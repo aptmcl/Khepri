@@ -86,7 +86,8 @@ export render_dir,
        render_size,
        prepare_for_saving_file,
        render_pathname,
-       render_view
+       render_view,
+       rendering_with
 
 # There is a render directory
 const render_dir = Parameter(homedir())
@@ -151,4 +152,43 @@ save_film_frame(obj::Any=true) =
         render_view(frame_filename(film_filename(), film_frame()))
         film_frame(film_frame() + 1)
         obj
+    end
+
+rendering_with(f;
+    dir=render_dir(),
+    user_dir=render_user_dir(),
+    backend_dir=render_backend_dir(),
+    kind_dir=render_kind_dir(),
+    color_dir=render_color_dir(),
+    ext=render_ext(),
+    width=render_width(),
+    height=render_height(),
+    quality=render_quality(),
+    exposure=render_exposure(),
+    floor_width=render_floor_width(),
+    floor_height=render_floor_height()) =
+    with(render_dir,dir) do
+        with(render_user_dir, user_dir) do
+            with(render_backend_dir, backend_dir) do
+                with(render_kind_dir,kind_dir) do
+                    with(render_color_dir,color_dir) do
+                        with(render_ext,ext) do
+                            with(render_width,width) do
+                                with(render_height,height) do
+                                    with(render_quality,quality) do
+                                        with(render_exposure,exposure) do
+                                           with(render_floor_width,floor_width) do
+                                               with(render_floor_height,floor_height) do
+                                                   f()
+                                               end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
     end
