@@ -77,13 +77,7 @@ acad"public Entity MeshFromGrid(int m, int n, Point3d[] pts, bool closedM, bool 
 acad"public Entity SurfaceFromGrid(int m, int n, Point3d[] pts, bool closedM, bool closedN, int level)"
 acad"public Entity SolidFromGrid(int m, int n, Point3d[] pts, bool closedM, bool closedN, int level, double thickness)"
 acad"public ObjectId Thicken(ObjectId obj, double thickness)"
-acad"public double[] CurveDomain(Entity ent)"
-acad"public double CurveLength(Entity ent)"
-acad"public Frame3d CurveFrameAt(Entity ent, double t)"
-acad"public Frame3d CurveFrameAtLength(Entity ent, double l)"
 acad"public ObjectId NurbSurfaceFrom(ObjectId id)"
-acad"public double[] SurfaceDomain(Entity ent)"
-acad"public Frame3d SurfaceFrameAt(Entity ent, double u, double v)"
 acad"public ObjectId Extrude(ObjectId profileId, Vector3d dir)"
 acad"public ObjectId Sweep(ObjectId pathId, ObjectId profileId, double rotation, double scale)"
 acad"public ObjectId Loft(ObjectId[] profilesIds, ObjectId[] guidesIds, bool ruled, bool closed)"
@@ -175,7 +169,9 @@ create_ACAD_connection() = create_backend_connection("AutoCAD", 11000)
 
 const autocad = ACAD(LazyParameter(TCPSocket, create_ACAD_connection))
 
-current_backend(autocad)
+
+
+#current_backend(autocad)
 
 
 backend_stroke_color(b::ACAD, path::Path, color::RGB) =
@@ -302,6 +298,55 @@ realize(b::ACAD, s::Surface) =
 backend_surface_boundary(b::ACAD, s::Shape2D) =
     ACADCurvesFromSurface(connection(b), ref(s).value)
 
+# Iterating over curves and surfaces
+
+acad"public double[] CurveDomain(Entity ent)"
+acad"public double CurveLength(Entity ent)"
+acad"public Frame3d CurveFrameAt(Entity ent, double t)"
+acad"public Frame3d CurveFrameAtLength(Entity ent, double l)"
+
+backend_map_division(b::ACAD, f::Function, s::Shape1D, n::Int) =
+    let conn = connection(b)
+        r = ref(s).value
+        (t1, t2) = ACADCurveDomain(conn, r)
+        map_division(t1, t2, n) do t
+            f(ACADCurveFrameAt(conn, r, t))
+        end
+    end
+
+
+
+
+
+
+acad"public double[] SurfaceDomain(Entity ent)"
+acad"public Frame3d SurfaceFrameAt(Entity ent, double u, double v)"
+
+backend_surface_domain(b::ACAD, s::Shape2D) =
+    tuple(ACADSurfaceDomain(connection(b), ref(s).value)...)
+
+backend_map_division(b::ACAD, f::Function, s::Shape2D, nu::Int, nv::Int) =
+    let conn = connection(b)
+        r = ref(s).value
+        (u1, u2, v1, v2) = ACADSurfaceDomain(conn, r)
+        map_division(u1, u2, nu) do u
+            map_division(v1, v2, nv) do v
+                f(ACADSurfaceFrameAt(conn, r, u, v))
+            end
+        end
+    end
+
+# The previous method cannot be applied to meshes in AutoCAD, which are created by surface_grid
+
+backend_map_division(b::ACAD, f::Function, s::SurfaceGrid, nu::Int, nv::Int) =
+    let (u1, u2, v1, v2) = ACADSurfaceDomain(conn, r)
+        map_division(u1, u2, nu) do u
+            map_division(v1, v2, nv) do v
+                f(ACADSurfaceFrameAt(conn, r, u, v))
+            end
+        end
+    end
+
 realize(b::ACAD, s::Text) =
   ACADText(connection(b), s.str, s.c, vx(1, s.c.cs), vy(1, s.c.cs), s.h)
 
@@ -312,9 +357,9 @@ realize(b::ACAD, s::Torus) =
 realize(b::ACAD, s::Cuboid) =
   ACADIrregularPyramidFrustum(connection(b), [s.b0, s.b1, s.b2, s.b3], [s.t0, s.t1, s.t2, s.t3])
 realize(b::ACAD, s::RegularPyramidFrustum) =
-  ACADIrregularPyramidFrustum(connection(b),
-                                 regular_polygon_vertices(s.edges, s.cb, s.rb, s.angle, s.inscribed),
-                                 regular_polygon_vertices(s.edges, add_z(s.cb, s.h), s.rt, s.angle, s.inscribed))
+    ACADIrregularPyramidFrustum(connection(b),
+                                regular_polygon_vertices(s.edges, s.cb, s.rb, s.angle, s.inscribed),
+                                regular_polygon_vertices(s.edges, add_z(s.cb, s.h), s.rt, s.angle, s.inscribed))
 realize(b::ACAD, s::RegularPyramid) =
   ACADIrregularPyramid(connection(b),
                           regular_polygon_vertices(s.edges, s.cb, s.rb, s.angle, s.inscribed),
@@ -475,7 +520,14 @@ realize(b::ACAD, s::UnionMirror) =
   end
 
 realize(b::ACAD, s::SurfaceGrid) =
-  ACADSurfaceFromGrid(connection(b), length(s.ptss), length(s.ptss[1]), vcat(s.ptss...), s.closed_u, s.closed_v, 2)
+    ACADSurfaceFromGrid(
+        connection(b),
+        size(s.points,1),
+        size(s.points,2),
+        reshape(s.points,:),
+        s.closed_u,
+        s.closed_v,
+        2)
 
 realize(b::ACAD, s::Thicken) =
   and_delete_shape(
@@ -520,7 +572,7 @@ backend_rectangular_table_and_chairs(b::ACAD, c, angle, family) =
 
 backend_slab(b::ACAD, profile, thickness) =
     map_ref(b,
-            r->ACADExtrude(connection(b), r, thickness),
+            r->ACADExtrude(connection(b), r, vz(thickness)),
             ensure_ref(b, backend_fill(b, profile)))
 
 #Beams are aligned along the top axis.
@@ -595,28 +647,25 @@ backend_bounding_box(b::ACAD, shapes::Shapes) =
   ACADBoundingBox(connection(b), collect_ref(shapes))
 
 
-current_backend_name(b::ACAD=current_backend()) = "AutoCAD"
+backend_name(b::ACAD) = "AutoCAD"
 
-import Base.view
-view(camera::Loc, target::Loc, lens::Real, b::ACAD=current_backend()) =
+Base.view(camera::Loc, target::Loc, lens::Real, b::ACAD) =
   ACADView(connection(b), camera, target, lens)
 
-get_view(b::ACAD=current_backend()) =
+get_view(b::ACAD) =
   let c = connection(b)
     ACADViewCamera(c), ACADViewTarget(c), ACADViewLens(c)
   end
 
-zoom_extents(b::ACAD=current_backend()) =
-  ACADZoomExtents(connection(b))
+zoom_extents(b::ACAD) = ACADZoomExtents(connection(b))
 
-view_top(b::ACAD=current_backend()) =
-    ACADViewTop(connection(b))
+view_top(b::ACAD) = ACADViewTop(connection(b))
 
 backend_delete_shapes(b::ACAD, shapes::Shapes) =
   ACADDeleteMany(connection(b), collect_ref(shapes))
 
 delete_all_shapes(b::ACAD) = ACADDeleteAll(connection(b))
-set_length_unit(b::ACAD, unit::String) = ACADSetLengthUnit(connection(b), unit)
+set_length_unit(unit::String, b::ACAD) = ACADSetLengthUnit(connection(b), unit)
 
 # Dimensions
 
@@ -690,7 +739,7 @@ backend_ieslight(b::ACAD, file::String, loc::Loc, dir::Vec, alpha::Real, beta::R
 
 
 
-prompt_position(prompt::String="Select position", b::ACAD=current_backend()) =
+prompt_position(prompt::String, b::ACAD) =
   let ans = ACADGetPoint(connection(b), prompt)
     length(ans) > 0 && ans[1]
   end
@@ -698,51 +747,54 @@ prompt_position(prompt::String="Select position", b::ACAD=current_backend()) =
 shape_from_ref(r, b::ACAD=current_backend()) =
     let c = connection(b)
         code = ACADShapeCode(c, r)
-        if code == 1
+        ref = LazyRef(b, ACADNativeRef(r))
+        if code == 1 # Point
             point(ACADPointPosition(c, r),
-                  backend=b, ref=LazyRef(b, ACADNativeRef(r)))
+                  backend=b, ref=ref)
         elseif code == 2
             circle(maybe_loc_from_o_vz(ACADCircleCenter(c, r), ACADCircleNormal(c, r)),
                    ACADCircleRadius(c, r),
-                   backend=b, ref=LazyRef(b, ACADNativeRef(r)))
+                   backend=b, ref=ref)
         elseif 3 <= code <= 6
             line(ACADLineVertices(c, r),
-                 backend=b, ref=LazyRef(b, ACADNativeRef(r)))
+                 backend=b, ref=ref)
         elseif code == 7
             spline([xy(0,0)], false, false, #HACK obtain interpolation points
-                   backend=b, ref=LazyRef(b, ACADNativeRef(r)))
+                   backend=b, ref=ref)
         elseif code == 9
             let start_angle = mod(ACADArcStartAngle(c, r), 2pi)
                 end_angle = mod(ACADArcEndAngle(c, r), 2pi)
                 if end_angle > start_angle
                     arc(maybe_loc_from_o_vz(ACADArcCenter(c, r), ACADArcNormal(c, r)),
                         ACADArcRadius(c, r), start_angle, end_angle - start_angle,
-                        backend=b, ref=LazyRef(b, ACADNativeRef(r)))
+                        backend=b, ref=ref)
                 else
                     arc(maybe_loc_from_o_vz(ACADArcCenter(c, r), ACADArcNormal(c, r)),
                         ACADArcRadius(c, r), end_angle, start_angle - end_angle,
-                        backend=b, ref=LazyRef(b, ACADNativeRef(r)))
+                        backend=b, ref=ref)
                 end
             end
         elseif code == 10
             let str = ACADTextString(c, r)
                 height = ACADTextHeight(c, r)
                 loc = ACADTextPosition(c, r)
-                text(str, loc, height, backend=b, ref=LazyRef(b, ACADNativeRef(r)))
+                text(str, loc, height, backend=b, ref=ref)
             end
         elseif code == 11
             let str = ACADMTextString(c, r)
                 height = ACADMTextHeight(c, r)
                 loc = ACADMTextPosition(c, r)
-                text(str, loc, height, backend=b, ref=LazyRef(b, ACADNativeRef(r)))
+                text(str, loc, height, backend=b, ref=ref)
             end
+        elseif code == 12 || code == 13
+            surface(Shapes1D[], backend=b, ref=ref)
         elseif code == 50
             block_instance(block("To be finished!"))
         elseif code == 70
             block_instance(block("A viewport to be finished!"))
         elseif 103 <= code <= 106
             polygon(ACADLineVertices(c, r),
-                    backend=b, ref=LazyRef(b, ACADNativeRef(r)))
+                    backend=b, ref=ref)
         else
             block_instance(block("Unknown shape. To be finished!"))
             #error("Unknown shape with code $(code)")
@@ -773,27 +825,24 @@ shape_from_ref(r, b::ACAD=current_backend()) =
                 raise RuntimeError("{0}: Unknown Rhino object {1}".format('shape_from_ref', r))
                 """
 
-all_shapes(b::ACAD=current_backend()) =
-  [shape_from_ref(r) for r in ACADGetAllShapes(connection(b))]
+all_shapes(b::ACAD) =
+  [shape_from_ref(r, b) for r in ACADGetAllShapes(connection(b))]
 
-all_shapes_in_layer(layer, b::ACAD=current_backend()) =
-  [shape_from_ref(r) for r in ACADGetAllShapesInLayer(connection(b), layer)]
+all_shapes_in_layer(layer, b::ACAD) =
+  [shape_from_ref(r, b) for r in ACADGetAllShapesInLayer(connection(b), layer)]
 
-disable_update(b::ACAD=current_backend()) =
+disable_update(b::ACAD) =
     ACADDisableUpdate(connection(b))
 
-enable_update(b::ACAD=current_backend()) =
+enable_update(b::ACAD) =
     ACADEnableUpdate(connection(b))
-
-export disable_update, enable_update
-
 # Render
 
-acad"public int Render(int width, int height, string path, string quality, double exposure)"
-
+acad"public void Render(int width, int height, string path, int levels, double exposure)"
+#render exposure: [-3, +3] -> [-6, 21]
 convert_render_exposure(b::ACAD, v::Real) = -4.05*v + 8.8
-convert_render_quality(b::ACAD, v::Real) = v < 0 ? "L" : v > 0 ? "H" : "M"
-
+#render quality: [-1, +1] -> [+1, +50]
+convert_render_quality(b::ACAD, v::Real) = round(Int, 25.5 + 24.5*v)
 
 render_view(name::String, b::ACAD=current_backend()) =
     ACADRender(connection(b),
@@ -803,10 +852,8 @@ render_view(name::String, b::ACAD=current_backend()) =
                convert_render_exposure(b, render_exposure()))
 
 
-backend_save_as(b::ACAD, pathname::String, format::String) =
+save_as(pathname::String, format::String, b::ACAD) =
     ACADSaveAs(connection(b), pathname, format)
-
-
 
 
 backend_frame_at(b::ACAD, c::Shape1D, t::Real) = ACADCurveFrameAt(connection(b), ref(c).value, t)
