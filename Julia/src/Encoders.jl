@@ -1,4 +1,6 @@
 export encode_String, decode_String,
+       encode_string, decode_string,
+       encode_string_array,
        Guid, Guids,
        encode_Guid, decode_Guid,
        encode_Guid_array, decode_Guid_array,
@@ -47,6 +49,11 @@ decode_String(c::TCPSocket) = begin
   end
   loop(0, 0)
 end
+
+# C# uses two different names for strings
+encode_string = encode_String
+decode_string = decode_String
+
 
 Guid = Vector{UInt8}
 Guids = Vector{Guid}
@@ -114,6 +121,11 @@ decode_int_or_error(c::TCPSocket) =
     end
   end
 
+encode_string_array(c::TCPSocket, v::Vector) = begin
+  encode_int(c, length(v))
+  for e in v encode_string(c, e) end
+end
+
 encode_double_array(c::TCPSocket, v::Vector) = begin
   encode_int(c, length(v))
   for e in v encode_double(c, e) end
@@ -161,7 +173,7 @@ encode_Point3d_array(c::TCPSocket, v::Vector) = begin
 end
 decode_Point3d_array(c::TCPSocket) = begin
   len = decode_int_or_error(c)
-  r = Vector{XYZ{Float64,Float64,Float64}}(len)
+  r = Vector{XYZ}(len)
   for i in 1:len
     r[i] = decode_Point3d(c)
   end
@@ -182,7 +194,7 @@ encode_Point2d_array(c::TCPSocket, v::Vector) = begin
 end
 decode_Point2d_array(c::TCPSocket) = begin
   len = decode_int_or_error(c)
-  r = Vector{XYZ{Float64,Float64,Float64}}(len)
+  r = Vector{XYZ}(len)
   for i in 1:len
     r[i] = decode_Point2d(c)
   end
@@ -201,7 +213,7 @@ encode_Vector3d_array(c::TCPSocket, v::Vector) = begin
 end
 decode_Vector3d_array(c::TCPSocket) = begin
   len = decode_int_or_error(c)
-  r = Vector{VXYZ{Float64,Float64,Float64}}(len)
+  r = Vector{VXYZ}(len)
   for i in 1:len
     r[i] = decode_Vector3d(c)
   end
@@ -238,5 +250,3 @@ create_backend_connection(backend::String, port::Integer) =
       end
     end
   end
-
-reset_backend_connection(b::Backend) = reset(b.connection)
