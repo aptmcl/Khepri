@@ -7,16 +7,23 @@ using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
+//using Autodesk.AutoCAD.GraphicsInterface;
 //using Autodesk.AutoCAD.Interop.Common;
 using DBSurface = Autodesk.AutoCAD.DatabaseServices.Surface;
 using DBNurbSurface = Autodesk.AutoCAD.DatabaseServices.NurbSurface;
 using AcadException = Autodesk.AutoCAD.Runtime.Exception;
+using ErrorStatus = Autodesk.AutoCAD.Runtime.ErrorStatus;
+using RapidRTLightingMode = Autodesk.AutoCAD.GraphicsInterface.RapidRTLightingMode;
+using RapidRTFilterType = Autodesk.AutoCAD.GraphicsInterface.RapidRTFilterType;
 using Autodesk.AutoCAD.Runtime;
 using System.Runtime.InteropServices;
 using Autodesk.AutoCAD.Colors;
 //using XYZ = Autodesk.AutoCAD.Geometry.Point3d;
 //using VXYZ = Autodesk.AutoCAD.Geometry.Vector3d;
 using KhepriBase;
+
+using Autodesk.AutoCAD.GraphicsSystem;
+using System.Drawing;
 
 namespace KhepriAutoCAD {
     public class Frame3d {
@@ -954,6 +961,8 @@ namespace KhepriAutoCAD {
                 { RXClass.GetClass(typeof(Arc)), 9},
                 { RXClass.GetClass(typeof(DBText)), 10},
                 { RXClass.GetClass(typeof(MText)), 11},
+                { RXClass.GetClass(typeof(DBSurface)), 12},
+                { RXClass.GetClass(typeof(DBNurbSurface)), 13},
                 { RXClass.GetClass(typeof(BlockReference)), 50 },
                 { RXClass.GetClass(typeof(Viewport)), 70 },
         };
@@ -1090,50 +1099,164 @@ namespace KhepriAutoCAD {
             return light.Id;
         }
 
-        public int MentalRayRender(int width, int height, string path, double exposure) {
-            Version version = Application.Version;
-            if (version.Major > 20 || (version.Major == 20 && version.Minor > 0)) { //MentalRay is hidden
-                Application.SetSystemVariable("RENDERENGINE", 0);
+
+        public void Render(int width, int height, string path, int renderLevel, double exposure) {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            using (doc.LockDocument())
+            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
+                DBDictionary namedObjs = tr.GetObject(doc.Database.NamedObjectsDictionaryId, OpenMode.ForRead) as DBDictionary;
+                RenderGlobal renderGlobal;
+                if (namedObjs.Contains("ACAD_RENDER_GLOBAL")) {
+                    renderGlobal = tr.GetObject(namedObjs.GetAt("ACAD_RENDER_GLOBAL"), OpenMode.ForWrite) as RenderGlobal;
+                } else {
+                    tr.GetObject(doc.Database.NamedObjectsDictionaryId, OpenMode.ForWrite);
+                    //namedObjs.UpgradeOpen();
+                    renderGlobal = new RenderGlobal();
+                    namedObjs.SetAt("ACAD_RENDER_GLOBAL", renderGlobal);
+                    tr.AddNewlyCreatedDBObject(renderGlobal, true);
+                }
+                renderGlobal.ProcedureAndDestination = new RenderGlobal.ProcedureAndDestinationParameter(RenderGlobal.Procedure.View, RenderGlobal.Destination.Window);
+                renderGlobal.Dimensions = new RenderGlobal.DimensionsParameter(width, height);
+                renderGlobal.SaveEnabled = true;
+                renderGlobal.SaveFileName = path;
+                DBDictionary settings;
+                if (namedObjs.Contains("ACAD_RENDER_RAPIDRT_SETTINGS")) {
+                    settings = tr.GetObject(namedObjs.GetAt("ACAD_RENDER_RAPIDRT_SETTINGS"), OpenMode.ForRead) as DBDictionary;
+                } else {
+                    tr.GetObject(doc.Database.NamedObjectsDictionaryId, OpenMode.ForWrite);
+                    //namedObjs.UpgradeOpen();
+                    settings = new DBDictionary();
+                    namedObjs.SetAt("ACAD_RENDER_RAPIDRT_SETTINGS", settings);
+                    tr.AddNewlyCreatedDBObject(settings, true);
+                }
+                RapidRTRenderSettings renderSettings;
+                if (settings.Contains("Khepri")) {
+                    renderSettings = tr.GetObject(settings.GetAt("Khepri"), OpenMode.ForWrite) as RapidRTRenderSettings;
+                } else {
+                    tr.GetObject(namedObjs.GetAt("ACAD_RENDER_RAPIDRT_SETTINGS"), OpenMode.ForWrite);
+                    renderSettings = new RapidRTRenderSettings();
+                    renderSettings.Name = "Khepri";
+                    renderSettings.Description = "Custom render preset for Khepri";
+                    settings.SetAt("Khepri", renderSettings);
+                    tr.AddNewlyCreatedDBObject(renderSettings, true);
+                }
+                renderSettings.RenderTarget = RapidRTRenderTarget.Level;
+                renderSettings.RenderLevel = renderLevel;
+                renderSettings.LightingModel = RapidRTLightingMode.Advanced;
+                tr.Commit();
+                string fmt = "._-render _custom Khepri _R {0} {1} _yes {2}\n";
+                string s = String.Format(fmt, width, height, path);
+                //Document doc = Application.DocumentManager.MdiActiveDocument;
+                //doc.SendStringToExecute(s, false, false, false);
+                //dynamic ddoc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
             }
-            string fmt = "._-render P _R {1} {2} _yes {3}\n";
-            string s = String.Format(fmt, width, height, path);
-            //Document doc = Application.DocumentManager.MdiActiveDocument;
-            //doc.SendStringToExecute(s, false, false, false);
-            dynamic doc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
-            doc.SendCommand(s);
-            return 1;
-        }
-
-        public int RapidRTRender(int width, int height, string path, string quality, double exposure) {
-            Version version = Application.Version;
-            if (version.Major > 20 || (version.Major == 20 && version.Minor > 0)) { //RapidRT is the default
-                Application.SetSystemVariable("RENDERENGINE", 1);
-            }
-            string fmt = "._-render {0} _R {1} {2} _yes {3}\n";
-            string s = String.Format(fmt, quality, width, height, path);
+            object prevEXPVALUE = Application.GetSystemVariable("EXPVALUE");
             Application.SetSystemVariable("EXPVALUE", exposure);
-            //Document doc = Application.DocumentManager.MdiActiveDocument;
-            //doc.SendStringToExecute(s, false, false, false);
-            dynamic doc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
-            doc.SendCommand(s);
-            return 1;
+            dynamic ddoc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
+            ddoc.SendCommand("_-RENDERPRESETS _custom Khepri\n");
+            ddoc.SendCommand("_RENDER\n");
+            Application.SetSystemVariable("EXPVALUE", prevEXPVALUE);
+            //            doc.Editor.Command("_-RENDERPRESETS", "_custom", "Khepri");
+            //          doc.Editor.Command("_RENDER");
+            //                ddoc.SendCommand(s);
         }
 
+        /*
+                public int MentalRayRender(int width, int height, string path, double exposure) {
+                    Version version = Application.Version;
+                    if (version.Major > 20 || (version.Major == 20 && version.Minor > 0)) { //MentalRay is hidden
+                        Application.SetSystemVariable("RENDERENGINE", 0);
+                    }
+                    string fmt = "._-render P _R {1} {2} _yes {3}\n";
+                    string s = String.Format(fmt, width, height, path);
+                    //Document doc = Application.DocumentManager.MdiActiveDocument;
+                    //doc.SendStringToExecute(s, false, false, false);
+                    dynamic doc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
+                    doc.SendCommand(s);
+                    return 1;
+                }
 
-        public int Render(int width, int height, string path, string quality, double exposure) {
-            Version version = Application.Version;
-            string fmt = "._-render {0} _R {1} {2} _yes {3}\n";
-            string s = String.Format(fmt,
-                (version.Major < 20 ||
-                 (version.Major == 20 && version.Minor == 0) ? "P" : quality),
-                width, height, path);
-            //Document doc = Application.DocumentManager.MdiActiveDocument;
-            //doc.SendStringToExecute(s, false, false, false);
-            Application.SetSystemVariable("EXPVALUE", exposure);
-            dynamic doc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
-            doc.SendCommand(s);
-            return 1;
-        }
+                public void SetKhepriRapidRTRenderSettings(int renderLevel) {
+                    Document doc = Application.DocumentManager.MdiActiveDocument;
+                    using (doc.LockDocument())
+                    using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
+                        DBDictionary namedObjs = tr.GetObject(doc.Database.NamedObjectsDictionaryId, OpenMode.ForRead) as DBDictionary;
+                        DBDictionary renderSettings;
+                        RapidRTRenderSettings renderSetting;
+                        if (namedObjs.Contains("ACAD_RENDER_RAPIDRT_SETTINGS")) {
+                            renderSettings = tr.GetObject(namedObjs.GetAt("ACAD_RENDER_RAPIDRT_SETTINGS"), OpenMode.ForWrite) as DBDictionary;
+                        } else {
+                            namedObjs.UpgradeOpen();
+                            renderSettings = new DBDictionary();
+                            namedObjs.SetAt("ACAD_RENDER_RAPIDRT_SETTINGS", renderSettings);
+                            tr.AddNewlyCreatedDBObject(renderSettings, true);
+                        }
+                        if (!renderSettings.Contains("Khepri")) {
+                            renderSetting = new RapidRTRenderSettings();
+                            renderSetting.Name = "Khepri";
+                            renderSetting.Description = "Khepri custom render settings";
+                            // Set renderer settings
+                            renderSetting.BackFacesEnabled = false;
+                            renderSetting.MaterialsEnabled = false;
+                            renderSetting.ShadowsEnabled = false;
+                            renderSetting.TextureSampling = false;
+                            // Set Rendering duration
+                            renderSetting.RenderTarget = RapidRTRenderTarget.Level;
+                            renderSetting.RenderLevel = 10;
+                            // Set rendering accuracy
+                            renderSetting.LightingModel = RapidRTLightingMode.Simplified;
+                            // Material rendering settings
+                            renderSetting.FilterHeight = 5;
+                            renderSetting.FilterWidth = 5;
+                            renderSetting.FilterType = RapidRTFilterType.Mitchell;
+                            renderSetting.DisplayIndex = 20;
+                            renderSettings.SetAt("Khepri", renderSetting);
+                            tr.AddNewlyCreatedDBObject(renderSetting, true);
+                        } else {
+                            renderSetting = tr.GetObject(renderSettings.GetAt("Khepri"), OpenMode.ForWrite) as RapidRTRenderSettings;
+                        }
+                        renderSetting.RenderLevel = renderLevel;
+                        tr.Commit();
+                    }
+                    // Set the new render preset MyPreset current
+                    doc.Editor.Command("_-RENDERPRESETS", "_custom", "Khepri");
+                }
+
+                public int RapidRTRender(int width, int height, string path, string quality, double exposure) {
+                    Version version = Application.Version;
+                    if (version.Major > 20 || (version.Major == 20 && version.Minor > 0)) { //RapidRT is the default
+                        Application.SetSystemVariable("RENDERENGINE", 1);
+                    }
+                    string fmt = "._-render {0} _R {1} {2} _yes {3}\n";
+                    string s = String.Format(fmt, quality, width, height, path);
+                    Application.SetSystemVariable("EXPVALUE", exposure);
+                    //Document doc = Application.DocumentManager.MdiActiveDocument;
+                    //doc.SendStringToExecute(s, false, false, false);
+                    dynamic doc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
+                    doc.SendCommand(s);
+                    return 1;
+                }
+
+                public int Render(int width, int height, string path, int levels, double exposure) {
+                    Version version = Application.Version;
+                    string fmt = "._-render {0} _R {1} {2} _yes {3}\n";
+                    string s = String.Format(fmt,
+                        (version.Major < 20 ||
+                         (version.Major == 20 && version.Minor == 0) ? "P" : quality),
+                        width, height, path);
+                    //Document doc = Application.DocumentManager.MdiActiveDocument;
+                    //doc.SendStringToExecute(s, false, false, false);
+                    Application.SetSystemVariable("RENDERTARGET", 0); //0 = by levels, 1 = by time
+                    //Application.SetSystemVariable("RENDERTIME", 0); //
+                    Application.SetSystemVariable("RENDERLEVEL", 25); //0 = by levels, 1 = by time
+                    Application.SetSystemVariable("SKYSTATUS", 2); //Sky background and illumination
+                    Application.SetSystemVariable("RENDERLIGHTCALC", 1); //Should we allow this as a parameter?
+                    Application.SetSystemVariable("EXPVALUE", exposure);
+                    dynamic doc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
+                    doc.SendCommand(s);
+                    return 1;
+                }
+                */
         public int Command(string cmd) {
             dynamic doc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
             doc.SendCommand(cmd);
