@@ -1,18 +1,19 @@
 using IntervalSets
+using Interpolations
 
 export Shape,
        backend,
        current_backend,
        switch_to_backend,
        void_ref,
-       all_shapes,
-       all_shapes_in_layer,
        delete_shape,
        delete_shapes,
        delete_all_shapes,
        set_length_unit,
        collecting_shapes,
        surface_boundary,
+       curve_domain,
+       surface_domain,
        create_layer,
        current_layer,
        create_block,
@@ -28,19 +29,11 @@ export Shape,
        subpath,
        subpath_starting_at,
        subpath_ending_at,
-       bounding_box,
-       view_top,
-       zoom_extents,
-       prompt_position,
-       save_as
+       bounding_box
 
 #Backends are types parameterized by a key identifying the backend (e.g., AutoCAD) and by the type of reference they use
 abstract type Backend{K,R} end
-import Base.show
-function show{K,R}(io::IO, b::Backend{K,R})
-  print(io, "Backend($(K))")
-end
-
+Base.show{K,R}(io::IO, b::Backend{K,R}) = print(io, "Backend($(K))")
 
 #References can be (single) native references or union or substraction of References
 #Unions and subtractions are needed because actual backends frequently fail those operations
@@ -217,9 +210,33 @@ end
 
 # The undefined backend
 struct Undefined_Backend <: Backend{Int,Int} end
-connection(b::Undefined_Backend) = error("No selected backend")
+connection(b::Undefined_Backend) = throw(UndefinedBackendException())
 void_ref(b::Undefined_Backend) = EmptyRef{Int,Int}()
 const current_backend = Parameter{Backend}(Undefined_Backend())
+
+# Side-effect full operations need to have a backend selected and will generate an exception if there is none
+
+struct UndefinedBackendException <: Exception end
+Base.show(io::IO, e::UndefinedBackendException) = print(io, "No current backend.")
+
+# Many functions default the backend to the current_backend and throw an error if there is none.
+# We will simplify their definition with a macro:
+# @defop delete_all_shapes()
+# that expands into
+# delete_all_shapes(backend::Backend=current_backend()) = throw(UndefinedBackendException())
+# Note that according to Julia semantics the previous definition actually generates two different ones:
+# delete_all_shapes() = delete_all_shapes(current_backend())
+# delete_all_shapes(backend::Backend) = throw(UndefinedBackendException())
+# Hopefully, backends will specially the function for each specific backend
+
+macro defop(name_params)
+    name, params = name_params.args[1], name_params.args[2:end]
+    quote
+        export $(esc(name))
+        $(esc(name))($(map(esc,params)...), backend::Backend=current_backend()) =
+            throw(UndefinedBackendException())
+    end
+end
 
 backend(backend::Backend) =
     begin
@@ -232,6 +249,12 @@ switch_to_backend(backend::Backend) =
     begin
         default_level(level(0))
     end
+
+@defop current_backend_name()
+@defop delete_all_shapes()
+@defop set_length_unit(unit::String)
+@defop reset_backend()
+@defop save_as(pathname::String, format::String)
 
 macro defproxy(name, parent, fields...)
   name_str = string(name)
@@ -252,7 +275,7 @@ macro defproxy(name, parent, fields...)
   predicate_name = esc(Symbol("is_", name_str))
   selector_names = map(field_name -> esc(Symbol(name_str, "_", string(field_name))), field_names)
   quote
-    export $(constructor_name), $(struct_name), $(predicate_name)
+    export $(constructor_name), $(struct_name), $(predicate_name), $(selector_names...)
     struct $struct_name <: $parent
       ref::LazyRef
       $(struct_fields...)
@@ -290,7 +313,19 @@ Shapes1D = Vector{<:Any}
 line(v0, v1, vs...) = line([v0, v1, vs...])
 @defproxy(closed_line, Shape1D, vertices::Locs=[u0(), ux(), uy()])
 closed_line(v0, v1, vs...) = closed_line([v0, v1, vs...])
-@defproxy(spline, Shape1D, points::Locs=[u0(), ux(), uy()], v0::Union{Bool,Vec}=false, v1::Union{Bool,Vec}=false)
+@defproxy(spline, Shape1D, points::Locs=[u0(), ux(), uy()], v0::Union{Bool,Vec}=false, v1::Union{Bool,Vec}=false,
+          interpolator::Any=LazyParameter(Any, () -> curve_interpolator(points)))
+curve_interpolator(pts::Locs) =
+    let pts = map(p -> in_world(p).raw, pts)
+        Interpolations.scale(
+            interpolate(pts, #hcat(linspace(0,1,length(pts)), pts), #map(cx, pts), map(cy, pts), map(cz, pts)),
+                        BSpline(Cubic(Natural())),
+                        OnGrid()),
+            linspace(0,1,length(pts)))
+    end
+
+# This needs to be improved to return a proper frame
+evaluate(s::Spline, t::Real) = xyz(s.interpolator()[t], world_cs)
 
 #(def-base-shape 1D-shape (spline* [pts : (Listof Loc) (list (u0) (ux) (uy))] [v0 : (U Boolean Vec) #f] [v1 : (U Boolean Vec) #f]))
 
@@ -324,6 +359,16 @@ surface_from = surface
 surface_boundary(s::Shape2D, backend::Backend=current_backend()) =
     backend_surface_boundary(backend, s)
 
+curve_domain(s::Shape1D, backend::Backend=current_backend()) =
+    backend_curve_domain(backend, s)
+map_division(f::Function, s::Shape1D, n::Int, backend::Backend=current_backend()) =
+    backend_map_division(backend, f, s, n)
+
+
+surface_domain(s::Shape2D, backend::Backend=current_backend()) =
+    backend_surface_domain(backend, s)
+map_division(f::Function, s::Shape2D, nu::Int, nv::Int, backend::Backend=current_backend()) =
+    backend_map_division(backend, f, s, nu, nv)
 
 @defproxy(text, Shape0D, str::String="", c::Loc=u0(), h::Real=1)
 
@@ -445,7 +490,7 @@ struct CircularPath <: ClosedPath
     center::Loc
     radius::Real
 end
-circular_path(center::Loc=u0(), radius::Real=1) = CircularPath(center, radius)
+circular_path(Center::Loc=u0(), Radius::Real=1; center::Loc=Center, radius::Real=Radius) = CircularPath(center, radius)
 struct RectangularPath <: ClosedPath
     corner::Loc
     dx::Real
@@ -898,6 +943,8 @@ convert(::Type{ClosedPolygonalPath}, path::RectangularPath) =
     end
 convert(::Type{OpenPolygonalPath}, path::ClosedPolygonalPath) =
     open_polygonal_path(vcat(path.vertices, [path.vertices[1]]))
+convert(::Type{OpenPolygonalPath}, path::RectangularPath) =
+    convert(OpenPolygonalPath, convert(ClosedPolygonalPath, path))
 
 #####################################################################
 export frame_at
@@ -921,7 +968,7 @@ upper_level(lvl) = level(lvl.height + default_level_to_level_height(), backend=b
 #default implementation
 realize(b::Backend, s::Level) = s.height
 
-export level, default_level, default_level_to_level_height, level_height
+export default_level, default_level_to_level_height, level_height
 
 #=
 @defproxy(polygonal_mass, Shape3D, points::Locs, height::Real)
@@ -961,7 +1008,7 @@ macro deffamily(name, parent, fields...)
                         $(key_params...),
                         based_on=Dict()) = #, backend::Backend=current_backend()) =
       $(struct_name)($(field_names...), based_on, Parameter(-1))
-    $(instance_name)(family:: $(struct_name); $(instance_params...), based_on=Dict()) =
+    $(instance_name)(family:: $(struct_name); $(instance_params...), based_on=family.based_on) =
       $(struct_name)($(field_names...), based_on, Parameter(-1))
     $(default_name) = Parameter($(constructor_name)())
     $(predicate_name)(v::$(struct_name)) = true
@@ -982,27 +1029,60 @@ ref(family::Family) = family.ref()==-1 ? family.ref(backend_get_family(current_b
     thickness::Real=0.2,
     coating_thickness::Real=0.0)
 
-@defproxy(slab, Shape3D, contour::ClosedPath=rectangular_path(), level::Level=default_level(), family::SlabFamily=default_slab_family())
+@defproxy(slab, Shape3D, contour::ClosedPath=rectangular_path(),
+          level::Level=default_level(), family::SlabFamily=default_slab_family(),
+          openings::Vector{ClosedPath}=ClosedPath[])
 slab(contour; level::Level=default_level(), family::SlabFamily=default_slab_family()) =
     slab(convert(ClosedPath, contour), level, family)
 
-# Default implementation
+# Default implementation: dispatch on the slab elements
 realize(b::Backend, s::Slab) =
-    let base = vz(level_height(s.level) + s.family.coating_thickness - s.family.thickness),
-        thickness = vz(s.family.coating_thickness + s.family.thickness)
-        backend_slab(b, translate(s.contour, base), thickness)
+    realize_slab(b, s.contour, s.level, s.family)
+
+realize_slab(b::Backend, contour::ClosedPath, level::Level, family::SlabFamily) =
+    let base = vz(level_height(level) + family.coating_thickness - family.thickness),
+        thickness = family.coating_thickness + family.thickness
+        # Change this to a better named protocol?
+        backend_slab(b, translate(contour, base), thickness)
     end
 
+#
+export add_slab_opening
+add_slab_opening(s::Slab=required(), contour::ClosedPath=circular_path()) =
+    let b = backend(s)
+        push!(s.openings, contour)
+        if realized(s)
+            set_ref!(s, realize_slab_openings(b, s, ref(s), [contour]))
+        end
+        s
+    end
+
+realize_slab_openings(b::Backend, s::Slab, s_ref, openings) =
+    let s_base_height = level_height(s.level),
+        s_thickness = s.family.thickness
+        for opening in openings
+            op_path = translate(opening, vz(s_base_height-1.1*s_thickness))
+            op_ref = ensure_ref(b, backend_slab(b, op_path, s_thickness*1.2))
+            s_ref = ensure_ref(b, subtract_ref(b, s_ref, op_ref))
+        end
+        s_ref
+    end
+
+#=
+Should we eliminate this?
+The rational is that an opening is not an object (like a door or a window)
+However, it might be interesting to have a computational object to store properties of the opening
 @defproxy(slab_opening, Shape3D, slab::Slab=required(), contour::ClosedPath=rectangular_path())
 # Default implementation
 realize(b::Backend, s::SlabOpening) =
     let base = vz(level_height(s.slab.level) + s.slab.family.coating_thickness - s.slab.family.thickness - 1)
-        thickness = vz(s.slab.family.coating_thickness + s.slab.family.thickness + 1)
+        thickness = s.slab.family.coating_thickness + s.slab.family.thickness + 1
         opening_ref = ensure_ref(b, backend_slab(b, translate(s.contour, base), thickness))
         # This is a dangerous side effect. Is this really the correct approach?
         set_ref!(s.slab, ensure_ref(b, subtract_ref(b, ref(s.slab), opening_ref)))
         opening_ref
     end
+=#
 
 # Roof
 
@@ -1236,7 +1316,21 @@ subtraction(shape::Shape, shapes...) = subtraction_shape(shape, [shapes...])
 @defproxy(mirror, Shape3D, shape::Shape=sphere(), p::Loc=u0(), n::Vec=vz(1))
 @defproxy(union_mirror, Shape3D, shape::Shape=sphere(), p::Loc=u0(), n::Vec=vz(1))
 
-@defproxy(surface_grid, Shape3D, ptss::Vector{<:Vector{<:Any}}=[], closed_u::Bool=false, closed_v::Bool=false)
+@defproxy(surface_grid, Shape2D, points::AbstractMatrix{<:Loc}=zeros(Loc,(2,2)), closed_u::Bool=false, closed_v::Bool=false,
+          interpolator::Any=LazyParameter(Any, () -> surface_interpolator(points)))
+surface_interpolator(pts::AbstractMatrix{<:Loc}) =
+    let pts = map(p -> in_world(p).raw, pts)
+        Interpolations.scale(
+            interpolate(pts,
+                        BSpline(Cubic(Natural())),
+                        OnGrid()),
+            linspace(0,1,size(pts, 1)),
+            linspace(0,1,size(pts, 2)))
+    end
+
+# This needs to be improved to return a proper frame
+evaluate(s::SurfaceGrid, u::Real, v::Real) = xyz(s.interpolator()[u,v], world_cs)
+
 
 @defproxy(thicken, Shape3D, shape::Shape=surface_circle(), thickness::Real=1)
 
@@ -1255,7 +1349,7 @@ struct Socket_Backend{K,T} <: Backend{K,T}
 end
 
 connection{K,T}(b::Socket_Backend{K,T}) = b.connection()
-
+reset_backend(b::Socket_Backend) = reset(b.connection)
 
 bounding_box(shape::Shape) =
   bounding_box([shape])
@@ -1334,16 +1428,6 @@ realize(b::Backend, s::Loft) =
       error("Cross sections are neither points nor curves nor surfaces")
     end
 
-delete_all_shapes() = delete_all_shapes(current_backend())
-set_length_unit(unit::String) = set_length_unit(current_backend(), unit)
-
-reset_backend() = reset_backend_connection(current_backend())
-
-save_as(pathname::String, format::String, backend=current_backend()) =
-    backend_save_as(backend, pathname, format)
-
-
-
 function startSketchup(port)
   ENV["ROSETTAPORT"] = port
   args = "C:\\Users\\aml\\Dropbox\\AML\\Projects\\rosetta\\sketchup\\rosetta.rb"
@@ -1354,6 +1438,23 @@ function startSketchup(port)
   connection = listener.accept()
   readline(connection) == "connected" ? connection : error("Could not connect!")
 end
+
+# CAD
+@defop all_shapes()
+@defop all_shapes_in_layer(layer)
+
+# BIM
+@defop all_levels()
+@defop all_walls()
+@defop all_walls_at_level(level)
+
+@defop disable_update()
+@defop enable_update()
+import Base.view
+@defop view(camera::Loc, target::Loc, lens::Real)
+@defop get_view()
+@defop zoom_extents()
+@defop view_top()
 
 angle_of_view(size, focal_length) = 2atan(size/2focal_length)
 
@@ -1371,8 +1472,7 @@ dolly_effect_pull_back(delta) = begin
   dolly_effect(camera, target, lens, new_camera)
 end
 
-
-
+@defop prompt_position(prompt::String="Select position")
 
 
 """
