@@ -86,6 +86,8 @@ translating_current_cs(f, _dx::Real=0, _dy::Real=0, _dz::Real=0; dx::Real=_dx, d
 abstract type Loc end
 abstract type Vec end
 
+Base.zero(::Type{<:Loc}) = u0()
+
 #ideally, this should be Vector{Loc} but empty vectors of Loc are
 #actually of type Vector{Any}
 const Locs = Vector{<:Loc}
@@ -95,10 +97,10 @@ const Vecs = Vector{<:Vec}
 
 #translation_matrix(x::Real, y::Real, z::Real) = CS(SMatrix{4,4,Float64}())
 
-struct XYZ{Tx<:Real,Ty<:Real,Tz<:Real} <: Loc
-  x::Tx
-  y::Ty
-  z::Tz
+struct XYZ <: Loc
+  x::Real
+  y::Real
+  z::Real
   cs::CS
   raw::Vec4f
 end
@@ -162,10 +164,10 @@ sph_psi(p) =
     0 == x == y == z ? 0 : mod(atan2(sqrt(x*x + y*y), z),2pi)
   end
 
-struct VXYZ{Tx<:Real,Ty<:Real,Tz<:Real} <: Vec
-    x::Tx
-    y::Ty
-    z::Tz
+struct VXYZ <: Vec
+    x::Real
+    y::Real
+    z::Real
     cs::CS
     raw::SVector{4,Float64}
 end
