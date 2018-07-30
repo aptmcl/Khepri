@@ -86,13 +86,20 @@ export show_rpc, step_rpc
 const show_rpc = Parameter(false)
 const step_rpc = Parameter(false)
 function initiate_rpc_call(conn, opcode, name)
-    if show_rpc()
-        println(STDERR, name)
-    end
     if step_rpc()
+        print(STDERR, "About to call $(name) [press ENTER]")
         readline()
     end
+    if show_rpc()
+        print(STDERR, name)
+    end
     write(conn, opcode)
+end
+function complete_rpc_call(conn, opcode, result)
+    if show_rpc()
+        println(STDERR, "-> $(result)")
+    end
+    result
 end
 
 function rpc(prefix, str)
@@ -107,7 +114,7 @@ function rpc(prefix, str)
         global $func_name = (conn, $([:($(p[3])) for p in params]...)) -> begin
           initiate_rpc_call(conn, opcode, $(string(name)))
           $([:($(Symbol("encode_", p[1], p[2] ? "_array" : ""))(conn, $(p[3]))) for p in params]...)
-          $(Symbol("decode_", ret[1], ret[2] ? "_array" : ""))(conn)
+          complete_rpc_call(conn, opcode, $(Symbol("decode_", ret[1], ret[2] ? "_array" : ""))(conn))
         end
         $func_name(conn, $([:($(p[3])) for p in params]...))
       end
