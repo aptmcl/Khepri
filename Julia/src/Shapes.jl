@@ -238,17 +238,9 @@ macro defop(name_params)
     end
 end
 
-backend(backend::Backend) =
-    begin
-        current_backend(backend)
-        switch_to_backend(backend)
-        true
-    end
+backend(backend::Backend) = switch_to_backend(current_backend(), backend)
 
-switch_to_backend(backend::Backend) =
-    begin
-        default_level(level(0))
-    end
+switch_to_backend(from::Backend, to::Backend) = current_backend(to)
 
 @defop current_backend_name()
 @defop delete_all_shapes()
@@ -442,7 +434,7 @@ export loft_ruled
 
 @defproxy(move, Shape3D, shape::Shape=point(), v::Vec=vx())
 @defproxy(scale, Shape3D, shape::Shape=point(), s::Real=1, p::Loc=u0())
-@defproxy(rotate, Shape3D, shape::Shape=point(), angle::Real=0, p::Loc=u0(), v::Vec=vx(1,p.cs))
+@defproxy(rotate, Shape3D, shape::Shape=point(), angle::Real=0, p::Loc=u0(), v::Vec=vz(1,p.cs))
 @defproxy(transform, Shape3D, shape::Shape=point(), xform::Loc=u0())
 
 # Paths are an important concept for BIM (and other things)
@@ -947,9 +939,18 @@ convert(::Type{OpenPolygonalPath}, path::RectangularPath) =
     convert(OpenPolygonalPath, convert(ClosedPolygonalPath, path))
 
 #####################################################################
-export frame_at
+export curve_domain, surface_domain, frame_at
+surface_domain(s::SurfaceRectangle) = (0, s.dx, 0, s.dy)
+surface_domain(s::SurfaceCircle) = (0, s.radius, 0, 2pi)
+surface_domain(s::SurfaceArc) = (0, s.radius, s.start_angle, s.amplitude)
+
+
 frame_at(c::Shape1D, t::Real) = backend_frame_at(backend(c), c, t)
 frame_at(s::Shape2D, u::Real, v::Real) = backend_frame_at(backend(s), s, u, v)
+
+#Some specific cases can be handled in an uniform way without the backend
+frame_at(s::SurfaceRectangle, u::Real, v::Real) = add_xy(s.c, u, v)
+frame_at(s::SurfaceCircle, u::Real, v::Real) = add_pol(s.center, u, v)
 
 
 
@@ -976,8 +977,128 @@ export default_level, default_level_to_level_height, level_height
 
 @defproxy(column, Shape3D, center::Loc, bottom_level::Any, top_level::Any, family::Any)
 =#
+
+
+#=
+
+We need to provide defaults for a lot of things. For example, we want to specify
+a wall that goes through a path without having to specify the kind of wall or its
+thickness and height.
+
+This means that, apart from the wall's path, all other wall features will come
+from defaults. The base height will be determined by the current level and the
+wall height by the current level-to-level height. Finally, the wall thickness,
+constituent parts, thermal characteristics, and so on will come from the wall
+defaults.  In the case of wall, we will assume that current_wall_defaults() is
+a parameter that contains a set of a wall parameters.  As an example of use, we
+might have:
+
+current_wall_defaults(wall_defaults(thickness=10))
+
+Another option is the definition of different defaults:
+
+thick_wall_defaults = wall_defaults(thickness=10)
+thin_wall_defaults = wall_defaults(thickness=5)
+
+which then can be make current:
+
+current_wall_defaults(thin_wall_defaults)
+
+In most cases, the defaults are not just one value, but a bunch of them. For a
+beam, we might have:
+
+standard_beam = beam_defaults(width=10, height=20)
+current_beam_defaults(standard_beam)
+
+Another useful feature is the ability to adapt defaults. For example:
+
+current_beam_defaults(beam_with(standard_beam, height=20))
+
+Finally, defaults can be created for anything. For example, in a building, we
+might want to define a bunch of parameters that are relevant. The syntax is as
+follows:
+
+@defaults(building,
+    width::Real=20,
+    length::Real=30,
+    height::Real=50)
+
+In order to access these defaults, we can use the following:
+
+current_building_defaults().width
+
+In some cases, defaults are supported by the backend itself. For example, in
+Revit, a wall can be specified using a family. In order to realize the wall
+defaults in the current backend, we need to map from the wall parameters to the
+corresponding BIM family parameters. This mapping must be described in a
+different structure.
+
+For example, a beam element might have a section with a given width and height
+but, in Revit, a beam element such as "...\\Structural Framing\\Wood\\M_Timber.rfa"
+has, as parameters, the dimensions b and d.  This means that we need a map, such
+as Dict(:width => "b", :height => "d")))). So, for a Revit family, we might use:
+
+RevitFamily(
+    "C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\Structural Framing\\Wood\\M_Timber.rfa",
+    Dict(:width => "b", :height => "d"))))
+
+However, the same beam might have a different mapping in a different backend.
+This means that we need another mapping to support different backends. One
+possibility is to use something similar to:
+
+backend_family(
+    revit => RevitFamily(
+        "C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\Structural Framing\\Wood\\M_Timber.rfa",
+        Dict(:width => "b", :height => "d")),
+    archicad => ArchiCADFamily(
+        "BeamElement",
+        Dict(:width => "size_x", :height => "size_y")),
+    autocad => AutoCADFamily())
+
+Then, we need an operation that instantiates a family. This can be done on two different
+levels: (1) from a backend-specific family (e.g., RevitFamily), for example:
+
+beam_family = RevitFamily(
+    "C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\Structural Framing\\Wood\\M_Timber.rfa",
+    Dict(:width => "b", :height => "d"))
+
+current_beam_defaults(beam_family_instance(beam_family, width=10, height=20)
+
+or from a generic backend family, for example:
+
+beam_family = backend_family(
+    revit => RevitFamily(
+        "C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\Structural Framing\\Wood\\M_Timber.rfa",
+        Dict(:width => "b", :height => "d")),
+    archicad => ArchiCADFamily(
+        "BeamElement"
+        Dict(:width => "size_x", :height => "size_y")),
+    autocad => AutoCADFamily())
+
+current_beam_defaults(beam_family_instance(beam_family, width=10, height=20)
+
+In this last case, the generic family will use the current_backend value to identify
+which family to use.
+
+Another important feature is the use of a delegation-based implementation for
+family instances. This means that we might do
+
+current_beam_defaults(beam_family_instance(current_beam_defaults(), width=20)
+
+to instantiate a family that uses, by default, the same parameter values used by
+another family instance.
+
+=#
+
+abstract type Family <: Proxy end
+abstract type FamilyInstance <: Family end
+
+family(f::Family) = f
+family(f::FamilyInstance) = f.family
+
 macro deffamily(name, parent, fields...)
   name_str = string(name)
+  abstract_name = esc(Symbol(string))
   struct_name = esc(Symbol(string(map(ucfirst,split(name_str,'_'))...)))
   field_names = map(field -> field.args[1].args[1], fields)
   field_types = map(field -> field.args[1].args[2], fields)
@@ -1001,14 +1122,14 @@ macro deffamily(name, parent, fields...)
     export $(constructor_name), $(instance_name), $(default_name), $(predicate_name), $(struct_name)
     struct $struct_name <: $parent
       $(struct_fields...)
-      based_on::Dict
+      based_on::Any #Family
       ref::Parameter{Int}
     end
     $(constructor_name)($(opt_params...);
                         $(key_params...),
-                        based_on=Dict()) = #, backend::Backend=current_backend()) =
+                        based_on=nothing) =
       $(struct_name)($(field_names...), based_on, Parameter(-1))
-    $(instance_name)(family:: $(struct_name); $(instance_params...), based_on=family.based_on) =
+    $(instance_name)(family:: Family #=$(struct_name)=#; $(instance_params...), based_on=family) =
       $(struct_name)($(field_names...), based_on, Parameter(-1))
     $(default_name) = Parameter($(constructor_name)())
     $(predicate_name)(v::$(struct_name)) = true
@@ -1021,7 +1142,7 @@ macro deffamily(name, parent, fields...)
 end
 
 
-abstract type Family <:Proxy end
+abstract type Family <: Proxy end
 
 ref(family::Family) = family.ref()==-1 ? family.ref(backend_get_family(current_backend(), family)) : family.ref()
 
@@ -1308,8 +1429,10 @@ union(shape::Shape, shapes...) = union_shape([shape, shapes...])
 intersection(shapes::Shapes) = intersection_shape(shapes)
 intersection(shape::Shape, shapes...) = intersection_shape([shape, shapes...])
 
-@defproxy(subtraction_shape, Shape3D, shape::Shape=surface_circle(), shapes::Shapes=[])
-subtraction(shape::Shape, shapes...) = subtraction_shape(shape, [shapes...])
+@defproxy(subtraction_shape2D, Shape2D, shape::Shape=surface_circle(), shapes::Shapes=[])
+@defproxy(subtraction_shape3D, Shape3D, shape::Shape=surface_circle(), shapes::Shapes=[])
+subtraction(shape::Shape2D, shapes...) = subtraction_shape2D(shape, [shapes...])
+subtraction(shape::Shape3D, shapes...) = subtraction_shape3D(shape, [shapes...])
 
 @defproxy(slice, Shape3D, shape::Shape=sphere(), p::Loc=u0(), n::Vec=vz(1))
 
@@ -1397,7 +1520,9 @@ realize_and_delete_shapes(shape::Shape, shapes::Shapes) =
 realize(b::Backend, s::UnionShape) =
     unite_refs(b, map(ref, s.shapes))
 
-realize(b::Backend, s::SubtractionShape) =
+realize(b::Backend, s::SubtractionShape2D) =
+    subtract_ref(b, ref(s.shape), unite_refs(b, map(ref, s.shapes)))
+realize(b::Backend, s::SubtractionShape3D) =
     subtract_ref(b, ref(s.shape), unite_refs(b, map(ref, s.shapes)))
 
 
