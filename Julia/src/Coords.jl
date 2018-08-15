@@ -105,10 +105,8 @@ struct XYZ <: Loc
   raw::Vec4f
 end
 
-import Base.show
-function show(io::IO, loc::XYZ)
-  print(io, "xyz($(loc.x),$(loc.y),$(loc.z)$(loc.cs == world_cs ? "" : ", ..."))")
-end
+Base.show(io::IO, loc::XYZ) =
+    print(io, "xyz($(loc.x),$(loc.y),$(loc.z)$(loc.cs == world_cs ? "" : ", ..."))")
 
 #import Base.getfield, Base.Field
 #getfield(p::XYZ, ::Field{:cyl_rho}) = hypot(p.x, p.y)
@@ -172,9 +170,8 @@ struct VXYZ <: Vec
     raw::SVector{4,Float64}
 end
 
-function show(io::IO, vec::VXYZ)
-  print(io, "vxyz($(vec.x),$(vec.y),$(vec.z)$(vec.cs == world_cs ? "" : ", ..."))")
-end
+Base.show(io::IO, vec::VXYZ) =
+    print(io, "vxyz($(vec.x),$(vec.y),$(vec.z)$(vec.cs == world_cs ? "" : ", ..."))")
 
 
 vxyz(x,y,z,cs=current_cs()) =
