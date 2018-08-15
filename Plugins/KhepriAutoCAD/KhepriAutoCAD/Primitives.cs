@@ -283,6 +283,24 @@ namespace KhepriAutoCAD {
         public double ArcStartAngle(Entity ent) => ((Arc)ent).StartAngle;
         public double ArcEndAngle(Entity ent) => ((Arc)ent).EndAngle;
 
+        public Vector3d RegionNormal(Entity ent) => ((Region)ent).Normal;
+        public Point3d RegionCentroid(Entity ent) {
+            Region reg = (Region)ent;
+            using (DBObjectCollection coll = new DBObjectCollection()) {
+                reg.Explode(coll);
+                if (coll.Count == 0) {
+                    throw new AcadException(ErrorStatus.InvalidInput, "Could not extract the boundary");
+                }
+                Curve cur = coll[0] as Curve;
+                var cs = cur.GetPlane().GetCoordinateSystem();
+                var o = cs.Origin;
+                var x = cs.Xaxis;
+                var y = cs.Yaxis;
+                var a = reg.AreaProperties(ref o, ref x, ref y);
+                var pl = new Plane(o, x, y);
+                return pl.EvaluatePoint(a.Centroid);
+            }
+        }
 
         public Entity Text(string str, Point3d corner, Vector3d vx, Vector3d vy, double height) {
             vx = vx.GetNormal();
@@ -318,8 +336,8 @@ namespace KhepriAutoCAD {
             SurfaceFromCurve(new Circle(c, n, r));
         public Entity SurfaceEllipse(Point3d c, Vector3d n, Vector3d majorAxis, double radiusRatio) =>
             SurfaceFromCurve(new Ellipse(c, n, majorAxis, radiusRatio, 0, 2 * Math.PI));
-        public Entity SurfaceArc(Point3d c, Vector3d n, double radius, double startAngle, double endAngle) =>
-            SurfaceFromCurve(new Arc(c, n, radius, startAngle, endAngle));
+//        public Entity SurfaceArc(Point3d c, Vector3d n, double radius, double startAngle, double endAngle) =>
+//            SurfaceFromCurve(new Arc(c, n, radius, startAngle, endAngle));
         public Entity SurfaceClosedPolyLine(Point3d[] pts) =>
             SurfaceFromCurve(new Polyline3d(Poly3dType.SimplePoly, new Point3dCollection(pts), true));
 
@@ -674,12 +692,13 @@ namespace KhepriAutoCAD {
         }
 
         public DBNurbSurface AsNurbSurface(Entity ent) =>
-            SingletonElement(DBSurface.CreateFrom(ent).ConvertToNurbSurface());
+            SingletonElement(AsSurface(ent).ConvertToNurbSurface());
         public ObjectId NurbSurfaceFrom(ObjectId id) {
             Document doc = Application.DocumentManager.MdiActiveDocument;
             using (doc.LockDocument())
             using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                return AddAndCommit(AsNurbSurface(tr.GetObject(id, OpenMode.ForRead) as Entity), doc, tr);
+                Entity ent = tr.GetObject(id, OpenMode.ForWrite) as Entity;
+                return AddAndDeleteAndCommit(AsNurbSurface(ent), ent, doc, tr);
             }
         }
         public double[] SurfaceDomain(Entity ent) {
@@ -689,13 +708,25 @@ namespace KhepriAutoCAD {
                 s.VKnots.StartParameter, s.VKnots.EndParameter };
         }
         public Frame3d SurfaceFrameAt(Entity ent, double u, double v) {
-            var s = ent as DBNurbSurface;
-            Point3d p = new Point3d();
-            Vector3d du = new Vector3d();
-            Vector3d dv = new Vector3d();
-            s.Evaluate(u, v, ref p, ref du, ref dv);
-            //Vector3d n = du.CrossProduct(dv);
-            return new Frame3d(p, du / du.Length, dv / dv.Length);
+            //PointOnSurface p = new PointOnSurface(EXTRACT GEOMETRY, new Point2d(u, v));
+            if (ent is DBNurbSurface) {
+                DBNurbSurface s = ent as DBNurbSurface;
+                Point3d p = new Point3d();
+                Vector3d du = new Vector3d();
+                Vector3d dv = new Vector3d();
+                s.Evaluate(u, v, ref p, ref du, ref dv);
+                //Vector3d n = du.CrossProduct(dv);
+                return new Frame3d(p, du / du.Length, dv / dv.Length);
+            } else if (ent is Region) {
+                //HACK: This needs to be fixed to properly handle u and v
+                Point3d p = RegionCentroid(ent);
+                Vector3d vn = RegionNormal(ent);
+                Vector3d vx = vpol(1, sphPhi(vn) + Math.PI / 2);
+                Vector3d vy = vn.CrossProduct(vx);
+                return new Frame3d(p, vx / vx.Length, vy / vy.Length);
+            } else {
+                throw new AcadException(ErrorStatus.InvalidInput, "Unsuitable object to compute frame of reference.");
+            }
         }
         public ObjectId Extrude(ObjectId profileId, Vector3d dir) {
             Document doc = Application.DocumentManager.MdiActiveDocument;

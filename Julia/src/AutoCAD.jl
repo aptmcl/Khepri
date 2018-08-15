@@ -169,8 +169,6 @@ create_ACAD_connection() = create_backend_connection("AutoCAD", 11000)
 
 const autocad = ACAD(LazyParameter(TCPSocket, create_ACAD_connection))
 
-
-
 #current_backend(autocad)
 
 
@@ -281,7 +279,28 @@ realize(b::ACAD, s::Rectangle) =
 realize(b::ACAD, s::SurfaceCircle) =
   ACADSurfaceCircle(connection(b), s.center, vz(1, s.center.cs), s.radius)
 realize(b::ACAD, s::SurfaceArc) =
-  ACADSurfaceArc(connection(b), s.center, vz(1, s.center.cs), s.radius, s.start_angle, s.start_angle + s.amplitude)
+    #ACADSurfaceArc(connection(b), s.center, vz(1, s.center.cs), s.radius, s.start_angle, s.start_angle + s.amplitude)
+    if s.radius == 0
+        ACADPoint(connection(b), s.center)
+    elseif s.amplitude == 0
+        ACADPoint(connection(b), s.center + vpol(s.radius, s.start_angle, s.center.cs))
+    elseif abs(s.amplitude) >= 2*pi
+        ACADSurfaceCircle(connection(b), s.center, vz(1, s.center.cs), s.radius)
+    else
+        end_angle = s.start_angle + s.amplitude
+        if end_angle > s.start_angle
+            ACADSurfaceFromCurves(connection(b),
+                [ACADArc(connection(b), s.center, vz(1, s.center.cs), s.radius, s.start_angle, end_angle),
+                 ACADPolyLine(connection(b), [add_pol(s.center, s.radius, end_angle),
+                                              add_pol(s.center, s.radius, s.start_angle)])])
+        else
+            ACADSurfaceFromCurves(connection(b),
+                [ACADArc(connection(b), s.center, vz(1, s.center.cs), s.radius, end_angle, s.start_angle),
+                 ACADPolyLine(connection(b), [add_pol(s.center, s.radius, s.start_angle),
+                                              add_pol(s.center, s.radius, end_angle)])])
+        end
+    end
+
 #realize(b::ACAD, s::SurfaceElliptic_Arc) = ACADCircle(connection(b),
 #realize(b::ACAD, s::SurfaceEllipse) = ACADCircle(connection(b),
 realize(b::ACAD, s::SurfacePolygon) =
@@ -291,12 +310,13 @@ realize(b::ACAD, s::SurfaceRegularPolygon) =
 realize(b::ACAD, s::SurfaceRectangle) =
   ACADSurfaceClosedPolyLine(connection(b), [s.c, add_x(s.c, s.dx), add_xy(s.c, s.dx, s.dy), add_y(s.c, s.dy)])
 realize(b::ACAD, s::Surface) =
-  let ids = ACADSurfaceFromCurves(connection(b), collect_ref(s.frontier))
+  let #ids = map(r->ACADNurbSurfaceFrom(connection(b),r), ACADSurfaceFromCurves(connection(b), collect_ref(s.frontier)))
+      ids = ACADSurfaceFromCurves(connection(b), collect_ref(s.frontier))
     foreach(mark_deleted, s.frontier)
     ids
   end
 backend_surface_boundary(b::ACAD, s::Shape2D) =
-    ACADCurvesFromSurface(connection(b), ref(s).value)
+    map(shape_from_ref, ACADCurvesFromSurface(connection(b), ref(s).value))
 
 # Iterating over curves and surfaces
 
@@ -315,10 +335,8 @@ backend_map_division(b::ACAD, f::Function, s::Shape1D, n::Int) =
     end
 
 
-
-
-
-
+acad"public Vector3d RegionNormal(Entity ent)"
+acad"public Point3d RegionCentroid(Entity ent)"
 acad"public double[] SurfaceDomain(Entity ent)"
 acad"public Frame3d SurfaceFrameAt(Entity ent, double u, double v)"
 
@@ -537,17 +555,17 @@ realize(b::ACAD, s::Thicken) =
     s.shape)
 
 # backend_frame_at
-backend_frame_at(b::ACAD, s::Circle, t::Real) =
-    #rotate frame?
-    add_pol(s.center, s.radius, t)
+backend_frame_at(b::ACAD, s::Circle, t::Real) = add_pol(s.center, s.radius, t)
 
-backend_frame_at(b::ACAD, s::SurfaceRectangle, u::Real, v::Real) =
-    add_xy(s.c, u, v)
+backend_frame_at(b::ACAD, c::Shape1D, t::Real) = ACADCurveFrameAt(connection(b), ref(c).value, t)
 
-backend_frame_at(b::ACAD, s::SurfaceCircle, u::Real, v::Real) =
-    add_pol(s.c, u, v)
+#backend_frame_at(b::ACAD, s::Surface, u::Real, v::Real) =
+    #What should we do with v?
+#    backend_frame_at(b, s.frontier[1], u)
 
+#backend_frame_at(b::ACAD, s::SurfacePolygon, u::Real, v::Real) =
 
+backend_frame_at(b::ACAD, s::Shape2D, u::Real, v::Real) = ACADSurfaceFrameAt(connection(b), ref(s).value, u, v)
 
 # BIM
 backend_get_family(b::ACAD, f::TableFamily) =
@@ -854,7 +872,3 @@ render_view(name::String, b::ACAD=current_backend()) =
 
 save_as(pathname::String, format::String, b::ACAD) =
     ACADSaveAs(connection(b), pathname, format)
-
-
-backend_frame_at(b::ACAD, c::Shape1D, t::Real) = ACADCurveFrameAt(connection(b), ref(c).value, t)
-backend_frame_at(b::ACAD, s::Shape2D, u::Real, v::Real) = ACADSurfaceFrameAt(connection(b), ref(s).value, u, v)
