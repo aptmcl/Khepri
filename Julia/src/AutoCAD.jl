@@ -1,5 +1,86 @@
 export autocad
 
+#=
+We need to ensure the AutoCAD plugin is properly installed.
+For AutoCAD, there are a few places where plugins can be installed:
+
+A plug-in can be deployed by placing it in one of the ApplicationPlugins or ApplicationAddins folders on a local drive.
+
+General Installation folder
+%PROGRAMFILES%\Autodesk\ApplicationPlugins
+All Users Profile folders
+%ALLUSERSPROFILE%\Autodesk\ApplicationPlugins
+User Profile folders
+%APPDATA%\Autodesk\ApplicationPlugins
+
+When the SECURELOAD system variable is set to 1 or 2,
+the program is restricted to loading and executing files that contain code from trusted locations;
+trusted locations are specified by the TRUSTEDPATHS system variable.
+
+=#
+dlls = ["KhepriBase.dll", "KhepriAutoCAD.dll"]
+bundle_name = "Khepri.bundle"
+bundle_dll_folder = joinpath(bundle_name, "Contents")
+xml_name = "PackageContents.xml"
+bundle_xml = joinpath(bundle_name, xml_name)
+local_plugins = joinpath(dirname(dirname(abspath(@__FILE__))), "Plugins", "AutoCAD")
+local_khepri_plugin = joinpath(local_plugins, bundle_name)
+local_khepri_plugin_dll_folder = joinpath(local_plugins, bundle_dll_folder)
+
+autocad_general_plugins = joinpath(dirname(joinpath(ENV["CommonProgramFiles"])), "Autodesk", "ApplicationPlugins")
+autocad_allusers_plugins = joinpath(ENV["ALLUSERSPROFILE"], "Autodesk", "ApplicationPlugins")
+autocad_user_plugins = joinpath(ENV["APPDATA"], "Autodesk", "ApplicationPlugins")
+autocad_khepri_plugin = joinpath(autocad_user_plugins, bundle_name)
+autocad_khepri_plugin_dll_folder = joinpath(autocad_user_plugins, bundle_dll_folder)
+
+update_file_if_needed(path) =
+    let local_path = joinpath(local_khepri_plugin, path)
+        autocad_path = joinpath(autocad_khepri_plugin, path)
+        if ! isfile(autocad_path) || mtime(autocad_path) < mtime(local_path)
+            isfile(autocad_path) && rm(autocad_path)
+            cp(local_path, autocad_path)
+        end
+    end
+
+update_plugin() =
+    begin
+        # Do we have the bundle folder?
+        isdir(autocad_khepri_plugin) || mkdir(autocad_khepri_plugin)
+        update_file_if_needed(xml_name)
+        isdir(autocad_khepri_plugin_dll_folder) || mkdir(autocad_khepri_plugin_dll_folder)
+        map(dlls) do dll
+            update_file_if_needed(joinpath("Contents", dll))
+        end
+    end
+
+checked_plugin = false
+
+check_plugin() =
+    begin
+        global checked_plugin
+        if ! checked_plugin
+            info("Checking plugin...")
+            try
+                update_plugin()
+                info("done.")
+                checked_plugin = true
+            catch exc
+                if isa(exc, Base.UVError)
+                    error("Please, close AutoCAD and retry.")
+                else
+                    throw(exc)
+                end
+            end
+        end
+    end
+
+
+#app = AutoCAD()
+#doc = app.ActiveDocument
+#doc.SendCommand("(command "._NETLOAD" "{0}") ".format(join(dirname(dirname(abspath(__file__))),
+#                                                      "Khepri", "KhepriAutoCAD", "KhepriAutoCAD", "bin", "x64", "Debug", "KhepriAutoCAD.dll")).replace("\\","/"))
+#db = doc.ModelSpace
+#util = doc.Utility
 
 macro acad_str(str)
     rpc("ACAD", str)
@@ -165,7 +246,11 @@ const ACAD = Socket_Backend{ACADKey, ACADId}
 
 void_ref(b::ACAD) = ACADNativeRef(-1)
 
-create_ACAD_connection() = create_backend_connection("AutoCAD", 11000)
+create_ACAD_connection() =
+    begin
+        check_plugin()
+        create_backend_connection("AutoCAD", 11000)
+end
 
 const autocad = ACAD(LazyParameter(TCPSocket, create_ACAD_connection))
 
@@ -390,6 +475,9 @@ realize(b::ACAD, s::RegularPrism) =
                                    cbs,
                                    map(p -> add_z(p, s.h), cbs))
   end
+realize(b::ACAD, s::IrregularPyramidFustrum) =
+    ACADIrregularPyramidFrustum(connection(b), s.cbs, s.cts)
+
 realize(b::ACAD, s::IrregularPrism) =
   ACADIrregularPyramidFrustum(connection(b),
                               s.cbs,
