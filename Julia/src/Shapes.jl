@@ -386,7 +386,9 @@ regular_pyramid(edges::Integer, cb::Loc, rb::Real, a::Real, ct::Loc, inscribed::
     regular_pyramid(edges, c, rb, a, h, inscribed)
   end
 
+@defproxy(irregular_pyramid_fustrum, Shape3D, cbs::Locs=[ux(), uy(), uxy()], cts::Locs=[uxz(), uyz(), uxyz()])
 @defproxy(irregular_pyramid, Shape3D, cbs::Locs=[ux(), uy(), uxy()], ct::Loc=uz())
+
 @defproxy(regular_prism, Shape3D, edges::Integer=3, cb::Loc=u0(), r::Real=1, angle::Real=0, h::Real=1, inscribed::Bool=false)
 regular_prism(edges::Integer, cb::Loc, r::Real, angle::Real, ct::Loc, inscribed::Bool=false) =
   let (c, h) = position_and_height(cb, ct)
@@ -938,6 +940,14 @@ convert(::Type{OpenPolygonalPath}, path::ClosedPolygonalPath) =
 convert(::Type{OpenPolygonalPath}, path::RectangularPath) =
     convert(OpenPolygonalPath, convert(ClosedPolygonalPath, path))
 
+#### Utilities
+
+path_vertices(path::OpenPolygonalPath) = path.vertices
+path_vertices(path::ClosedPolygonalPath) = path.vertices
+path_vertices(path::RectangularPath) = path_vertices(convert(ClosedPolygonalPath, path))
+
+export path_vertices
+
 #####################################################################
 export curve_domain, surface_domain, frame_at
 surface_domain(s::SurfaceRectangle) = (0, s.dx, 0, s.dy)
@@ -964,7 +974,7 @@ create(s::Measure) = s
 
 default_level = Parameter{Level}(level())
 default_level_to_level_height = Parameter{Real}(3)
-upper_level(lvl) = level(lvl.height + default_level_to_level_height(), backend=backend(lvl))
+upper_level(lvl, height=default_level_to_level_height()) = level(lvl.height + height, backend=backend(lvl))
 
 #default implementation
 realize(b::Backend, s::Level) = s.height
@@ -1141,9 +1151,6 @@ macro deffamily(name, parent, fields...)
   end
 end
 
-
-abstract type Family <: Proxy end
-
 ref(family::Family) = family.ref()==-1 ? family.ref(backend_get_family(current_backend(), family)) : family.ref()
 
 @deffamily(slab_family, Family,
@@ -1241,11 +1248,19 @@ A wall contains doors and windows
     thickness::Real=0.2)
 
 @defproxy(wall, Shape3D, path::Path=rectangular_path(),
-          bottom_level::Level=default_level(), top_level::Level=upper_level(bottom_level), family::WallFamily=default_wall_family(),
+          bottom_level::Level=default_level(),
+          top_level::Level=upper_level(bottom_level),
+          family::WallFamily=default_wall_family(),
           doors::Shapes=Shape[], windows::Shapes=Shape[])
-wall(path::Vector; bottom_level::Level=default_level(), top_level::Level=upper_level(bottom_level), family::WallFamily=default_wall_family()) =
+wall(path::Vector;
+     bottom_level::Level=default_level(),
+     top_level::Level=upper_level(bottom_level),
+     family::WallFamily=default_wall_family()) =
     wall(convert(Path, path), bottom_level, top_level, family)
-wall(p0::Loc, p1::Loc; bottom_level::Level=default_level(), top_level::Level=upper_level(bottom_level), family::WallFamily=default_wall_family()) =
+wall(p0::Loc, p1::Loc;
+     bottom_level::Level=default_level(),
+     top_level::Level=upper_level(bottom_level),
+     family::WallFamily=default_wall_family()) =
     wall([p0, p1], bottom_level=bottom_level, top_level=top_level, family=family)
 
 # Door
