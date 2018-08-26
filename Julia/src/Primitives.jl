@@ -1,4 +1,4 @@
-decode_id(c::TCPSocket) =
+decode_id(c::IO) =
   let id = decode_int(c)
     if id == -1
       error("Backend Error: $(decode_String(c))")
@@ -12,7 +12,7 @@ decode_BIMLevel = decode_int_or_error
 encode_FloorFamily = encode_int
 decode_FloorFamily = decode_int_or_error
 
-function request_operation(conn::TCPSocket, name)
+function request_operation(conn::IO, name)
   write(conn, Int32(0))
   encode_String(conn, name)
   op = read(conn, Int32)
@@ -93,7 +93,6 @@ function initiate_rpc_call(conn, opcode, name)
     if show_rpc()
         print(STDERR, name)
     end
-    write(conn, opcode)
 end
 function complete_rpc_call(conn, opcode, result)
     if show_rpc()
@@ -103,22 +102,26 @@ function complete_rpc_call(conn, opcode, result)
 end
 
 function rpc(prefix, str)
-  name, params, ret = parse_c_signature(str)
-  func_name = Symbol(prefix, name)
-  #Expr(:(=), Expr(:call, esc(name), [p[1] for p in params]...), Expr(:call, :+, params[1][1], 2))
-  esc(quote
-    $func_name =
-      let opcode = -1
-      (conn, $([:($(p[3])) for p in params]...)) -> begin
-        opcode = Int32(request_operation(conn, $(string(name))))
-        global $func_name = (conn, $([:($(p[3])) for p in params]...)) -> begin
-          initiate_rpc_call(conn, opcode, $(string(name)))
-          $([:($(Symbol("encode_", p[1], p[2] ? "_array" : ""))(conn, $(p[3]))) for p in params]...)
-          complete_rpc_call(conn, opcode, $(Symbol("decode_", ret[1], ret[2] ? "_array" : ""))(conn))
+    name, params, ret = parse_c_signature(str)
+    func_name = Symbol(prefix, name)
+    #Expr(:(=), Expr(:call, esc(name), [p[1] for p in params]...), Expr(:call, :+, params[1][1], 2))
+    esc(quote
+        $func_name =
+          let opcode = -1
+              buf = IOBuffer()
+              (conn, $([:($(p[3])) for p in params]...)) -> begin
+                opcode = Int32(request_operation(conn, $(string(name))))
+                global $func_name = (conn, $([:($(p[3])) for p in params]...)) -> begin
+                  initiate_rpc_call(conn, opcode, $(string(name)))
+                  take!(buf) # Reset the buffer just in case there was an encoding error on a previous call
+                  write(buf, opcode)
+                  $([:($(Symbol("encode_", p[1], p[2] ? "_array" : ""))(buf, $(p[3]))) for p in params]...)
+                  write(conn, take!(buf))
+                  complete_rpc_call(conn, opcode, $(Symbol("decode_", ret[1], ret[2] ? "_array" : ""))(conn))
+                end
+                $func_name(conn, $([:($(p[3])) for p in params]...))
+          end
         end
-        $func_name(conn, $([:($(p[3])) for p in params]...))
-      end
-    end
-    #export $func_name
-  end)
+        #export $func_name
+      end)
 end
