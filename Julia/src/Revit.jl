@@ -13,9 +13,9 @@ decode_XYZ = decode_Point3d
 encode_XYZ_array = encode_Point3d_array
 decode_XYZ_array = decode_Point3d_array
 encode_ElementId = encode_int
-decode_ElementId = decode_int_or_error
+decode_ElementId = decode_int_or_error_numbered(-1234) # sometimes, Revit returns a id of -1
 encode_ElementId_array = encode_int_array
-decode_ElementId_array = decode_int_or_error_array
+decode_ElementId_array = decode_int_or_error_numbered_array(-1234) # sometimes, Revit returns a id of -1
 encode_Element = encode_ElementId
 decode_Element = decode_ElementId
 decode_Element_array = decode_ElementId_array
@@ -60,7 +60,6 @@ void_ref(b::RVT) = RVTNativeRef(-1)
 create_RVT_connection() = create_backend_connection("Revit", 11001)
 
 const revit = RVT(LazyParameter(TCPSocket, create_RVT_connection))
-current_backend(revit)
 
 # Levels
 
@@ -71,31 +70,89 @@ rvt"public Length GetLevelElevation(Level level)"
 realize(b::RVT, s::Level) =
     RVTFindOrCreateLevelAtElevation(connection(b), s.height)
 
-default_level(level(0.0))
+# Revit also considers unconnected walls. These have a top level with id -1
+is_unconnected_level(level::Level) = ref(level).value == -1
+
 # Families
+#=
+
+Revit families are divided into
+1. System Families (for walls, roofs, floors, pipes)
+2. Loadable Families (for building components that have an associated file)
+3. In-Place Families (for unique elements created just for the current project)
+
+=#
+
+abstract type RevitFamily <: Family end
+
+struct RevitSystemFamily <: RevitFamily
+    parameter_map::Dict{Symbol,String}
+    ref::Parameter{Int}
+end
+
+revit_system_family(pairs...) = RevitSystemFamily(Dict(pairs...), Parameter(-1))
+
+struct RevitFileFamily <: RevitFamily
+    path::String
+    parameter_map::Dict{Symbol,String}
+    ref::Parameter{Int}
+end
+
+revit_file_family(path, pairs...) = RevitFileFamily(path, Dict(pairs...), Parameter(-1))
+
+# This is for future use
+struct RevitInPlaceFamily <: RevitFamily
+    parameter_map::Dict{Symbol,String}
+    ref::Parameter{Int}
+end
+
 
 rvt"public ElementId LoadFamily(string fileName)"
 rvt"public ElementId FamilyElement(ElementId familyId, string[] namesList, Length[] valuesList)"
 
-struct RevitFamily
-    path::String
-    parameter_map::Dict{Symbol,String}
-end
-
-default_beam_family(beam_family(
-    based_on=Dict(
-        revit => RevitFamily(
-            "C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\Structural Framing\\Wood\\M_Timber.rfa",
-            Dict(:width => "b", :height => "d")))))
-
-backend_get_family(b::RVT, f::BeamFamily) =
-    let param_map = f.based_on[b].parameter_map
+backend_get_family(b::RVT, f::RevitSystemFamily) = 0 #Convention for system families
+backend_get_family(b::RVT, f::RevitFileFamily) = RVTLoadFamily(connection(b), f.path)
+backend_get_family(b::RVT, f::Family) =
+    let revit_family = f.based_on # This needs to be fixed
+        param_map = revit_family.parameter_map
         params = keys(param_map)
-        RVTFamilyElement(connection(b),
-                         RVTLoadFamily(connection(b), f.based_on[b].path),
-                         [param_map[param] for param in params],
-                         [getfield(f, param) for param in params])
+        if isempty(param_map) # no parameters, just use the system family
+            0
+        else
+            RVTFamilyElement(connection(b),
+                             ref(revit_family),
+                             [param_map[param] for param in params],
+                             [getfield(f, param) for param in params])
+        end
     end
+
+#
+
+revit_wall_family = wall_family(based_on=revit_system_family())
+
+# This should go into switch_to_backend
+
+
+revit_beam_family =
+    beam_family_element(
+        beam_family(
+            based_on=revit_file_family(
+                "C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\Structural Framing\\Wood\\M_Timber.rfa",
+                :width=>"b", :height=>"d")),
+        width=0.2, height=0.3)
+
+# We need to install families
+
+switch_to_backend(from::Backend, to::RVT) =
+    let height = level_height(default_level())
+
+        current_backend(to)
+        default_level(level(height))
+        default_wall_family(revit_wall_family) # Adjust to the former values?
+        default_beam_family(revit_beam_family)
+    end
+
+
 
 #=
 backend_get_family(b::RVT, f::TableFamily) =
@@ -134,7 +191,6 @@ locs_and_arcs(circle::CircularPath) =
         ([locs1..., locs2...], [arcs1..., arcs2...])
     end
 
-
 realize_slab(b::RVT, contour::ClosedPath, level::Level, family::SlabFamily) =
     let (locs, arcs) = locs_and_arcs(contour)
         RVTCreatePathFloor(connection(b), locs, arcs, ref(level).value)
@@ -149,6 +205,9 @@ realize_slab(b::RVT, contour::ClosedPolygonalPath, level::Level, family::SlabFam
         ref(level).value)
         # we are not using the family yet
         # ref(s.family))
+
+realize_slab(b::RVT, contour::RectangularPath, level::Level, family::SlabFamily) =
+    realize_slab(b, convert(ClosedPolygonalPath, contour), level, family)
 
 rvt"public void CreatePolygonalOpening(XYZ[] pts, Element host)"
 rvt"public void CreatePathOpening(XYZ[] pts, double[] angles, Element host)"
@@ -196,35 +255,27 @@ realize(b::RVT, s::Column) =
 
 #
 rvt"public ElementId[] CreateLineWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId)"
+rvt"public ElementId[] CreateUnconnectedLineWall(XYZ[] pts, ElementId baseLevelId, double height, ElementId famId)"
 rvt"public ElementId CreateSplineWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool closed)"
 rvt"public Element CreateLineRailing(XYZ[] pts, ElementId baseLevelId, ElementId familyId)"
 rvt"public Element CreatePolygonRailing(XYZ[] pts, ElementId baseLevelId, ElementId familyId)"
 
-default_wall_family(wall_family(
-    based_on=Dict()))
-        #revit => RevitFamily(
-        #    "C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\Structural Framing\\Wood\\M_Timber.rfa",
-        #    Dict(:width => "b", :height => "d")))))
-
-backend_get_family(b::RVT, f::WallFamily) =
-    let param_map = get(f.based_on, b, nothing)
-        param_map == nothing ?
-            0 :
-            let params = keys(param_map)
-                RVTFamilyElement(connection(b),
-                                 RVTLoadFamily(connection(b), param_map.path),
-                                 [param_map[param] for param in params],
-                                 [getfield(f, param) for param in params])
-            end
-    end
-
 realize(b::RVT, s::Wall) =
-    RVTCreateLineWall(
-        connection(b),
-        convert(OpenPolygonalPath, s.path).vertices,
-        ref(s.bottom_level).value,
-        ref(s.top_level).value,
-        ref(s.family))
+    if is_unconnected_level(s.top_level)
+        RVTCreateUnconnectedLineWall(
+            connection(b),
+            convert(OpenPolygonalPath, s.path).vertices,
+            ref(s.bottom_level).value,
+            s.top_level.height - s.bottom_level.height,
+            ref(s.family))
+    else
+        RVTCreateLineWall(
+            connection(b),
+            convert(OpenPolygonalPath, s.path).vertices,
+            ref(s.bottom_level).value,
+            ref(s.top_level).value,
+            ref(s.family))
+    end
 
 ############################################
 
@@ -321,26 +372,6 @@ disable_update(b::RVT) =
 enable_update(b::RVT) =
     RVTEnableUpdate(connection(b))
 
-struct revit_family
-    path::String
-    map::Dict
-end
-
-struct archicad_family
-    name::String
-    map::Dict
-end
-
-# for a non-BIM backend
-bars_family = beam_family(width=10,height=20,based_on=Dict(
-    revit => revit_family(
-        "C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\Structural Framing\\Steel\\M_HSS-Hollow Structural Section.rfa",
-        Dict(:width=>"b", :height=>"d", :angle=>"Cross-Section Rotation"))
-#    archicad => archicad_family("SpecialBeam", Dict(:width=>"width", :height=>"height"))
-))
-
-
-
 rvt"public Level[] DocLevels()"
 rvt"public Element[] DocElements()"
 rvt"public Element[] DocFamilies()"
@@ -351,14 +382,22 @@ rvt"public Element[] DocWallsAtLevel(Level level)"
 rvt"public XYZ[] LineWallVertices(Element element)"
 rvt"public ElementId ElementLevel(Element element)"
 rvt"public ElementId WallTopLevel(Element element)"
+rvt"public double WallHeight(Element element)"
 
 all_levels(b::RVT) =
     [level_from_ref(r, b) for r in RVTDocLevels(connection(b))]
 
 level_from_ref(r, b::RVT) =
     let c = connection(b)
-        level(RVTGetLevelElevation(c, r), backend=b, ref=LazyRef(b, RVTNativeRef(r)))
+        level(r == -1 ?
+                error("Level for unconnected height") :
+                RVTGetLevelElevation(c, r),
+              backend=b, ref=LazyRef(b, RVTNativeRef(r)))
     end
+
+unconnected_level(h::Real, b::RVT) =
+    level(h, backend=b, ref=LazyRef(b, RVTNativeRef(-1)))
+
 
 all_Elements(b::RVT) =
     [element_from_ref(r, b) for r in RVTDocElements(connection(b))]
@@ -378,13 +417,43 @@ floor_from_ref(r, b::RVT) =
 
 all_walls(b::RVT) =
     [wall_from_ref(r, b) for r in RVTDocWalls(connection(b))]
-all_walls_at_level(level, b::RVT) =
-    [wall_from_ref(r, b) for r in RVTDocWallsAtLevel(connection(b), level)]
+all_walls_at_level(level::Level, b::RVT) =
+    [wall_from_ref(r, b) for r in RVTDocWallsAtLevel(connection(b), ref(level).value)]
 
 wall_from_ref(r, b::RVT) =
     let c = connection(b)
-        wall(convert(Path, RVTLineWallVertices(c, r)),
-             bottom_level=level_from_ref(RVTElementLevel(c, r), b),
-             top_level=level_from_ref(RVTWallTopLevel(c, r), b),
-             backend=b, ref=LazyRef(b, RVTNativeRef(r)))
+        path = convert(Path, RVTLineWallVertices(c, r))
+        bottom_level_id = RVTElementLevel(c, r)
+        top_level_id = RVTWallTopLevel(c, r)
+        bottom_level = level_from_ref(bottom_level_id, b)
+        top_level = top_level_id == -1 ?
+                        unconnected_level(bottom_level.height + RVTWallHeight(c, r), b) :
+                        level_from_ref(top_level_id, b)
+        wall(path,
+             bottom_level=bottom_level,
+             top_level=top_level,
+             backend=b,
+             ref=LazyRef(b, RVTNativeRef(r)))
     end
+
+#=
+
+struct revit_family
+    path::String
+    map::Dict
+end
+
+struct archicad_family
+    name::String
+    map::Dict
+end
+
+# for a non-BIM backend
+bars_family = beam_family(width=10,height=20,based_on=Dict(
+    revit => revit_family(
+        "C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\Structural Framing\\Steel\\M_HSS-Hollow Structural Section.rfa",
+        Dict(:width=>"b", :height=>"d", :angle=>"Cross-Section Rotation"))
+#    archicad => archicad_family("SpecialBeam", Dict(:width=>"width", :height=>"height"))
+))
+
+=#
