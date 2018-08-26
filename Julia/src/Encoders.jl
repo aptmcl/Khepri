@@ -19,7 +19,7 @@ export encode_String, decode_String,
        encode_Frame3d, decode_Frame3d,
        decode_void
 
-encode_String(c::TCPSocket, v::String) = begin
+encode_String(c::IO, v::String) = begin
   str = string(v)
   size = length(str)
   array = UInt8[]
@@ -37,7 +37,7 @@ encode_String(c::TCPSocket, v::String) = begin
   write(c, str)
 end
 
-decode_String(c::TCPSocket) = begin
+decode_String(c::IO) = begin
   loop(size::Int, shift::Int) = begin
     b = convert(Int, read(c, UInt8))
     size = size | ((b & 0x7f) << shift)
@@ -60,14 +60,14 @@ Guids = Vector{Guid}
 
 is_empty_guid(g::Guid) = all(v -> v == 0, g)
 
-encode_Guid(c::TCPSocket, v::Guid) = write(c, v)
-decode_Guid(c::TCPSocket) = read(c, 16)
+encode_Guid(c::IO, v::Guid) = write(c, v)
+decode_Guid(c::IO) = read(c, 16)
 
-encode_Guid_array(c::TCPSocket, v::Vector) = begin
+encode_Guid_array(c::IO, v::Vector) = begin
   encode_int(c, length(v))
   for e in v encode_Guid(c, e) end
 end
-decode_Guid_array(c::TCPSocket) = begin
+decode_Guid_array(c::IO) = begin
   len = decode_int_or_error(c)
   r = Vector{Guid}(len)
   for i in 1:len
@@ -81,8 +81,8 @@ end
 encode_string = encode_String
 decode_string = decode_String
 
-encode_bool(c::TCPSocket, v::Bool) = encode_byte(c, v ? UInt8(1) : UInt8(0))
-decode_bool(c::TCPSocket) =
+encode_bool(c::IO, v::Bool) = encode_byte(c, v ? UInt8(1) : UInt8(0))
+decode_bool(c::IO) =
   let i = decode_byte(c)
     if i == 127
       error("Backend Error: $(decode_String(c))")
@@ -91,14 +91,14 @@ decode_bool(c::TCPSocket) =
     end
   end
 
-encode_byte(c::TCPSocket, v::UInt8) = write(c, convert(UInt8, v))
-decode_byte(c::TCPSocket) = convert(UInt8, read(c, UInt8))
+encode_byte(c::IO, v::UInt8) = write(c, convert(UInt8, v))
+decode_byte(c::IO) = convert(UInt8, read(c, UInt8))
 
-encode_int(c::TCPSocket, v::Int) = write(c, convert(Int32, v))
-decode_int(c::TCPSocket) = convert(Int, read(c, Int32))
+encode_int(c::IO, v::Int) = write(c, convert(Int32, v))
+decode_int(c::IO) = convert(Int, read(c, Int32))
 
-encode_double(c::TCPSocket, v::Real) = write(c, convert(Float64, v))
-decode_double(c::TCPSocket) =
+encode_double(c::IO, v::Real) = write(c, convert(Float64, v))
+decode_double(c::IO) =
     let d = read(c, Float64)
         if isnan(d)
             error("Backend Error: $(decode_String(c))")
@@ -106,31 +106,33 @@ decode_double(c::TCPSocket) =
             d
         end
     end
-encode_double3(c::TCPSocket, v0::Real, v1::Real, v2::Real) = begin
+encode_double3(c::IO, v0::Real, v1::Real, v2::Real) = begin
     encode_double(c, v0)
     encode_double(c, v1)
     encode_double(c, v2)
 end
 
-decode_int_or_error(c::TCPSocket) =
+decode_int_or_error_numbered(err_num) = (c::IO) ->
   let i = decode_int(c)
-    if i == -1
+    if i == err_num
       error("Backend Error: $(decode_String(c))")
     else
       i
     end
   end
 
-encode_string_array(c::TCPSocket, v::Vector) = begin
+decode_int_or_error = decode_int_or_error_numbered(-12345)
+
+encode_string_array(c::IO, v::Vector) = begin
   encode_int(c, length(v))
   for e in v encode_string(c, e) end
 end
 
-encode_double_array(c::TCPSocket, v::Vector) = begin
+encode_double_array(c::IO, v::Vector) = begin
   encode_int(c, length(v))
   for e in v encode_double(c, e) end
 end
-decode_double_array(c::TCPSocket) = begin
+decode_double_array(c::IO) = begin
   len = decode_int_or_error(c)
   r = Vector{Float64}(len)
   for i in 1:len
@@ -139,11 +141,11 @@ decode_double_array(c::TCPSocket) = begin
   r
 end
 
-encode_int_array(c::TCPSocket, v::Vector) = begin
+encode_int_array(c::IO, v::Vector) = begin
   encode_int(c, length(v))
   for e in v encode_int(c, e) end
 end
-decode_int_array(c::TCPSocket) = begin
+decode_int_array(c::IO) = begin
   len = decode_int_or_error(c)
   r = Vector{Int}(len)
   for i in 1:len
@@ -152,7 +154,19 @@ decode_int_array(c::TCPSocket) = begin
   r
 end
 
-decode_int_or_error_array(c::TCPSocket) = begin
+decode_int_or_error_numbered_array(err_num) =
+    let decode_int_or_err_num = decode_int_or_error_numbered(err_num)
+        (c::IO) -> begin
+            len = decode_int_or_error(c)
+            r = Vector{Int}(len)
+            for i in 1:len
+                r[i] = decode_int_or_err_num(c)
+            end
+            r
+        end
+    end
+
+decode_int_or_error_array(c::IO) = begin
   len = decode_int_or_error(c)
   r = Vector{Int}(len)
   for i in 1:len
@@ -162,16 +176,16 @@ decode_int_or_error_array(c::TCPSocket) = begin
 end
 
 # Must convert from local to world coordinates
-encode_Point3d(c::TCPSocket, v::XYZ) = begin
+encode_Point3d(c::IO, v::XYZ) = begin
   v = in_world(v)
   encode_double3(c, v.x, v.y, v.z)
 end
-decode_Point3d(c::TCPSocket) = xyz(decode_double(c), decode_double(c), decode_double(c), world_cs)
-encode_Point3d_array(c::TCPSocket, v::Vector) = begin
+decode_Point3d(c::IO) = xyz(decode_double(c), decode_double(c), decode_double(c), world_cs)
+encode_Point3d_array(c::IO, v::Vector) = begin
   encode_int(c, length(v))
   for e in v encode_Point3d(c, e) end
 end
-decode_Point3d_array(c::TCPSocket) = begin
+decode_Point3d_array(c::IO) = begin
   len = decode_int_or_error(c)
   r = Vector{XYZ}(len)
   for i in 1:len
@@ -179,20 +193,20 @@ decode_Point3d_array(c::TCPSocket) = begin
   end
   r
 end
-encode_Point2d(c::TCPSocket, v::XYZ) = begin
+encode_Point2d(c::IO, v::XYZ) = begin
   v = in_world(v)
   @assert v.z == zero(v.z) "Non zero Z coordinate";
   encode_double(c, v.x)
   encode_double(c, v.y)
 end
-decode_Point2d(c::TCPSocket) = xyz(decode_double(c), decode_double(c), 0.0, world_cs)
-encode_Point2d_array(c::TCPSocket, v::Vector) = begin
+decode_Point2d(c::IO) = xyz(decode_double(c), decode_double(c), 0.0, world_cs)
+encode_Point2d_array(c::IO, v::Vector) = begin
   encode_int(c, length(v))
   for e in v
     encode_Point2d(c, e)
   end
 end
-decode_Point2d_array(c::TCPSocket) = begin
+decode_Point2d_array(c::IO) = begin
   len = decode_int_or_error(c)
   r = Vector{XYZ}(len)
   for i in 1:len
@@ -201,17 +215,17 @@ decode_Point2d_array(c::TCPSocket) = begin
   r
 end
 
-encode_Vector3d(c::TCPSocket, v::VXYZ) = begin
+encode_Vector3d(c::IO, v::VXYZ) = begin
   v = in_world(v)
   encode_double3(c, v.x, v.y, v.z)
 end
-decode_Vector3d(c::TCPSocket) = vxyz(decode_double(c), decode_double(c), decode_double(c), world_cs)
+decode_Vector3d(c::IO) = vxyz(decode_double(c), decode_double(c), decode_double(c), world_cs)
 
-encode_Vector3d_array(c::TCPSocket, v::Vector) = begin
+encode_Vector3d_array(c::IO, v::Vector) = begin
   encode_int(c, length(v))
   for e in v encode_Vector3d(c, e) end
 end
-decode_Vector3d_array(c::TCPSocket) = begin
+decode_Vector3d_array(c::IO) = begin
   len = decode_int_or_error(c)
   r = Vector{VXYZ}(len)
   for i in 1:len
@@ -220,7 +234,7 @@ decode_Vector3d_array(c::TCPSocket) = begin
   r
 end
 
-encode_Frame3d(c::TCPSocket, v::XYZ) = begin
+encode_Frame3d(c::IO, v::XYZ) = begin
   encode_Point3d(c, v)
   t = v.cs.transform
   encode_double3(c, t[1,1], t[2,1], t[3,1])
@@ -228,10 +242,10 @@ encode_Frame3d(c::TCPSocket, v::XYZ) = begin
   encode_double3(c, t[1,3], t[2,3], t[3,3])
 end
 
-decode_Frame3d(c::TCPSocket) =
+decode_Frame3d(c::IO) =
     u0(cs_from_o_vx_vy_vz(decode_Point3d(c), decode_Vector3d(c), decode_Vector3d(c), decode_Vector3d(c)))
 
-decode_void(c::TCPSocket) = begin
+decode_void(c::IO) = begin
   v = decode_byte(c)
   if v == 127
     error("Backend Error: $(decode_String(c))")
@@ -243,7 +257,7 @@ create_backend_connection(backend::String, port::Integer) =
     try
       return connect(port)
     catch e
-      println("Please, start/restart $(backend).")
+      info("Please, start/restart $(backend).")
       sleep(4)
       if i == 9
         throw(e)
