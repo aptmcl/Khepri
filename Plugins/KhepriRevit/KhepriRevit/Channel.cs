@@ -85,10 +85,13 @@ namespace KhepriRevit {
         public ElementId rElementId() {
             int id = r.ReadInt32();
             //Check this number. Should we use -1?
-            return (id == 0) ? null : new ElementId(id);
+            return (id == 0) ? null : 
+                (id == -1) ? ElementId.InvalidElementId : 
+                new ElementId(id);
         }
         public void wElementId(ElementId id) => wInt32(id.IntegerValue);
-        public void eElementId(Exception e) { wInt32(-1); dumpException(e); }
+        // Revit uses -1 as legit ElementId
+        public void eElementId(Exception e) { wInt32(-1234); dumpException(e); }
 
         public Element rElement() => doc.GetElement(rElementId());
         public void wElement(Element e) { using (e) { wElementId(e.Id); } }
@@ -134,7 +137,7 @@ namespace KhepriRevit {
         }
         public void eElementArray(Exception e) => eArray(e);
 
-        static private Dictionary<int, Family> loadedFamilies = new Dictionary<int, Family>();
+        static private Dictionary<int, Family> loadedFamilies = new Dictionary<int, Family>() { { 0, null } };
         public Family rFamily() => loadedFamilies[rInt32()];
         public void wFamily(Family f) { int i = f.Id.IntegerValue; loadedFamilies[i] = f; wInt32(i); }
         public void eFamily(Exception e) => eElementId(e);
