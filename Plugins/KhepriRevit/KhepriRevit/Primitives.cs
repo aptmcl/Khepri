@@ -300,6 +300,20 @@ namespace KhepriRevit {
             doc.AutoJoinElements();
             return ids;
         }
+        public ElementId[] CreateUnconnectedLineWall(XYZ[] pts, ElementId baseLevelId, double height, ElementId famId) {
+            ElementId wallTypeId = doc.GetDefaultElementTypeId(ElementTypeGroup.WallType);
+            ElementId[] ids = new ElementId[pts.Length - 1];
+            for (int i = 0; i < pts.Length - 1; i++) {
+                Wall wall = Wall.Create(doc, Line.CreateBound(pts[i], pts[i + 1]), wallTypeId, baseLevelId, height, 0, false, false);
+                if (famId != null) {
+                    wall.WallType = doc.GetElement(famId) as WallType;
+                }
+                ids[i] = wall.Id;
+            }
+            // IS THIS WORKING???
+            doc.AutoJoinElements();
+            return ids;
+        }
         public ElementId CreateSplineWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool closed) {
             Wall wall = Wall.Create(doc, HermiteSpline.Create(pts, false), baseLevelId, closed);
             if (famId != null) {
@@ -315,8 +329,11 @@ namespace KhepriRevit {
             return new XYZ[] { l.GetEndPoint(0), l.GetEndPoint(1) };
         }
         public ElementId ElementLevel(Element element) => element.LevelId;
-        public ElementId WallTopLevel(Element element) =>
+        // Walls can have unconnected height
+        public ElementId WallTopLevel(Element element) => 
             element.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).AsElementId();
+        public double WallHeight(Element element) =>
+            element.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM).AsDouble();
 
         //HACK deltaFromGround is not used
         public Element InsertDoor(Length deltaFromStart, Length deltaFromGround, Element host, ElementId familyId) {
