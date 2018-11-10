@@ -10,10 +10,10 @@ namespace KhepriBase {
         static MethodInfo GetMethod(Type t, String name) {
             try {
                 MethodInfo m = t.GetMethod(name);
-                Debug.Assert(m != null, "There is no method named '" + name + "'");
+                Debug.Assert(m != null, "There is no method named '" + name + "' in type '" + t + "'");
                 return m;
             } catch (AmbiguousMatchException) {
-                Debug.Assert(false, "The method '" + name + "' is ambiguous");
+                Debug.Assert(false, "The method '" + name + "' is ambiguous in type '" + t + "'");
                 return null;
             }
         }
