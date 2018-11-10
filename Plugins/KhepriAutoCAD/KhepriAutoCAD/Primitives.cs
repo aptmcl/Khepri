@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Linq;
+using System.Diagnostics;
 
 //using System.Windows;
 using Autodesk.AutoCAD.EditorInput;
@@ -336,8 +338,8 @@ namespace KhepriAutoCAD {
             SurfaceFromCurve(new Circle(c, n, r));
         public Entity SurfaceEllipse(Point3d c, Vector3d n, Vector3d majorAxis, double radiusRatio) =>
             SurfaceFromCurve(new Ellipse(c, n, majorAxis, radiusRatio, 0, 2 * Math.PI));
-//        public Entity SurfaceArc(Point3d c, Vector3d n, double radius, double startAngle, double endAngle) =>
-//            SurfaceFromCurve(new Arc(c, n, radius, startAngle, endAngle));
+        //        public Entity SurfaceArc(Point3d c, Vector3d n, double radius, double startAngle, double endAngle) =>
+        //            SurfaceFromCurve(new Arc(c, n, radius, startAngle, endAngle));
         public Entity SurfaceClosedPolyLine(Point3d[] pts) =>
             SurfaceFromCurve(new Polyline3d(Poly3dType.SimplePoly, new Point3dCollection(pts), true));
 
@@ -917,14 +919,40 @@ namespace KhepriAutoCAD {
                 return id;
             }
         }
-        public Point3d[] GetPoint(string prompt) {
+        public Point3d[] GetPosition(string prompt) {
             Document acDoc = Application.DocumentManager.MdiActiveDocument;
-            PromptPointResult pPtRes;
-            PromptPointOptions pPtOpts = new PromptPointOptions(prompt);
-            pPtOpts.AllowArbitraryInput = true;
-            pPtRes = acDoc.Editor.GetPoint(pPtOpts);
-            return pPtRes.Status == PromptStatus.Cancel ? new Point3d[] { } : new Point3d[] { pPtRes.Value };
+            PromptPointOptions opts = new PromptPointOptions(prompt);
+            opts.AllowArbitraryInput = true;
+            PromptPointResult result = acDoc.Editor.GetPoint(opts);
+            return result.Status == PromptStatus.Cancel ? new Point3d[] { } : new Point3d[] { result.Value };
         }
+        public ObjectId[] GetShapeOfType(string prompt, Type type, String typename) {
+            Document acDoc = Application.DocumentManager.MdiActiveDocument;
+            PromptEntityOptions opts = new PromptEntityOptions(prompt);
+            opts.SetRejectMessage("Entity must be a " + typename + "\n");
+            opts.AddAllowedClass(type, false);
+            PromptEntityResult result = acDoc.Editor.GetEntity(opts);
+            return result.Status == PromptStatus.Cancel ? new ObjectId[] { } : new ObjectId[] { result.ObjectId };
+        }
+
+        public ObjectId[] GetPoint(string prompt) => GetShapeOfType(prompt, typeof(DBPoint), "point");
+        public ObjectId[] GetCurve(string prompt) => GetShapeOfType(prompt, typeof(Curve), "curve");
+        public ObjectId[] GetSurface(string prompt) => GetShapeOfType(prompt, typeof(DBSurface), "surface");
+        public ObjectId[] GetSolid(string prompt) => GetShapeOfType(prompt, typeof(Solid3d), "solid");
+        public ObjectId[] GetShape(string prompt) => GetShapeOfType(prompt, typeof(Entity), "shape");
+
+        public long GetHandleFromShape(Entity e) => e.Handle.Value;
+        public ObjectId GetShapeFromHandle(long h) {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            using (doc.LockDocument())
+            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
+                Database db = HostApplicationServices.WorkingDatabase;
+                ObjectId res = db.GetObjectId(false, new Handle(h), 0);
+                tr.Commit();
+                return res;
+            }
+        }
+
         public ObjectId[] GetAllShapes() {
             Document doc = Application.DocumentManager.MdiActiveDocument;
             using (doc.LockDocument())
@@ -979,7 +1007,7 @@ namespace KhepriAutoCAD {
         }
 
         //To speedup type identification, we will use an old approach
-        IDictionary<RXClass, byte> shapeCode = 
+        IDictionary<RXClass, byte> shapeCode =
             new Dictionary<RXClass, byte>() {
                 { RXClass.GetClass(typeof(DBPoint)), 1},
                 { RXClass.GetClass(typeof(Circle)), 2},
@@ -994,6 +1022,7 @@ namespace KhepriAutoCAD {
                 { RXClass.GetClass(typeof(MText)), 11},
                 { RXClass.GetClass(typeof(DBSurface)), 12},
                 { RXClass.GetClass(typeof(DBNurbSurface)), 13},
+                { RXClass.GetClass(typeof(LoftedSurface)), 14 },
                 { RXClass.GetClass(typeof(BlockReference)), 50 },
                 { RXClass.GetClass(typeof(Viewport)), 70 },
         };
@@ -1005,6 +1034,7 @@ namespace KhepriAutoCAD {
                 }
                 return code;
             } else {
+                Debug.Assert(false, "Unknown ObjectClass:" + id.ObjectClass.DxfName);
                 return 0;
             }
         }
@@ -1497,7 +1527,7 @@ namespace KhepriAutoCAD {
 
         public List<BlockReference> RowOfBlockReferences(Point3d c, double angle, int n, double spacing, ObjectId id) {
             Matrix3d rot = Matrix3d.Rotation(angle + Math.PI / 2, Vector3d.ZAxis, Point3d.Origin);
-            return Enumerable.Range(0, n).Select(i => TransformedBlockReference(id, 
+            return Enumerable.Range(0, n).Select(i => TransformedBlockReference(id,
                 Matrix3d.Displacement(c + vpol(spacing * i, angle) - Point3d.Origin) * rot)).ToList();
         }
 
@@ -1623,11 +1653,10 @@ namespace KhepriAutoCAD {
         public void SetLengthUnit(String unit) {
             Document doc = Application.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
-            using (doc.LockDocument()) {
-                using (Transaction tr = db.TransactionManager.StartTransaction()) {
-                    db.Unitmode = unit_code[unit];
-                    tr.Commit();
-                }
+            using (doc.LockDocument())
+            using (Transaction tr = db.TransactionManager.StartTransaction()) {
+                db.Unitmode = unit_code[unit];
+                tr.Commit();
             }
         }
 
@@ -1640,6 +1669,56 @@ namespace KhepriAutoCAD {
                     doc.Database.SaveAs(pathname, true, DwgVersion.Current, doc.Database.SecurityParameters);
             } else {
                 throw new AcadException(ErrorStatus.InvalidInput, "Unknown format: " + format);
+            }
+        }
+
+        // Change notification
+
+        BlockingCollection<ObjectId> changedShapes = new BlockingCollection<ObjectId>();
+
+        public void AddChangedShape(object senderObj, EventArgs evtArgs) =>
+            changedShapes.Add((senderObj as Entity).Id);
+
+        public ObjectId[] ChangedShape() {
+            ObjectId changed;
+            if (changedShapes.TryTake(out changed)) {
+                return new ObjectId[]{ changed };
+            } else {
+                return new ObjectId[]{ } ;
+            }
+        }
+
+        bool wasCanceled = false;
+        public void DetectCancel() {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            wasCanceled = false;
+            doc.CommandCancelled += new CommandEventHandler(UserCancelled);
+        }
+        public void UndetectCancel() {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            doc.CommandCancelled -= new CommandEventHandler(UserCancelled);
+        }
+        public void UserCancelled(object senderObj, EventArgs evtArgs) => wasCanceled = true;
+        public bool WasCanceled() => wasCanceled;
+
+        public void RegisterForChanges(ObjectId id) {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Database db = doc.Database;
+            using (doc.LockDocument())
+            using (Transaction tr = db.TransactionManager.StartTransaction()) {
+                Entity ent = tr.GetObject(id, OpenMode.ForWrite) as Entity;
+                ent.Modified += new EventHandler(AddChangedShape);
+                tr.Commit();
+            }
+        }
+        public void UnregisterForChanges(ObjectId id) {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Database db = doc.Database;
+            using (doc.LockDocument())
+            using (Transaction tr = db.TransactionManager.StartTransaction()) {
+                Entity ent = tr.GetObject(id, OpenMode.ForWrite) as Entity;
+                ent.Modified -= new EventHandler(AddChangedShape);
+                tr.Commit();
             }
         }
     }
