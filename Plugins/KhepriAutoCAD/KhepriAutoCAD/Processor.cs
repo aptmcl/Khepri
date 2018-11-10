@@ -13,7 +13,7 @@ namespace KhepriAutoCAD {
 
         public override void Execute(int op) {
             sync.Invoke(operations[op], new object[] { channel, primitives });
-            channel.Flush();
+            channel.Flush(); //This seems to be incorrect, as it is doing the flush _before_ the writing
         }
     }
 }
