@@ -60,9 +60,6 @@
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\..\..\..\..\..\..\..\..\Program Files\Autodesk\AutoCAD 2016\acmgd.dll</HintPath>
     </Reference>
-    <Reference Include="KhepriBase">
-      <HintPath>..\..\KhepriBase\KhepriBase\KhepriBase\bin\x64\Debug\KhepriBase.dll</HintPath>
-    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Windows.Forms" />
@@ -87,6 +84,12 @@
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Khepri.bundle\Contents\" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\KhepriBase\KhepriBase\KhepriBase.csproj">
+      <Project>{63155619-47cc-464b-beab-78097e19f6b7}</Project>
+      <Name>KhepriBase</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
