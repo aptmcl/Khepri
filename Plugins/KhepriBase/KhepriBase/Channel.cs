@@ -72,9 +72,17 @@ namespace KhepriBase {
         public void wInt32(Int32 i) => w.Write(i);
         public void eInt32(Exception e) { w.Write(-12345); dumpException(e); }
 
+        public long rInt64() => r.ReadInt64();
+        public void wInt64(Int64 i) => w.Write(i);
+        public void eInt64(Exception e) { w.Write(-123456789); dumpException(e); }
+
         public string rString() => r.ReadString();
         public void wString(string s) => w.Write(s);
         public void eString(Exception e) { w.Write("This an error!"); dumpException(e); }
+
+        public float rSingle() => r.ReadSingle();
+        public void wSingle(float d) => w.Write(d);
+        public void eSingle(Exception e) { w.Write(Single.NaN); dumpException(e); }
 
         public double rDouble() => r.ReadDouble();
         public void wDouble(double d) => w.Write(d);
