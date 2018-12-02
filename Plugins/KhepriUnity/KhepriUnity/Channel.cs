@@ -9,12 +9,12 @@ using UnityEngine;
 namespace KhepriUnity {
     public class Channel : KhepriBase.Channel {
         public List<GameObject> shapes;
-        //public List<Material> materials;
+        public List<Material> materials;
         // Storage for operations made available. The starting one is the operation that makes other operations available 
 
         public Channel(NetworkStream stream) : base(stream) {
             this.shapes = new List<GameObject>();
-            //this.materials = new List<Material>();
+            this.materials = new List<Material>();
         }
 
         /*
@@ -37,6 +37,29 @@ namespace KhepriUnity {
         }
         public void eGameObject(Exception e) { wInt32(-1); dumpException(e); }
 
+        public GameObject[] rGameObjectArray() {
+            int length = rInt32();
+            GameObject[] objs = new GameObject[length];
+            for (int i = 0; i < length; i++) {
+                objs[i] = rGameObject();
+            }
+            return objs;
+        }
+        public void wGameObjectArray(GameObject[] ids) {
+            wInt32(ids.Length);
+            foreach (var id in ids) {
+                wGameObject(id);
+            }
+        }
+        public void eGameObjectArray(Exception e) { wInt32(-1); dumpException(e); }
+
+        public Material rMaterial() => materials[r.ReadInt32()];
+        public void wMaterial(Material mat) {
+            materials.Add(mat);
+            wInt32(materials.Count - 1);
+        }
+        public void eMaterial(Exception e) { wInt32(-1); dumpException(e); }
+
         public Vector3 rVector3() => new Vector3(rSingle(), rSingle(), rSingle());
         public void wVector3(Vector3 p) { w.Write(p.x); w.Write(p.y); w.Write(p.z); }
         public void eVector3(Exception e) { eDouble(e); }
@@ -56,6 +79,26 @@ namespace KhepriUnity {
             }
         }
         public void eVector3Array(Exception e) => wInt32(-1);
+
+        public Vector3[][] rVector3ArrayArray() {
+            int length = rInt32();
+            Vector3[][] ptss = new Vector3[length][];
+            for (int i = 0; i < length; i++) {
+                ptss[i] = rVector3Array();
+            }
+            return ptss;
+        }
+        public void wVector3ArrayArray(Vector3[][] ptss) {
+            wInt32(ptss.Length);
+            foreach (var pt in ptss) {
+                wVector3Array(pt);
+            }
+        }
+        public void eVector3ArrayArray(Exception e) => wInt32(-1);
+
+        public Color rColor() => new Color(rSingle(), rSingle(), rSingle());
+        public void wColor(Color c) { w.Write(c.r); w.Write(c.g); w.Write(c.b); }
+        public void eColor(Exception e) { eDouble(e); }
 
         public Quaternion rQuaternion() {
             float m11 = rSingle();
