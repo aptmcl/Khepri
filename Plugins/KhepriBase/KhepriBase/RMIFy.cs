@@ -11,14 +11,20 @@ namespace KhepriBase {
             try {
                 MethodInfo m = t.GetMethod(name);
                 Debug.Assert(m != null, "There is no method named '" + name + "' in type '" + t + "'");
-                return m;
+                if (m != null) {
+                    return m;
+                } else {
+                    throw new Exception("There is no method named '" + name + "' in type '" + t + "'");
+                }
             } catch (AmbiguousMatchException) {
                 Debug.Assert(false, "The method '" + name + "' is ambiguous in type '" + t + "'");
-                return null;
+                throw new Exception("The method '" + name + "' is ambiguous in type '" + t + "'");
+                //return null;
             }
         }
 
-        static String MethodNameFromType(Type t) => t.Name.Replace("[]", "Array");
+        static String MethodNameFromType(Type t) =>
+            t.IsArray ? MethodNameFromType(t.GetElementType()) + "Array" : t.Name;
 
         static MethodCallExpression DeserializeParameter(ParameterExpression c, ParameterInfo p) =>
             Expression.Call(c, GetMethod(c.Type, "r" + MethodNameFromType(p.ParameterType)));
