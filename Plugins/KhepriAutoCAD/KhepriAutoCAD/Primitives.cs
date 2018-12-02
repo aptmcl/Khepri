@@ -51,7 +51,7 @@ namespace KhepriAutoCAD {
     }
 
     public class Primitives : KhepriBase.Primitives {
-        public int DeleteAll() {
+        public void DeleteAll() {
             Document doc = Application.DocumentManager.MdiActiveDocument;
             using (doc.LockDocument())
             using (var tr = doc.Database.TransactionManager.StartTransaction()) {
@@ -67,7 +67,25 @@ namespace KhepriAutoCAD {
                 }
                 tr.Commit();
             }
-            return 0;
+        }
+        public void DeleteAllInLayer(ObjectId layerId) {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            using (doc.LockDocument())
+            using (var tr = doc.Database.TransactionManager.StartTransaction()) {
+                BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
+                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+                foreach (var entId in btr) {
+                    var ent = tr.GetObject(entId, OpenMode.ForRead) as Entity;
+                    if (ent != null) {
+                        if (ent.LayerId == layerId) {
+                            ent.UpgradeOpen();
+                            ent.Erase();
+                            ent.DowngradeOpen();
+                        }
+                    }
+                }
+                tr.Commit();
+            }
         }
 
         public void SetView(Point3d position, Point3d target, double lens, bool perspective, string style) {
@@ -920,19 +938,36 @@ namespace KhepriAutoCAD {
             }
         }
         public Point3d[] GetPosition(string prompt) {
-            Document acDoc = Application.DocumentManager.MdiActiveDocument;
-            PromptPointOptions opts = new PromptPointOptions(prompt);
-            opts.AllowArbitraryInput = true;
-            PromptPointResult result = acDoc.Editor.GetPoint(opts);
-            return result.Status == PromptStatus.Cancel ? new Point3d[] { } : new Point3d[] { result.Value };
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            using (doc.LockDocument()) {
+                PromptPointOptions opts = new PromptPointOptions(prompt);
+                opts.AllowArbitraryInput = true;
+                PromptPointResult result = doc.Editor.GetPoint(opts);
+                return result.Status == PromptStatus.Cancel ? new Point3d[] { } : new Point3d[] { result.Value };
+            }
         }
         public ObjectId[] GetShapeOfType(string prompt, Type type, String typename) {
-            Document acDoc = Application.DocumentManager.MdiActiveDocument;
-            PromptEntityOptions opts = new PromptEntityOptions(prompt);
-            opts.SetRejectMessage("Entity must be a " + typename + "\n");
-            opts.AddAllowedClass(type, false);
-            PromptEntityResult result = acDoc.Editor.GetEntity(opts);
-            return result.Status == PromptStatus.Cancel ? new ObjectId[] { } : new ObjectId[] { result.ObjectId };
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            using (doc.LockDocument()) {
+                PromptEntityOptions opts = new PromptEntityOptions(prompt);
+                opts.SetRejectMessage("Entity must be a " + typename + "\n");
+                opts.AddAllowedClass(type, false);
+                PromptEntityResult result = doc.Editor.GetEntity(opts);
+                return result.Status == PromptStatus.Cancel ? new ObjectId[] { } : new ObjectId[] { result.ObjectId };
+            }
+        }
+        public ObjectId[] GetShapesOfType(string prompt, Type type, String typename) {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            using (doc.LockDocument()) {
+                PromptSelectionResult selPrompt = doc.Editor.GetSelection();
+                if (selPrompt.Status == PromptStatus.OK) {
+                    SelectionSet selSet = selPrompt.Value;
+                    RXClass rxClass = RXClass.GetClass(type);
+                    return selSet.GetObjectIds().Where(id => id.ObjectClass.IsDerivedFrom(rxClass)).ToArray();
+                } else {
+                    return new ObjectId[] { };
+                }
+            }
         }
 
         public ObjectId[] GetPoint(string prompt) => GetShapeOfType(prompt, typeof(DBPoint), "point");
@@ -940,6 +975,12 @@ namespace KhepriAutoCAD {
         public ObjectId[] GetSurface(string prompt) => GetShapeOfType(prompt, typeof(DBSurface), "surface");
         public ObjectId[] GetSolid(string prompt) => GetShapeOfType(prompt, typeof(Solid3d), "solid");
         public ObjectId[] GetShape(string prompt) => GetShapeOfType(prompt, typeof(Entity), "shape");
+
+        public ObjectId[] GetPoints(string prompt) => GetShapesOfType(prompt, typeof(DBPoint), "point");
+        public ObjectId[] GetCurves(string prompt) => GetShapesOfType(prompt, typeof(Curve), "curve");
+        public ObjectId[] GetSurfaces(string prompt) => GetShapesOfType(prompt, typeof(DBSurface), "surface");
+        public ObjectId[] GetSolids(string prompt) => GetShapesOfType(prompt, typeof(Solid3d), "solid");
+        public ObjectId[] GetShapes(string prompt) => GetShapesOfType(prompt, typeof(Entity), "shape");
 
         public long GetHandleFromShape(Entity e) => e.Handle.Value;
         public ObjectId GetShapeFromHandle(long h) {
