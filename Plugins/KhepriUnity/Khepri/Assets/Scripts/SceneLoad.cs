@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -84,9 +86,10 @@ public class SceneLoad : MonoBehaviour {
         }
     }
 
+
     void Awake() {
         //DontDestroyOnLoad(this.gameObject);
-        GameObject.Find("MainObject").transform.Rotate(-90, 0, 0);
+        //GameObject.Find("MainObject").transform.Rotate(-90, 0, 0);
         StartServer();
     }
 
