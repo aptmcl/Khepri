@@ -40,11 +40,11 @@ namespace KhepriUnity {
             BestSize(sizeB, sizeA, sizeC);
 
         public GameObject ApplyMaterial(GameObject obj, Material material) {
-            float scaleFactor = 2;
+//            float scaleFactor = 2;
             Renderer renderer = obj.GetComponent<Renderer>();
             renderer.material = material;
-            Vector3 size = renderer.bounds.size;
-            renderer.material.mainTextureScale = BestSize(size.x, size.y, size.z)/scaleFactor;
+//            Vector3 size = renderer.bounds.size;
+//            renderer.material.mainTextureScale = BestSize(size.x, size.y, size.z)/scaleFactor;
             return obj;
         }
 
@@ -164,6 +164,7 @@ namespace KhepriUnity {
         public GameObject Box(Vector3 position, Vector3 vx, Vector3 vy, float dx, float dy, float dz) {
             Quaternion rotation = Quaternion.LookRotation(vx, vy);
             GameObject s = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            GameObject.Destroy(s.GetComponent<Collider>());
             s.name = "Box";
             s.transform.parent = mainObj.transform;
             s.transform.localScale = new Vector3(Math.Abs(dx), Math.Abs(dy), Math.Abs(dz));
@@ -173,7 +174,8 @@ namespace KhepriUnity {
             return s;
         }
 
-        public GameObject Box2(Vector3 position, Quaternion rotation, float dx, float dy, float dz) {
+        public GameObject Box2(Vector3 position, Vector3 vx, Vector3 vy, float dx, float dy, float dz) {
+            Quaternion rotation = Quaternion.LookRotation(vx, vy);
             GameObject box = new GameObject("Box");
             box.transform.parent = GameObject.Find("MainObject").transform;
 
@@ -234,11 +236,11 @@ namespace KhepriUnity {
                 uvs.Add(new Vector2(1, 0));
                 uvs.Add(new Vector2(1, 1));
                 uvs.Add(new Vector2(0, 1));
-                mesh.SetTriangles(triangles.ToArray(), i);
-                triangles.Clear();
+   //             mesh.SetTriangles(triangles.ToArray(), i);
+   //             triangles.Clear();
             }
             mesh.uv = uvs.ToArray();
-
+            mesh.triangles = triangles.ToArray();
             //Material material = new Material(Shader.Find("Diffuse")); REMOVE ME
 
             // Codigo a alterar no set material, fazer um ciclo por cada material
@@ -247,13 +249,14 @@ namespace KhepriUnity {
 //                material.mainTextureScale = new Vector2(scaleX, scaleY);
 
 
-            Material material = currentMaterial;
-            Material[] mats = { material, material, material, material, material, material }; // This list has the size of #faces or #submeshes, in this case 6
-            meshRenderer.materials = mats;
+//            Material material = currentMaterial;
+//            Material[] mats = { material, material, material, material, material, material }; // This list has the size of #faces or #submeshes, in this case 6
+//            meshRenderer.materials = mats;
+            meshRenderer.material = currentMaterial;
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
 
-            box.AddComponent<BoxCollider>();
+            //box.AddComponent<BoxCollider>();
             box.transform.localRotation = rotation;
             return box;
         }
@@ -351,13 +354,17 @@ namespace KhepriUnity {
         public GameObject RightCuboid(Vector3 position, Vector3 vx, Vector3 vy, float dx, float dy, float dz, float angle) =>
             ApplyCurrentMaterial(RightCuboidNamed("RightCuboid", position, vx, vy, dx, dy, dz, angle));
 
-        public GameObject Sphere(Vector3 center, float radius) {
+        public GameObject SphereNamed(String name, Vector3 center, float radius) {
             GameObject s = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            s.name = name;
             s.transform.parent = mainObj.transform;
             s.transform.localScale = new Vector3(2 * radius, 2 * radius, 2 * radius);
             s.transform.localPosition = center;
             return s;
         }
+
+        public GameObject Sphere(Vector3 center, float radius) =>
+            ApplyCurrentMaterial(SphereNamed("Sphere", center, radius));
 
         public GameObject CylinderNamed(String name, Vector3 bottom, float radius, Vector3 top) {
             GameObject s = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -480,6 +487,48 @@ namespace KhepriUnity {
             return s;
         }
 
+        GameObject AddQuadMeshAux(GameObject parent, Vector3[] ps, Vector3[] qs, Material material) {
+            GameObject s = new GameObject("QuadMesh");
+            s.transform.parent = parent.transform;
+            MeshRenderer render = s.AddComponent<MeshRenderer>();
+            MeshFilter filter = s.AddComponent<MeshFilter>();
+            Vector3[] vertices = new Vector3[ps.Length * 2];
+            Array.Copy(ps, vertices, ps.Length);
+            Array.Copy(qs, 0, vertices, ps.Length, qs.Length);
+            Mesh mesh = new Mesh();
+            mesh.vertices = vertices;
+            List<Vector2> uvs = new List<Vector2>();
+            List<Material> materials = new List<Material>();
+            for (int i = 0, j = ps.Length; i < ps.Length - 1; i++, j++) {
+                int[] triangles = new int[6];
+                int k = 0;
+                triangles[k++] = i;
+                triangles[k++] = i + 1;
+                triangles[k++] = j + 1;
+                triangles[k++] = i;
+                triangles[k++] = j + 1;
+                triangles[k++] = j;
+                // Same uvs for all faces
+                uvs.Add(new Vector2(0, 0));
+                uvs.Add(new Vector2(1, 0));
+                uvs.Add(new Vector2(1, 1));
+                uvs.Add(new Vector2(0, 1));
+                Material mat = GameObject.Instantiate(material);
+                mat.mainTextureScale = new Vector2(
+                    Vector3.Distance(ps[i], ps[i + 1]),
+                    Vector3.Distance(ps[i], qs[i]));
+                materials.Add(mat);
+                mesh.SetTriangles(triangles.ToArray(), i); // Setup submeshes triangles
+            }
+            mesh.uv = uvs.ToArray();
+            render.materials = materials.ToArray();
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            filter.mesh = mesh;
+            ApplyCollider(s, mesh);
+            return s;
+        }
+
         GameObject ApplyCollider(GameObject obj, Mesh mesh) {
             MeshCollider meshCollider = obj.AddComponent<MeshCollider>();
             meshCollider.sharedMesh = mesh;
@@ -489,28 +538,33 @@ namespace KhepriUnity {
         public GameObject SurfacePolygon(Vector3[] ps) =>
             AddPolygonMesh(mainObj, ReverseIfNeeded(ps, Vector3.up), currentMaterial);
 
-        public GameObject Pyramid(Vector3[] ps, Vector3 q) {
+        public GameObject PyramidWithMaterial(Vector3[] ps, Vector3 q, Material material) {
             ps = ReverseIfNeeded(ps, Vector3.down);
             GameObject s = new GameObject("Pyramid");
             s.transform.parent = mainObj.transform;
-            AddPolygonMesh(s, ps, currentMaterial);
+            AddPolygonMesh(s, ps, material);
             Array.Reverse(ps);
-            AddTrigMesh(s, ps, q, currentMaterial);
+            AddTrigMesh(s, ps, q, material);
             return s;
         }
 
-        public GameObject PyramidFrustum(Vector3[] ps, Vector3[] qs) {
+        public GameObject Pyramid(Vector3[] ps, Vector3 q) => PyramidWithMaterial(ps, q, currentMaterial);
+
+        public GameObject PyramidFrustumWithMaterial(Vector3[] ps, Vector3[] qs, Material material) {
             ps = ReverseIfNeeded(ps, Vector3.down);
             qs = ReverseIfNeeded(qs, Vector3.up);
             GameObject s = new GameObject("PyramidFrustum");
             s.transform.parent = mainObj.transform;
-            AddPolygonMesh(s, ps, currentMaterial);
+            AddPolygonMesh(s, ps, material);
             //Array.Reverse(qs);
-            AddPolygonMesh(s, qs, currentMaterial);
+            AddPolygonMesh(s, qs, material);
             Array.Reverse(ps);
-            AddQuadMesh(s, ps, qs, currentMaterial);
+            AddQuadMesh(s, ps, qs, material);
             return s;
         }
+
+        public GameObject PyramidFrustum(Vector3[] ps, Vector3[] qs) =>
+            PyramidFrustumWithMaterial(ps, qs, currentMaterial);
 
         public GameObject ExtrudeContour(Vector3[] contour, Vector3[][] holes, Vector3 v, Material material) {
             contour = ReverseIfNeeded(contour, Vector3.down);
@@ -645,10 +699,15 @@ namespace KhepriUnity {
         public GameObject BeamCircSection(Vector3 bot, float radius, Vector3 top, Material material) =>
             ApplyMaterial(CylinderNamed("Beam", bot, radius, top), material);
 
+        public GameObject Panel(Vector3[] pts, Vector3 n, Material material) =>
+            PyramidFrustumWithMaterial(pts, pts.Select(p => p + n).ToArray(), material);
+
         public void SetView(Vector3 position, Vector3 target, float lens) {
             mainCamera.transform.position = position;
-            mainCamera.transform.rotation = Quaternion.FromToRotation(mainCamera.transform.forward, target - position);
+            //mainCamera.transform.rotation = Quaternion.FromToRotation(mainCamera.transform.forward, target - position);
+            mainCamera.transform.LookAt(target);
             mainCamera.focalLength = lens;
+            Canvas.ForceUpdateCanvases();
         }
 
         public void SetResolution(int width, int height) {
