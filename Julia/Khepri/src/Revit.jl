@@ -132,9 +132,6 @@ backend_get_family(b::RVT, f::Family) =
 
 revit_wall_family = wall_family(based_on=revit_system_family())
 
-# This should go into switch_to_backend
-
-
 revit_beam_family =
     beam_family_element(
         beam_family(
@@ -145,13 +142,13 @@ revit_beam_family =
 
 # We need to install families
 
+default_wall_family(revit, revit_wall_family)
+default_beam_family(revit, revit_beam_family)
+
 switch_to_backend(from::Backend, to::RVT) =
     let height = level_height(default_level())
-
         current_backend(to)
         default_level(level(height))
-        default_wall_family(revit_wall_family) # Adjust to the former values?
-        default_beam_family(revit_beam_family)
     end
 
 
