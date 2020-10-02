@@ -452,10 +452,7 @@ sky_sphere {
 ####################################################
 abstract type POVRayKey end
 const POVRayId = Int
-const POVRayRef = GenericRef{POVRayKey, POVRayId}
 const POVRayNativeRef = NativeRef{POVRayKey, POVRayId}
-const POVRayUnionRef = UnionRef{POVRayKey, POVRayId}
-const POVRaySubtractionRef = SubtractionRef{POVRayKey, POVRayId}
 
 mutable struct POVRayBackend{K,T} <: LazyBackend{K,T}
   shapes::Shapes
