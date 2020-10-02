@@ -3,6 +3,9 @@ uuid = "a0383a2d-1751-46ec-a2af-70a49b2064d3"
 authors = ["António Menezes Leitão <antonio.menezes.leitao@gmail.com>"]
 version = "0.1.0"
 
+[deps]
+Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
+
 [compat]
 julia = "1.4"
 
