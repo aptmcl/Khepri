@@ -10,7 +10,8 @@ KhepriBase = "4cc0fe96-1163-46f3-ba32-de1e65d9548f"
 Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
 
 [compat]
-KhepriBase = "0.1"
+Reexport = "0.2"
+KhepriBase = "0.2"
 julia = "1.4"
 
 [extras]
