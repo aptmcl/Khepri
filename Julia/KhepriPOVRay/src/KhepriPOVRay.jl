@@ -1,10 +1,7 @@
 module KhepriPOVRay
-using Reexport
-@reexport using KhepriBase
-using Dates
-using ColorTypes
-# resolve conflicts
-using KhepriBase: XYZ
+using KhepriBase
 
+# functions that need specialization
+include(khepribase_interface_file())
 include("POVRay.jl")
 end
