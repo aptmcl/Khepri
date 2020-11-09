@@ -143,20 +143,41 @@ check_plugin() =
     end
   end
 
-
+#HACK This should not be needed
+import KhepriBase.parse_signature, KhepriBase.encode, KhepriBase.decode
 # ACAD is a subtype of CS
 parse_signature(::Val{:ACAD}, sig::T) where {T} = parse_signature(Val(:CS), sig)
-encode(::Val{:ACAD}, t::T, c::IO, v) where {T} = encode(Val(:CS), t, c, v)
-decode(::Val{:ACAD}, t::T, c::IO) where {T} = decode(Val(:CS), t, c)
+encode(::Val{:ACAD}, t::Val{T}, c::IO, v) where {T} = encode(Val(:CS), t, c, v)
+decode(::Val{:ACAD}, t::Val{T}, c::IO) where {T} = decode(Val(:CS), t, c)
 
 # We need some additional Encoders
-@encode_decode_as(:ACAD, :Entity, :size)
-@encode_decode_as(:ACAD, :ObjectId, :size)
-@encode_decode_as(:ACAD, :BIMLevel, :size)
-@encode_decode_as(:ACAD, :FloorFamily, :size)
+@encode_decode_as(:ACAD, Val{:Entity}, Val{:size})
+@encode_decode_as(:ACAD, Val{:ObjectId}, Val{:size})
+@encode_decode_as(:ACAD, Val{:BIMLevel}, Val{:size})
+@encode_decode_as(:ACAD, Val{:FloorFamily}, Val{:size})
 
 encode(::Val{:ACAD}, t::Union{Val{:Point3d},Val{:Vector3d}}, c::IO, p) =
   encode(Val(:CS), Val(:double3), c, raw_point(p))
+decode(::Val{:ACAD}, t::Val{:Point3d}, c::IO) =
+  xyz(decode(Val(:CS), Val(:double3), c)..., world_cs)
+decode(::Val{:ACAD}, t::Val{:Vector3d}, c::IO) =
+  vxyz(decode(Val(:CS), Val(:double3), c)..., world_cs)
+
+encode(ns::Val{:ACAD}, t::Val{:Frame3d}, c::IO, v) = begin
+  encode(ns, Val(:Point3d), c, v)
+  t = v.cs.transform
+  encode(Val(:CS), Val(:double3), c, (t[1,1], t[2,1], t[3,1]))
+  encode(Val(:CS), Val(:double3), c, (t[1,2], t[2,2], t[3,2]))
+  encode(Val(:CS), Val(:double3), c, (t[1,3], t[2,3], t[3,3]))
+end
+
+decode(ns::Val{:ACAD}, t::Val{:Frame3d}, c::IO) =
+  u0(cs_from_o_vx_vy_vz(
+      decode(ns, Val(:Point3d), c),
+      decode(ns, Val(:Vector3d), c),
+      decode(ns, Val(:Vector3d), c),
+      decode(ns, Val(:Vector3d), c)))
+
 
 acad_api = @remote_functions :ACAD """
 public void SetLengthUnit(String unit)
@@ -369,32 +390,6 @@ acad_layer_family(name, color::RGB=rgb(1,1,1)) =
 backend_get_family_ref(b::ACAD, f::Family, af::ACADLayerFamily) =
   backend_create_layer(b, af.name, true, af.color)
 
-set_backend_family(default_wall_family(), autocad, acad_layer_family("Wall"))
-set_backend_family(default_slab_family(), autocad, acad_layer_family("Slab"))
-set_backend_family(default_roof_family(), autocad, acad_layer_family("Roof"))
-set_backend_family(default_beam_family(), autocad, acad_layer_family("Beam"))
-set_backend_family(default_column_family(), autocad, acad_layer_family("Column"))
-set_backend_family(default_door_family(), autocad, acad_layer_family("Door"))
-set_backend_family(default_panel_family(), autocad, acad_layer_family("Panel"))
-
-set_backend_family(default_table_family(), autocad, acad_layer_family("Table"))
-set_backend_family(default_chair_family(), autocad, acad_layer_family("Chair"))
-set_backend_family(default_table_chair_family(), autocad, acad_layer_family("TableChairs"))
-
-set_backend_family(default_curtain_wall_family(), autocad, acad_layer_family("CurtainWall"))
-set_backend_family(default_curtain_wall_family().panel, autocad, acad_layer_family("CurtainWall-Panel"))
-set_backend_family(default_curtain_wall_family().boundary_frame, autocad, acad_layer_family("CurtainWall-Boundary"))
-set_backend_family(default_curtain_wall_family().transom_frame, autocad, acad_layer_family("CurtainWall-Transom"))
-set_backend_family(default_curtain_wall_family().mullion_frame, autocad, acad_layer_family("CurtainWall-Mullion"))
-#current_backend(autocad)
-
-set_backend_family(default_truss_node_family(), autocad, acad_layer_family("TrussNode"))
-set_backend_family(default_truss_bar_family(), autocad, acad_layer_family("TrussBar"))
-
-set_backend_family(fixed_truss_node_family, autocad, acad_layer_family("FixedTrussNode"))
-set_backend_family(free_truss_node_family, autocad, acad_layer_family("FreeTrussNode"))
-
-#use_family_in_layer(b::ACAD) = true
 
 backend_stroke_color(b::ACAD, path::Path, color::RGB) =
     let r = backend_stroke(b, path)
@@ -675,14 +670,14 @@ backend_cylinder(b::ACAD, cb::Loc, r::Real, h::Real) =
   @remote(b, Cylinder(cb, r, add_z(cb, h)))
 
 backend_extrusion(b::ACAD, s::Shape, v::Vec) =
-    and_mark_deleted(
+    and_mark_deleted(b,
         map_ref(s) do r
             @remote(b, Extrude(r, v))
         end,
         s)
 
 backend_sweep(b::ACAD, path::Shape, profile::Shape, rotation::Real, scale::Real) =
-  and_mark_deleted(
+  and_mark_deleted(b,
     map_ref(profile) do profile_r
       map_ref(path) do path_r
         @remote(b, Sweep(path_r, profile_r, rotation, scale))
@@ -744,7 +739,7 @@ unite_refs(b::ACAD, refs::Vector{<:ACADRef}) =
 realize(b::ACAD, s::IntersectionShape) =
   let r = foldl(intersect_ref(b), map(ref, s.shapes),
                 init=ACADUniversalRef())
-    mark_deleted(s.shapes)
+    mark_deleted(b, s.shapes)
     r
   end
 
@@ -752,50 +747,50 @@ realize(b::ACAD, s::Slice) =
   slice_ref(b, ref(s.shape), s.p, s.n)
 
 realize(b::ACAD, s::Move) =
-  let r = map_ref(s.shape) do r
+  let r = map_ref(b, s.shape) do r
             @remote(b, Move(r, s.v))
             r
           end
-    mark_deleted(s.shape)
+    mark_deleted(b, s.shape)
     r
   end
 
 realize(b::ACAD, s::Transform) =
-  let r = map_ref(s.shape) do r
+  let r = map_ref(b, s.shape) do r
             @remote(b, Transform(r, s.xform))
             r
           end
-    mark_deleted(s.shape)
+    mark_deleted(b, s.shape)
     r
   end
 
 realize(b::ACAD, s::Scale) =
-  let r = map_ref(s.shape) do r
+  let r = map_ref(b, s.shape) do r
             @remote(b, Scale(r, s.p, s.s))
             r
           end
-    mark_deleted(s.shape)
+    mark_deleted(b, s.shape)
     r
   end
 
 realize(b::ACAD, s::Rotate) =
-  let r = map_ref(s.shape) do r
+  let r = map_ref(b, s.shape) do r
             @remote(b, Rotate(r, s.p, s.v, s.angle))
             r
           end
-    mark_deleted(s.shape)
+    mark_deleted(b, s.shape)
     r
   end
 
 realize(b::ACAD, s::Mirror) =
-  and_mark_deleted(map_ref(s.shape) do r
+  and_mark_deleted(b, map_ref(s.shape) do r
                     @remote(b, Mirror(r, s.p, s.n, false))
                    end,
                    s.shape)
 
 realize(b::ACAD, s::UnionMirror) =
-  let r0 = ref(s.shape),
-      r1 = map_ref(s.shape) do r
+  let r0 = ref(b, s.shape),
+      r1 = map_ref(b, s.shape) do r
             @remote(b, Mirror(r, s.p, s.n, true))
           end
     UnionRef((r0,r1))
@@ -812,7 +807,7 @@ backend_surface_grid(b::ACAD, points, closed_u, closed_v, smooth_u, smooth_v) =
         smooth_u && smooth_v ? 2 : 0))
 
 realize(b::ACAD, s::Thicken) =
-  and_mark_deleted(
+  and_mark_deleted(b,
     map_ref(s.shape) do r
       @remote(b, Thicken(r, s.thickness))
     end,
@@ -897,15 +892,15 @@ backend_panel(b::ACAD, bot::Locs, top::Locs, family) =
 backend_bounding_box(b::ACAD, shapes::Shapes) =
   @remote(b, BoundingBox(collect_ref(shapes)))
 
-set_view(camera::Loc, target::Loc, lens::Real, aperture::Real, b::ACAD) =
+backend_set_view(b::ACAD, camera::Loc, target::Loc, lens::Real, aperture::Real) =
   @remote(b, View(camera, target, lens))
 
-get_view(b::ACAD) =
+backend_get_view(b::ACAD) =
   @remote(b, ViewCamera()), @remote(b, ViewTarget()), @remote(b, ViewLens())
 
-zoom_extents(b::ACAD) = @remote(b, ZoomExtents())
+backend_zoom_extents(b::ACAD) = @remote(b, ZoomExtents())
 
-view_top(b::ACAD) = @remote(b, ViewTop())
+backend_view_top(b::ACAD) = @remote(b, ViewTop())
 
 backend_realistic_sky(b::ACAD, date, latitude, longitude, meridian, turbidity, withsun) =
   @remote(b, SetSkyFromDateLocation(year(date), month(date), day(date),
@@ -916,33 +911,38 @@ backend_realistic_sky(b::ACAD, date, latitude, longitude, meridian, turbidity, w
 backend_delete_shapes(b::ACAD, shapes::Shapes) =
   @remote(b, DeleteMany(collect_ref(shapes)))
 
-delete_all_shapes(b::ACAD) =
+backend_delete_all_shapes(b::ACAD) =
   @remote(b, DeleteAll())
 
-set_length_unit(unit::String, b::ACAD) = @remote(b, SetLengthUnit(unit))
+backend_set_length_unit(b::ACAD, unit::String) = @remote(b, SetLengthUnit(unit))
 
 # Dimensions
 
 const ACADDimensionStyles = Dict(:architectural => "_ARCHTICK", :mechanical => "")
 
-dimension(p0::Loc, p1::Loc, p::Loc, scale::Real, style::Symbol, b::ACAD=current_backend()) =
+backend_dimension(b::ACAD, p0::Loc, p1::Loc, p::Loc, scale::Real, style::Symbol) =
     @remote(b, CreateAlignedDimension(p0, p1, p,
         scale,
         ACADDimensionStyles[style]))
 
-dimension(p0::Loc, p1::Loc, sep::Real, scale::Real, style::Symbol, b::ACAD=current_backend()) =
+backend_dimension(b::ACAD, p0::Loc, p1::Loc, sep::Real, scale::Real, style::Symbol) =
     let v = p1 - p0
         angle = pol_phi(v)
         dimension(p0, p1, add_pol(p0, sep, angle + pi/2), scale, style, b)
     end
 
 # Layers
+backend_layer(b::ACAD, name::String, active::Bool, color::RGB) =
+  let to255(x) = round(UInt8, x*255)
+    @remote(b, CreateLayer(name, true, to255(red(color)), to255(green(color)), to255(blue(color))))
+  end
+
 ACADLayer = Int
 
-current_layer(b::ACAD)::ACADLayer =
+backend_current_layer(b::ACAD)::ACADLayer =
   @remote(b, CurrentLayer())
 
-current_layer(layer::ACADLayer, b::ACAD) =
+backend_current_layer(b::ACAD, layer::ACADLayer) =
   @remote(b, SetCurrentLayer(layer))
 
 backend_create_layer(b::ACAD, name::String, active::Bool, color::RGB) =
@@ -950,7 +950,7 @@ backend_create_layer(b::ACAD, name::String, active::Bool, color::RGB) =
     @remote(b, CreateLayer(name, true, to255(red(color)), to255(green(color)), to255(blue(color))))
   end
 
-delete_all_shapes_in_layer(layer::ACADLayer, b::ACAD) =
+backend_delete_all_shapes_in_layer(b::ACAD, layer::ACADLayer) =
   @remote(b, DeleteAllInLayer(layer))
 
 switch_to_layer(to, b::ACAD) =
@@ -963,13 +963,13 @@ switch_to_layer(to, b::ACAD) =
 # Materials
 ACADMaterial = Int
 
-current_material(b::ACAD)::ACADMaterial =
+backend_current_material(b::ACAD)::ACADMaterial =
   -1 #@remote(b, CurrentMaterial())
 
-current_material(material::ACADMaterial, b::ACAD) =
+backend_current_material(b::ACAD, material::ACADMaterial) =
   -1 #@remote(b, SetCurrentMaterial(material))
 
-get_material(name::String, b::ACAD) =
+backend_get_material(b::ACAD, name::String) =
   -1 #@remote(b, CreateMaterial(name))
 
 # Blocks
@@ -1008,77 +1008,77 @@ backend_ieslight(b::ACAD, file::String, loc::Loc, dir::Vec, alpha::Real, beta::R
 
 # User Selection
 
-shape_from_ref(r, b::ACAD) =
-    let c = connection(b),
-        code = @remote(b, ShapeCode(r)),
-        ref = LazyRef(b, ACADNativeRef(r))
-        if code == 1 # Point
-            point(@remote(b, PointPosition(r)),
-                  backend=b, ref=ref)
-        elseif code == 2
-            circle(maybe_loc_from_o_vz(@remote(b, CircleCenter(r)), @remote(b, CircleNormal(r))),
-                   @remote(b, CircleRadius(r)),
-                   backend=b, ref=ref)
-        elseif 3 <= code <= 6
-            line(@remote(b, LineVertices(r)),
-                 backend=b, ref=ref)
-        elseif code == 7
-            let tans = @remote(b, SplineTangents(r))
-                if length(tans[1]) < 1e-20 && length(tans[2]) < 1e-20
-                    closed_spline(@remote(b, SplineInterpPoints(r))[1:end-1],
-                                  backend=b, ref=ref)
-                else
-                    spline(@remote(b, SplineInterpPoints(r)), tans[1], tans[2],
-                           backend=b, ref=ref)
-                end
+backend_shape_from_ref(b::ACAD, r) =
+  let c = connection(b),
+      code = @remote(b, ShapeCode(r)),
+      ref = DynRefs(b=>ACADNativeRef(r))
+    if code == 1 # Point
+        point(@remote(b, PointPosition(r)),
+              ref=ref)
+    elseif code == 2
+        circle(loc_from_o_vz(@remote(b, CircleCenter(r)), @remote(b, CircleNormal(r))),
+               @remote(b, CircleRadius(r)),
+               ref=ref)
+    elseif 3 <= code <= 6
+        line(@remote(b, LineVertices(r)),
+             ref=ref)
+    elseif code == 7
+        let tans = @remote(b, SplineTangents(r))
+            if length(tans[1]) < 1e-20 && length(tans[2]) < 1e-20
+                closed_spline(@remote(b, SplineInterpPoints(r))[1:end-1],
+                              ref=ref)
+            else
+                spline(@remote(b, SplineInterpPoints(r)), tans[1], tans[2],
+                       ref=ref)
             end
-        elseif code == 9
-            let start_angle = mod(@remote(b, ArcStartAngle(r)), 2pi),
-                end_angle = mod(@remote(b, ArcEndAngle(r)), 2pi)
-                arc(maybe_loc_from_o_vz(@remote(b, ArcCenter(r)), @remote(b, ArcNormal(r))),
-                    @remote(b, ArcRadius(r)), start_angle, mod(end_angle - start_angle, 2pi),
-                    backend=b, ref=ref)
-            #=    if end_angle > start_angle
-                    arc(maybe_loc_from_o_vz(@remote(b, ArcCenter(r)), @remote(b, ArcNormal(r))),
-                        @remote(b, ArcRadius(r)), start_angle, end_angle - start_angle,
-                        backend=b, ref=ref)
-                else
-                    arc(maybe_loc_from_o_vz(@remote(b, ArcCenter(r)), @remote(b, ArcNormal(r))),
-                        @remote(b, ArcRadius(r)), end_angle, start_angle - end_angle,
-                        backend=b, ref=ref)
-                end=#
-            end
-        elseif code == 10
-            let str = @remote(b, TextString(r)),
-                height = @remote(b, TextHeight(r)),
-                loc = @remote(b, TextPosition(r))
-                text(str, loc, height, backend=b, ref=ref)
-            end
-        elseif code == 11
-            let str = @remote(b, MTextString(r)),
-                height = @remote(b, MTextHeight(r)),
-                loc = @remote(b, MTextPosition(r))
-                text(str, loc, height, backend=b, ref=ref)
-            end
-        elseif code == 16
-            let pts = @remote(b, MeshVertices(r)),
-                (type, n, m, n_closed, m_closed) = @remote(b, PolygonMeshData(r))
-                surface_grid(reshape(pts, (n, m)), n_closed == 1, m_closed == 1, ref=ref)
-            end
-        elseif 12 <= code <= 14
-            surface(Shapes1D[], backend=b, ref=ref)
-        elseif 103 <= code <= 106
-            polygon(@remote(b, LineVertices(r)),
-                    backend=b, ref=ref)
-        elseif code == 107
-            closed_spline(@remote(b, SplineInterpPoints(r))[1:end-1],
-                          backend=b, ref=ref)
-        else
-            #unknown(backend=b, ref=ref)
-            unknown(r, backend=b, ref=LazyRef(b, ACADNativeRef(r), 0, 0)) # To force copy
-            #error("Unknown shape with code $(code)")
         end
+    elseif code == 9
+        let start_angle = mod(@remote(b, ArcStartAngle(r)), 2pi),
+            end_angle = mod(@remote(b, ArcEndAngle(r)), 2pi)
+            arc(loc_from_o_vz(@remote(b, ArcCenter(r)), @remote(b, ArcNormal(r))),
+                @remote(b, ArcRadius(r)), start_angle, mod(end_angle - start_angle, 2pi),
+                ref=ref)
+        #=    if end_angle > start_angle
+                arc(maybe_loc_from_o_vz(@remote(b, ArcCenter(r)), @remote(b, ArcNormal(r))),
+                    @remote(b, ArcRadius(r)), start_angle, end_angle - start_angle,
+                    ref=ref)
+            else
+                arc(maybe_loc_from_o_vz(@remote(b, ArcCenter(r)), @remote(b, ArcNormal(r))),
+                    @remote(b, ArcRadius(r)), end_angle, start_angle - end_angle,
+                    ref=ref)
+            end=#
+        end
+    elseif code == 10
+        let str = @remote(b, TextString(r)),
+            height = @remote(b, TextHeight(r)),
+            loc = @remote(b, TextPosition(r))
+            text(str, loc, height, ref=ref)
+        end
+    elseif code == 11
+        let str = @remote(b, MTextString(r)),
+            height = @remote(b, MTextHeight(r)),
+            loc = @remote(b, MTextPosition(r))
+            text(str, loc, height, ref=ref)
+        end
+    elseif code == 16
+        let pts = @remote(b, MeshVertices(r)),
+            (type, n, m, n_closed, m_closed) = @remote(b, PolygonMeshData(r))
+            surface_grid(reshape(pts, (n, m)), n_closed == 1, m_closed == 1, ref=ref)
+        end
+    elseif 12 <= code <= 14
+        surface(Shapes1D[], ref=ref)
+    elseif 103 <= code <= 106
+        polygon(@remote(b, LineVertices(r)),
+                ref=ref)
+    elseif code == 107
+        closed_spline(@remote(b, SplineInterpPoints(r))[1:end-1],
+                      ref=ref)
+    else
+        #unknown(ref=ref)
+        unknown(r, ref=LazyRef(b, ACADNativeRef(r), 0, 0)) # To force copy
+        #error("Unknown shape with code $(code)")
     end
+  end
 #
 
 #=
@@ -1090,7 +1090,7 @@ realize(b::ACAD, s::Unknown) =
 
 
 
-select_position(prompt::String, b::ACAD) =
+backend_select_position(b::ACAD, prompt::String) =
   begin
     @info "$(prompt) on the $(b) backend."
     let ans = @remote(b, GetPosition(prompt))
@@ -1098,7 +1098,7 @@ select_position(prompt::String, b::ACAD) =
     end
   end
 
-select_positions(prompt::String, b::ACAD) =
+backend_select_positions(b::ACAD, prompt::String) =
   let sel() =
     let p = select_position(prompt, b)
       if p == nothing
@@ -1113,52 +1113,52 @@ select_positions(prompt::String, b::ACAD) =
 
 # HACK: The next operations should receive a set of shapes to avoid re-creating already existing shapes
 
-select_point(prompt::String, b::ACAD) =
+backend_select_point(b::ACAD, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetPoint)
 
-select_points(prompt::String, b::ACAD) =
+backend_select_points(b::ACAD, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetPoints)
 
-select_curve(prompt::String, b::ACAD) =
+backend_select_curve(b::ACAD, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetCurve)
 
-select_curves(prompt::String, b::ACAD) =
+backend_select_curves(b::ACAD, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetCurves)
 
 
-select_surface(prompt::String, b::ACAD) =
+backend_select_surface(b::ACAD, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetSurface)
 
-select_surfaces(prompt::String, b::ACAD) =
+backend_select_surfaces(b::ACAD, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetSurfaces)
 
 
-select_solid(prompt::String, b::ACAD) =
+backend_select_solid(b::ACAD, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetSolid)
 
-select_solids(prompt::String, b::ACAD) =
+backend_select_solids(b::ACAD, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetSolids)
 
 
-select_shape(prompt::String, b::ACAD) =
+backend_select_shape(b::ACAD, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetShape)
 
-select_shapes(prompt::String, b::ACAD) =
+backend_select_shapes(b::ACAD, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetShapes)
 
 
-captured_shape(b::ACAD, handle) =
+backend_captured_shape(b::ACAD, handle) =
   shape_from_ref(@remote(b, GetShapeFromHandle(handle)), b)
 #
-captured_shapes(b::ACAD, handles) =
+backend_captured_shapes(b::ACAD, handles) =
   map(handles) do handle
       shape_from_ref(@remote(b, GetShapeFromHandle(handle)), b)
   end
 
-generate_captured_shape(s::Shape, b::ACAD) =
+backend_generate_captured_shape(b::ACAD, s::Shape) =
     println("captured_shape(autocad, $(@remote(b, GetHandleFromShape(ref(s).value))))")
 
-generate_captured_shapes(ss::Shapes, b::ACAD) =
+backend_generate_captured_shapes(b::ACAD, ss::Shapes) =
   begin
     print("captured_shapes(autocad, [")
     for s in ss
@@ -1171,24 +1171,24 @@ generate_captured_shapes(ss::Shapes, b::ACAD) =
 # Register for notification
 
 
-register_for_changes(s::Shape, b::ACAD) =
+backend_register_shape_for_changes(b::ACAD, s::Shape) =
     let conn = connection(b)
         @remote(b, RegisterForChanges(ref(s).value))
         @remote(b, DetectCancel())
         s
     end
 
-unregister_for_changes(s::Shape, b::ACAD) =
+backend_unregister_shape_for_changes(b::ACAD, s::Shape) =
     let conn = connection(b)
         @remote(b, UnregisterForChanges(ref(s).value))
         @remote(b, UndetectCancel())
         s
     end
 
-waiting_for_changes(s::Shape, b::ACAD) =
+backend_waiting_for_changes(b::ACAD, s::Shape) =
     ! @remote(b, WasCanceled())
 
-changed_shape(ss::Shapes, b::ACAD) =
+backend_changed_shape(b::ACAD, ss::Shapes) =
     let conn = connection(b)
         changed = []
         while length(changed) == 0 && ! @remote(b, WasCanceled())
@@ -1204,33 +1204,33 @@ changed_shape(ss::Shapes, b::ACAD) =
 
 
 # HACK: This should be filtered on the plugin, not here.
-all_shapes(b::ACAD) =
+backend_all_shapes(b::ACAD) =
   Shape[shape_from_ref(r, b)
         for r in filter(r -> @remote(b, ShapeCode(r)) != 0, @remote(b, GetAllShapes()))]
 
-all_shapes_in_layer(layer, b::ACAD) =
+backend_all_shapes_in_layer(b::ACAD, layer) =
   Shape[shape_from_ref(r, b) for r in @remote(b, GetAllShapesInLayer(layer))]
 
-highlight_shape(s::Shape, b::ACAD) =
+backend_highlight_shape(b::ACAD, s::Shape) =
   @remote(b, SelectShapes(collect_ref(s)))
 
-highlight_shapes(ss::Shapes, b::ACAD) =
+backend_highlight_shapes(b::ACAD, ss::Shapes) =
   @remote(b, SelectShapes(collect_ref(ss)))
 
-pre_selected_shapes_from_set(ss::Shapes) =
+backend_pre_selected_shapes_from_set(ss::Shapes) =
   length(ss) == 0 ? [] : pre_selected_shapes_from_set(ss, backend(ss[1]))
 
 # HACK: This must be implemented for all backends
-pre_selected_shapes_from_set(ss::Shapes, b::Backend) = []
+backend_pre_selected_shapes_from_set(ss::Shapes, b::Backend) = []
 
-pre_selected_shapes_from_set(ss::Shapes, b::ACAD) =
+backend_pre_selected_shapes_from_set(b::ACAD, ss::Shapes) =
   let refs = map(id -> @remote(b, GetHandleFromShape(id)), @remote(b, GetPreSelectedShapes()))
     filter(s -> @remote(b, GetHandleFromShape(ref(s).value)) in refs, ss)
   end
-disable_update(b::ACAD) =
+backend_disable_update(b::ACAD) =
   @remote(b, DisableUpdate())
 
-enable_update(b::ACAD) =
+backend_enable_update(b::ACAD) =
   @remote(b, EnableUpdate())
 
 # Render
@@ -1240,7 +1240,7 @@ convert_render_exposure(b::ACAD, v::Real) = -4.05*v + 8.8
 #render quality: [-1, +1] -> [+1, +50]
 convert_render_quality(b::ACAD, v::Real) = round(Int, 25.5 + 24.5*v)
 
-render_view(path::String, b::ACAD) =
+backend_render_view(b::ACAD, path::String) =
     @remote(b, Render(
                render_width(), render_height(),
                path,
@@ -1254,7 +1254,7 @@ mentalray_render_view(name::String) =
         @remote(b, Command("._-render P _R $(render_width()) $(render_height()) _yes $(prepare_for_saving_file(render_pathname(name)))\n"))
     end
 
-save_as(pathname::String, format::String, b::ACAD) =
+backend_save_as(b::ACAD, pathname::String, format::String) =
     @remote(b, SaveAs(pathname, format))
 
 
