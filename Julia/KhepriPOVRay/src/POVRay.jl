@@ -77,6 +77,21 @@ write_povray_param(io::IO, name::String, value::Any) =
     write(io, '\n')
   end
 
+write_povray_call(io::IO, name::String, values...) =
+  let first = true
+    write(io, "  ", name, "(")
+    for value in values
+      if !first
+        print(io, ", ")
+      else
+        first = false
+      end
+      write_povray_value(io, value)
+    end
+    write(io, ")\n")
+  end
+
+
 write_povray_material(io::IO, material) =
   begin
     write(io, "  ")
@@ -469,6 +484,8 @@ mutable struct POVRayBackend{K,T} <: LazyBackend{K,T}
 end
 
 const POVRay = POVRayBackend{POVRayKey, POVRayId}
+backend_name(::POVRay) = "POVRay"
+
 # Traits
 # Although we have boolean operation in POVRay at the level of shapes, we do
 # not have boolean operations at the level of references
@@ -508,7 +525,7 @@ get_material(b::POVRay, s::Shape) = get_material(b, get(b.shape_material, s, def
 
 #
 
-set_view(camera::Loc, target::Loc, lens::Real, aperture::Real, b::POVRay) =
+backend_set_view(b::POVRay, camera::Loc, target::Loc, lens::Real, aperture::Real) =
   begin
     b.camera = camera
     b.target = target
@@ -536,9 +553,13 @@ backend_ground(b::POVRay, level::Loc, color::RGB) =
   b.ground = povray_ground_string(level, color)
 
 #
-delete_all_shapes(b::POVRay) =
+backend_delete_all_shapes(b::POVRay) =
+  (empty!(b.shapes); empty!(b.materials); empty!(b.shape_material); nothing)
+
+backend_delete_shape(b::POVRay, shape::Shape) =
   begin
-    (empty!(b.shapes); empty!(b.materials); empty!(b.shape_material); nothing)
+    b.shapes = filter(s->s!== shape, b.shapes)
+    delete!(b.shape_material, shape)
   end
 
 backend_delete_shapes(b::POVRay, shapes::Shapes) =
@@ -554,7 +575,8 @@ backend_surface_polygon(b::POVRay, vs::Locs) =
     void_ref(b)
   end
 
-
+backend_sphere(b::POVRay, c::Loc, r::Real) =
+  write_povray_object(buffer(b), "sphere", default_povray_material(), s.center, s.radius)
 
 realize(b::POVRay, s::Sphere) =
   let mat = get_material(b, s)
@@ -702,44 +724,48 @@ realize(b::POVRay, s::Thicken) =
 
 realize(b::POVRay, s::EmptyShape) = void_ref(b)
 realize(b::POVRay, s::UniversalShape) = void_ref(b)
-#=
+
 realize(b::POVRay, s::Move) =
-    let r = map_ref(s.shape) do r
-                POVRayMove(connection(b), r, s.v)
-                r
-            end
-        mark_deleted(s.shape)
-        r
+  let buf = buffer(b)
+    write_povray_object(buf, "object", nothing) do
+      ref(b, s.shape)
+      backend_delete_shape(b, s.shape)
+      write_povray_param(buf, "translate", s.v)
     end
+  end
 
 realize(b::POVRay, s::Scale) =
-    let r = map_ref(s.shape) do r
-                POVRayScale(connection(b), r, s.p, s.s)
-                r
-            end
-        mark_deleted(s.shape)
-        r
+  let buf = buffer(b),
+      trans = s.p-u0()
+    write_povray_object(buf, "object", nothing) do
+      ref(b, s.shape)
+      backend_delete_shape(b, s.shape)
+      write_povray_param(buf, "translate", -trans)
+      write_povray_param(buf, "scale", s.s)
+      write_povray_param(buf, "translate", trans)
     end
+  end
 
 realize(b::POVRay, s::Rotate) =
-    let r = map_ref(s.shape) do r
-                POVRayRotate(connection(b), r, s.p, s.v, s.angle)
-                r
-            end
-        mark_deleted(s.shape)
-        r
+  let buf = buffer(b),
+      trans = s.p-u0()
+    write_povray_object(buf, "object", nothing) do
+      ref(b, s.shape)
+      backend_delete_shape(b, s.shape)
+      write_povray_param(buf, "translate", -trans)
+      write_povray_call(buf, "Axis_Rotate_Trans", s.v, -rad2deg(s.angle))
+      write_povray_param(buf, "translate", trans)
     end
-
-=#
+  end
 
 realize(b::POVRay, s::UnionShape) =
   let shapes = filter(! is_empty_shape, s.shapes)
     length(shapes) == 1 ?
-      (ref(shapes[1]); delete_shape(shapes[1])) :
-      write_povray_object(buffer(b), "union", get_material(b, s)) do
+      (ref(b, shapes[1]); backend_delete_shape(b, shapes[1])) :
+      write_povray_object(buffer(b), "union", nothing) do #get_material(b, s)) do
         for ss in shapes
-          ref(ss)
-          delete_shape(ss)
+          ref(b, ss)
+          backend_delete_shape(b, ss)
         end
       end
     void_ref(b)
@@ -749,19 +775,19 @@ realize(b::POVRay, s::UnionShape) =
 realize(b::POVRay, s::IntersectionShape) =
   write_povray_object(buffer(b), "intersection", get_material(b, s)) do
     for ss in s.shapes
-      ref(ss)
-      delete_shape(ss)
+      ref(b, ss)
+      backend_delete_shape(b, ss)
     end
     void_ref(b)
   end
 
 realize(b::POVRay, s::SubtractionShape3D) =
   write_povray_object(buffer(b), "difference", get_material(b, s)) do
-    ref(s.shape)
-    delete_shape(s.shape)
+    ref(b, s.shape)
+    backend_delete_shape(b, s.shape)
     for ss in s.shapes
-      ref(ss)
-      delete_shape(ss)
+      ref(b, ss)
+      backend_delete_shape(b, ss)
     end
     void_ref(b)
   end
@@ -891,10 +917,10 @@ use_family_in_layer(b::POVRay) = true
 # Layers
 
 
-current_layer(b::POVRay) =
+backend_current_layer(b::POVRay) =
   default_povray_material()
 
-current_layer(layer, b::POVRay) =
+backend_current_layer(layer, b::POVRay) =
   default_povray_material(layer)
 
 backend_create_layer(b::POVRay, name::String, active::Bool, color::RGB) =
@@ -944,16 +970,18 @@ export_to_povray(path::String, b::POVRay=current_backend()) =
     take!(buf)
     # We cannot do this because the array might be updated during the iteration
     for s in b.shapes
-      mark_deleted(s)
+      mark_deleted(b, s)
     end
     i = 1
     while i <= length(b.shapes)
-      ref(b.shapes[i])
+      force_realize(b, b.shapes[i])
       i += 1
     end
     open(path, "w") do out
       # write the sky
       write(out, b.sky)
+      # write useful include
+      write(out, """#include "transforms.inc"\n""")
       # write the ground
       write(out, b.ground)
       # write materials
@@ -985,7 +1013,7 @@ const povray_folder = Parameter("C:/Program Files/POV-Ray/v3.7/bin/")
 povray_cmd(cmd::AbstractString="pvengine64") = povray_folder() * cmd
 
 ##########################################
-render_view(path::String, b::POVRay) =
+backend_render_view(b::POVRay, path::String) =
   let povpath = path_replace_suffix(path, ".pov")
     @info povpath
     export_to_povray(povpath)
@@ -994,9 +1022,15 @@ render_view(path::String, b::POVRay) =
       run(`$(povray_cmd()) +A +HR Width=$(render_width()) Height=$(render_height()) /RENDER $(povpath)`, wait=false)
   end
 
-export clay_model
+export clay_model, realistic_model
 clay_model(level::Loc=z(0), b::POVRay=povray) =
   begin
     b.sky = povray_clay_settings_string()
     b.ground = "plane { y, $(cz(level)) texture{ pigment { color rgb 3 } finish { reflection 0 ambient 0 }}}\n"
+  end
+
+realistic_model(level::Loc=z(0), b::POVRay=povray) =
+  begin
+    b.sky = povray_realistic_sky_string(DateTime(2020, 9, 21, 10, 0, 0), 39, 9, 0, 5, true)
+    b.ground = povray_ground_string(level, rgb(0.8,0.8,0.8))
   end
