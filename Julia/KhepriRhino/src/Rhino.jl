@@ -31,7 +31,7 @@ decode(ns::Val{:RH}, t::Val{:Plane}, c::IO) =
     decode(ns, Val(:Vector3d), c),
     decode(ns, Val(:Vector3d), c))
 
-rhino_api = @remote_functions :CS """
+rhino_api = @remote_functions :RH """
 public void RunScript(string script)
 public void SetView(Point3d position, Point3d target, double lens, bool perspective, string style)
 public void View(Point3d position, Point3d target, double lens)
@@ -73,6 +73,7 @@ public double[] CurveDomain(RhinoObject obj)
 public double CurveLength(RhinoObject obj)
 public Plane CurveFrameAt(RhinoObject obj, double t)
 public Plane CurveFrameAtLength(RhinoObject obj, double l)
+public Point3d[] BoundingBox(ObjectId[] ids)
 public Brep Extrusion(RhinoObject obj, Vector3d dir)
 public Brep[] SweepPathProfile(RhinoObject path, RhinoObject profile, double rotation, double scale)
 public Guid[] Intersect(RhinoObject obj0, RhinoObject obj1)
@@ -154,7 +155,6 @@ public Guid Loft(ObjectId[] profilesIds, ObjectId[] guidesIds, bool ruled, bool 
 public void Unite(ObjectId objId0, ObjectId objId1)
 public Guid Revolve(ObjectId profileId, Point3d p, Vector3d n, double startAngle, double amplitude)
 public Point3d[] GetPoint(string prompt)
-public Point3d[] BoundingBox(ObjectId[] ids)
 public void ZoomExtents()
 public void SetSystemVariableInt(string name, int value)
 public int Command(string cmd)
@@ -376,15 +376,10 @@ backend_map_division(b::RH, f::Function, s::Shape2D, nu::Int, nv::Int) =
         end
     end
 
-realize(b::RH, s::Sphere) =
-    @remote(b, Sphere(s.center, s.radius))
+backend_sphere(b::RH, c::Loc, r::Real) =
+  @remote(b, Sphere(c, r))
 realize(b::RH, s::Torus) =
-    @remote(b, Torus(s.center, vz(1, s.center.cs), s.re, s.ri))
-realize(b::RH, s::Cuboid) =
-    @remote(b, IrregularPyramidFrustum([s.b0, s.b1, s.b2, s.b3], [s.t0, s.t1, s.t2, s.t3]))
-realize(b::RH, s::RegularPyramidFrustum) =
-    @remote(b, IrregularPyramidFrustum(regular_polygon_vertices(s.edges, s.cb, s.rb, s.angle, s.inscribed),
-                                       regular_polygon_vertices(s.edges, add_z(s.cb, s.h), s.rt, s.angle, s.inscribed)))
+  @remote(b, Torus(s.center, vz(1, s.center.cs), s.re, s.ri))
 backend_pyramid(b::RH, bs::Locs, t::Loc) =
   @remote(b, IrregularPyramid(bs, t))
 backend_pyramid_frustum(b::RH, bs::Locs, ts::Locs) =
@@ -401,8 +396,8 @@ realize(b::RH, s::Cone) =
 realize(b::RH, s::ConeFrustum) =
   @remote(b, ConeFrustum(s.cb, s.rb, s.cb + vz(s.h, s.cb.cs), s.rt))
 
-realize(b::RH, s::Cylinder) =
-  @remote(b, Cylinder(s.cb, s.r, s.cb + vz(s.h, s.cb.cs)))
+backend_cylinder(b::RH, c::Loc, r::Real, h::Real) =
+  @remote(b, Cylinder(c, r, c + vz(h, c.cs)))
 
 backend_extrusion(b::RH, s::Shape, v::Vec) =
     and_mark_deleted(
@@ -644,32 +639,31 @@ backend_wall(b::RH, path, height, l_thickness, r_thickness, family) =
 backend_bounding_box(b::RH, shapes::Shapes) =
   @remote(b, BoundingBox(collect_ref(shapes)))
 
-import Base.view
-set_view(camera::XYZ, target::XYZ, lens::Real, aperture::Real, b::RH) =
+backend_set_view(b::RH, camera::XYZ, target::XYZ, lens::Real, aperture::Real) =
   @remote(b, View(camera, target, lens))
 
-get_view(b::RH) =
+backend_get_view(b::RH) =
   @remote(b, ViewCamera()), @remote(b, ViewTarget()), @remote(b, ViewLens())
 
-zoom_extents(b::RH) =
+backend_zoom_extents(b::RH) =
   @remote(b, ZoomExtents())
 
-view_top(b::RH) =
+backend_view_top(b::RH) =
   @remote(b, ViewTop())
 
 backend_delete_shapes(b::RH, shapes::Shapes) =
   @remote(b, DeleteMany(collect_ref(shapes)))
 
-delete_all_shapes(b::RH) =
+backend_delete_all_shapes(b::RH) =
   @remote(b, DeleteAll())
 
 # Layers
 RHLayer = String
 
-current_layer(b::RH)::RHLayer =
+backend_current_layer(b::RH)::RHLayer =
   @remote(b, CurrentLayer())
 
-current_layer(layer::RHLayer, b::RH) =
+backend_current_layer(b::RH, layer::RHLayer) =
   @remote(b, SetCurrentLayer(layer))
 
 backend_create_layer(b::RH, name::String, active::Bool, color::RGB) =
@@ -677,13 +671,13 @@ backend_create_layer(b::RH, name::String, active::Bool, color::RGB) =
     @remote(b, CreateLayer(name, true, to255(red(color)), to255(green(color)), to255(blue(color))))
   end
 
-delete_all_shapes_in_layer(layer::RHLayer, b::RH) =
+backend_delete_all_shapes_in_layer(b::RH, layer::RHLayer) =
   @remote(b, DeleteAllInLayer(layer))
 
-shape_from_ref(r, b::RH) =
+backend_shape_from_ref(b::RH, r) =
   let c = connection(b)
     let code = @remote(b, ShapeCode(r)),
-        ref = LazyRef(b, RHNativeRef(r))
+        ref = DynRefs(b=>RHNativeRef(r))
       if code == 1
         point(@remote(b, PointPosition(r)),
               backend=b, ref=ref)
@@ -692,19 +686,17 @@ shape_from_ref(r, b::RH) =
                @remote(b, CircleRadius(r)),
                backend=b, ref=ref)
       elseif 3 <= code <= 6
-        line(@remote(b, LineVertices(r)),
-             backend=b, ref=ref)
+        line(@remote(b, LineVertices(r)), ref=ref)
       elseif code == 7
         spline([xy(0,0)], false, false, #HACK obtain interpolation points
-               backend=b, ref=ref)
+               ref=ref)
       elseif 103 <= code <= 106
-        polygon(@remote(b, LineVertices(r)),
-                backend=b, ref=ref)
+        polygon(@remote(b, LineVertices(r)), ref=ref)
       elseif code == 40
         # FIXME: frontier is missing
-        surface(frontier=[], backend=b, ref=ref)
+        surface(frontier=[], ref=ref)
       elseif code == 41
-        surface(frontier=[], backend=b, ref=ref)
+        surface(frontier=[], ref=ref)
       elseif code == 81
         sphere(backend=b, ref=ref)
       elseif code == 82
@@ -721,7 +713,7 @@ shape_from_ref(r, b::RH) =
 
 #
 
-select_position(prompt::String, b::RH) =
+backend_select_position(b::RH, prompt::String) =
   begin
     @info "$(prompt) on the $(b) backend."
     let ans = @remote(b, GetPosition(prompt))
@@ -729,7 +721,7 @@ select_position(prompt::String, b::RH) =
     end
   end
 
-select_positions(prompt::String, b::RH) =
+backend_select_positions(b::RH, prompt::String) =
   let ps = Loc[]
       p = nothing
     @info "$(prompt) on the $(b) backend."
@@ -741,50 +733,42 @@ select_positions(prompt::String, b::RH) =
 
 # HACK: The next operations should receive a set of shapes to avoid re-creating already existing shapes
 
-select_point(prompt::String, b::RH) =
+backend_select_point(b::RH, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetPoint)
-
-select_points(prompt::String, b::RH) =
+backend_select_points(b::RH, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetPoints)
 
-select_curve(prompt::String, b::RH) =
+backend_select_curve(b::RH, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetCurve)
-
-select_curves(prompt::String, b::RH) =
+backend_select_curves(b::RH, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetCurves)
 
-
-select_surface(prompt::String, b::RH) =
+backend_select_surface(b::RH, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetSurface)
-
-select_surfaces(prompt::String, b::RH) =
+backend_select_surfaces(b::RH, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetSurfaces)
 
-
-select_solid(prompt::String, b::RH) =
+backend_select_solid(b::RH, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetSolid)
-
-select_solids(prompt::String, b::RH) =
+backend_select_solids(b::RH, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetSolids)
 
-select_shape(prompt::String, b::RH) =
+backend_select_shape(b::RH, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetShape)
-
-select_shapes(prompt::String, b::RH) =
+backend_select_shapes(b::RH, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetShapes)
 
-captured_shape(b::RH, handle) =
-  shape_from_ref(handle, b)
+backend_captured_shape(b::RH, handle) =
+  backend_shape_from_ref(b, handle)
 #
-captured_shapes(b::RH, handles) =
+backend_captured_shapes(b::RH, handles) =
   map(handles) do handle
-      shape_from_ref(handle, b)
+      backend_shape_from_ref(b, handle)
   end
 
-generate_captured_shape(s::Shape, b::RH) =
+backend_generate_captured_shape(b::RH, s::Shape) =
     println("captured_shape(rhino, $(ref(s).value))")
-
-generate_captured_shapes(ss::Shapes, b::RH) =
+backend_generate_captured_shapes(b::RH, ss::Shapes) =
   begin
     print("captured_shapes(rhino, [")
     for s in ss
@@ -794,17 +778,17 @@ generate_captured_shapes(ss::Shapes, b::RH) =
     println("])")
   end
 
-all_shapes(b::RH) =
-  Shape[shape_from_ref(r, b)
+backend_all_shapes(b::RH) =
+  Shape[backend_shape_from_ref(b, r)
         for r in filter(r -> @remote(b, ShapeCode(r)) != 0, @remote(b, GetAllShapes()))]
 
-all_shapes_in_layer(layer, b::RH) =
-  Shape[shape_from_ref(r, b) for r in @remote(b, GetAllShapesInLayer(layer))]
+backend_all_shapes_in_layer(b::RH, layer) =
+  Shape[backend_shape_from_ref(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
 
-render_view(path::String, b::RH) =
+backend_render_view(b::RH, path::String) =
   @remote(b, Render(render_width(), render_height(), path))
 
-save_view(path::String, b::RH) =
+backend_save_view(b::RH, path::String) =
   @remote(b, SaveView(render_width(), render_height(), path))
 
 
