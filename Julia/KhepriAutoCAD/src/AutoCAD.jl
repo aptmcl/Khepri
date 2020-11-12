@@ -143,8 +143,6 @@ check_plugin() =
     end
   end
 
-#HACK This should not be needed
-import KhepriBase.parse_signature, KhepriBase.encode, KhepriBase.decode
 # ACAD is a subtype of CS
 parse_signature(::Val{:ACAD}, sig::T) where {T} = parse_signature(Val(:CS), sig)
 encode(::Val{:ACAD}, t::Val{T}, c::IO, v) where {T} = encode(Val(:CS), t, c, v)
@@ -560,7 +558,7 @@ realize(b::ACAD, s::Surface) =
     ids
   end
 backend_surface_boundary(b::ACAD, s::Shape2D) =
-    map(c -> shape_from_ref(c, b), @remote(b, CurvesFromSurface(ref(s).value)))
+    map(c -> backend_shape_from_ref(b, r), @remote(b, CurvesFromSurface(ref(s).value)))
 
 # Iterating over curves and surfaces
 
@@ -647,9 +645,7 @@ realize(b::ACAD, s::Text) =
   @remote(b, Text(
     s.str, s.corner, vx(1, s.corner.cs), vy(1, s.corner.cs), s.height))
 
-realize(b::ACAD, s::Sphere) =
-  @remote(b, Sphere(s.center, s.radius))
-
+backend_sphere(b::ACAD, c, r) = @remote(b, Sphere(c, r))
 realize(b::ACAD, s::Torus) =
   @remote(b, Torus(s.center, vz(1, s.center.cs), s.re, s.ri))
 
@@ -1115,49 +1111,38 @@ backend_select_positions(b::ACAD, prompt::String) =
 
 backend_select_point(b::ACAD, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetPoint)
-
 backend_select_points(b::ACAD, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetPoints)
 
 backend_select_curve(b::ACAD, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetCurve)
-
 backend_select_curves(b::ACAD, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetCurves)
 
-
 backend_select_surface(b::ACAD, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetSurface)
-
 backend_select_surfaces(b::ACAD, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetSurfaces)
 
-
 backend_select_solid(b::ACAD, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetSolid)
-
 backend_select_solids(b::ACAD, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetSolids)
 
-
 backend_select_shape(b::ACAD, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetShape)
-
 backend_select_shapes(b::ACAD, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetShapes)
 
-
 backend_captured_shape(b::ACAD, handle) =
-  shape_from_ref(@remote(b, GetShapeFromHandle(handle)), b)
-#
+  backend_shape_from_ref(b, @remote(b, GetShapeFromHandle(handle)))
 backend_captured_shapes(b::ACAD, handles) =
   map(handles) do handle
-      shape_from_ref(@remote(b, GetShapeFromHandle(handle)), b)
+      backend_shape_from_ref(b, @remote(b, GetShapeFromHandle(handle)))
   end
 
 backend_generate_captured_shape(b::ACAD, s::Shape) =
     println("captured_shape(autocad, $(@remote(b, GetHandleFromShape(ref(s).value))))")
-
 backend_generate_captured_shapes(b::ACAD, ss::Shapes) =
   begin
     print("captured_shapes(autocad, [")
@@ -1169,7 +1154,6 @@ backend_generate_captured_shapes(b::ACAD, ss::Shapes) =
   end
 
 # Register for notification
-
 
 backend_register_shape_for_changes(b::ACAD, s::Shape) =
     let conn = connection(b)
@@ -1196,7 +1180,7 @@ backend_changed_shape(b::ACAD, ss::Shapes) =
             sleep(0.1)
         end
         if length(changed) > 0
-            shape_from_ref(changed[1], b)
+            backend_shape_from_ref(b, changed[1])
         else
             nothing
         end
@@ -1205,11 +1189,11 @@ backend_changed_shape(b::ACAD, ss::Shapes) =
 
 # HACK: This should be filtered on the plugin, not here.
 backend_all_shapes(b::ACAD) =
-  Shape[shape_from_ref(r, b)
+  Shape[backend_shape_from_ref(b, r)
         for r in filter(r -> @remote(b, ShapeCode(r)) != 0, @remote(b, GetAllShapes()))]
 
 backend_all_shapes_in_layer(b::ACAD, layer) =
-  Shape[shape_from_ref(r, b) for r in @remote(b, GetAllShapesInLayer(layer))]
+  Shape[backend_shape_from_ref(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
 
 backend_highlight_shape(b::ACAD, s::Shape) =
   @remote(b, SelectShapes(collect_ref(s)))
