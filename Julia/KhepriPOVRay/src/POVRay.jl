@@ -576,8 +576,10 @@ backend_surface_polygon(b::POVRay, vs::Locs) =
   end
 
 backend_sphere(b::POVRay, c::Loc, r::Real) =
-  write_povray_object(buffer(b), "sphere", default_povray_material(), s.center, s.radius)
-
+  let mat = get_material(b, default_povray_material())
+    write_povray_object(buffer(b), "sphere", mat, c, r)
+    void_ref(b)
+  end
 realize(b::POVRay, s::Sphere) =
   let mat = get_material(b, s)
     write_povray_object(buffer(b), "sphere", mat, s.center, s.radius)
@@ -658,6 +660,15 @@ realize(b::POVRay, s::Cylinder) =
     end
     void_ref(b)
   end
+backend_cylinder(b::POVRay, cb::Loc, r::Real, h::Real) =
+  let buf = buffer(b),
+      mat = get_material(b, default_povray_material())
+    write_povray_object(buf, "cylinder", mat, [0,0,0], [0,0,h], r) do
+      write_povray_matrix(buf, cb)
+    end
+    void_ref(b)
+  end
+
 
 write_povray_mesh(buf::IO, mat, points, closed_u, closed_v, smooth_u, smooth_v) =
   let si = size(points, 1),
@@ -895,22 +906,6 @@ povray_wood = povray_include("woods.inc", "texture", "T_Wood10")
 povray_glass = povray_include("textures.inc", "material", "M_Glass")
 
 export povray_stone, povray_metal, povray_wood, povray_glass
-set_backend_family(default_wall_family(), povray,
-  povray_wall_family(povray_material("InteriorWall70", gray=0.7)))
-set_backend_family(default_slab_family(), povray,
-  povray_slab_family(povray_material("GenericFloor20", gray=0.2), povray_material("GenericCeiling80", gray=0.8)))
-set_backend_family(default_roof_family(), povray,
-  povray_roof_family(povray_material("GenericFloor20", gray=0.2), povray_material("GenericCeiling30", gray=0.3)))
-set_backend_family(default_beam_family(), povray, povray_material_family(povray_metal))
-set_backend_family(default_column_family(), povray, povray_material_family(povray_metal))
-set_backend_family(default_door_family(), povray, povray_material_family(povray_wood))
-set_backend_family(default_panel_family(), povray, povray_material_family(povray_glass))
-set_backend_family(default_table_family(), povray, povray_material_family(povray_wood))
-set_backend_family(default_chair_family(), povray, povray_material_family(povray_wood))
-set_backend_family(default_table_chair_family(), povray, povray_material_family(povray_wood))
-set_backend_family(default_truss_node_family(), povray, povray_material_family(povray_metal))
-set_backend_family(default_truss_bar_family(), povray, povray_material_family(povray_metal))
-
 
 use_family_in_layer(b::POVRay) = true
 
@@ -920,7 +915,7 @@ use_family_in_layer(b::POVRay) = true
 backend_current_layer(b::POVRay) =
   default_povray_material()
 
-backend_current_layer(layer, b::POVRay) =
+backend_current_layer(b::POVRay, layer) =
   default_povray_material(layer)
 
 backend_create_layer(b::POVRay, name::String, active::Bool, color::RGB) =
