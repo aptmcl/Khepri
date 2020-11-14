@@ -645,7 +645,7 @@ realize(b::ACAD, s::Text) =
   @remote(b, Text(
     s.str, s.corner, vx(1, s.corner.cs), vy(1, s.corner.cs), s.height))
 
-backend_sphere(b::ACAD, c, r) = @remote(b, Sphere(c, r))
+backend_sphere(b::ACAD, c::Loc, r::Real) = @remote(b, Sphere(c, r))
 realize(b::ACAD, s::Torus) =
   @remote(b, Torus(s.center, vz(1, s.center.cs), s.re, s.ri))
 
