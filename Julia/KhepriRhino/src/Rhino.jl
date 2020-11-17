@@ -289,7 +289,7 @@ realize(b::RH, s::Spline) =
   end
 
 realize(b::RH, s::ClosedSpline) =
-  @remote(b, InterpClosedSpline(s.points))
+  @remote(b, ClosedSpline(s.points))
 
 realize(b::RH, s::Circle) =
   @remote(b, Circle(s.center, vz(1, s.center.cs), s.radius))
@@ -454,7 +454,7 @@ unite_refs(b::RH, r::RHUnionRef) =
   r
 
 unite_ref(b::RH, r0::RHNativeRef, r1::RHNativeRef) =
-  (@remote(b, Unite(r0.value, r1.value)); r0)
+  RHUnionRef((r0, r1))
 
 intersect_ref(b::RH, r0::RHNativeRef, r1::RHNativeRef) =
     let refs = @remote(b, Intersect(r0.value, r1.value))
