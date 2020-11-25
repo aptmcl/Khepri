@@ -44,6 +44,7 @@ public Point3d PointPosition(Guid ent)
 public Guid PolyLine(Point3d[] pts)
 public Point3d[] LineVertices(RhinoObject id)
 public Guid Spline(Point3d[] pts)
+public Guid SplineTangents(Point3d[] pts, Vector3d start, Vector3d end)
 public Guid ClosedPolyLine(Point3d[] pts)
 public Guid ClosedSpline(Point3d[] pts)
 public Guid Circle(Point3d c, Vector3d n, double r)
@@ -51,11 +52,11 @@ public Point3d CircleCenter(RhinoObject obj)
 public Vector3d CircleNormal(RhinoObject obj)
 public double CircleRadius(RhinoObject obj)
 public Guid Ellipse(Point3d c, Vector3d n, double radiusX, double radiusY)
-public Guid Arc(Point3d c, Vector3d n, double radius, double startAngle, double endAngle)
+public Guid Arc(Point3d c, Vector3d vx, Vector3d vy, double radius, double startAngle, double endAngle)
 public Guid JoinCurves(Guid[] objs)
 public Guid SurfaceCircle(Point3d c, Vector3d n, double r)
 public Guid SurfaceEllipse(Point3d c, Vector3d n, double radiusX, double radiusY)
-public Guid SurfaceArc(Point3d c, Vector3d n, double radius, double startAngle, double endAngle)
+public Guid SurfaceArc(Point3d c, Vector3d vx, Vector3d vy, double radius, double startAngle, double endAngle)
 public Guid SurfaceClosedPolyLine(Point3d[] pts)
 public Guid SurfaceFrom(Guid[] objs)
 public Guid Sphere(Point3d c, double r)
@@ -73,6 +74,8 @@ public double[] CurveDomain(RhinoObject obj)
 public double CurveLength(RhinoObject obj)
 public Plane CurveFrameAt(RhinoObject obj, double t)
 public Plane CurveFrameAtLength(RhinoObject obj, double l)
+public double[] SurfaceDomain(RhinoObject obj)
+public Plane SurfaceFrameAt(RhinoObject obj, double u, double v)
 public Point3d[] BoundingBox(ObjectId[] ids)
 public Brep Extrusion(RhinoObject obj, Vector3d dir)
 public Brep[] SweepPathProfile(RhinoObject path, RhinoObject profile, double rotation, double scale)
@@ -88,10 +91,8 @@ public bool IsPoint(RhinoObject e)
 public bool IsCircle(RhinoObject e)
 public bool IsPolyLine(RhinoObject e)
 public bool IsSpline(RhinoObject e)
-public bool IsInterpSpline(RhinoObject e)
 public bool IsClosedPolyLine(RhinoObject e)
 public bool IsClosedSpline(RhinoObject e)
-public bool IsInterpClosedSpline(RhinoObject e)
 public bool IsEllipse(RhinoObject e)
 public bool IsArc(RhinoObject e)
 public bool IsText(RhinoObject e)
@@ -226,17 +227,18 @@ backend_stroke(b::RH, path::OpenSplinePath) =
     #ACADSpline(connection(b), path.vertices)
     @remote(b, Spline(path.vertices))
   elseif (path.v0 != false) && (path.v1 != false)
-    @remote(b, InterpSpline(path.vertices, path.v0, path.v1))
+    @remote(b, SplineTangents(path.vertices, path.v0, path.v1))
   else
-    @remote(b, InterpSpline(connection(b),
-                     path.vertices,
-                     path.v0 == false ? path.vertices[2]-path.vertices[1] : path.v0,
-                     path.v1 == false ? path.vertices[end-1]-path.vertices[end] : path.v1))
+    @remote(b, SplineTangents(
+                 connection(b),
+                 path.vertices,
+                 path.v0 == false ? path.vertices[2]-path.vertices[1] : path.v0,
+                 path.v1 == false ? path.vertices[end-1]-path.vertices[end] : path.v1))
   end
 backend_stroke(b::RH, path::ClosedSplinePath) =
-    @remote(b, InterpClosedSpline(path.vertices))
+    @remote(b, ClosedSpline(path.vertices))
 backend_fill(b::RH, path::ClosedSplinePath) =
-    backend_fill_curves(b, @remote(b, InterpClosedSpline(path.vertices)))
+    backend_fill_curves(b, @remote(b, ClosedSpline(path.vertices)))
 
 backend_stroke_unite(b::RH, refs) = @remote(b, JoinCurves(refs))
 
@@ -264,9 +266,9 @@ backend_stroke_line(b::RH, vs) = @remote(b, PolyLine(vs))
 backend_stroke_arc(b::RH, center::Loc, radius::Real, start_angle::Real, amplitude::Real) =
     let end_angle = start_angle + amplitude
         if end_angle > start_angle
-            @remote(b, Arc(center, vz(1, center.cs), radius, start_angle, end_angle))
+            @remote(b, Arc(center, vx(1, center.cs), vy(1, center.cs), radius, start_angle, end_angle))
         else
-            @remote(b, Arc(center, vz(1, center.cs), radius, end_angle, start_angle))
+            @remote(b, Arc(center, vx(1, center.cs), vy(1, center.cs), radius, end_angle, start_angle))
         end
     end
 
@@ -280,12 +282,12 @@ realize(b::RH, s::Spline) =
   if (s.v0 == false) && (s.v1 == false)
     @remote(b, Spline(s.points))
   elseif (s.v0 != false) && (s.v1 != false)
-    @remote(b, InterpSpline(s.points, s.v0, s.v1))
+    @remote(b, SplineTangents(s.points, s.v0, s.v1))
   else
-    @remote(b, InterpSpline(connection(b),
-                     s.points,
-                     s.v0 == false ? s.points[2]-s.points[1] : s.v0,
-                     s.v1 == false ? s.points[end-1]-s.points[end] : s.v1))
+    @remote(b, SplineTangents(
+                 s.points,
+                 s.v0 == false ? s.points[2]-s.points[1] : s.v0,
+                 s.v1 == false ? s.points[end-1]-s.points[end] : s.v1))
   end
 
 realize(b::RH, s::ClosedSpline) =
@@ -302,12 +304,7 @@ realize(b::RH, s::Arc) =
   elseif abs(s.amplitude) >= 2*pi
     @remote(b, Circle(s.center, vz(1, s.center.cs), s.radius))
   else
-    end_angle = s.start_angle + s.amplitude
-    if end_angle > s.start_angle
-      @remote(b, Arc(s.center, vz(1, s.center.cs), s.radius, s.start_angle, end_angle))
-    else
-      @remote(b, Arc(s.center, vz(1, s.center.cs), s.radius, end_angle, s.start_angle))
-    end
+    backend_stroke_arc(b, s.center, s.radius, s.start_angle, s.amplitude)
   end
 
 realize(b::RH, s::Ellipse) =
@@ -341,7 +338,7 @@ realize(b::RH, s::SurfaceCircle) =
   @remote(b, SurfaceCircle(s.center, vz(1, s.center.cs), s.radius))
 
 realize(b::RH, s::SurfaceArc) =
-  @remote(b, SurfaceArc(s.center, vz(1, s.center.cs), s.radius, s.start_angle, s.start_angle + s.amplitude))
+  @remote(b, SurfaceArc(s.center, vx(1, s.center.cs), vy(1, s.center.cs), s.radius, s.start_angle, s.start_angle + s.amplitude))
 
 realize(b::RH, s::SurfaceEllipticArc) =
   error("Finish this")
@@ -566,6 +563,11 @@ realize(b::RH, s::Thicken) =
       @remote(b, Thicken(r, s.thickness))
     end,
     s.shape)
+
+backend_frame_at(b::RH, s::Shape2D, u::Real, v::Real) =
+  @remote(b, SurfaceFrameAt(ref(b, s).value, u, v))
+
+
 
 # BIM
 
