@@ -32,6 +32,8 @@ function __init__()
   set_backend_family(fixed_truss_node_family, autocad, acad_layer_family("FixedTrussNode"))
   set_backend_family(free_truss_node_family, autocad, acad_layer_family("FreeTrussNode"))
   #use_family_in_layer(b::ACAD) = true
+
+  add_current_backend(autocad)
 end
 
 end
