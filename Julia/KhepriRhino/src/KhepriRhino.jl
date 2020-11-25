@@ -29,5 +29,7 @@ function __init__()
 
   set_backend_family(default_truss_node_family(), rhino, rhino_layer_family("TrussNodes"))
   set_backend_family(default_truss_bar_family(), rhino, rhino_layer_family("TrussBars"))
+
+  add_current_backend(rhino)
 end
 end
