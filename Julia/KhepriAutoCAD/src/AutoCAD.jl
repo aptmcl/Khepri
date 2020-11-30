@@ -21,7 +21,7 @@ trusted locations are specified by the TRUSTEDPATHS system variable.
 
 
 # This only needs to be done when the AutoCAD plugin is updated
-#=
+
 julia_khepri = dirname(dirname(abspath(@__FILE__)))
 
 upgrade_autocad(; advance_major_version=false, advance_minor_version=true, phase="Debug") =
@@ -44,8 +44,10 @@ upgrade_autocad(; advance_major_version=false, advance_minor_version=true, phase
           doc = readxml(bundle_xml)
           app_pkg = findfirst("//ApplicationPackage", doc)
           major, minor = map(s -> parse(Int, s), split(app_pkg["AppVersion"], '.'))
+          print("Advancing version from $(major).$(minor) ")
           major += advance_major_version ? 1 : 0
           minor += advance_minor_version ? 1 : 0
+          println("to $(major).$(minor).")
           app_pkg["AppVersion"] = "$(major).$(minor)"
           write(bundle_xml, doc)
       end
@@ -53,9 +55,7 @@ upgrade_autocad(; advance_major_version=false, advance_minor_version=true, phase
       local_bundle_path = joinpath(julia_khepri, "Plugin", bundle_name)
       # 8. but, before, we remove any previously existing bundle
       mkpath(dirname(local_bundle_path))
-      if isdir(local_bundle_path)
-          rm(local_bundle_path, force=true, recursive=true)
-      end
+      rm(local_bundle_path, force=true, recursive=true)
       # 9. Now we do the copy
       cp(bundle_path, local_bundle_path)
       # 10. and we copy the dlls to the local bundle Contents folder
@@ -68,6 +68,8 @@ upgrade_autocad(; advance_major_version=false, advance_minor_version=true, phase
       end
   end
 
+#=
+# Whenever the plugin is updated, run this function and commit the plugin files.
 upgrade_autocad()
 =#
 
