@@ -806,7 +806,7 @@ backend_surface_grid(b::ACAD, points, closed_u, closed_v, smooth_u, smooth_v) =
 
 realize(b::ACAD, s::Thicken) =
   and_mark_deleted(b,
-    map_ref(s.shape) do r
+    map_ref(b, s.shape) do r
       @remote(b, Thicken(r, s.thickness))
     end,
     s.shape)
