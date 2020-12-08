@@ -9,25 +9,26 @@ export
     revit_file_family
 
 #
-# ACAD is a subtype of CS
+# RVT is a subtype of CS
 parse_signature(::Val{:RVT}, sig::T) where {T} = parse_signature(Val(:CS), sig)
 encode(::Val{:RVT}, t::Val{T}, c::IO, v) where {T} = encode(Val(:CS), t, c, v)
 decode(::Val{:RVT}, t::Val{T}, c::IO) where {T} = decode(Val(:CS), t, c)
 
+#
+# We need some additional Encoders
 encode(::Val{:RVT}, t::Union{Val{:XYZ},Val{:VXYZ}}, c::IO, p) =
   encode(Val(:CS), Val(:double3), c, raw_point(p))
 decode(::Val{:RVT}, t::Val{:XYZ}, c::IO) =
   xyz(decode(Val(:CS), Val(:double3), c)..., world_cs)
 decode(::Val{:RVT}, t::Val{:VXYZ}, c::IO) =
   vxyz(decode(Val(:CS), Val(:double3), c)..., world_cs)
+encode(ns::Val{:RVT}, t::Union{Val{:ElementId},Val{:Element},Val{:Level},Val{:FloorFamily}}, c::IO, v) =
+  encode(ns, Val(:int), c, v)
+decode(ns::Val{:RVT}, t::Union{Val{:ElementId},Val{:Element},Val{:Level},Val{:FloorFamily}}, c::IO) =
+  decode_or_error(ns, Val(:int), c, -1234)
 
-#
-# We need some additional Encoders
-@encode_decode_as(:RVT, Val{:ElementId}, Val{:size})
-@encode_decode_as(:RVT, Val{:Element}, Val{:size})
-@encode_decode_as(:RVT, Val{:Level}, Val{:size})
-@encode_decode_as(:RVT, Val{:FloorFamily}, Val{:size})
 @encode_decode_as(:RVT, Val{:Length}, Val{:double})
+
 
 revit_api = @remote_functions :RVT """
 public Element Sphere(XYZ centre, Length radius)
@@ -51,7 +52,7 @@ public Level UpperLevel(Level level, Length addedElevation)
 public Length GetLevelElevation(Level level)
 public ElementId LoadFamily(string fileName)
 public ElementId FamilyElement(ElementId familyId, string[] names, Length[] values)
-public String InstalledLibraryPath(String name)
+public String InstalledLibraryPath(String root)
 public void MoveElement(ElementId id, XYZ translation)
 public void RotateElement(ElementId id, double angle, XYZ axis0, XYZ axis1)
 public ElementId CreatePolygonalFloor(XYZ[] pts, ElementId levelId)
@@ -199,6 +200,13 @@ struct RevitInPlaceFamily <: RevitFamily
     ref::Parameter{Int}
 end
 
+#=
+root should be "Imperial Library" or "Metric Library"
+path can be something as "Structural Framing\\Wood\\M_Timber.rfa"
+=#
+export revit_library_path
+revit_library_path(root::String, path::String) =
+  joinpath(@remote(revit, InstalledLibraryPath(root)), path)
 
 switch_to_backend(from::Backend, to::RVT) =
     let height = level_height(default_level())
@@ -266,7 +274,7 @@ realize_slab(b::RVT, contour::RectangularPath, holes::Vector{<:ClosedPath}, leve
 realize_roof(b::RVT, contour::ClosedPath, holes::Vector{<:ClosedPath}, level::Level, family::RoofFamily) =
     let (locs, arcs) = locs_and_arcs(contour)
         @assert length(holes) == 0
-        @remote(b, CreatePathRoof(locs, arcs, ref(level).value, family))
+        @remote(b, CreatePathRoof(locs, arcs, ref(b, level).value, family))
     end
 
 realize_slab_openings(b::RVT, s::Slab, s_ref, openings) =
@@ -279,15 +287,15 @@ realize_slab_openings(b::RVT, s::Slab, s_ref, openings) =
 
 realize_slab_opening(b::RVT, s::Slab, contour::ClosedPath) =
     let (locs, arcs) = locs_and_arcs(contour)
-        @remote(b, CreatePathOpening(locs, arcs, ref(s).value))
+        @remote(b, CreatePathOpening(locs, arcs, ref(b, s).value))
     end
 realize_slab_opening(b::RVT, s::Slab, contour::ClosedPolygonalPath) =
-  @remote(b, CreatePolygonalOpening(convert(ClosedPolygonalPath, contour).vertices, ref(s).value))
+  @remote(b, CreatePolygonalOpening(convert(ClosedPolygonalPath, contour).vertices, ref(b, s).value))
 
 #Beams are aligned along the top axis.
 realize(b::RVT, s::Beam) =
     let o = loc_from_o_phi(s.cb, s.angle)
-        @remote(b, CreateBeam(o, add_z(o, s.h), s.angle, ref(s.family)))
+        @remote(b, CreateBeam(o, add_z(o, s.h), s.angle, realize(b, s.family)))
     end
 
 #Columns are aligned along the center axis.
@@ -298,7 +306,7 @@ realize(b::RVT, s::FreeColumn) =
         @remote(b, CreateColumnPoints(b, t,
             @remote(b, FindOrCreateLevelAtElevation(loc_in_world(b).z)),
             @remote(b, FindOrCreateLevelAtElevation(loc_in_world(t).z)),
-            ref(s.family)))
+            ref(b, s.family)))
     end
 
 realize_wall_no_openings(b::RVT, s::Wall) =
@@ -346,6 +354,12 @@ backend_add_window(b::RVT, w::Wall, loc::Loc, family::WindowFamily) =
         end
         w
     end
+
+realize(b::RVT, s::TrussNode) =
+  @remote(b, CreateBeam(s.p, add_x(s.p, 0.1), 0, realize(b, s.family)))
+
+realize(b::RVT, s::TrussBar) =
+  @remote(b, CreateBeam(s.p0, s.p1, s.angle, realize(b, s.family)))
 
 ############################################
 # Select New Family ...
@@ -455,7 +469,7 @@ zoom_extents(b::RVT) = @remote(b, ZoomExtents())
 view_top(b::RVT) =
     @remote(b, ViewTop())
 
-delete_all_shapes(b::RVT) =
+backend_delete_all_shapes(b::RVT) =
   @remote(b, DeleteAllElements())
 
 prompt_position(prompt::String, b::RVT) =
