@@ -362,7 +362,7 @@ const ACAD = SocketBackend{ACADKey, ACADId}
 create_ACAD_connection() =
     begin
         check_plugin()
-        create_backend_connection("AutoCAD", 11000)
+        create_backend_connection("AutoCAD", autocad_port)
     end
 
 const autocad = ACAD(LazyParameter(TCPSocket, create_ACAD_connection), acad_api)
@@ -1073,7 +1073,7 @@ backend_shape_from_ref(b::ACAD, r) =
                       ref=ref)
     else
         #unknown(ref=ref)
-        unknown(r, ref=LazyRef(b, ACADNativeRef(r), 0, 0)) # To force copy
+        unknown(r, ref=ref) # To force copy
         #error("Unknown shape with code $(code)")
     end
   end
