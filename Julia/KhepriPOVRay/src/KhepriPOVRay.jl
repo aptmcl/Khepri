@@ -21,5 +21,7 @@ function __init__()
   set_backend_family(default_table_chair_family(), povray, povray_material_family(povray_wood))
   set_backend_family(default_truss_node_family(), povray, povray_material_family(povray_metal))
   set_backend_family(default_truss_bar_family(), povray, povray_material_family(povray_metal))
+  
+  add_current_backend(povray)
 end
 end
