@@ -194,7 +194,7 @@ const RH = SocketBackend{RHKey, RHId}
 
 void_ref(b::RH) = RHNativeRef(zeros(UInt8, 16))
 
-create_RH_connection() = create_backend_connection("Rhinoceros", 12000)
+create_RH_connection() = create_backend_connection("Rhinoceros", rhino_port)
 
 const rhino = RH(LazyParameter(TCPSocket, create_RH_connection), rhino_api)
 
