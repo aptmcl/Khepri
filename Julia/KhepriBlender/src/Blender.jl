@@ -1,12 +1,75 @@
 # Blender
 export blender
 
+const blender_folder = Parameter("C:/Program Files/Blender Foundation/Blender 2.91/")
+blender_cmd(cmd::AbstractString="blender.exe") = blender_folder() * cmd
+const KhepriServerPath = Parameter(abspath(@__DIR__, "../../../Plugins/KhepriBlender/KhepriServer.py"))
+
+start_blender() =
+  run(detach(`$(blender_cmd()) --python $(KhepriServerPath())`), wait=false)
+
+#=
+sel = utils.selection_get()
+                            bpy.ops.view3d.select(location=(event.mouse_region_x, event.mouse_region_y))
+                            sel1 = utils.selection_get()
+                            if sel[0] != sel1[0] and sel1[0].type != 'MESH':
+                                object = sel1[0]
+                                target_slot = sel1[0].active_material_index
+                                ui_props.has_hit = True
+                            utils.selection_set(sel)
+
+
+def mouse_raycast(context, mx, my):
+    r = context.region
+    rv3d = context.region_data
+    coord = mx, my
+
+    # get the ray from the viewport and mouse
+    view_vector = view3d_utils.region_2d_to_vector_3d(r, rv3d, coord)
+    ray_origin = view3d_utils.region_2d_to_origin_3d(r, rv3d, coord)
+    ray_target = ray_origin + (view_vector * 1000000000)
+
+    vec = ray_target - ray_origin
+
+    has_hit, snapped_location, snapped_normal, face_index, object, matrix = bpy.context.scene.ray_cast(
+        bpy.context.view_layer, ray_origin, vec)
+
+    # rote = mathutils.Euler((0, 0, math.pi))
+    randoffset = math.pi
+    if has_hit:
+        snapped_rotation = snapped_normal.to_track_quat('Z', 'Y').to_euler()
+        up = Vector((0, 0, 1))
+        props = bpy.context.scene.blenderkit_models
+        if props.randomize_rotation and snapped_normal.angle(up) < math.radians(10.0):
+            randoffset = props.offset_rotation_amount + math.pi + (
+                    random.random() - 0.5) * props.randomize_rotation_amount
+        else:
+            randoffset = props.offset_rotation_amount  # we don't rotate this way on walls and ceilings. + math.pi
+        # snapped_rotation.z += math.pi + (random.random() - 0.5) * .2
+
+    else:
+        snapped_rotation = mathutils.Quaternion((0, 0, 0, 0)).to_euler()
+
+    snapped_rotation.rotate_axis('Z', randoffset)
+
+    return has_hit, snapped_location, snapped_normal, snapped_rotation, face_index, object, matrix
+
+=#
 
 # BLR is a subtype of Python
 parse_signature(::Val{:BLR}, sig::T) where {T} = parse_signature(Val(:PY), sig)
 encode(::Val{:BLR}, t::Val{T}, c::IO, v) where {T} = encode(Val(:PY), t, c, v)
 decode(::Val{:BLR}, t::Val{T}, c::IO) where {T} = decode(Val(:PY), t, c)
-
+encode(ns::Val{:BLR}, t::Tuple{T1,T2,T3}, c::IO, v) where {T1,T2,T3} =
+  begin
+    encode(ns, T1(), c, v[1])
+    encode(ns, T2(), c, v[2])
+    encode(ns, T3(), c, v[3])
+  end
+decode(ns::Val{:BLR}, t::Tuple{T1,T2,T3}, c::IO) where {T1,T2,T3} =
+  (decode(ns, T1(), c),
+   decode(ns, T2(), c),
+   decode(ns, T3(), c))
 #=
 # We need some additional Encoders
 @encode_decode_as(:BLR, Val{:Entity}, Val{:size})
@@ -14,6 +77,9 @@ decode(::Val{:BLR}, t::Val{T}, c::IO) where {T} = decode(Val(:PY), t, c)
 @encode_decode_as(:BLR, Val{:BIMLevel}, Val{:size})
 @encode_decode_as(:BLR, Val{:FloorFamily}, Val{:size})
 =#
+@encode_decode_as(:BLR, Val{:Id}, Val{:size})
+@encode_decode_as(:BLR, Val{:MatId}, Val{:size})
+
 encode(::Val{:BLR}, t::Union{Val{:Point3d},Val{:Vector3d}}, c::IO, p) =
   encode(Val(:PY), Val(:float3), c, raw_point(p))
 decode(::Val{:BLR}, t::Val{:Point3d}, c::IO) =
@@ -36,218 +102,174 @@ decode(ns::Val{:BLR}, t::Val{:Frame3d}, c::IO) =
       decode(ns, Val(:Vector3d), c),
       decode(ns, Val(:Vector3d), c)))
 
-encode(ns::Val{:BLR}, t::Tuple{T1,T2}, c::IO, v) =
-  let t1 = T1(),
-      t2 = T2()
-    encode(ns, t1, c, v[1])
-    encode(ns, t2, c, v[2])
-  end
-#=
-blender_api = @remote_functions :BLR """
-public void SetLengthUnit(String unit)
-public void SetView(Point3d position, Point3d target, double lens, bool perspective, string style)
-public void View(Point3d position, Point3d target, double lens)
-public void ViewTop()
-public Point3d ViewCamera()
-public Point3d ViewTarget()
-public double ViewLens()
-public void SetSkyFromDateLocation(int year, int month, int day, int hour, int minute, double latitude, double longitude, double meridian)
-public byte Sync()
-public byte Disconnect()
-public ObjectId Copy(ObjectId id)
-public Entity Point(Point3d p)
-public Point3d PointPosition(Entity ent)
-public Entity PolyLine(Point3d[] pts)
-public Point3d[] LineVertices(ObjectId id)
-public Entity Spline(Point3d[] pts)
-public Entity InterpSpline(Point3d[] pts, Vector3d tan0, Vector3d tan1)
-public Entity ClosedPolyLine(Point3d[] pts)
-public Entity ClosedSpline(Point3d[] pts)
-public Entity InterpClosedSpline(Point3d[] pts)
-public Point3d[] SplineInterpPoints(Entity ent)
-public Vector3d[] SplineTangents(Entity ent)
-public Entity Circle(Point3d c, Vector3d n, double r)
-public Point3d CircleCenter(Entity ent)
-public Vector3d CircleNormal(Entity ent)
-public double CircleRadius(Entity ent)
-public Entity Ellipse(Point3d c, Vector3d n, Vector3d majorAxis, double radiusRatio)
-public Entity Arc(Point3d c, Vector3d n, double radius, double startAngle, double endAngle)
-public Point3d ArcCenter(Entity ent)
-public Vector3d ArcNormal(Entity ent)
-public double ArcRadius(Entity ent)
-public double ArcStartAngle(Entity ent)
-public double ArcEndAngle(Entity ent)
-public ObjectId JoinCurves(ObjectId[] ids)
-public Entity Text(string str, Point3d corner, Vector3d vx, Vector3d vy, double height)
-public Entity SurfaceFromCurve(Entity curve)
-public Entity SurfaceCircle(Point3d c, Vector3d n, double r)
-public Entity SurfaceEllipse(Point3d c, Vector3d n, Vector3d majorAxis, double radiusRatio)
-public Entity SurfaceArc(Point3d c, Vector3d n, double radius, double startAngle, double endAngle)
-public Entity SurfaceClosedPolyLine(Point3d[] pts)
-public ObjectId[] SurfaceFromCurves(ObjectId[] ids)
-public ObjectId[] CurvesFromSurface(ObjectId id)
-public Entity Sphere(Point3d c, double r)
-public Entity Torus(Point3d c, Vector3d vz, double majorRadius, double minorRadius)
-public Entity ConeFrustum(Point3d bottom, double base_radius, Point3d top, double top_radius)
-public Entity Cylinder(Point3d bottom, double radius, Point3d top)
-public Entity Cone(Point3d bottom, double radius, Point3d top)
-public Entity Box(Frame3d frame, double dx, double dy, double dz)
-public Entity CenteredBox(Frame3d frame, double dx, double dy, double dz)
-public ObjectId IrregularPyramidMesh(Point3d[] pts, Point3d apex)
-public ObjectId IrregularPyramid(Point3d[] pts, Point3d apex)
-public ObjectId IrregularPyramidFrustum(Point3d[] bpts, Point3d[] tpts)
-public ObjectId Thicken(ObjectId obj, double thickness)
-public ObjectId NurbSurfaceFrom(ObjectId id)
-public ObjectId Extrude(ObjectId profileId, Vector3d dir)
-public ObjectId Sweep(ObjectId pathId, ObjectId profileId, double rotation, double scale)
-public ObjectId Loft(ObjectId[] profilesIds, ObjectId[] guidesIds, bool ruled, bool closed)
-public ObjectId Unite(ObjectId objId0, ObjectId objId1)
-public ObjectId Intersect(ObjectId objId0, ObjectId objId1)
-public ObjectId Subtract(ObjectId objId0, ObjectId objId1)
-public void Slice(ObjectId id, Point3d p, Vector3d n)
-public ObjectId Revolve(ObjectId profileId, Point3d p, Vector3d n, double startAngle, double amplitude)
-public void Transform(ObjectId id, Frame3d frame)
-public void Move(ObjectId id, Vector3d v)
-public void Scale(ObjectId id, Point3d p, double s)
-public void Rotate(ObjectId id, Point3d p, Vector3d n, double a)
-public ObjectId Mirror(ObjectId id, Point3d p, Vector3d n, bool copy)
-public Point3d[] BoundingBox(ObjectId[] ids)
-public void ZoomExtents()
-public ObjectId CreateLayer(string name, bool active, byte r, byte g, byte b)
-public void SetLayerColor(ObjectId id, byte r, byte g, byte b)
-public void SetShapeColor(ObjectId id, byte r, byte g, byte b)
-public ObjectId CurrentLayer()
-public void SetCurrentLayer(ObjectId id)
-public ObjectId ShapeLayer(ObjectId objId)
-public void SetShapeLayer(ObjectId objId, ObjectId layerId)
-public void SetSystemVariableInt(string name, int value)
-public int Command(string cmd)
-public void DisableUpdate()
-public void EnableUpdate()
-public bool IsPoint(Entity e)
-public bool IsCircle(Entity e)
-public bool IsPolyLine(Entity e)
-public bool IsSpline(Entity e)
-public bool IsInterpSpline(Entity e)
-public bool IsClosedPolyLine(Entity e)
-public bool IsClosedSpline(Entity e)
-public bool IsInterpClosedSpline(Entity e)
-public bool IsEllipse(Entity e)
-public bool IsArc(Entity e)
-public bool IsText(Entity e)
-public byte ShapeCode(ObjectId id)
-public BIMLevel FindOrCreateLevelAtElevation(double elevation)
-public BIMLevel UpperLevel(BIMLevel currentLevel, double addedElevation)
-public double GetLevelElevation(BIMLevel level)
-public FloorFamily FloorFamilyInstance(double totalThickness, double coatingThickness)
-public Entity LightweightPolyLine(Point2d[] pts, double[] angles, double elevation)
-public Entity SurfaceLightweightPolyLine(Point2d[] pts, double[] angles, double elevation)
-public ObjectId CreatePathFloor(Point2d[] pts, double[] angles, BIMLevel level, FloorFamily family)
-public ObjectId CreateBlockFromShapes(String baseName, ObjectId[] ids)
-public ObjectId CreateBlockInstance(ObjectId id, Frame3d frame)
-public ObjectId CreateInstanceFromBlockNamed(String name, Frame3d frame)
-public ObjectId CreateInstanceFromBlockNamedAtRotated(String name, Point3d c, double angle)
-public ObjectId CreateRectangularTableFamily(double length, double width, double height, double top_thickness, double leg_thickness)
-public ObjectId Table(Point3d c, double angle, ObjectId family)
-public ObjectId CreateChairFamily(double length, double width, double height, double seat_height, double thickness)
-public ObjectId Chair(Point3d c, double angle, ObjectId family)
-public ObjectId CreateRectangularTableAndChairsFamily(ObjectId tableFamily, ObjectId chairFamily, double tableLength, double tableWidth, int chairsOnTop, int chairsOnBottom, int chairsOnRight, int chairsOnLeft, double spacing)
-public ObjectId TableAndChairs(Point3d c, double angle, ObjectId family)
-public ObjectId CreateAlignedDimension(Point3d p0, Point3d p1, Point3d p, double scale, String mark)
-public String TextString(Entity ent)
-public Point3d TextPosition(Entity ent)
-public double TextHeight(Entity ent)
-public String MTextString(Entity ent)
-public Point3d MTextPosition(Entity ent)
-public double MTextHeight(Entity ent)
-public void SaveAs(String pathname, String format)
-public double[] CurveDomain(Entity ent)
-public double CurveLength(Entity ent)
-public Frame3d CurveFrameAt(Entity ent, double t)
-public Frame3d CurveFrameAtLength(Entity ent, double l)
-public Point3d[] CurvePointsAt(Entity ent, double[] ts)
-public Vector3d[] CurveTangentsAt(Entity ent, double[] ts)
-public Vector3d[] CurveNormalsAt(Entity ent, double[] ts)
-public Vector3d RegionNormal(Entity ent)
-public Point3d RegionCentroid(Entity ent)
-public double[] SurfaceDomain(Entity ent)
-public Frame3d SurfaceFrameAt(Entity ent, double u, double v)
-public Entity MeshFromGrid(int m, int n, Point3d[] pts, bool closedM, bool closedN)
-public int[] PolygonMeshData(Entity e)
-public Point3dCollection MeshVertices(ObjectId id)
-public Entity SurfaceFromGrid(int m, int n, Point3d[] pts, bool closedM, bool closedN, int level)
-public Entity SolidFromGrid(int m, int n, Point3d[] pts, bool closedM, bool closedN, int level, double thickness)
-public void DeleteAll()
-public void DeleteAllInLayer(ObjectId layerId)
-public void Delete(ObjectId id)
-public void DeleteMany(ObjectId[] ids)
-public Entity SpotLight(Point3d position, double hotspot, double falloff, Point3d target)
-public Entity IESLight(String webFile, Point3d position, Point3d target, Vector3d rotation)
-public Point3d[] GetPosition(string prompt)
-public ObjectId[] GetPoint(string prompt)
-public ObjectId[] GetPoints(string prompt)
-public ObjectId[] GetCurve(string prompt)
-public ObjectId[] GetCurves(string prompt)
-public ObjectId[] GetSurface(string prompt)
-public ObjectId[] GetSurfaces(string prompt)
-public ObjectId[] GetSolid(string prompt)
-public ObjectId[] GetSolids(string prompt)
-public ObjectId[] GetShape(string prompt)
-public ObjectId[] GetShapes(string prompt)
-public ObjectId[] GetPreSelectedShapes()
-public long GetHandleFromShape(Entity e)
-public ObjectId GetShapeFromHandle(long h)
-public void RegisterForChanges(ObjectId id)
-public void UnregisterForChanges(ObjectId id)
-public ObjectId[] ChangedShape()
-public void DetectCancel()
-public void UndetectCancel()
-public bool WasCanceled()
-public ObjectId[] GetAllShapes()
-public ObjectId[] GetAllShapesInLayer(ObjectId layerId)
-public void SelectShapes(ObjectId[] ids)
-public void Render(int width, int height, string path, int levels, double exposure)
-"""
-=#
 blender_api = @remote_functions :BLR """
 def delete_all_shapes()->None:
-def delete_shape(name:str)->None:
-def mesh(vert:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]])->str:
-def sphere(center:Point3d, radius:float)->str:
-def cylinder(base:Point3d, radius:float, top:Point3d)->str:
+def delete_shape(name:Id)->None:
+def get_material(name:str)->MatId:
+def get_blenderkit_material(ref:str)->MatId:
+def new_material(name:str, diffuse_color:RGBA, specularity:float, roughness:float)->MatId:
+def mesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], mat:MatId)->Id:
+def objmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat:MatId)->Id:
+def trig(p1:Point3d, p2:Point3d, p3:Point3d, mat:MatId)->Id:
+def quad(p1:Point3d, p2:Point3d, p3:Point3d, p4:Point3d, mat:MatId)->Id:
+def quad_strip(ps:List[Point3d], qs:List[Point3d], smooth:bool, mat:MatId)->Id:
+def quad_strip_closed(ps:List[Point3d], qs:List[Point3d], smooth:bool, mat:MatId)->Id:
+def ngon(ps:List[Point3d], pivot:Point3d, smooth:bool, mat:MatId)->Id:
+def polygon(ps:List[Point3d], mat:MatId)->Id:
+def surface(pss:List[List[Point3d]], mat:MatId)->Id:
+def cuboid(verts:List[Point3d], mat:MatId)->Id:
+def pyramid_frustum(bs:List[Point3d], ts:List[Point3d], smooth:bool, bmat:MatId, tmat:MatId, smat:MatId)->Id:
+def sphere(center:Point3d, radius:float, mat:MatId)->Id:
+def cone_frustum(b:Point3d, br:float, t:Point3d, tr:float, bmat:MatId, tmat:MatId, smat:MatId)->Id:
+def box(p:Point3d, vx:Vector3d, vy:Vector3d, dx:float, dy:float, dz:float, mat:MatId)->Id:
+def text(txt:str, p:Point3d, vx:Vector3d, vy:Vector3d, size:float)->Id:
+def set_view(camera:Point3d, target:Point3d, lens:float)->None:
+def get_view()->Tuple[Point3d, Point3d, float]:
+def set_camera_view(camera:Point3d, target:Point3d, lens:float)->None:
+def area_light(p:Point3d, v:Vector3d, size:float, color:RGBA, strength:float)->Id:
+def sun_light(p:Point3d, v:Vector3d)->Id:
+def light(p:Point3d, type:str)->Id:
+def camera_from_view()->None:
+def set_render_size(width:int, height:int)->None:
+def render_to_file(filepath:str)->None:
+def cycles_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool)->None:
 """
 
 abstract type BLRKey end
-const BLRId = String
+const BLRId = Int64
 const BLRIds = Vector{BLRId}
-const BLRRef = GenericRef{BLRKey, BLRId}
+const BLRRef = NativeRef{BLRKey, BLRId}
 const BLRRefs = Vector{BLRRef}
 const BLREmptyRef = EmptyRef{BLRKey, BLRId}
 const BLRUniversalRef = UniversalRef{BLRKey, BLRId}
-const BLRNativeRef = NativeRef{BLRKey, BLRId}
 const BLRUnionRef = UnionRef{BLRKey, BLRId}
 const BLRSubtractionRef = SubtractionRef{BLRKey, BLRId}
 const BLR = SocketBackend{BLRKey, BLRId}
 
-#void_ref(b::BLR) = BLRNativeRef(-1)
-#AML Remove
-blender_port = 11003
 create_blender_connection() =
-    begin
-        #check_plugin()
-        create_backend_connection("Blender", blender_port)
+  let port = blender_port,
+		  backend = "Blender"
+		for i in 1:10
+    	try
+      	return connect(port)
+      catch e
+        if i == 1
+					@info("Starting $(backend).")
+  				start_blender()
+        	sleep(1)
+				elseif i == 9
+          throw(e)
+				else
+					sleep(1)
+        end
+      end
     end
+	end
 
 #const
 blender = BLR(LazyParameter(TCPSocket, create_blender_connection), blender_api)
 
-backend_name(b::BLR) = "Blender"
+backend_name(::BLR) = "Blender"
+KhepriBase.has_boolean_ops(::Type{BLR}) = HasBooleanOps{false}()
 
+
+backend(::BLRRef) = blender
+void_ref(b::BLR) = BLRRef(-1)
+
+# Primitives
+KhepriBase.b_trig(b::BLR, p1, p2, p3, mat) =
+  @remote(b, trig(p1, p2, p3, mat))
+
+KhepriBase.b_quad(b::BLR, p1, p2, p3, p4, mat) =
+	@remote(b, quad(p1, p2, p3, p4, mat))
+
+KhepriBase.b_ngon(b::BLR, ps, pivot, smooth, mat) =
+	@remote(b, ngon(ps, pivot, smooth, mat))
+
+KhepriBase.b_quad_strip(b::BLR, ps, qs, smooth, mat) =
+  @remote(b, quad_strip(ps, qs, smooth, mat))
+
+KhepriBase.b_quad_strip_closed(b::BLR, ps, qs, smooth, mat) =
+  @remote(b, quad_strip_closed(ps, qs, smooth, mat))
+
+KhepriBase.b_surface_polygon(b::BLR, ps, mat) =
+  @remote(b, polygon(ps, mat))
+
+KhepriBase.b_surface_polygon_with_holes(b::BLR, ps, qss, mat) =
+  @remote(b, surface([ps, qss...], mat))
+
+KhepriBase.b_generic_pyramid_frustum(b::BLR, bs, ts, smooth, bmat, tmat, smat) =
+  @remote(b, pyramid_frustum(bs, ts, smooth, bmat, tmat, smat))
+
+KhepriBase.b_cone(b::BLR, cb, r, h, bmat, smat) =
+  @remote(b, cone_frustum(cb, r, add_z(cb, h), 0, bmat, bmat, smat))
+
+KhepriBase.b_cone_frustum(b::BLR, cb, rb, h, rt, bmat, tmat, smat) =
+    @remote(b, cone_frustum(cb, rb, add_z(cb, h), rt, bmat, tmat, smat))
+
+KhepriBase.b_cylinder(b::BLR, cb, r, h, mat) =
+  @remote(b, cone_frustum(cb, r, add_z(cb, h), r, mat, mat, mat))
+
+KhepriBase.b_cuboid(b::BLR, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat) =
+  @remote(b, cuboid([pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3], mat))
+
+KhepriBase.b_sphere(b::BLR, c, r, mat) =
+  @remote(b, sphere(c, r, mat))
+
+# Materials
+
+KhepriBase.b_get_material(b::BLR, ref) =
+  get_blender_material(b, ref)
+
+get_blender_material(b, ref::Nothing) = void_ref(b)
+
+#=
+Important source of materials:
+
+1. Activate Blender's blenderkit addon:
+https://www.blenderkit.com/get-blenderkit/
+
+2. Browse BlenderKit's material database:
+https://www.blenderkit.com/asset-gallery?query=category_subtree:material
+
+3. Select material and copy reference, e.g.:
+asset_base_id:ced25dc0-d461-42f7-aa03-85cb88f671a1 asset_type:material
+
+4. Install material and retrive its id with:
+b_get_material(blender, "asset_base_id:ced25dc0-d461-42f7-aa03-85cb88f671a1 asset_type:material")
+=#
+
+get_blender_material(b, ref::AbstractString) =
+  startswith(ref, "asset_base_id") ?
+    @remote(b, get_blenderkit_material(ref)) :
+    @remote(b, get_material(ref))
+
+KhepriBase.b_new_material(b::BLR, path, color, specularity, roughness, transmissivity, transmitted_specular) =
+  @remote(b, new_material(path, convert(RGBA, color), specularity, roughness))
+
+# BIM
+
+
+
+
+
+#=
+b_regular_pyramid_frustum(b, 32, cb, r, 0, h, r, true, mat, mat, mat)
+
+
+
+backend_surface_polygon(b::BLR, vs::Locs) =
+  @remote(b, mesh(vs, [], [collect(0:length(vs)-1)]))
+
+
+=#
 #=
 
 Default families
 
 =#
+export blender_family_materials
+blender_family_materials(m1, m2=m1, m3=m2, m4=m3) = (materials=(m1, m2, m3, m4), )
 
 
 abstract type BLRFamily <: Family end
@@ -262,9 +284,10 @@ blender_layer_family(name, color::RGB=rgb(1,1,1)) =
   BLRLayerFamily(name, color, Parameter{Any}(nothing))
 
 backend_get_family_ref(b::BLR, f::Family, af::BLRLayerFamily) =
-  backend_create_layer(b, af.name, true, af.color)
+  nothing #backend_create_layer(b, af.name, true, af.color)
 
-
+#=
+#=
 backend_stroke_color(b::BLR, path::Path, color::RGB) =
     let r = backend_stroke(b, path)
         @remote(b, SetShapeColor(r, color.r, color.g, color.b))
@@ -328,12 +351,13 @@ backend_stroke_arc(b::BLR, center::Loc, radius::Real, start_angle::Real, amplitu
   end
 backend_stroke_unite(b::BLR, refs) = @remote(b, JoinCurves(refs))
 
-
-
+=#
+=#
 realize(b::BLR, s::EmptyShape) =
   BLREmptyRef()
 realize(b::BLR, s::UniversalShape) =
   BLRUniversalRef()
+#=
 realize(b::BLR, s::Point) =
   @remote(b, Point(s.position))
 realize(b::BLR, s::Line) =
@@ -423,10 +447,12 @@ realize(b::BLR, s::SurfaceEllipse) =
   else
     @remote(b, SurfaceEllipse(s.center, vz(1, s.center.cs), vxyz(0, s.radius_y, 0, s.center.cs), s.radius_x/s.radius_y))
   end
-
+=#
 
 backend_surface_polygon(b::BLR, vs::Locs) =
-  @remote(b, SurfaceClosedPolyLine(vs))
+  @remote(b, mesh(vs, [], [collect(0:length(vs)-1)], default_material))
+
+#=
 realize(b::BLR, s::Surface) =
   let #ids = map(r->@remote(b, NurbSurfaceFrom(r)), @remote(b, SurfaceFromCurves(collect_ref(s.frontier))))
       ids = @remote(b, SurfaceFromCurves(collect_ref(s.frontier)))
@@ -459,7 +485,7 @@ backend_map_division(b::BLR, f::Function, s::Shape1D, n::Int) =
       frames = rotation_minimizing_frames(@remote(b, CurveFrameAt(r, t1)), ps, ts)
     map(f, frames)
   end
-
+=#
 #=
 rotation_minimizing_frames(u0, xs, ts) =
   let ri = in_world(vy(1, u0.cs)),
@@ -488,7 +514,7 @@ rotation_minimizing_frames(u0, xs, ts) =
 
 #
 
-
+#=
 backend_surface_domain(b::BLR, s::Shape2D) =
     tuple(@remote(b, SurfaceDomain(ref(s).value))...)
 
@@ -521,7 +547,6 @@ realize(b::BLR, s::Text) =
   @remote(b, Text(
     s.str, s.corner, vx(1, s.corner.cs), vy(1, s.corner.cs), s.height))
 
-backend_sphere(b::BLR, c::Loc, r::Real) = @remote(b, sphere(c, r))
 realize(b::BLR, s::Torus) =
   @remote(b, Torus(s.center, vz(1, s.center.cs), s.re, s.ri))
 
@@ -538,8 +563,6 @@ realize(b::BLR, s::Cone) =
   @remote(b, Cone(add_z(s.cb, s.h), s.r, s.cb))
 realize(b::BLR, s::ConeFrustum) =
   @remote(b, ConeFrustum(s.cb, s.rb, s.cb + vz(s.h, s.cb.cs), s.rt))
-backend_cylinder(b::BLR, cb::Loc, r::Real, h::Real) =
-  @remote(b, cylinder(cb, r, add_z(cb, h)))
 
 backend_extrusion(b::BLR, s::Shape, v::Vec) =
     and_mark_deleted(b,
@@ -590,16 +613,16 @@ backend_loft_curve_point(b::BLR, profile::Shape, point::Shape) =
 backend_loft_surface_point(b::BLR, profile::Shape, point::Shape) =
     backend_loft_curve_point(b, profile, point)
 
-unite_ref(b::BLR, r0::BLRNativeRef, r1::BLRNativeRef) =
+unite_ref(b::BLR, r0::BLRRef, r1::BLRRef) =
     ensure_ref(b, @remote(b, Unite(r0.value, r1.value)))
 
-intersect_ref(b::BLR, r0::BLRNativeRef, r1::BLRNativeRef) =
+intersect_ref(b::BLR, r0::BLRRef, r1::BLRRef) =
     ensure_ref(b, @remote(b, Intersect(r0.value, r1.value)))
 
-subtract_ref(b::BLR, r0::BLRNativeRef, r1::BLRNativeRef) =
+subtract_ref(b::BLR, r0::BLRRef, r1::BLRRef) =
     ensure_ref(b, @remote(b, Subtract(r0.value, r1.value)))
 
-slice_ref(b::BLR, r::BLRNativeRef, p::Loc, v::Vec) =
+slice_ref(b::BLR, r::BLRRef, p::Loc, v::Vec) =
     (@remote(b, Slice(r.value, p, v)); r)
 
 slice_ref(b::BLR, r::BLRUnionRef, p::Loc, v::Vec) =
@@ -726,7 +749,7 @@ backend_slab(b::BLR, profile, holes, thickness, family) =
       holes_bodies = map(slab, holes)
     foldl((r0, r1)->subtract_ref(b, r0, r1), holes_bodies, init=main_body)
   end
-
+=#
 #=
 realize_beam_profile(b::BLR, s::Union{Beam,FreeColumn,Column}, profile::CircularPath, cb::Loc, length::Real) =
   @remote(b, Cylinder(cb, profile.radius, add_z(cb, length)))
@@ -748,7 +771,7 @@ realize_beam_profile(b::BLR, s::FreeColumn, profile::RectangularPath, cb::Loc, l
     @remote(b, CenteredBox(o, profile.dx, profile.dy, length))
   end
 =#
-
+#=
 backend_wall(b::BLR, path, height, l_thickness, r_thickness, family) =
   @remote(b,
     Thicken(@remote(b,
@@ -764,30 +787,35 @@ backend_panel(b::BLR, bot::Locs, top::Locs, family) =
 backend_bounding_box(b::BLR, shapes::Shapes) =
   @remote(b, BoundingBox(collect_ref(shapes)))
 
-backend_set_view(b::BLR, camera::Loc, target::Loc, lens::Real, aperture::Real) =
-  @remote(b, View(camera, target, lens))
+=#
 
-backend_get_view(b::BLR) =
-  @remote(b, ViewCamera()), @remote(b, ViewTarget()), @remote(b, ViewLens())
+KhepriBase.b_set_view(b::BLR, camera::Loc, target::Loc, lens::Real, aperture::Real) =
+  begin
+  	@remote(b, set_view(camera, target, lens))
+  	@remote(b, set_camera_view(camera, target, lens))
+  end
+
+KhepriBase.b_get_view(b::BLR) =
+  @remote(b, get_view())
 
 backend_zoom_extents(b::BLR) = @remote(b, ZoomExtents())
 
 backend_view_top(b::BLR) = @remote(b, ViewTop())
+
+#=
 
 backend_realistic_sky(b::BLR, date, latitude, longitude, meridian, turbidity, withsun) =
   @remote(b, SetSkyFromDateLocation(year(date), month(date), day(date),
                                     hour(date), minute(date),
                                     latitude, longitude, meridian))
 
+=#
+KhepriBase.b_delete_ref(b::BLR, r::BLRId) =
+  @remote(b, delete_shape(r))
 
-backend_delete_shapes(b::BLR, shapes::Shapes) =
-  for s in shapes
-    @remote(b, delete_shape(ref(b, s).value))
-  end
-
-backend_delete_all_shapes(b::BLR) =
+KhepriBase.b_delete_all_refs(b::BLR) =
   @remote(b, delete_all_shapes())
-
+#=
 backend_set_length_unit(b::BLR, unit::String) = @remote(b, SetLengthUnit(unit))
 
 # Dimensions
@@ -855,7 +883,7 @@ realize(b::BLR, s::BlockInstance) =
     @remote(b, CreateBlockInstance(
         collect_ref(s.block)[1],
         center_scaled_cs(s.loc, s.scale, s.scale, s.scale)))
-
+=#
 #=
 
 # Manual process
@@ -868,7 +896,7 @@ Khepri.create_block("Foo", [circle(radius=r) for r in 1:10])
 @time for i in 1:1000 Khepri.instantiate_block("Foo", x(i*10), 0) end
 
 =#
-
+#=
 # Lights
 backend_pointlight(b::BLR, loc::Loc, color::RGB, range::Real, intensity::Real) =
   # HACK: Fix this
@@ -885,7 +913,7 @@ backend_ieslight(b::BLR, file::String, loc::Loc, dir::Vec, alpha::Real, beta::Re
 backend_shape_from_ref(b::BLR, r) =
   let c = connection(b),
       code = @remote(b, ShapeCode(r)),
-      ref = DynRefs(b=>BLRNativeRef(r))
+      ref = DynRefs(b=>BLRRef(r))
     if code == 1 # Point
         point(@remote(b, PointPosition(r)),
               ref=ref)
@@ -954,11 +982,11 @@ backend_shape_from_ref(b::BLR, r) =
     end
   end
 #
-
+=#
 #=
 In case we need to realize an Unknown shape, we just copy it
 =#
-
+#=
 realize(b::BLR, s::Unknown) =
     @remote(b, Copy(s.baseref))
 
@@ -1102,24 +1130,19 @@ convert_render_exposure(b::BLR, v::Real) = -4.05*v + 8.8
 #render quality: [-1, +1] -> [+1, +50]
 convert_render_quality(b::BLR, v::Real) = round(Int, 25.5 + 24.5*v)
 
-backend_render_view(b::BLR, path::String) =
-    @remote(b, Render(
-               render_width(), render_height(),
-               path,
-               convert_render_quality(b, render_quality()),
-               convert_render_exposure(b, render_exposure())))
+=#
 
-export mentalray_render_view
-mentalray_render_view(name::String) =
-    let b = current_backend()
-        @remote(b, SetSystemVariableInt("SKYSTATUS", 2)) # skystatus:background-and-illumination
-        @remote(b, Command("._-render P _R $(render_width()) $(render_height()) _yes $(prepare_for_saving_file(render_pathname(name)))\n"))
-    end
+KhepriBase.b_render_view(b::BLR, path::String) =
+  let (camera, target, lens) = @remote(b, get_view())
+    @remote(b, set_camera_view(camera, target, lens))
+    @remote(b, set_render_size(render_width(), render_height()))
+    @remote(b, render_to_file(path))
+  	@remote(b, cycles_renderer(100, true, false, false))
+  end
 
-backend_save_as(b::BLR, pathname::String, format::String) =
-    @remote(b, SaveAs(pathname, format))
-
+#=
 
 export blender_command
 blender_command(s::String) =
   @remote(blender, Command("$(s)\n"))
+=#
