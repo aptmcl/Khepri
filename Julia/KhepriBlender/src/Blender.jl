@@ -123,16 +123,19 @@ def sphere(center:Point3d, radius:float, mat:MatId)->Id:
 def cone_frustum(b:Point3d, br:float, t:Point3d, tr:float, bmat:MatId, tmat:MatId, smat:MatId)->Id:
 def box(p:Point3d, vx:Vector3d, vy:Vector3d, dx:float, dy:float, dz:float, mat:MatId)->Id:
 def text(txt:str, p:Point3d, vx:Vector3d, vy:Vector3d, size:float)->Id:
-def set_view(camera:Point3d, target:Point3d, lens:float)->None:
-def get_view()->Tuple[Point3d, Point3d, float]:
-def set_camera_view(camera:Point3d, target:Point3d, lens:float)->None:
 def area_light(p:Point3d, v:Vector3d, size:float, color:RGBA, strength:float)->Id:
 def sun_light(p:Point3d, v:Vector3d)->Id:
 def light(p:Point3d, type:str)->Id:
 def camera_from_view()->None:
+def set_view(camera:Point3d, target:Point3d, lens:float)->None:
+def get_view()->Tuple[Point3d, Point3d, float]:
+def set_camera_view(camera:Point3d, target:Point3d, lens:float)->None:
 def set_render_size(width:int, height:int)->None:
-def render_to_file(filepath:str)->None:
+def set_render_path(filepath:str)->None:
+def default_renderer()->None:
 def cycles_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool)->None:
+def set_sun(latitude:float, longitude:float, elevation:float, year:int, month:int, day:int, time:float, UTC_zone:float, use_daylight_savings:bool)->None:
+def set_sky(turbidity:float)->None:
 """
 
 abstract type BLRKey end
@@ -148,33 +151,33 @@ const BLR = SocketBackend{BLRKey, BLRId}
 
 create_blender_connection() =
   let port = blender_port,
-		  backend = "Blender"
-		for i in 1:10
-    	try
+	  backend = "Blender"
+	for i in 1:10
+      try
       	return connect(port)
       catch e
         if i == 1
-					@info("Starting $(backend).")
-  				start_blender()
+		  @info("Starting $(backend).")
+  			start_blender()
         	sleep(1)
-				elseif i == 9
+		elseif i == 9
           throw(e)
-				else
-					sleep(1)
+		else
+		  sleep(1)
         end
       end
     end
-	end
+  end
 
 #const
 blender = BLR(LazyParameter(TCPSocket, create_blender_connection), blender_api)
 
-backend_name(::BLR) = "Blender"
+KhepriBase.backend_name(::BLR) = "Blender"
 KhepriBase.has_boolean_ops(::Type{BLR}) = HasBooleanOps{false}()
 
 
-backend(::BLRRef) = blender
-void_ref(b::BLR) = BLRRef(-1)
+KhepriBase.backend(::BLRRef) = blender
+KhepriBase.void_ref(b::BLR) = BLRRef(-1)
 
 # Primitives
 KhepriBase.b_trig(b::BLR, p1, p2, p3, mat) =
@@ -220,8 +223,6 @@ KhepriBase.b_sphere(b::BLR, c, r, mat) =
 
 KhepriBase.b_get_material(b::BLR, ref) =
   get_blender_material(b, ref)
-
-get_blender_material(b, ref::Nothing) = void_ref(b)
 
 #=
 Important source of materials:
@@ -416,8 +417,6 @@ realize(b::BLR, s::Rectangle) =
      add_x(s.corner, s.dx),
      add_xy(s.corner, s.dx, s.dy),
      add_y(s.corner, s.dy)]))
-realize(b::BLR, s::SurfaceCircle) =
-  @remote(b, SurfaceCircle(s.center, vz(1, s.center.cs), s.radius))
 realize(b::BLR, s::SurfaceArc) =
     #@remote(b, SurfaceArc(s.center, vz(1, s.center.cs), s.radius, s.start_angle, s.start_angle + s.amplitude))
     if s.radius == 0
@@ -802,19 +801,18 @@ backend_zoom_extents(b::BLR) = @remote(b, ZoomExtents())
 
 backend_view_top(b::BLR) = @remote(b, ViewTop())
 
-#=
+KhepriBase.b_realistic_sky(b::BLR, date, latitude, longitude, elevation, meridian, turbidity, withsun) =
+  begin
+	@remote(b, set_sun(latitude, longitude, elevation, year(date), month(date), day(date), hour(date)+minute(date)/60, meridian, false))
+	@remote(b, set_sky(turbidity)) #Add withsun
+  end
 
-backend_realistic_sky(b::BLR, date, latitude, longitude, meridian, turbidity, withsun) =
-  @remote(b, SetSkyFromDateLocation(year(date), month(date), day(date),
-                                    hour(date), minute(date),
-                                    latitude, longitude, meridian))
-
-=#
 KhepriBase.b_delete_ref(b::BLR, r::BLRId) =
   @remote(b, delete_shape(r))
 
 KhepriBase.b_delete_all_refs(b::BLR) =
   @remote(b, delete_all_shapes())
+
 #=
 backend_set_length_unit(b::BLR, unit::String) = @remote(b, SetLengthUnit(unit))
 
@@ -1136,8 +1134,8 @@ KhepriBase.b_render_view(b::BLR, path::String) =
   let (camera, target, lens) = @remote(b, get_view())
     @remote(b, set_camera_view(camera, target, lens))
     @remote(b, set_render_size(render_width(), render_height()))
-    @remote(b, render_to_file(path))
-  	@remote(b, cycles_renderer(100, true, false, false))
+    @remote(b, set_render_path(path))
+  	@remote(b, cycles_renderer(200, true, false, false))
   end
 
 #=
