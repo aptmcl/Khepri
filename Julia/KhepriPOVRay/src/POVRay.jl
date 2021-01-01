@@ -7,8 +7,7 @@ so that realistic skies can be used
 =#
 export POVRay,
        povray,
-       povray_material,
-       default_povray_material
+       povray_material
 
 # We will use MIME types to encode for POVRay
 const MIMEPOVRay = MIME"text/povray"
@@ -54,10 +53,10 @@ write_povray_object(f::Function, io::IO, type, material, args...) =
       show(io, mime, arg)
     end
     write(io, '\n')
-    if ! isnothing(material)
-      write_povray_material(io, material)
-    end
     let res = f()
+      if ! isnothing(material)
+        write_povray_material(io, material)
+      end
       write(io, "}\n")
       res
     end
@@ -65,10 +64,23 @@ write_povray_object(f::Function, io::IO, type, material, args...) =
 
 write_povray_object(io::IO, type, material, args...) =
   write_povray_object(io, type, material, args...) do
+    -1 # Default id
   end
 
 write_povray_value(io::IO, value::Any) =
   show(io, MIMEPOVRay(), value)
+
+write_povray_values(io::IO, values) =
+  let first = true
+    for value in values
+      if !first
+        print(io, ", ")
+      else
+        first = false
+      end
+      write_povray_value(io, value)
+    end
+  end
 
 write_povray_param(io::IO, name::String, value::Any) =
   begin
@@ -78,16 +90,9 @@ write_povray_param(io::IO, name::String, value::Any) =
   end
 
 write_povray_call(io::IO, name::String, values...) =
-  let first = true
+  begin
     write(io, "  ", name, "(")
-    for value in values
-      if !first
-        print(io, ", ")
-      else
-        first = false
-      end
-      write_povray_value(io, value)
-    end
+    write_povray_values(io, values)
     write(io, ")\n")
   end
 
@@ -119,6 +124,13 @@ write_povray_camera(io::IO, camera, target, lens) =
 write_povray_pointlight(io::IO, location, color) =
   write_povray_object(io, "light_source", nothing, location, color)
 
+write_povray_polygon(io::IO, mat, vs) =
+  write_povray_object(io, "polygon", mat, length(vs)+1, vs..., vs[1])
+
+write_povray_polygons(io::IO, mat, vss) =
+  write_povray_object(io, "polygon", mat,
+    mapreduce(length, +, vss) + length(vss),
+    mapreduce(vs->[vs..., vs[1]], vcat, vss)...)
 
 #=
 struct POVRayPigment
@@ -314,8 +326,6 @@ const povray_neutral =
   povray_definition("Material", "texture",
     "{ pigment { color rgb 0.3 } finish { reflection 0 ambient 0 }}")
 
-const default_povray_material = Parameter{POVRayMaterial}(povray_neutral)
-
 povray_material(name::String;
                 gray::Real=0.3,
                 red::Real=gray, green::Real=gray, blue::Real=gray,
@@ -467,12 +477,11 @@ sky_sphere {
 ####################################################
 abstract type POVRayKey end
 const POVRayId = Int
-const POVRayNativeRef = NativeRef{POVRayKey, POVRayId}
+const POVRayRef = NativeRef{POVRayKey, POVRayId}
 
 mutable struct POVRayBackend{K,T} <: LazyBackend{K,T}
   shapes::Shapes
-  shape_material::Dict{Shape,POVRayMaterial}
-  materials::Dict{POVRayMaterial,POVRayMaterial}
+  materials::Vector{POVRayMaterial}
   sky::String
   ground::String
   buffer::LazyParameter{IOBuffer}
@@ -491,12 +500,9 @@ backend_name(::POVRay) = "POVRay"
 # not have boolean operations at the level of references
 has_boolean_ops(::Type{POVRay}) = HasBooleanOps{false}()
 
-
-# In POVRay, everytime we save a shape, we attach the default_povray_material
 save_shape!(b::POVRay, s::Shape) =
   begin
     prepend!(b.shapes, [s])
-    b.shape_material[s] = default_povray_material()
     s
   end
 
@@ -504,12 +510,11 @@ save_shape!(b::POVRay, s::Shape) =
 The POVRay backend cannot realize shapes immediately, only when requested.
 =#
 
-void_ref(b::POVRay) = POVRayNativeRef(-1)
+void_ref(b::POVRay) = POVRayRef(-1)
 
 const povray =
   POVRay(Shape[],
-         Dict{Shape,POVRayMaterial}(),
-         Dict{POVRayMaterial,POVRayMaterial}(),
+         POVRayMaterial[],
          povray_realistic_sky_string(DateTime(2020, 9, 21, 10, 0, 0), 39, 9, 0, 5, true),
          povray_ground_string(z(0), rgb(0.8,0.8,0.8)),
          LazyParameter(IOBuffer, IOBuffer),
@@ -520,21 +525,99 @@ const povray =
          0)
 
 buffer(b::POVRay) = b.buffer()
-get_material(b::POVRay, key) = get!(b.materials, key, key)
-get_material(b::POVRay, s::Shape) = get_material(b, get(b.shape_material, s, default_povray_material()))
+pov_material(b, mat) = b.materials[mat]
 
-#
+KhepriBase.b_trig(b::POVRay, p1, p2, p3, mat) =
+  write_povray_object(buffer(b), "triangle", pov_material(b, mat), p1, p2, p3)
 
-backend_set_view(b::POVRay, camera::Loc, target::Loc, lens::Real, aperture::Real) =
+KhepriBase.b_quad(b::POVRay, p1, p2, p3, p4, mat) =
+  write_povray_object(buffer(b), "polygon", pov_material(b, mat), 5, p1, p2, p3, p4, p1)
+
+KhepriBase.b_surface_polygon(b::POVRay, ps, mat) =
+  write_povray_object(buffer(b), "polygon", pov_material(b, mat), length(ps) + 1, ps..., ps[1])
+
+KhepriBase.b_surface_polygon_with_holes(b::POVRay, ps, qss, mat) =
+  let vss = [ps, qss...]
+    write_povray_object(buffer(b), "polygon", pov_material(b, mat),
+      mapreduce(length, +, vss) + length(vss),
+      mapreduce(vs->[vs..., vs[1]], vcat, vss)...)
+  end
+
+KhepriBase.b_surface_circle(b::POVRay, c, r, mat) =
+  	write_povray_object(buffer(b), "disc", pov_material(b, mat), c, uvz(c.cs), r)
+
+
+KhepriBase.b_cylinder(b::POVRay, cb, r, h, bmat, tmat, smat) =
+  let buf = buffer(b)
+    write_povray_object(buf, "cylinder", pov_material(b, smat), [0,0,0], [0,0,h], r) do
+      write_povray_matrix(buf, cb)
+    end
+    -1
+  end
+
+KhepriBase.b_sphere(b::POVRay, c, r, mat) =
+  write_povray_object(buffer(b), "sphere", pov_material(b, mat), c, r)
+
+# realize(b::POVRay, s::Torus) =
+#   let buf = buffer(b)
+#     write_povray_object(buf, "torus", get_material(b, s), s.re, s.ri) do
+#       write_povray_matrix(buf, s.center)
+#     end
+#     void_ref(b)
+#   end
+
+KhepriBase.b_box(b::POVRay, c, dx, dy, dz, mat) =
+  let buf = buffer(b)
+    write_povray_object(buf, "box", pov_material(b, mat), [0,0,0], [dx, dy, dz]) do
+      write_povray_matrix(buf, c)
+    end
+    -1
+  end
+
+KhepriBase.b_cone(b::POVRay, cb, r, h, bmat, smat) =
+  write_povray_object(buffer(b), "cone", pov_material(b, smat), cb, r, add_z(cb, h), 0)
+
+KhepriBase.b_cone_frustum(b::POVRay, cb, rb, h, rt, bmat, tmat, smat) =
+  write_povray_object(buffer(b), "cone", pov_material(b, smat), cb, rb, add_z(cb, h), rt)
+
+# This works (including the smooth bit) BUT
+# 1. It does not seem to run faster on POVRay than multiple polygons
+# 2. It does not support multiple materials
+# 3. The vector must be strictly perpendicular to the profile
+# So..., I'm disabling it for now.
+# KhepriBase.b_generic_prism(b::POVRay, bs, smooth, v, bmat, tmat, smat) =
+#   let buf = buffer(b),
+#       cs = cs_from_o_vz(bs[1], -v),
+#       ps = [[p.x, p.y] for p in in_cs(bs, cs)]
+#     write_povray_object(buf, "prism", pov_material(b, smat)) do
+#       if smooth
+#         write(buf, "linear_sweep cubic_spline ")
+#         write_povray_values(buf, [0, norm(v), length(ps) + 3, ps[end], ps..., ps[1], ps[2]])
+#       else
+#         write(buf, "linear_sweep linear_spline ")
+#         write_povray_values(buf, [0, norm(v), length(ps) + 1, ps..., ps[1]])
+#       end
+#       write_povray_matrix(buf, u0(rotated_x_cs(cs, -pi/2)))
+#       -1
+#     end
+#   end
+
+# Materials
+
+KhepriBase.b_get_material(b::POVRay, ref) =
+  (push!(b.materials, ref); length(b.materials))
+
+KhepriBase.b_set_view(b::POVRay, camera, target, lens, aperture) =
   begin
     b.camera = camera
     b.target = target
     b.lens = lens
   end
 
-get_view(b::POVRay) =
+KhepriBase.get_view(b::POVRay) =
   b.camera, b.target, b.lens
 
+#=
 ###################################
 
 set_sun(altitude, azimuth, b::POVRay) =
@@ -542,58 +625,26 @@ set_sun(altitude, azimuth, b::POVRay) =
     b.altitude = altitude
     b.azimuth = azimuth
   end
-
-backend_realistic_sky(b::POVRay, date, latitude, longitude, meridian, turbidity, withsun) =
+=#
+KhepriBase.b_realistic_sky(b::POVRay, date, latitude, longitude, elevation, meridian, turbidity, withsun) =
   b.sky = povray_realistic_sky_string(date, latitude, longitude, meridian, turbidity, withsun)
 
-backend_realistic_sky(b::POVRay, altitude, azimuth, turbidity, withsun) =
-  b.sky = povray_realistic_sky_string(altitude, azimuth, turbidity, withsun)
+# backend_realistic_sky(b::POVRay, altitude, azimuth, turbidity, withsun) =
+#   b.sky = povray_realistic_sky_string(altitude, azimuth, turbidity, withsun)
 
 backend_ground(b::POVRay, level::Loc, color::RGB) =
   b.ground = povray_ground_string(level, color)
 
-#
-backend_delete_all_shapes(b::POVRay) =
-  (empty!(b.shapes); empty!(b.materials); empty!(b.shape_material); nothing)
+b_delete_all_refs(b::POVRay) =
+  empty!(b.shapes)
 
-backend_delete_shape(b::POVRay, shape::Shape) =
-  begin
-    b.shapes = filter(s->s!== shape, b.shapes)
-    delete!(b.shape_material, shape)
-  end
+b_delete_shape(b::POVRay, shape::Shape) =
+  (b.shapes = filter(s->s!== shape, b.shapes); nothing)
 
-backend_delete_shapes(b::POVRay, shapes::Shapes) =
-  begin
-    b.shapes = filter(s->isnothing(findfirst(s1->s1===s, shapes)), b.shapes)
-    for s in shapes delete!(b.shape_material, s) end
-  end
+b_delete_shapes(b::POVRay, shapes::Shapes) =
+  (b.shapes = filter(s->isnothing(findfirst(s1->s1===s, shapes)), b.shapes); nothing)
 
-backend_surface_polygon(b::POVRay, vs::Locs) =
-  let buf = buffer(b),
-      mat = get_material(b, default_povray_material())
-    write_povray_polygon(buf, mat, vs)
-    void_ref(b)
-  end
-
-backend_sphere(b::POVRay, c::Loc, r::Real) =
-  let mat = get_material(b, default_povray_material())
-    write_povray_object(buffer(b), "sphere", mat, c, r)
-    void_ref(b)
-  end
-realize(b::POVRay, s::Sphere) =
-  let mat = get_material(b, s)
-    write_povray_object(buffer(b), "sphere", mat, s.center, s.radius)
-    void_ref(b)
-  end
-
-realize(b::POVRay, s::Torus) =
-  let buf = buffer(b)
-    write_povray_object(buf, "torus", get_material(b, s), s.re, s.ri) do
-      write_povray_matrix(buf, s.center)
-    end
-    void_ref(b)
-  end
-
+#=
 #=
 realize(b::ACAD, s::Cuboid) =
   ACADIrregularPyramidFrustum(connection(b), [s.b0, s.b1, s.b2, s.b3], [s.t0, s.t1, s.t2, s.t3])
@@ -624,50 +675,6 @@ realize(b::ACAD, s::IrregularPrism) =
 realize(b::ACAD, s::RightCuboid) =
   ACADCenteredBox(connection(b), s.cb, s.width, s.height, s.h)
 =#
-
-realize(b::POVRay, s::Box) =
-  let buf = buffer(b),
-      mat = get_material(b, s)
-    write_povray_object(buf, "box", mat, [0,0,0], [s.dx, s.dy, s.dz]) do
-      write_povray_matrix(buf, s.c)
-    end
-    void_ref(b)
-  end
-
-realize(b::POVRay, s::Cone) =
-  let buf = buffer(b),
-      bot = s.cb,
-      top = s.cb + vz(s.h, s.cb.cs),
-      mat = get_material(b, s)
-    write_povray_object(buf, "cone", mat, bot, s.r, top, 0)
-    void_ref(b)
-  end
-
-realize(b::POVRay, s::ConeFrustum) =
-  let buf = buffer(b),
-      bot = s.cb,
-      top = s.cb + vz(s.h, s.cb.cs),
-      mat = get_material(b, s)
-    write_povray_object(buf, "cone", mat, bot, s.rb, top, s.rt)
-    void_ref(b)
-  end
-
-realize(b::POVRay, s::Cylinder) =
-  let buf = buffer(b),
-      mat = get_material(b, s)
-    write_povray_object(buf, "cylinder", mat, [0,0,0], [0,0,s.h], s.r) do
-      write_povray_matrix(buf, s.cb)
-    end
-    void_ref(b)
-  end
-backend_cylinder(b::POVRay, cb::Loc, r::Real, h::Real) =
-  let buf = buffer(b),
-      mat = get_material(b, default_povray_material())
-    write_povray_object(buf, "cylinder", mat, [0,0,0], [0,0,h], r) do
-      write_povray_matrix(buf, cb)
-    end
-    void_ref(b)
-  end
 
 
 write_povray_mesh(buf::IO, mat, points, closed_u, closed_v, smooth_u, smooth_v) =
@@ -851,14 +858,6 @@ backend_surface_polygon(b::POVRay, mat, vs::Locs, acw=true) =
     write_povray_polygon(buf, mat, acw ? vs : reverse(vs))
   end
 
-write_povray_polygon(io::IO, mat, vs) =
-  write_povray_object(io, "polygon", mat, length(vs)+1, vs..., vs[1])
-
-write_povray_polygons(io::IO, mat, vss) =
-  write_povray_object(io, "polygon", mat,
-    mapreduce(length, +, vss) + length(vss),
-    mapreduce(vs->[vs..., vs[1]], vcat, vss)...)
-
 # Polygons with holes need PathSets in POVRay
 
 subtract_paths(b::POVRay, c_r_w_path::PathSet, c_l_w_path::PathSet, c_r_op_path, c_l_op_path) =
@@ -893,11 +892,12 @@ const POVRayWallFamily = BackendWallFamily{POVRayMaterial}
 povray_wall_family(right::POVRayMaterial, left::POVRayMaterial=right) =
   POVRayWallFamily(right, left)
 
-export povray_material_family,
-       povray_slab_family,
-       povray_roof_family,
-       povray_wall_family,
-       default_povray_material
+=#
+export povray_family_materials
+
+povray_family_materials(m1, m2=m1, m3=m2, m4=m3) = (materials=(m1, m2, m3, m4), )
+
+export povray_stone, povray_metal, povray_wood, povray_glass
 
 povray_stone = povray_include("stones2.inc", "texture", "T_Stone35")
 povray_metal = povray_include("textures.inc", "texture", "Chrome_Metal")
@@ -905,7 +905,7 @@ povray_metal = povray_include("textures.inc", "texture", "Chrome_Metal")
 povray_wood = povray_include("woods.inc", "texture", "T_Wood10")
 povray_glass = povray_include("textures.inc", "material", "M_Glass")
 
-export povray_stone, povray_metal, povray_wood, povray_glass
+#=
 
 use_family_in_layer(b::POVRay) = true
 
@@ -956,6 +956,7 @@ realize(b::POVRay, s::Beam) =
 =#
 realize(b::POVRay, s::Union{Door, Window}) =
   void_ref(b)
+=#
 
 ####################################################
 
@@ -979,9 +980,9 @@ export_to_povray(path::String, b::POVRay=current_backend()) =
       write(out, """#include "transforms.inc"\n""")
       # write the ground
       write(out, b.ground)
-      # write materials
-      for (k,v) in b.materials
-        write_povray_definition(out, k)
+      # write materials (removing duplicate includes)
+      for m in unique(m->m isa POVRayInclude ? m.filename : m, b.materials)
+        write_povray_definition(out, m)
       end
       # write the objects
       write(out, String(take!(buf)))
@@ -1008,7 +1009,7 @@ const povray_folder = Parameter("C:/Program Files/POV-Ray/v3.7/bin/")
 povray_cmd(cmd::AbstractString="pvengine64") = povray_folder() * cmd
 
 ##########################################
-backend_render_view(b::POVRay, path::String) =
+KhepriBase.b_render_view(b::POVRay, path::String) =
   let povpath = path_replace_suffix(path, ".pov")
     @info povpath
     export_to_povray(povpath)
