@@ -108,6 +108,9 @@ def delete_shape(name:Id)->None:
 def get_material(name:str)->MatId:
 def get_blenderkit_material(ref:str)->MatId:
 def new_material(name:str, diffuse_color:RGBA, specularity:float, roughness:float)->MatId:
+def line(ps:List[Point3d], closed:bool, mat:MatId)->Id:
+def spline(ps:List[Point3d], closed:bool, mat:MatId)->Id:
+def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
 def mesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], mat:MatId)->Id:
 def objmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat:MatId)->Id:
 def trig(p1:Point3d, p2:Point3d, p3:Point3d, mat:MatId)->Id:
@@ -150,27 +153,9 @@ const BLRSubtractionRef = SubtractionRef{BLRKey, BLRId}
 const BLR = SocketBackend{BLRKey, BLRId}
 
 create_blender_connection() =
-  let port = blender_port,
-	  backend = "Blender"
-	for i in 1:10
-      try
-      	return connect(port)
-      catch e
-        if i == 1
-		  @info("Starting $(backend).")
-  			start_blender()
-        	sleep(1)
-		elseif i == 9
-          throw(e)
-		else
-		  sleep(1)
-        end
-      end
-    end
-  end
+  start_and_connect_to("Blender", start_blender, blender_port)
 
-#const
-blender = BLR(LazyParameter(TCPSocket, create_blender_connection), blender_api)
+const blender = BLR(LazyParameter(TCPSocket, create_blender_connection), blender_api)
 
 KhepriBase.backend_name(::BLR) = "Blender"
 KhepriBase.has_boolean_ops(::Type{BLR}) = HasBooleanOps{false}()
@@ -180,6 +165,16 @@ KhepriBase.backend(::BLRRef) = blender
 KhepriBase.void_ref(b::BLR) = BLRRef(-1)
 
 # Primitives
+
+KhepriBase.b_line(b::BLR, ps, mat) =
+  @remote(b, line(ps, false, mat))
+
+KhepriBase.b_polygon(b::BLR, ps, mat) =
+	@remote(b, line(ps, true, mat))
+
+KhepriBase.b_nurbs_curve(b::BLR, order, ps, knots, weights, closed, mat) =
+  @remote(b, nurbs(order, ps, closed, mat))
+
 KhepriBase.b_trig(b::BLR, p1, p2, p3, mat) =
   @remote(b, trig(p1, p2, p3, mat))
 
@@ -208,10 +203,10 @@ KhepriBase.b_cone(b::BLR, cb, r, h, bmat, smat) =
   @remote(b, cone_frustum(cb, r, add_z(cb, h), 0, bmat, bmat, smat))
 
 KhepriBase.b_cone_frustum(b::BLR, cb, rb, h, rt, bmat, tmat, smat) =
-    @remote(b, cone_frustum(cb, rb, add_z(cb, h), rt, bmat, tmat, smat))
+  @remote(b, cone_frustum(cb, rb, add_z(cb, h), rt, bmat, tmat, smat))
 
-KhepriBase.b_cylinder(b::BLR, cb, r, h, mat) =
-  @remote(b, cone_frustum(cb, r, add_z(cb, h), r, mat, mat, mat))
+KhepriBase.b_cylinder(b::BLR, cb, r, h, bmat, tmat, smat) =
+  @remote(b, cone_frustum(cb, r, add_z(cb, h), r, bmat, tmat, smat))
 
 KhepriBase.b_cuboid(b::BLR, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat) =
   @remote(b, cuboid([pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3], mat))
