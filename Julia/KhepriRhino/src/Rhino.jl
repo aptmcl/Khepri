@@ -39,6 +39,10 @@ public void ViewTop()
 public Point3d ViewCamera()
 public Point3d ViewTarget()
 public double ViewLens()
+public string DefaultMaterialsFolder()
+public MatId LoadRenderMaterialFromPath(string path)
+public MatId CreateMaterial(string name, Color diffuse, Color specular, Color ambient, Color emission, Color reflection, double reflectivity, double reflectionGlossiness, double refractionIndex, double transparency)
+public MatId CreateColorMaterial(Color color)
 public Guid Point(Point3d p)
 public Point3d PointPosition(Guid ent)
 public Guid PolyLine(Point3d[] pts)
@@ -54,21 +58,25 @@ public double CircleRadius(RhinoObject obj)
 public Guid Ellipse(Point3d c, Vector3d n, double radiusX, double radiusY)
 public Guid Arc(Point3d c, Vector3d vx, Vector3d vy, double radius, double startAngle, double endAngle)
 public Guid JoinCurves(Guid[] objs)
-public Guid SurfaceCircle(Point3d c, Vector3d n, double r)
+public Guid Mesh(Point3d[] pts, int[][] faces, MatId mat)
+public Guid NGon(Point3d[] pts, Point3d pivot, bool smooth, MatId mat)
+public Guid SurfaceFrom(Guid[] ids, MatId mat)
+public Guid SurfaceFromCurvesPoints(Point3d[][] ptss, bool[] smooths, MatId mat)
+public Guid SurfaceCircle(Point3d c, Vector3d n, double r, MatId mat)
 public Guid SurfaceEllipse(Point3d c, Vector3d n, double radiusX, double radiusY)
-public Guid SurfaceArc(Point3d c, Vector3d vx, Vector3d vy, double radius, double startAngle, double endAngle)
-public Guid SurfaceClosedPolyLine(Point3d[] pts)
-public Guid SurfaceFrom(Guid[] objs)
-public Guid Sphere(Point3d c, double r)
-public Guid Torus(Point3d c, Vector3d vz, double majorRadius, double minorRadius)
-public Brep Cylinder(Point3d bottom, double radius, Point3d top)
-public Brep Cone(Point3d bottom, double radius, Point3d top)
-public Brep ConeFrustum(Point3d bottom, double bottom_radius, Point3d top, double top_radius)
-public Brep Box(Point3d corner, Vector3d vx, Vector3d vy, double dx, double dy, double dz)
-public Brep XYCenteredBox(Point3d corner, Vector3d vx, Vector3d vy, double dx, double dy, double dz)
-public Brep IrregularPyramid(Point3d[] pts, Point3d apex)
-public Brep IrregularPyramidFrustum(Point3d[] bpts, Point3d[] tpts)
-public Guid SurfaceFromGrid(int nU, int nV, Point3d[] pts, bool closedU, bool closedV, int degreeU, int degreeV)
+public Guid SurfaceArc(Point3d c, Vector3d vx, Vector3d vy, double radius, double startAngle, double endAngle, MatId mat)
+public Guid SurfaceClosedPolyLine(Point3d[] pts, MatId mat)
+public Guid Sphere(Point3d c, double r, MatId mat)
+public Guid Torus(Point3d c, Vector3d vz, double majorRadius, double minorRadius, MatId mat)
+public Guid Cylinder(Point3d bottom, double radius, Point3d top, MatId mat)
+public Guid Cone(Point3d bottom, double radius, Point3d top, MatId mat)
+public Guid ConeFrustum(Point3d bottom, double bottom_radius, Point3d top, double top_radius, MatId mat)
+public Guid Box(Point3d corner, Vector3d vx, Vector3d vy, double dx, double dy, double dz, MatId mat)
+public Guid XYCenteredBox(Point3d corner, Vector3d vx, Vector3d vy, double dx, double dy, double dz, MatId mat)
+public Guid IrregularPyramid(Point3d[] pts, Point3d apex, MatId mat)
+public Guid IrregularPyramidFrustum(Point3d[] bpts, Point3d[] tpts, MatId mat)
+public Guid PrismWithHoles(Point3d[][] ptss, bool[] smooths, Vector3d dir, MatId mat)
+public Guid SurfaceFromGrid(int nU, int nV, Point3d[] pts, bool closedU, bool closedV, int degreeU, int degreeV, MatId mat)
 public Brep[] Thicken(RhinoObject obj, double thickness)
 public double[] CurveDomain(RhinoObject obj)
 public double CurveLength(RhinoObject obj)
@@ -138,6 +146,7 @@ public Guid[] GetShape(string prompt)
 public Guid[] GetShapes(string prompt)
 public Guid[] GetAllShapes()
 public Guid[] GetAllShapesInLayer(String name)
+public void SetSun(DateTime dt, double latitude, double longitude, int meridian)
 """
 #=
 public byte Sync()
@@ -192,135 +201,250 @@ const RHUnionRef = UnionRef{RHKey, RHId}
 const RHSubtractionRef = SubtractionRef{RHKey, RHId}
 const RH = SocketBackend{RHKey, RHId}
 
-void_ref(b::RH) = RHNativeRef(zeros(UInt8, 16))
+KhepriBase.void_ref(::RH) = 0 % UInt128
 
-create_RH_connection() = create_backend_connection("Rhinoceros", rhino_port)
+create_RH_connection() = connect_to("Rhinoceros", rhino_port)
 
 const rhino = RH(LazyParameter(TCPSocket, create_RH_connection), rhino_api)
 
-# This should not be done automatically
-backend_name(b::RH) = "Rhino"
+KhepriBase.backend_name(b::RH) = "Rhino"
+KhepriBase.has_boolean_ops(::Type{RH}) = HasBooleanOps{false}()
+KhepriBase.backend(::RHRef) = rhino
+
+# Primitives
+KhepriBase.b_point(b::RH, p) =
+  @remote(b, Point(p))
+
+KhepriBase.b_line(b::RH, ps, mat) =
+  @remote(b, PolyLine(ps))
+
+KhepriBase.b_polygon(b::RH, ps, mat) =
+  @remote(b, ClosedPolyLine(ps))
+
+KhepriBase.b_spline(b::RH, ps, v0, v1, interpolator, mat) =
+  if (v0 == false) && (v1 == false)
+    @remote(b, Spline(ps))
+  elseif (v0 != false) && (v1 != false)
+    @remote(b, SplineTangents(ps, v0, v1))
+  else
+    @remote(b, SplineTangents(ps,
+                 v0 == false ? ps[2]-ps[1] : v0,
+                 v1 == false ? ps[end-1]-ps[end] : v1))
+  end
+
+KhepriBase.b_closed_spline(b::RH, ps, mat) =
+  @remote(b, ClosedSpline(ps))
+
+#b_nurbs_curve(b::Backend{K,T}, order, ps, knots, weights, closed, mat) where {K,T} =
+#  b_line(b, ps, closed, mat)
+
+KhepriBase.b_circle(b::RH, c, r, mat) =
+  @remote(b, Circle(c, vz(1, c.cs), r))
+
+KhepriBase.b_arc(b::RH, c, r, α, Δα, mat) =
+  if r == 0
+    @remote(b, Point(c))
+  elseif Δα == 0
+    @remote(b, Point(c + vpol(r, α, c.cs)))
+  elseif abs(Δα) >= 2*pi
+    @remote(b, Circle(c, vz(1, c.cs), r))
+  else
+	let β = α + amplitude
+  	  if β > α
+  	  	@remote(b, Arc(c, vx(1, c.cs), vy(1, c.cs), r, α, β))
+  	  else
+  	  	@remote(b, Arc(c, vx(1, c.cs), vy(1, c.cs), r, β, α))
+  	  end
+    end
+  end
+
+b_ellipse() =
+  @remote(b, Ellipse(s.center, vz(1, s.center.cs), s.radius_x, s.radius_y))
+
+KhepriBase.b_trig(b::RH, p1, p2, p3, mat) =
+  @remote(b, Mesh([p1, p2, p3], [[0, 1, 2, 2]], mat))
+
+KhepriBase.b_quad(b::RH, p1, p2, p3, p4, mat) =
+ 	@remote(b, Mesh([p1, p2, p3, p4], [[0, 1, 2, 2], [0, 2, 3, 3]], mat))
+
+KhepriBase.b_ngon(b::RH, ps, pivot, smooth, mat) =
+ 	@remote(b, NGon(ps, pivot, smooth, mat))
+
+# b_quad_strip(b::Backend{K,T}, ps, qs, smooth, mat) where {K,T} =
+#   [b_quad(b, ps[i], ps[i+1], qs[i+1], qs[i], mat)
+#    for i in 1:size(ps,1)-1]
+#
+# b_quad_strip_closed(b::Backend{K,T}, ps, qs, smooth, mat) where {K,T} =
+#   b_quad_strip(b, [ps..., ps[1]], [qs..., qs[1]], smooth, mat)
+
+############################################################
+# Second tier: surfaces
+
+KhepriBase.b_surface_polygon(b::RH, ps, mat) =
+  @remote(b, SurfaceClosedPolyLine(ps, mat))
+
+KhepriBase.b_surface_polygon_with_holes(b::RH, ps, qss, mat) =
+  @remote(b, SurfaceFromCurvesPoints([ps, qss...], falses(1 + length(qss)), mat))
+
+KhepriBase.b_surface_circle(b::RH, c, r, mat) =
+	@remote(b, SurfaceCircle(c, vz(1, c.cs), r))
+
+KhepriBase.b_surface_arc(b::RH, c, r, α, Δα, mat) =
+  @remote(b, SurfaceArc(c, vx(1, c.cs), vy(1, c.cs), r, α, α + Δα))
+
+# This is wrong, for sure!
+b_surface_ellipse(b::RH, c, rx, ry) =
+   @remote(b, SurfaceEllipse(c, vz(1, c.cs), rx, ry))
+
+############################################################
+# Third tier: solids
+
+#=
+# Each solid can have just one material or multiple materials
+b_generic_pyramid_frustum(b::Backend{K,T}, bs, ts, smooth, bmat, tmat, smat) where {K,T} =
+  [b_surface_polygon(b, reverse(bs), bmat),
+   b_quad_strip_closed(b, bs, ts, smooth, smat),
+   b_surface_polygon(b, ts, tmat)]
+
+b_generic_pyramid_frustum_with_holes(b::Backend{K,T}, bs, ts, smooth, bbs, tts, smooths, bmat, tmat, smat) where {K,T} =
+  [b_surface_polygon_with_holes(b, reverse(bs), bbs, bmat),
+   b_quad_strip_closed(b, bs, ts, smooth, smat),
+   [b_quad_strip_closed(b, bs, ts, smooth, smat)
+    for (bs, ts, smooth) in zip(bbs, tts, smooths)]...,
+   b_surface_polygon_with_holes(b, ts, reverse.(tts), tmat)]
+
+b_generic_pyramid(b::Backend{K,T}, bs, t, smooth, bmat, smat) where {K,T} =
+	[b_surface_polygon(b, reverse(bs), bmat),
+	 b_ngon(b, bs, t, smooth, smat)]
+
+	=#
+KhepriBase.b_generic_prism(b::RH, bs, smooth, v, bmat, tmat, smat) =
+	@remote(b, PrismWithHoles([bs], [smooth], v, tmat))
+
+KhepriBase.b_generic_prism_with_holes(b::RH, bs, smooth, bss, smooths, v, bmat, tmat, smat) =
+  @remote(b, PrismWithHoles([bs, bss...], [smooth, smooths...], v, tmat))
+
+KhepriBase.b_pyramid_frustum(b::RH, bs, ts, bmat, tmat, smat) =
+  @remote(b, IrregularPyramidFrustum(bs, ts, tmat))
+
+KhepriBase.b_pyramid(b::RH, bs, t, bmat, smat) =
+  @remote(b, IrregularPyramid(bs, t, smat))
+
+KhepriBase.b_cylinder(b::RH, c, r, h, bmat, tmat, smat) =
+  @remote(b, Cylinder(c, r, c + vz(h, c.cs), smat))
+
+# b_cuboid(b::Backend{K,T}, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat) where {K,T} =
+#   [b_quad(b, pb3, pb2, pb1, pb0, mat),
+#    b_quad_strip_closed(b, [pb0, pb1, pb2, pb3], [pt0, pt1, pt2, pt3], false, mat),
+#    b_quad(b, pt0, pt1, pt2, pt3, mat)]
+
+KhepriBase.b_box(b::RH, c, dx, dy, dz, mat) =
+  @remote(b, Box(c, vx(1, c.cs), vy(1, c.cs), dx, dy, dz, mat))
+
+KhepriBase.b_sphere(b::RH, c, r, mat) =
+	@remote(b, Sphere(c, r, mat))
+
+KhepriBase.b_cone(b::RH, cb, r, h, bmat, smat) =
+  @remote(b, Cone(add_z(cb, h), r, cb, smat))
+
+KhepriBase.b_cone_frustum(b::RH, cb, rb, h, rt, bmat, tmat, smat) =
+  @remote(b, ConeFrustum(cb, rb, cb + vz(h, cb.cs), rt, smat))
+
+##################################################################
+# Paths and Regions
+#=
+b_surface(b::Backend{K,T}, path::ClosedPath, mat) where {K,T} =
+  b_surface_polygon(b, path_vertices(path), mat)
+
+b_surface(b::Backend{K,T}, region::Region, mat) where {K,T} =
+  b_surface_polygon_with_holes(
+    b,
+    path_vertices(outer_path(region)),
+    path_vertices.(inner_paths(region)),
+    mat)
+
+# In theory, this should be implemented using a loft
+b_path_frustum(b::Backend{K,T}, bpath, tpath, bmat, tmat, smat) where {K,T} =
+  let blength = path_length(bpath),
+	  tlength = path_length(tpath),
+	  n = max(length(path_vertices(bpath)), length(path_vertices(bpath))),
+	  bs = division(bpath, n),
+	  ts = division(tpath, n)
+	  # We should rotate one of the vertices array to minimize the distance
+	  # between corresponding so that they align better.
+	b_generic_pyramid_frustum(
+	  b, bs, ts,
+	  is_smooth_path(bpath) || is_smooth_path(tpath),
+	  bmat, tmat, smat)
+	end
+
+# Extruding a profile
+b_extrude_profile(b::Backend{K,T}, cb, h, profile, mat) where {K,T} =
+  b_extrude_profile(b, cb, h, profile, mat, mat, mat)
+
+b_extrude_profile(b::Backend{K,T}, cb, h, profile, bmat, tmat, smat) where {K,T} =
+  let path = profile
+  	b_generic_prism(
+  	  b,
+  	  path_vertices_on(path, cb),
+  	  is_smooth_path(path),
+      vz(h, cb.cs),
+  	  bmat, tmat, smat)
+  end
+
+b_extrude_profile(b::Backend{K,T}, cb, h, profile::Region, bmat, tmat, smat) where {K,T} =
+  let outer = outer_path(profile),
+      inners = inner_paths(profile)
+    isempty(inners) ?
+      b_generic_prism(b,
+        path_vertices_on(outer, cb),
+        is_smooth_path(outer),
+        vz(h, cb.cs),
+        bmat, tmat, smat) :
+      b_generic_prism_with_holes(b,
+        path_vertices_on(outer, cb),
+        is_smooth_path(outer),
+        path_vertices_on.(inners, cb),
+        is_smooth_path.(inners),
+        vz(h, cb.cs),
+        bmat, tmat, smat)
+  end
+=#
+
+#
+# # Materials
+# To encode materials, we use a Guid but convert it to an int,
+# taking into consideration that Guid(int) = int + 1
+encode(ns::Val{:RH}, t::Val{:MatId}, c::IO, v) =
+  encode(ns, Val(:int), c, v%Int32 - 1)
+decode(ns::Val{:RH}, t::Val{:MatId}, c::IO) =
+  (decode(ns, Val(:int), c) + 1)%Guid
+
+KhepriBase.b_get_material(b::RH, ref) =
+  get_rhino_material(b, ref)
+
+get_rhino_material(b, path::String) =
+  @remote(b, LoadRenderMaterialFromPath(path))
+
+struct RhinoDefaultMaterial
+  name::String
+end
+
+export rhino_default_material
+rhino_default_material = RhinoDefaultMaterial
+
+get_rhino_material(b, mat::RhinoDefaultMaterial) =
+  get_rhino_material(b, joinpath(@remote(b, DefaultMaterialsFolder()), mat.name*".rmtl"))
+
+
+KhepriBase.b_new_material(b::RH, path, color, specularity, roughness, transmissivity, transmitted_specular) =
+  Guid(@remote(b, new_material(path, convert(RGBA, color), specularity, roughness)) + 1)
 
 realize(b::RH, s::EmptyShape) =
   RHEmptyRef()
 realize(b::RH, s::UniversalShape) =
   RHUniversalRef()
 
-backend_stroke(b::RH, path::CircularPath) =
-    @remote(b, Circle(path.center, vz(1, path.center.cs), path.radius))
-backend_stroke(b::RH, path::RectangularPath) =
-    let c = path.corner,
-        dx = path.dx,
-        dy = path.dy
-        @remote(b, ClosedPolyLine([c, add_x(c, dx), add_xy(c, dx, dy), add_y(c, dy)]))
-    end
-backend_stroke(b::RH, path::ArcPath) =
-  backend_stroke_arc(b, path.center, path.radius, path.start_angle, path.amplitude)
-
-backend_stroke(b::RH, path::OpenPolygonalPath) =
-  	@remote(b, PolyLine(path.vertices))
-backend_stroke(b::RH, path::ClosedPolygonalPath) =
-    @remote(b, ClosedPolyLine(path.vertices))
-
-backend_stroke(b::RH, path::OpenSplinePath) =
-  if (path.v0 == false) && (path.v1 == false)
-    #ACADSpline(connection(b), path.vertices)
-    @remote(b, Spline(path.vertices))
-  elseif (path.v0 != false) && (path.v1 != false)
-    @remote(b, SplineTangents(path.vertices, path.v0, path.v1))
-  else
-    @remote(b, SplineTangents(
-                 connection(b),
-                 path.vertices,
-                 path.v0 == false ? path.vertices[2]-path.vertices[1] : path.v0,
-                 path.v1 == false ? path.vertices[end-1]-path.vertices[end] : path.v1))
-  end
-backend_stroke(b::RH, path::ClosedSplinePath) =
-    @remote(b, ClosedSpline(path.vertices))
-backend_fill(b::RH, path::ClosedSplinePath) =
-    backend_fill_curves(b, @remote(b, ClosedSpline(path.vertices)))
-
-backend_stroke_unite(b::RH, refs) = @remote(b, JoinCurves(refs))
-
-#=backend_fill(b::RH, path::ClosedPolygonalPath) =
-    @remote(b, SurfaceClosedPolyLine(path.vertices))
-    backend_fill(b::RH, path::RectangularPath) =
-        let c = path.corner,
-            dx = path.dx,
-            dy = path.dy
-            @remote(b, SurfaceClosedPolyLine([c, add_x(c, dx), add_xy(c, dx, dy), add_y(c, dy)]))
-        end
-backend_fill(b::RH, path::RectangularPath) =
-    let c = path.corner,
-        dx = path.dx,
-        dy = path.dy
-        SurfaceClosedPolyLine(connection(b), [c, add_x(c, dx), add_xy(c, dx, dy), add_y(c, dy)])
-    end
-=#
-
-backend_fill_curves(b::RH, gs::Guids) = @remote(b, SurfaceFrom(gs))
-backend_fill_curves(b::RH, g::Guid) = @remote(b, SurfaceFrom([g]))
-
-backend_stroke_line(b::RH, vs) = @remote(b, PolyLine(vs))
-
-backend_stroke_arc(b::RH, center::Loc, radius::Real, start_angle::Real, amplitude::Real) =
-    let end_angle = start_angle + amplitude
-        if end_angle > start_angle
-            @remote(b, Arc(center, vx(1, center.cs), vy(1, center.cs), radius, start_angle, end_angle))
-        else
-            @remote(b, Arc(center, vx(1, center.cs), vy(1, center.cs), radius, end_angle, start_angle))
-        end
-    end
-
-realize(b::RH, s::Point) =
-  @remote(b, Point(s.position))
-
-realize(b::RH, s::Line) =
-  @remote(b, PolyLine(s.vertices))
-
-realize(b::RH, s::Spline) =
-  if (s.v0 == false) && (s.v1 == false)
-    @remote(b, Spline(s.points))
-  elseif (s.v0 != false) && (s.v1 != false)
-    @remote(b, SplineTangents(s.points, s.v0, s.v1))
-  else
-    @remote(b, SplineTangents(
-                 s.points,
-                 s.v0 == false ? s.points[2]-s.points[1] : s.v0,
-                 s.v1 == false ? s.points[end-1]-s.points[end] : s.v1))
-  end
-
-realize(b::RH, s::ClosedSpline) =
-  @remote(b, ClosedSpline(s.points))
-
-realize(b::RH, s::Circle) =
-  @remote(b, Circle(s.center, vz(1, s.center.cs), s.radius))
-
-realize(b::RH, s::Arc) =
-  if s.radius == 0
-    @remote(b, Point(s.center))
-  elseif s.amplitude == 0
-    @remote(b, Point(s.center + vpol(s.radius, s.start_angle, s.center.cs)))
-  elseif abs(s.amplitude) >= 2*pi
-    @remote(b, Circle(s.center, vz(1, s.center.cs), s.radius))
-  else
-    backend_stroke_arc(b, s.center, s.radius, s.start_angle, s.amplitude)
-  end
-
-realize(b::RH, s::Ellipse) =
-    @remote(b, Ellipse(s.center, vz(1, s.center.cs), s.radius_x, s.radius_y))
-
-realize(b::RH, s::EllipticArc) =
-  error("Finish this")
-
-realize(b::RH, s::Polygon) =
-  @remote(b, ClosedPolyLine(s.vertices))
-
-realize(b::RH, s::RegularPolygon) =
-  @remote(b, ClosedPolyLine(regular_polygon_vertices(s.edges, s.center, s.radius, s.angle, s.inscribed)))
-
-realize(b::RH, s::Rectangle) =
-  @remote(b, ClosedPolyLine([s.corner, add_x(s.corner, s.dx), add_xy(s.corner, s.dx, s.dy), add_y(s.corner, s.dy)]))
 
 backend_map_division(b::RH, f::Function, s::Shape1D, n::Int) =
   let conn = connection(b),
@@ -334,20 +458,6 @@ backend_map_division(b::RH, f::Function, s::Shape1D, n::Int) =
     map(f, frames)
   end
 
-realize(b::RH, s::SurfaceCircle) =
-  @remote(b, SurfaceCircle(s.center, vz(1, s.center.cs), s.radius))
-
-realize(b::RH, s::SurfaceArc) =
-  @remote(b, SurfaceArc(s.center, vx(1, s.center.cs), vy(1, s.center.cs), s.radius, s.start_angle, s.start_angle + s.amplitude))
-
-realize(b::RH, s::SurfaceEllipticArc) =
-  error("Finish this")
-
-realize(b::RH, s::SurfaceEllipse) =
-  @remote(b, SurfaceEllipse(s.center, vz(1, s.center.cs), s.radius_x, s.radius_y))
-
-backend_surface_polygon(b::RH, vs::Locs) =
-  @remote(b, SurfaceClosedPolyLine(vs))
 
 realize(b::RH, s::Surface) =
   let ids = @remote(b, SurfaceFrom(collect_ref(s.frontier)))
@@ -373,28 +483,10 @@ backend_map_division(b::RH, f::Function, s::Shape2D, nu::Int, nv::Int) =
         end
     end
 
-backend_sphere(b::RH, c::Loc, r::Real) =
-  @remote(b, Sphere(c, r))
 realize(b::RH, s::Torus) =
   @remote(b, Torus(s.center, vz(1, s.center.cs), s.re, s.ri))
-backend_pyramid(b::RH, bs::Locs, t::Loc) =
-  @remote(b, IrregularPyramid(bs, t))
-backend_pyramid_frustum(b::RH, bs::Locs, ts::Locs) =
-  @remote(b, IrregularPyramidFrustum(bs, ts))
 backend_right_cuboid(b::RH, cb, width, height, h, material) =
   @remote(b, XYCenteredBox(cb, vx(1, cb.cs), vy(1, cb.cs), width, height, h))
-
-realize(b::RH, s::Box) =
-    @remote(b, Box(s.c, vx(1,s.c.cs), vy(1,s.c.cs), s.dx, s.dy, s.dz))
-
-realize(b::RH, s::Cone) =
-  @remote(b, Cone(add_z(s.cb, s.h), s.r, s.cb))
-
-realize(b::RH, s::ConeFrustum) =
-  @remote(b, ConeFrustum(s.cb, s.rb, s.cb + vz(s.h, s.cb.cs), s.rt))
-
-backend_cylinder(b::RH, c::Loc, r::Real, h::Real) =
-  @remote(b, Cylinder(c, r, c + vz(h, c.cs)))
 
 backend_extrusion(b::RH, s::Shape, v::Vec) =
     and_mark_deleted(
@@ -641,10 +733,10 @@ backend_wall(b::RH, path, height, l_thickness, r_thickness, family) =
 backend_bounding_box(b::RH, shapes::Shapes) =
   @remote(b, BoundingBox(collect_ref(shapes)))
 
-backend_set_view(b::RH, camera::XYZ, target::XYZ, lens::Real, aperture::Real) =
+b_set_view(b::RH, camera::XYZ, target::XYZ, lens::Real, aperture::Real) =
   @remote(b, View(camera, target, lens))
 
-backend_get_view(b::RH) =
+b_get_view(b::RH) =
   @remote(b, ViewCamera()), @remote(b, ViewTarget()), @remote(b, ViewLens())
 
 backend_zoom_extents(b::RH) =
@@ -656,19 +748,22 @@ backend_view_top(b::RH) =
 backend_delete_shapes(b::RH, shapes::Shapes) =
   @remote(b, DeleteMany(collect_ref(shapes)))
 
-backend_delete_all_shapes(b::RH) =
+b_all_refs(b::RH) =
+  @remote(b, GetAllShapes())
+
+b_delete_all_refs(b::RH) =
   @remote(b, DeleteAll())
 
 # Layers
 RHLayer = String
 
-backend_current_layer(b::RH)::RHLayer =
+KhepriBase.b_current_layer(b::RH)::RHLayer =
   @remote(b, CurrentLayer())
 
-backend_current_layer(b::RH, layer::RHLayer) =
+KhepriBase.b_current_layer(b::RH, layer::RHLayer) =
   @remote(b, SetCurrentLayer(layer))
 
-backend_create_layer(b::RH, name::String, active::Bool, color::RGB) =
+KhepriBase.b_create_layer(b::RH, name::String, active::Bool, color::RGB) =
   let to255(x) = round(UInt8, x*255)
     @remote(b, CreateLayer(name, true, to255(red(color)), to255(green(color)), to255(blue(color))))
   end
@@ -676,46 +771,44 @@ backend_create_layer(b::RH, name::String, active::Bool, color::RGB) =
 backend_delete_all_shapes_in_layer(b::RH, layer::RHLayer) =
   @remote(b, DeleteAllInLayer(layer))
 
-backend_shape_from_ref(b::RH, r) =
-  let c = connection(b)
-    let code = @remote(b, ShapeCode(r)),
-        ref = DynRefs(b=>RHNativeRef(r))
-      if code == 1
-        point(@remote(b, PointPosition(r)),
-              backend=b, ref=ref)
-      elseif code == 2
-        circle(maybe_loc_from_o_vz(@remote(b, CircleCenter(r)), @remote(b, CircleNormal(r))),
-               @remote(b, CircleRadius(r)),
-               backend=b, ref=ref)
-      elseif 3 <= code <= 6
-        line(@remote(b, LineVertices(r)), ref=ref)
-      elseif code == 7
-        spline([xy(0,0)], false, false, #HACK obtain interpolation points
-               ref=ref)
-      elseif 103 <= code <= 106
-        polygon(@remote(b, LineVertices(r)), ref=ref)
-      elseif code == 40
-        # FIXME: frontier is missing
-        surface(frontier=[], ref=ref)
-      elseif code == 41
-        surface(frontier=[], ref=ref)
-      elseif code == 81
-        sphere(backend=b, ref=ref)
-      elseif code == 82
-        cylinder(backend=b, ref=ref)
-      elseif code == 83
-        cone(backend=b, ref=ref)
-      elseif code == 84
-        torus(backend=b, ref=ref)
-      else
-        error("Unknown shape")
-      end
+KhepriBase.b_shape_from_ref(b::RH, r) =
+  let code = @remote(b, ShapeCode(r)),
+      ref = DynRefs(b=>RHNativeRef(r))
+    if code == 1
+      point(@remote(b, PointPosition(r)),
+            backend=b, ref=ref)
+    elseif code == 2
+      circle(maybe_loc_from_o_vz(@remote(b, CircleCenter(r)), @remote(b, CircleNormal(r))),
+             @remote(b, CircleRadius(r)),
+             backend=b, ref=ref)
+    elseif 3 <= code <= 6
+      line(@remote(b, LineVertices(r)), ref=ref)
+    elseif code == 7
+      spline([xy(0,0)], false, false, #HACK obtain interpolation points
+             ref=ref)
+    elseif 103 <= code <= 106
+      polygon(@remote(b, LineVertices(r)), ref=ref)
+    elseif code == 40
+      # FIXME: frontier is missing
+      surface(frontier=[], ref=ref)
+    elseif code == 41
+      surface(frontier=[], ref=ref)
+    elseif code == 81
+      sphere(backend=b, ref=ref)
+    elseif code == 82
+      cylinder(backend=b, ref=ref)
+    elseif code == 83
+      cone(backend=b, ref=ref)
+    elseif code == 84
+      torus(backend=b, ref=ref)
+    else
+      error("Unknown shape")
     end
   end
 
 #
 
-backend_select_position(b::RH, prompt::String) =
+KhepriBase.b_select_position(b::RH, prompt::String) =
   begin
     @info "$(prompt) on the $(b) backend."
     let ans = @remote(b, GetPosition(prompt))
@@ -723,7 +816,7 @@ backend_select_position(b::RH, prompt::String) =
     end
   end
 
-backend_select_positions(b::RH, prompt::String) =
+KhepriBase.b_select_positions(b::RH, prompt::String) =
   let ps = Loc[]
       p = nothing
     @info "$(prompt) on the $(b) backend."
@@ -735,29 +828,29 @@ backend_select_positions(b::RH, prompt::String) =
 
 # HACK: The next operations should receive a set of shapes to avoid re-creating already existing shapes
 
-backend_select_point(b::RH, prompt::String) =
+KhepriBase.b_select_point(b::RH, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetPoint)
-backend_select_points(b::RH, prompt::String) =
+KhepriBase.b_select_points(b::RH, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetPoints)
 
-backend_select_curve(b::RH, prompt::String) =
+KhepriBase.b_select_curve(b::RH, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetCurve)
-backend_select_curves(b::RH, prompt::String) =
+KhepriBase.b_select_curves(b::RH, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetCurves)
 
-backend_select_surface(b::RH, prompt::String) =
+KhepriBase.b_select_surface(b::RH, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetSurface)
-backend_select_surfaces(b::RH, prompt::String) =
+KhepriBase.b_select_surfaces(b::RH, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetSurfaces)
 
-backend_select_solid(b::RH, prompt::String) =
+KhepriBase.b_select_solid(b::RH, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetSolid)
-backend_select_solids(b::RH, prompt::String) =
+KhepriBase.b_select_solids(b::RH, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetSolids)
 
-backend_select_shape(b::RH, prompt::String) =
+KhepriBase.b_select_shape(b::RH, prompt::String) =
   select_one_with_prompt(prompt, b, @get_remote b GetShape)
-backend_select_shapes(b::RH, prompt::String) =
+KhepriBase.b_select_shapes(b::RH, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetShapes)
 
 backend_captured_shape(b::RH, handle) =
@@ -780,14 +873,11 @@ backend_generate_captured_shapes(b::RH, ss::Shapes) =
     println("])")
   end
 
-backend_all_shapes(b::RH) =
-  Shape[backend_shape_from_ref(b, r)
-        for r in filter(r -> @remote(b, ShapeCode(r)) != 0, @remote(b, GetAllShapes()))]
 
 backend_all_shapes_in_layer(b::RH, layer) =
   Shape[backend_shape_from_ref(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
 
-backend_render_view(b::RH, path::String) =
+b_render_view(b::RH, path::String) =
   @remote(b, Render(render_width(), render_height(), path))
 
 backend_save_view(b::RH, path::String) =
@@ -811,3 +901,7 @@ rhino_layer_family(name, color::RGB=rgb(1,1,1)) =
 
 backend_get_family_ref(b::RH, f::Family, af::RhinoLayerFamily) =
   backend_create_layer(b, af.name, true, af.color)
+
+
+KhepriBase.b_realistic_sky(b::RH, date, latitude, longitude, elevation, meridian, turbidity, withsun) =
+  @remote(b, SetSun(date, latitude, longitude, meridian))
