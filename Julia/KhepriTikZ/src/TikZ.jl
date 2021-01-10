@@ -141,6 +141,19 @@ tikz_closed_line(out::IO, pts::Locs, filled::Bool=false) =
     tikz_e(out, "cycle")
   end
 
+tikz_closed_lines(out::IO, ptss, filled::Bool=false) =
+  begin
+    tikz_draw(out, filled)
+    for pts in ptss
+      for pt in pts
+        tikz_coord(out, pt)
+        print(out, "--")
+      end
+      println(out, "cycle")
+    end
+    println(out, ";")
+  end
+
 tikz_spline(out::IO, pts::Locs, filled::Bool=false) =
   begin
     tikz_draw(out, filled)
@@ -249,13 +262,13 @@ const TikZUnionRef = UnionRef{TikZKey, TikZId}
 const TikZSubtractionRef = SubtractionRef{TikZKey, TikZId}
 const TikZ = IOBufferBackend{TikZKey, TikZId}
 
-void_ref(b::TikZ) = TikZNativeRef(nothing)
+KhepriBase.void_ref(b::TikZ) = TikZNativeRef(nothing)
 
 create_TikZ_connection() = IOBuffer()
 
 const tikz = TikZ(create_TikZ_connection())
 
-backend_name(b::TikZ) = "TikZ"
+KhepriBase.backend_name(b::TikZ) = "TikZ"
 
 get_accumulated_tikz(out::IO) = String(take!(out))
 
@@ -272,48 +285,67 @@ withTikZXForm(f, out, c) =
       c)
    end
 
-backend_delete_all_shapes(b::TikZ) =
+KhepriBase.b_delete_all_refs(b::TikZ) =
   truncate(connection(b), 0)
 
-realize(b::TikZ, s::Point) =
-  tikz_pgfpoint(connection(b), in_world(s.position))
+KhepriBase.b_point(b::TikZ, p) =
+  tikz_pgfpoint(connection(b), in_world(p))
 
-realize(b::TikZ, s::Line) =
-  tikz_line(connection(b), map(in_world, s.vertices))
+KhepriBase.b_line(b::TikZ, ps, mat) =
+  tikz_line(connection(b), map(in_world, ps))
 
-realize(b::TikZ, s::Spline) =
-  if (s.v0 == false) && (s.v1 == false)
+KhepriBase.b_polygon(b::TikZ, ps, mat) =
+  tikz_closed_line(connection(b), map(in_world, s.vertices))
+
+KhepriBase.b_spline(b::TikZ, ps, v0, v1, interpolator, mat) =
+  if (v0 == false) && (v1 == false)
     #TikZSpline(connection(b), s.points)
-    tikz_hobby_spline(connection(b), map(in_world, s.points), false)
-  elseif (s.v0 != false) && (s.v1 != false)
-    TikZInterpSpline(connection(b), s.points, s.v0, s.v1)
+    tikz_hobby_spline(connection(b), map(in_world, ps), false)
+  elseif (v0 != false) && (v1 != false)
+    TikZInterpSpline(connection(b), ps, v0, v1)
   else
     TikZInterpSpline(connection(b),
-                     s.points,
-                     s.v0 == false ? s.points[2]-s.points[1] : s.v0,
-                     s.v1 == false ? s.points[end-1]-s.points[end] : s.v1)
+                     ps,
+                     v0 == false ? ps[2] - ps[1] : v0,
+                     v1 == false ? ps[end-1] - ps[end] : v1)
   end
 
-realize(b::TikZ, s::ClosedSpline) =
-  tikz_hobby_closed_spline(connection(b), map(in_world, s.points))
+KhepriBase.b_closed_spline(b::TikZ, ps, mat) =
+  tikz_hobby_closed_spline(connection(b), map(in_world, ps))
 
-realize(b::TikZ, s::Circle) =
-  withTikZXForm(connection(b), s.center) do out, c
-    tikz_circle(out, c, s.radius)
-  end
-realize(b::TikZ, s::SurfaceCircle) =
-  withTikZXForm(connection(b), s.center) do out, c
-    tikz_circle(out, c, s.radius, true)
+KhepriBase.b_circle(b::TikZ, c, r, mat) =
+  withTikZXForm(connection(b), c) do out, cc
+    tikz_circle(out, cc, r)
   end
 
-realize(b::TikZ, s::Arc) =
-  withTikZXForm(connection(b), s.center) do out, c
-    tikz_maybe_arc(out, c, s.radius, s.start_angle, s.amplitude, false)
+KhepriBase.b_arc(b::TikZ, c, r, α, Δα, mat) =
+  withTikZXForm(connection(b), c) do out, cc
+    tikz_maybe_arc(out, cc, r, α, Δα, false)
   end
 
-realize(b::TikZ, s::SurfaceArc) =
-  withTikZXForm(connection(b), s.center) do out, c
-    tikz_maybe_arc(out, c, s.radius, s.start_angle, s.amplitude, true)
+KhepriBase.b_rectangle(b::TikZ, c, dx, dy, mat) =
+  withTikZXForm(connection(b), c) do out, cc
+    tikz_rectangle(out, cc, dx, dy)
+  end
+
+KhepriBase.b_trig(b::TikZ, p1, p2, p3, mat) =
+  tikz_closed_line(connection(b), in_world.([p1, p2, p3]), true)
+
+KhepriBase.b_surface_polygon(b::TikZ, ps, mat) =
+  tikz_closed_line(connection(b), in_world.(ps), true)
+
+KhepriBase.b_surface_polygon_with_holes(b::TikZ, ps, qss, mat) =
+  tikz_closed_lines(
+    connection(b), [in_world.(ps), [in_world.(reverse(qs)) for qs in qss]...], true)
+
+KhepriBase.b_surface_circle(b::TikZ, c, r, mat) =
+  withTikZXForm(connection(b), c) do out, cc
+    tikz_circle(out, cc, r, true)
+  end
+
+KhepriBase.b_surface_arc(b::TikZ, c, r, α, Δα, mat) =
+  withTikZXForm(connection(b), c) do out, cc
+    tikz_maybe_arc(out, cc, r, α, Δα, true)
   end
 
 realize(b::TikZ, s::Ellipse) =
@@ -331,33 +363,9 @@ realize(b::TikZ, s::EllipticArc) =
 
 #realize(b::TikZ, s::SurfaceElliptic_Arc) = TikZCircle(connection(b),
 
-realize(b::TikZ, s::Polygon) =
-  tikz_closed_line(connection(b), map(in_world, s.vertices))
-
-realize(b::TikZ, s::SurfacePolygon) =
-  tikz_closed_line(connection(b), map(in_world, s.vertices), true)
-
-realize(b::TikZ, s::RegularPolygon) =
-  tikz_closed_line(
-    connection(b),
-    map(in_world,
-        regular_polygon_vertices(s.edges, s.center, s.radius, s.angle, s.inscribed)))
-
-realize(b::TikZ, s::SurfaceRegularPolygon) =
-  tikz_closed_line(
-    connection(b),
-    map(in_world,
-        regular_polygon_vertices(s.edges, s.center, s.radius, s.angle, s.inscribed)),
-    false)
-
-realize(b::TikZ, s::Rectangle) =
-  withTikZXForm(connection(b), s.corner) do out, c
-    tikz_rectangle(out, c, s.dx, s.dy)
-  end
-
-realize(b::TikZ, s::SurfaceRectangle) =
-  withTikZXForm(connection(b), s.corner) do out, c
-    tikz_rectangle(out, c, s.dx, s.dy, true)
+KhepriBase.b_surface_rectangle(b::TikZ, c, dx, dy, mat) =
+  withTikZXForm(connection(b), c) do out, cc
+    tikz_rectangle(out, cc, dx, dy, true)
   end
 
 realize(b::TikZ, s::Text) =
