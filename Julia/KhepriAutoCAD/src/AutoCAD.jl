@@ -345,8 +345,8 @@ public Frame3d SurfaceFrameAt(Entity ent, double u, double v)
 public Entity MeshFromGrid(int m, int n, Point3d[] pts, bool closedM, bool closedN)
 public int[] PolygonMeshData(Entity e)
 public Point3dCollection MeshVertices(ObjectId id)
-public Entity SurfaceFromGrid(int m, int n, Point3d[] pts, bool closedM, bool closedN, int level)
-public Entity SolidFromGrid(int m, int n, Point3d[] pts, bool closedM, bool closedN, int level, double thickness)
+public Entity SurfaceFromGrid(int m, int n, Point3d[] pts, bool closedM, bool closedN, int level, ObjectId matId)
+public Entity SolidFromGrid(int m, int n, Point3d[] pts, bool closedM, bool closedN, int level, double thickness, ObjectId matId)
 public void DeleteAll()
 public void DeleteAllInLayer(ObjectId layerId)
 public void Delete(ObjectId id)
@@ -401,7 +401,7 @@ create_ACAD_connection() =
 
 const autocad = ACAD(LazyParameter(TCPSocket, create_ACAD_connection), acad_api)
 
-backend_name(b::ACAD) = "AutoCAD"
+KhepriBase.backend_name(b::ACAD) = "AutoCAD"
 
 # Primitives
 KhepriBase.b_point(b::ACAD, p) =
@@ -539,10 +539,8 @@ KhepriBase.b_pyramid_frustum(b::ACAD, bs, ts, bmat, tmat, smat) =
 KhepriBase.b_pyramid(b::ACAD, bs, t, bmat, smat) =
   @remote(b, IrregularPyramid(bs, t, smat))
 
-#b_cuboid(b::Backend{K,T}, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat) where {K,T} =
-#  [b_quad(b, pb3, pb2, pb1, pb0, mat),
-#   b_quad_strip_closed(b, [pb0, pb1, pb2, pb3], [pt0, pt1, pt2, pt3], false, mat),
-#   b_quad(b, pt0, pt1, pt2, pt3, mat)]
+KhepriBase.b_cylinder(b::ACAD, cb, r, h, bmat, tmat, smat) =
+  @remote(b, Cylinder(cb, r, add_z(cb, h), smat))
 
 KhepriBase.b_box(b::ACAD, c, dx, dy, dz, mat) =
   @remote(b, Box(s.c, s.dx, s.dy, s.dz))
@@ -556,17 +554,11 @@ KhepriBase.b_cone(b::ACAD, cb, r, h, bmat, smat) =
 KhepriBase.b_cone_frustum(b::ACAD, cb, rb, h, rt, bmat, tmat, smat) =
   @remote(b, ConeFrustum(s.cb, s.rb, s.cb + vz(s.h, s.cb.cs), s.rt))
 
-KhepriBase.b_cylinder(b::ACAD, cb, r, h, bmat, tmat, smat) =
-  @remote(b, Cylinder(cb, r, add_z(cb, h), smat))
+KhepriBase.b_torus(b::ACAD, c, ra, rb, mat) =
+  @remote(b, Torus(c, vz(1, c.cs), ra, rb, mat))
 
 #KhepriBase.b_cuboid(b::BLR, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat) =
 #  @remote(b, cuboid([pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3], mat))
-
-#=
-#realize(b::ACAD, s::Torus) =
-#    @remote(b, Torus(s.center, vz(1, s.center.cs), s.re, s.ri))
-
-=#
 
 # Materials
 
@@ -894,15 +886,25 @@ realize(b::ACAD, s::UnionMirror) =
     UnionRef((r0,r1))
   end
 
-backend_surface_grid(b::ACAD, points, closed_u, closed_v, smooth_u, smooth_v) =
-    @remote(b, SurfaceFromGrid(
-        size(points,2),
-        size(points,1),
-        reshape(points,:),
-        closed_u,
-        closed_v,
-        # Autocad does not allow us to distinguish smoothness along different dimensions
-        smooth_u && smooth_v ? 2 : 0))
+KhepriBase.b_surface_grid(b::ACAD, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
+  let (nu, nv) = size(ptss)
+    smooth_u && smooth_v ?
+      # Autocad does not allow us to distinguish smoothness along different dimensions
+      @remote(b, SurfaceFromGrid(nu, nv, reshape(permutedims(ptss),:), closed_u, closed_v, 2, mat)) :
+      (smooth_u ?
+        vcat([@remote(b, SurfaceFromGrid(nu, 2, reshape(permutedims(ptss[:,i:i+1]),:), closed_u, false, 2, mat))
+              for i in 1:nv-1],
+             closed_v ?
+               [@remote(b, SurfaceFromGrid(nu, 2, reshape(permutedims(ptss[:,[end,1]]),:), closed_u, false, 2, mat))] :
+               []) :
+        (smooth_v ?
+          vcat([@remote(b, SurfaceFromGrid(2, nv, reshape(permutedims(ptss[i:i+1,:]),:), false, closed_v, 2, mat))
+                for i in 1:nu-1],
+               closed_u ?
+                 [@remote(b, SurfaceFromGrid(2, nv, reshape(permutedims(ptss[[end,1],:]),:), false, closed_v, 2, mat))] :
+                 []) :
+          @remote(b, SurfaceFromGrid(nu, nv, reshape(permutedims(ptss),:), closed_u, closed_v, 0, mat))))
+  end
 
 realize(b::ACAD, s::Thicken) =
   and_mark_deleted(b,
