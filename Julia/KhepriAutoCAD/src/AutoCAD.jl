@@ -456,7 +456,7 @@ KhepriBase.b_arc(b::ACAD, c, r, α, Δα, mat) =
   end
 
 b_ellipse() =
-  @remote(b, Ellipse(s.center, vz(1, s.center.cs), s.radius_x, s.radius_y))
+  @remote(b, Ellipse(center, vz(1, center.cs), radius_x, radius_y))
 
 KhepriBase.b_trig(b::ACAD, p1, p2, p3, mat) =
   @remote(b, Mesh([p1, p2, p3], [[0, 1, 2, 2]], mat))
@@ -549,10 +549,10 @@ KhepriBase.b_sphere(b::ACAD, c, r, mat) =
   @remote(b, Sphere(c, r, mat))
 
 KhepriBase.b_cone(b::ACAD, cb, r, h, bmat, smat) =
-  @remote(b, Cone(add_z(s.cb, s.h), s.r, s.cb))
+  @remote(b, Cone(add_z(cb, h), r, cb, smat))
 
 KhepriBase.b_cone_frustum(b::ACAD, cb, rb, h, rt, bmat, tmat, smat) =
-  @remote(b, ConeFrustum(s.cb, s.rb, s.cb + vz(s.h, s.cb.cs), s.rt))
+  @remote(b, ConeFrustum(cb, rb, cb + vz(h, cb.cs), rt, smat))
 
 KhepriBase.b_torus(b::ACAD, c, ra, rb, mat) =
   @remote(b, Torus(c, vz(1, c.cs), ra, rb, mat))
@@ -564,6 +564,9 @@ KhepriBase.b_torus(b::ACAD, c, ra, rb, mat) =
 
 KhepriBase.b_get_material(b::ACAD, ref) =
   get_autocad_material(b, ref)
+
+get_autocad_material(b, ref::Nothing) =
+  void_ref(b)
 
 get_autocad_material(b, ref::AbstractString) =
   @remote(b, GetMaterialNamed(ref))
@@ -1333,7 +1336,7 @@ b_render_view(b::ACAD, path::String) =
 
 export mentalray_render_view
 mentalray_render_view(name::String) =
-    let b = current_backend()
+    let b = autocad
         @remote(b, SetSystemVariableInt("SKYSTATUS", 2)) # skystatus:background-and-illumination
         @remote(b, Command("._-render P _R $(render_width()) $(render_height()) _yes $(prepare_for_saving_file(render_pathname(name)))\n"))
     end
