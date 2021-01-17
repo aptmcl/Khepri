@@ -3,7 +3,7 @@ export blender
 
 const blender_folder = Parameter("C:/Program Files/Blender Foundation/Blender 2.91/")
 blender_cmd(cmd::AbstractString="blender.exe") = blender_folder() * cmd
-const KhepriServerPath = Parameter(abspath(@__DIR__, "../../../Plugins/KhepriBlender/KhepriServer.py"))
+const KhepriServerPath = Parameter(abspath(@__DIR__, "KhepriServer.py"))
 
 start_blender() =
   run(detach(`$(blender_cmd()) --python $(KhepriServerPath())`), wait=false)
@@ -103,6 +103,10 @@ decode(ns::Val{:BLR}, t::Val{:Frame3d}, c::IO) =
       decode(ns, Val(:Vector3d), c)))
 
 blender_api = @remote_functions :BLR """
+def find_or_create_collection(name:str, active:bool, color:RGBA)->str:
+def get_current_collection()->str:
+def set_current_collection(name:str)->None:
+def delete_all_shapes_in_collection(name:str)->None:
 def delete_all_shapes()->None:
 def delete_shape(name:Id)->None:
 def get_material(name:str)->MatId:
@@ -119,7 +123,9 @@ def quad_strip(ps:List[Point3d], qs:List[Point3d], smooth:bool, mat:MatId)->Id:
 def quad_strip_closed(ps:List[Point3d], qs:List[Point3d], smooth:bool, mat:MatId)->Id:
 def ngon(ps:List[Point3d], pivot:Point3d, smooth:bool, mat:MatId)->Id:
 def polygon(ps:List[Point3d], mat:MatId)->Id:
-def surface(pss:List[List[Point3d]], mat:MatId)->Id:
+def polygon_with_holes(pss:List[List[Point3d]], mat:MatId)->Id:
+def quad_surface(ps:List[Point3d], nu:int, nv:int, closed_u:bool, closed_v:bool, smooth:bool, mat:MatId)->Id:
+def circle(c:Point3d, v:Vector3d, r:float, mat:MatId)->Id:
 def cuboid(verts:List[Point3d], mat:MatId)->Id:
 def pyramid_frustum(bs:List[Point3d], ts:List[Point3d], smooth:bool, bmat:MatId, tmat:MatId, smat:MatId)->Id:
 def sphere(center:Point3d, radius:float, mat:MatId)->Id:
@@ -196,6 +202,27 @@ KhepriBase.b_surface_polygon(b::BLR, ps, mat) =
 KhepriBase.b_surface_polygon_with_holes(b::BLR, ps, qss, mat) =
   @remote(b, surface([ps, qss...], mat))
 
+KhepriBase.b_surface_circle(b::BLR, c, r, mat) =
+  @remote(b, circle(c, vz(1, c.cs), r, mat))
+
+KhepriBase.b_surface_grid(b::BLR, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
+  let (nu, nv) = size(ptss)
+	smooth_u && smooth_v ?
+	  @remote(blender, quad_surface(vcat(ptss...), nu, nv, closed_u, closed_v, true, mat)) :
+	  smooth_u ?
+	  	(closed_u ?
+          vcat([b_quad_strip_closed(b, ptss[i,:], ptss[i+1,:], smooth_u, mat) for i in 1:nu-1],
+	           closed_v ? [b_quad_strip_closed(b, ptss[end,:], ptss[1,:], smooth_u, mat)] : []) :
+	      vcat([b_quad_strip(b, ptss[i,:], ptss[i+1,:], smooth_u, mat) for i in 1:nu-1],
+	           closed_v ? [b_quad_strip(b, ptss[end,:], ptss[1,:], smooth_u, mat)] : [])) :
+ 	    (closed_v ?
+           vcat([b_quad_strip_closed(b, ptss[:,i], ptss[:,i+1], smooth_v, mat) for i in 1:nv-1],
+  	         	closed_u ? [b_quad_strip_closed(b, ptss[:,end], ptss[:,1], smooth_v, mat)] : []) :
+  	       vcat([b_quad_strip(b, ptss[:,i], ptss[:,i+1], smooth_v, mat) for i in 1:nv-1],
+  	          	closed_u ? [b_quad_strip(b, ptss[:,end], ptss[:,1], smooth_v, mat)] : []))
+  end
+
+
 KhepriBase.b_generic_pyramid_frustum(b::BLR, bs, ts, smooth, bmat, tmat, smat) =
   @remote(b, pyramid_frustum(bs, ts, smooth, bmat, tmat, smat))
 
@@ -235,6 +262,9 @@ asset_base_id:ced25dc0-d461-42f7-aa03-85cb88f671a1 asset_type:material
 b_get_material(blender, "asset_base_id:ced25dc0-d461-42f7-aa03-85cb88f671a1 asset_type:material")
 =#
 
+get_blender_material(b, ref::Nothing) =
+  void_ref(b)
+
 get_blender_material(b, ref::AbstractString) =
   startswith(ref, "asset_base_id") ?
     @remote(b, get_blenderkit_material(ref)) :
@@ -267,521 +297,21 @@ Default families
 export blender_family_materials
 blender_family_materials(m1, m2=m1, m3=m2, m4=m3) = (materials=(m1, m2, m3, m4), )
 
+KhepriBase.b_create_layer(b::BLR, name::String, active::Bool, color::RGB) =
+  @remote(b, find_or_create_collection(name, active, color))
+KhepriBase.b_current_layer(b::BLR) =
+  @remote(b, get_current_collection())
+KhepriBase.b_current_layer(b::BLR, layer) =
+  @remote(b, set_current_collection(layer))
+KhepriBase.b_all_shapes_in_layer(b::BLR, layer) =
+  @remote(b, all_shapes_in_collection(layer))
+KhepriBase.b_delete_all_shapes_in_layer(b::BLR, layer) =
+  @remote(b, delete_all_shapes_in_collection(layer))
 
-abstract type BLRFamily <: Family end
-
-struct BLRLayerFamily <: BLRFamily
-  name::String
-  color::RGB
-  ref::Parameter{Any}
-end
-
-blender_layer_family(name, color::RGB=rgb(1,1,1)) =
-  BLRLayerFamily(name, color, Parameter{Any}(nothing))
-
-backend_get_family_ref(b::BLR, f::Family, af::BLRLayerFamily) =
-  nothing #backend_create_layer(b, af.name, true, af.color)
-
-#=
-#=
-backend_stroke_color(b::BLR, path::Path, color::RGB) =
-    let r = backend_stroke(b, path)
-        @remote(b, SetShapeColor(r, color.r, color.g, color.b))
-        r
-    end
-
-backend_stroke(b::BLR, path::CircularPath) =
-    @remote(b, Circle(path.center, vz(1, path.center.cs), path.radius))
-backend_stroke(b::BLR, path::RectangularPath) =
-    let c = path.corner,
-        dx = path.dx,
-        dy = path.dy
-        @remote(b, ClosedPolyLine([c, add_x(c, dx), add_xy(c, dx, dy), add_y(c, dy)]))
-    end
-backend_stroke(b::BLR, path::ArcPath) =
-    backend_stroke_arc(b, path.center, path.radius, path.start_angle, path.amplitude)
-
-backend_stroke(b::BLR, path::OpenPolygonalPath) =
-  	@remote(b, PolyLine(path.vertices))
-backend_stroke(b::BLR, path::ClosedPolygonalPath) =
-    backend_polygon(b, path.vertices)
-backend_polygon(b::BLR, vs::Locs) =
-  @remote(b, ClosedPolyLine(vs))
-backend_fill(b::BLR, path::ClosedPolygonalPath) =
-    @remote(b, SurfaceClosedPolyLine(path.vertices))
-backend_fill(b::BLR, path::RectangularPath) =
-    let c = path.corner,
-        dx = path.dx,
-        dy = path.dy
-        @remote(b, SurfaceClosedPolyLine([c, add_x(c, dx), add_xy(c, dx, dy), add_y(c, dy)]))
-    end
-backend_stroke(b::BLR, path::OpenSplinePath) =
-  if (path.v0 == false) && (path.v1 == false)
-    #@remote(b, Spline(path.vertices))
-    @remote(b, InterpSpline(
-                     path.vertices,
-                     path.vertices[2]-path.vertices[1],
-                     path.vertices[end]-path.vertices[end-1]))
-  elseif (path.v0 != false) && (path.v1 != false)
-    @remote(b, InterpSpline(path.vertices, path.v0, path.v1))
-  else
-    @remote(b, InterpSpline(
-                     path.vertices,
-                     path.v0 == false ? path.vertices[2]-path.vertices[1] : path.v0,
-                     path.v1 == false ? path.vertices[end-1]-path.vertices[end] : path.v1))
-  end
-backend_stroke(b::BLR, path::ClosedSplinePath) =
-    @remote(b, InterpClosedSpline(path.vertices))
-backend_fill(b::BLR, path::ClosedSplinePath) =
-    backend_fill_curves(b, @remote(b, InterpClosedSpline(path.vertices)))
-
-backend_fill_curves(b::BLR, refs::BLRIds) = @remote(b, SurfaceFromCurves(refs))
-backend_fill_curves(b::BLR, ref::BLRId) = @remote(b, SurfaceFromCurves([ref]))
-
-backend_stroke_arc(b::BLR, center::Loc, radius::Real, start_angle::Real, amplitude::Real) =
-  let p = in_world(add_pol(center, radius, start_angle)),
-      c = in_world(center),
-      alpha = pol_phi(p-c),
-      end_angle = alpha + amplitude
-    @remote(b, Arc(center, vz(1, center.cs), radius, alpha, end_angle))
-  end
-backend_stroke_unite(b::BLR, refs) = @remote(b, JoinCurves(refs))
-
-=#
-=#
 realize(b::BLR, s::EmptyShape) =
   BLREmptyRef()
 realize(b::BLR, s::UniversalShape) =
   BLRUniversalRef()
-#=
-realize(b::BLR, s::Point) =
-  @remote(b, Point(s.position))
-realize(b::BLR, s::Line) =
-  @remote(b, PolyLine(s.vertices))
-realize(b::BLR, s::Spline) = # This should be merged with opensplinepath
-  if (s.v0 == false) && (s.v1 == false)
-    #@remote(b, Spline(s.points))
-    @remote(b, InterpSpline(
-                     s.points,
-                     s.points[2]-s.points[1],
-                     s.points[end]-s.points[end-1]))
-  elseif (s.v0 != false) && (s.v1 != false)
-    @remote(b, InterpSpline(s.points, s.v0, s.v1))
-  else
-    @remote(b, InterpSpline(
-                     s.points,
-                     s.v0 == false ? s.points[2]-s.points[1] : s.v0,
-                     s.v1 == false ? s.points[end-1]-s.points[end] : s.v1))
-  end
-realize(b::BLR, s::ClosedSpline) =
-  @remote(b, InterpClosedSpline(s.points))
-realize(b::BLR, s::Circle) =
-  @remote(b, Circle(s.center, vz(1, s.center.cs), s.radius))
-realize(b::BLR, s::Arc) =
-  if s.radius == 0
-    @remote(b, Point(s.center))
-  elseif s.amplitude == 0
-    @remote(b, Point(s.center + vpol(s.radius, s.start_angle, s.center.cs)))
-  elseif abs(s.amplitude) >= 2*pi
-    @remote(b, Circle(s.center, vz(1, s.center.cs), s.radius))
-  else
-    end_angle = s.start_angle + s.amplitude
-    if end_angle > s.start_angle
-      @remote(b, Arc(s.center, vz(1, s.center.cs), s.radius, s.start_angle, end_angle))
-    else
-      @remote(b, Arc(s.center, vz(1, s.center.cs), s.radius, end_angle, s.start_angle))
-    end
-  end
-
-realize(b::BLR, s::Ellipse) =
-  if s.radius_x > s.radius_y
-    @remote(b, Ellipse(s.center, vz(1, s.center.cs), vxyz(s.radius_x, 0, 0, s.center.cs), s.radius_y/s.radius_x))
-  else
-    @remote(b, Ellipse(s.center, vz(1, s.center.cs), vxyz(0, s.radius_y, 0, s.center.cs), s.radius_x/s.radius_y))
-  end
-realize(b::BLR, s::EllipticArc) =
-  error("Finish this")
-
-realize(b::BLR, s::Polygon) =
-  @remote(b, ClosedPolyLine(s.vertices))
-realize(b::BLR, s::RegularPolygon) =
-  @remote(b, ClosedPolyLine(regular_polygon_vertices(s.edges, s.center, s.radius, s.angle, s.inscribed)))
-realize(b::BLR, s::Rectangle) =
-  @remote(b, ClosedPolyLine(
-    [s.corner,
-     add_x(s.corner, s.dx),
-     add_xy(s.corner, s.dx, s.dy),
-     add_y(s.corner, s.dy)]))
-realize(b::BLR, s::SurfaceArc) =
-    #@remote(b, SurfaceArc(s.center, vz(1, s.center.cs), s.radius, s.start_angle, s.start_angle + s.amplitude))
-    if s.radius == 0
-        @remote(b, Point(s.center))
-    elseif s.amplitude == 0
-        @remote(b, Point(s.center + vpol(s.radius, s.start_angle, s.center.cs)))
-    elseif abs(s.amplitude) >= 2*pi
-        @remote(b, SurfaceCircle(s.center, vz(1, s.center.cs), s.radius))
-    else
-        end_angle = s.start_angle + s.amplitude
-        if end_angle > s.start_angle
-            @remote(b, SurfaceFromCurves(
-                [@remote(b, Arc(s.center, vz(1, s.center.cs), s.radius, s.start_angle, end_angle)),
-                 @remote(b, PolyLine([add_pol(s.center, s.radius, end_angle),
-                                              add_pol(s.center, s.radius, s.start_angle)]))]))
-        else
-            @remote(b, SurfaceFromCurves(
-                [@remote(b, Arc(s.center, vz(1, s.center.cs), s.radius, end_angle, s.start_angle)),
-                 @remote(b, PolyLine([add_pol(s.center, s.radius, s.start_angle),
-                                              add_pol(s.center, s.radius, end_angle)]))]))
-        end
-    end
-
-realize(b::BLR, s::SurfaceEllipse) =
-  if s.radius_x > s.radius_y
-    @remote(b, SurfaceEllipse(s.center, vz(1, s.center.cs), vxyz(s.radius_x, 0, 0, s.center.cs), s.radius_y/s.radius_x))
-  else
-    @remote(b, SurfaceEllipse(s.center, vz(1, s.center.cs), vxyz(0, s.radius_y, 0, s.center.cs), s.radius_x/s.radius_y))
-  end
-=#
-
-backend_surface_polygon(b::BLR, vs::Locs) =
-  @remote(b, mesh(vs, [], [collect(0:length(vs)-1)], default_material))
-
-#=
-realize(b::BLR, s::Surface) =
-  let #ids = map(r->@remote(b, NurbSurfaceFrom(r)), @remote(b, SurfaceFromCurves(collect_ref(s.frontier))))
-      ids = @remote(b, SurfaceFromCurves(collect_ref(s.frontier)))
-    foreach(mark_deleted, s.frontier)
-    ids
-  end
-backend_surface_boundary(b::BLR, s::Shape2D) =
-    map(c -> backend_shape_from_ref(b, r), @remote(b, CurvesFromSurface(ref(s).value)))
-
-# Iterating over curves and surfaces
-
-
-old_backend_map_division(b::BLR, f::Function, s::Shape1D, n::Int) =
-  let r = ref(s).value,
-      (t1, t2) = @remote(b, CurveDomain(r))
-    map_division(t1, t2, n) do t
-      f(@remote(b, CurveFrameAt(r, t)))
-    end
-  end
-
-# For low level access:
-
-backend_map_division(b::BLR, f::Function, s::Shape1D, n::Int) =
-  let r = ref(s).value,
-      (t1, t2) = @remote(b, CurveDomain(r)),
-      ti = division(t1, t2, n),
-      ps = @remote(b, CurvePointsAt(r, ti)),
-      ts = @remote(b, CurveTangentsAt(r, ti)),
-      #ns = @remote(b, CurveNormalsAt(r, ti)),
-      frames = rotation_minimizing_frames(@remote(b, CurveFrameAt(r, t1)), ps, ts)
-    map(f, frames)
-  end
-=#
-#=
-rotation_minimizing_frames(u0, xs, ts) =
-  let ri = in_world(vy(1, u0.cs)),
-      new_frames = [loc_from_o_vx_vy(xs[1], ri, cross(ts[1], ri))]
-    for i in 1:length(xs)-1
-      let xi = xs[i],
-          xii = xs[i+1],
-          ti = ts[i],
-          tii = ts[i+1],
-          v1 = xii - xi,
-          c1 = dot(v1, v1),
-          ril = ri - v1*(2/c1*dot(v1,ri)),
-          til = ti - v1*(2/c1*dot(v1,ti)),
-          v2 = tii - til,
-          c2 = dot(v2, v2),
-          rii = ril - v2*(2/c2*dot(v2, ril)),
-          sii = cross(tii, rii),
-          uii = loc_from_o_vx_vy(xii, rii, sii)
-        push!(new_frames, uii)
-        ri = rii
-      end
-    end
-    new_frames
-  end
-=#
-
-#
-
-#=
-backend_surface_domain(b::BLR, s::Shape2D) =
-    tuple(@remote(b, SurfaceDomain(ref(s).value))...)
-
-backend_map_division(b::BLR, f::Function, s::Shape2D, nu::Int, nv::Int) =
-    let conn = connection(b)
-        r = ref(s).value
-        (u1, u2, v1, v2) = @remote(b, SurfaceDomain(r))
-        map_division(u1, u2, nu) do u
-            map_division(v1, v2, nv) do v
-                f(@remote(b, SurfaceFrameAt(r, u, v)))
-            end
-        end
-    end
-
-# The previous method cannot be applied to meshes in AutoCAD, which are created by surface_grid
-
-
-backend_map_division(b::BLR, f::Function, s::SurfaceGrid, nu::Int, nv::Int) =
-let conn = connection(b)
-    r = ref(s).value
-    (u1, u2, v1, v2) = @remote(b, SurfaceDomain(r))
-    map_division(u1, u2, nu) do u
-        map_division(v1, v2, nv) do v
-            f(@remote(b, SurfaceFrameAt(r, u, v)))
-        end
-    end
-end
-
-realize(b::BLR, s::Text) =
-  @remote(b, Text(
-    s.str, s.corner, vx(1, s.corner.cs), vy(1, s.corner.cs), s.height))
-
-realize(b::BLR, s::Torus) =
-  @remote(b, Torus(s.center, vz(1, s.center.cs), s.re, s.ri))
-
-backend_pyramid(b::BLR, bs::Locs, t::Loc) =
-  @remote(b, IrregularPyramid(bs, t))
-backend_pyramid_frustum(b::BLR, bs::Locs, ts::Locs) =
-  @remote(b, IrregularPyramidFrustum(bs, ts))
-
-backend_right_cuboid(b::BLR, cb, width, height, h, material) =
-  @remote(b, CenteredBox(cb, width, height, h))
-realize(b::BLR, s::Box) =
-  @remote(b, Box(s.c, s.dx, s.dy, s.dz))
-realize(b::BLR, s::Cone) =
-  @remote(b, Cone(add_z(s.cb, s.h), s.r, s.cb))
-realize(b::BLR, s::ConeFrustum) =
-  @remote(b, ConeFrustum(s.cb, s.rb, s.cb + vz(s.h, s.cb.cs), s.rt))
-
-backend_extrusion(b::BLR, s::Shape, v::Vec) =
-    and_mark_deleted(b,
-        map_ref(s) do r
-            @remote(b, Extrude(r, v))
-        end,
-        s)
-
-backend_sweep(b::BLR, path::Shape, profile::Shape, rotation::Real, scale::Real) =
-  and_mark_deleted(b,
-    map_ref(profile) do profile_r
-      map_ref(path) do path_r
-        @remote(b, Sweep(path_r, profile_r, rotation, scale))
-      end
-  end, [profile, path])
-
-backend_revolve_point(b::BLR, profile::Shape, p::Loc, n::Vec, start_angle::Real, amplitude::Real) =
-  realize(b, arc(loc_from_o_vz(p, n), distance(profile, p), start_angle, amplitude))
-backend_revolve_curve(b::BLR, profile::Shape, p::Loc, n::Vec, start_angle::Real, amplitude::Real) =
-  blender_revolution(b, profile, p, n, start_angle, amplitude)
-backend_revolve_surface(b::BLR, profile::Shape, p::Loc, n::Vec, start_angle::Real, amplitude::Real) =
-  blender_revolution(b, profile, p, n, start_angle, amplitude)
-
-blender_revolution(b::BLR, profile::Shape, p::Loc, n::Vec, start_angle::Real, amplitude::Real) =
-  and_delete_shape(
-    map_ref(profile) do r
-      @remote(b, Revolve(r, p, n, start_angle, amplitude))
-    end,
-    profile)
-
-backend_loft_curves(b::BLR, profiles::Shapes, rails::Shapes, ruled::Bool, closed::Bool) =
-  and_delete_shapes(@remote(b, Loft(
-                             collect_ref(profiles),
-                             collect_ref(rails),
-                             ruled, closed)),
-                    vcat(profiles, rails))
-
-backend_loft_surfaces(b::BLR, profiles::Shapes, rails::Shapes, ruled::Bool, closed::Bool) =
-    backend_loft_curves(b, profiles, rails, ruled, closed)
-
-backend_loft_curve_point(b::BLR, profile::Shape, point::Shape) =
-    and_delete_shapes(@remote(b, Loft(
-                               vcat(collect_ref(profile), collect_ref(point)),
-                               [],
-                               true, false)),
-                      [profile, point])
-
-backend_loft_surface_point(b::BLR, profile::Shape, point::Shape) =
-    backend_loft_curve_point(b, profile, point)
-
-unite_ref(b::BLR, r0::BLRRef, r1::BLRRef) =
-    ensure_ref(b, @remote(b, Unite(r0.value, r1.value)))
-
-intersect_ref(b::BLR, r0::BLRRef, r1::BLRRef) =
-    ensure_ref(b, @remote(b, Intersect(r0.value, r1.value)))
-
-subtract_ref(b::BLR, r0::BLRRef, r1::BLRRef) =
-    ensure_ref(b, @remote(b, Subtract(r0.value, r1.value)))
-
-slice_ref(b::BLR, r::BLRRef, p::Loc, v::Vec) =
-    (@remote(b, Slice(r.value, p, v)); r)
-
-slice_ref(b::BLR, r::BLRUnionRef, p::Loc, v::Vec) =
-    BLRUnionRef(map(r->slice_ref(b, r, p, v), r.values))
-
-unite_refs(b::BLR, refs::Vector{<:BLRRef}) =
-    BLRUnionRef(tuple(refs...))
-
-realize(b::BLR, s::IntersectionShape) =
-  let r = foldl(intersect_ref(b), map(ref, s.shapes),
-                init=BLRUniversalRef())
-    mark_deleted(b, s.shapes)
-    r
-  end
-
-realize(b::BLR, s::Slice) =
-  slice_ref(b, ref(s.shape), s.p, s.n)
-
-realize(b::BLR, s::Move) =
-  let r = map_ref(b, s.shape) do r
-            @remote(b, Move(r, s.v))
-            r
-          end
-    mark_deleted(b, s.shape)
-    r
-  end
-
-realize(b::BLR, s::Transform) =
-  let r = map_ref(b, s.shape) do r
-            @remote(b, Transform(r, s.xform))
-            r
-          end
-    mark_deleted(b, s.shape)
-    r
-  end
-
-realize(b::BLR, s::Scale) =
-  let r = map_ref(b, s.shape) do r
-            @remote(b, Scale(r, s.p, s.s))
-            r
-          end
-    mark_deleted(b, s.shape)
-    r
-  end
-
-realize(b::BLR, s::Rotate) =
-  let r = map_ref(b, s.shape) do r
-            @remote(b, Rotate(r, s.p, s.v, s.angle))
-            r
-          end
-    mark_deleted(b, s.shape)
-    r
-  end
-
-realize(b::BLR, s::Mirror) =
-  and_mark_deleted(b, map_ref(s.shape) do r
-                    @remote(b, Mirror(r, s.p, s.n, false))
-                   end,
-                   s.shape)
-
-realize(b::BLR, s::UnionMirror) =
-  let r0 = ref(b, s.shape),
-      r1 = map_ref(b, s.shape) do r
-            @remote(b, Mirror(r, s.p, s.n, true))
-          end
-    UnionRef((r0,r1))
-  end
-
-backend_surface_grid(b::BLR, points, closed_u, closed_v, smooth_u, smooth_v) =
-    @remote(b, SurfaceFromGrid(
-        size(points,2),
-        size(points,1),
-        reshape(points,:),
-        closed_u,
-        closed_v,
-        # Autocad does not allow us to distinguish smoothness along different dimensions
-        smooth_u && smooth_v ? 2 : 0))
-
-realize(b::BLR, s::Thicken) =
-  and_mark_deleted(b,
-    map_ref(b, s.shape) do r
-      @remote(b, Thicken(r, s.thickness))
-    end,
-    s.shape)
-
-# backend_frame_at
-backend_frame_at(b::BLR, s::Circle, t::Real) = add_pol(s.center, s.radius, t)
-
-backend_frame_at(b::BLR, c::Shape1D, t::Real) = @remote(b, CurveFrameAt(ref(c).value, t))
-
-#backend_frame_at(b::BLR, s::Surface, u::Real, v::Real) =
-    #What should we do with v?
-#    backend_frame_at(b, s.frontier[1], u)
-
-#backend_frame_at(b::BLR, s::SurfacePolygon, u::Real, v::Real) =
-
-backend_frame_at(b::BLR, s::Shape2D, u::Real, v::Real) = @remote(b, SurfaceFrameAt(ref(s).value, u, v))
-
-# BIM
-realize(b::BLR, f::TableFamily) =
-    @remote(b, CreateRectangularTableFamily(f.length, f.width, f.height, f.top_thickness, f.leg_thickness))
-realize(b::BLR, f::ChairFamily) =
-    @remote(b, CreateChairFamily(f.length, f.width, f.height, f.seat_height, f.thickness))
-realize(b::BLR, f::TableChairFamily) =
-    @remote(b, CreateRectangularTableAndChairsFamily(
-        realize(b, f.table_family), realize(b, f.chair_family),
-        f.table_family.length, f.table_family.width,
-        f.chairs_top, f.chairs_bottom, f.chairs_right, f.chairs_left,
-        f.spacing))
-
-backend_rectangular_table(b::BLR, c, angle, family) =
-    @remote(b, Table(c, angle, realize(b, family)))
-
-backend_chair(b::BLR, c, angle, family) =
-    @remote(b, Chair(c, angle, realize(b, family)))
-
-backend_rectangular_table_and_chairs(b::BLR, c, angle, family) =
-    @remote(b, TableAndChairs(c, angle, realize(b, family)))
-
-backend_slab(b::BLR, profile, holes, thickness, family) =
-  let slab(profile) = map_ref(b, r -> @remote(b, Extrude(r, vz(thickness))),
-                              ensure_ref(b, backend_fill(b, profile))),
-      main_body = slab(profile),
-      holes_bodies = map(slab, holes)
-    foldl((r0, r1)->subtract_ref(b, r0, r1), holes_bodies, init=main_body)
-  end
-=#
-#=
-realize_beam_profile(b::BLR, s::Union{Beam,FreeColumn,Column}, profile::CircularPath, cb::Loc, length::Real) =
-  @remote(b, Cylinder(cb, profile.radius, add_z(cb, length)))
-
-realize_beam_profile(b::BLR, s::Union{Beam,Column}, profile::RectangularPath, cb::Loc, length::Real) =
-  let profile_u0 = profile.corner,
-      c = add_xy(s.cb, profile_u0.x + profile.dx/2, profile_u0.y + profile.dy/2)
-      # need to test whether it is rotation on center or on axis
-      o = loc_from_o_phi(c, s.angle)
-    @remote(b, CenteredBox(add_y(o, -profile.dy/2), profile.dx, profile.dy, length))
-  end
-
-#Columns are aligned along the center axis.
-realize_beam_profile(b::BLR, s::FreeColumn, profile::RectangularPath, cb::Loc, length::Real) =
-  let profile_u0 = profile.corner,
-      c = add_xy(s.cb, profile_u0.x + profile.dx/2, profile_u0.y + profile.dy/2)
-      # need to test whether it is rotation on center or on axis
-      o = loc_from_o_phi(c, s.angle)
-    @remote(b, CenteredBox(o, profile.dx, profile.dy, length))
-  end
-=#
-#=
-backend_wall(b::BLR, path, height, l_thickness, r_thickness, family) =
-  @remote(b,
-    Thicken(@remote(b,
-      Extrude(backend_stroke(b, offset(path, (l_thickness - r_thickness)/2)),
-              vz(height))),
-      r_thickness + l_thickness))
-
-backend_panel(b::BLR, bot::Locs, top::Locs, family) =
-  @remote(b, IrregularPyramidFrustum(bot, top))
-
-############################################
-
-backend_bounding_box(b::BLR, shapes::Shapes) =
-  @remote(b, BoundingBox(collect_ref(shapes)))
-
-=#
 
 KhepriBase.b_set_view(b::BLR, camera::Loc, target::Loc, lens::Real, aperture::Real) =
   begin
@@ -792,15 +322,19 @@ KhepriBase.b_set_view(b::BLR, camera::Loc, target::Loc, lens::Real, aperture::Re
 KhepriBase.b_get_view(b::BLR) =
   @remote(b, get_view())
 
-backend_zoom_extents(b::BLR) = @remote(b, ZoomExtents())
+KhepriBase.b_zoom_extents(b::BLR) = @remote(b, ZoomExtents())
 
-backend_view_top(b::BLR) = @remote(b, ViewTop())
+KhepriBase.b_set_view_top(b::BLR) = @remote(b, ViewTop())
 
 KhepriBase.b_realistic_sky(b::BLR, date, latitude, longitude, elevation, meridian, turbidity, withsun) =
   begin
 	@remote(b, set_sun(latitude, longitude, elevation, year(date), month(date), day(date), hour(date)+minute(date)/60, meridian, false))
 	@remote(b, set_sky(turbidity)) #Add withsun
   end
+
+KhepriBase.b_set_ground(b::BLR, level, mat) =
+  b_surface_regular_polygon(b, 16, z(level), 10000, 0, true, mat) #HACK use a proper material
+
 
 KhepriBase.b_delete_ref(b::BLR, r::BLRId) =
   @remote(b, delete_shape(r))
