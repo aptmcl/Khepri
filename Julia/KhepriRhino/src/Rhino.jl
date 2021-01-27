@@ -117,12 +117,10 @@ public Guid Chair(Point3d c, double angle, int family)
 public GeometryBase[] BaseRectangularTableAndChairs(int tableFamily, int chairFamily, double tableLength, double tableWidth, int chairsOnTop, int chairsOnBottom, int chairsOnRight, int chairsOnLeft, double spacing)
 public int CreateRectangularTableAndChairsFamily(int tableFamily, int chairFamily, double tableLength, double tableWidth, int chairsOnTop, int chairsOnBottom, int chairsOnRight, int chairsOnLeft, double spacing)
 public Guid TableAndChairs(Point3d c, double angle, int family)
-public String CreateLayer(String name, bool active, byte r, byte g, byte b)
-public void SetLayerColor(ObjectId id, byte r, byte g, byte b)
-public void SetShapeColor(ObjectId id, byte r, byte g, byte b)
-public String CurrentLayer()
-public void SetCurrentLayer(String id)
-public void SetLayerActive(String name, bool active)
+public Guid CreateLayer(String name, bool active, byte r, byte g, byte b)
+public Guid CurrentLayer()
+public void SetCurrentLayer(Guid id)
+public void SetLayerActive(Guid id, bool active) {
 public String ShapeLayer(RhinoObject objId)
 public void SetShapeLayer(RhinoObject objId, String layerId)
 public Point3d[] CurvePointsAt(RhinoObject obj, double[] ts)
@@ -235,9 +233,6 @@ KhepriBase.b_spline(b::RH, ps, v0, v1, interpolator, mat) =
 KhepriBase.b_closed_spline(b::RH, ps, mat) =
   @remote(b, ClosedSpline(ps))
 
-#b_nurbs_curve(b::Backend{K,T}, order, ps, knots, weights, closed, mat) where {K,T} =
-#  b_line(b, ps, closed, mat)
-
 KhepriBase.b_circle(b::RH, c, r, mat) =
   @remote(b, Circle(c, vz(1, c.cs), r))
 
@@ -270,13 +265,6 @@ KhepriBase.b_quad(b::RH, p1, p2, p3, p4, mat) =
 KhepriBase.b_ngon(b::RH, ps, pivot, smooth, mat) =
  	@remote(b, NGon(ps, pivot, smooth, mat))
 
-# b_quad_strip(b::Backend{K,T}, ps, qs, smooth, mat) where {K,T} =
-#   [b_quad(b, ps[i], ps[i+1], qs[i+1], qs[i], mat)
-#    for i in 1:size(ps,1)-1]
-#
-# b_quad_strip_closed(b::Backend{K,T}, ps, qs, smooth, mat) where {K,T} =
-#   b_quad_strip(b, [ps..., ps[1]], [qs..., qs[1]], smooth, mat)
-
 ############################################################
 # Second tier: surfaces
 
@@ -287,10 +275,22 @@ KhepriBase.b_surface_polygon_with_holes(b::RH, ps, qss, mat) =
   @remote(b, SurfaceFromCurvesPoints([ps, qss...], falses(1 + length(qss)), mat))
 
 KhepriBase.b_surface_circle(b::RH, c, r, mat) =
-	@remote(b, SurfaceCircle(c, vz(1, c.cs), r))
+	@remote(b, SurfaceCircle(c, vz(1, c.cs), r, mat))
 
 KhepriBase.b_surface_arc(b::RH, c, r, α, Δα, mat) =
-  @remote(b, SurfaceArc(c, vx(1, c.cs), vy(1, c.cs), r, α, α + Δα))
+  @remote(b, SurfaceArc(c, vx(1, c.cs), vy(1, c.cs), r, α, α + Δα, mat))
+
+KhepriBase.b_surface_grid(b::RH, ptss, closed_u, closed_v, smooth_u, smooth_v, interpolator, mat) =
+  let (nu, nv) = size(ptss),
+      order(n) = min(2*ceil(Int,n/16) + 1, 5)
+    @remote(b, SurfaceFromGrid(nu, nv,
+                               reshape(permutedims(ptss), :),
+                               closed_u, closed_v,
+                               smooth_u ? order(nu) : 1,
+                               smooth_v ? order(nv) : 1,
+							   mat))
+  end
+
 
 # This is wrong, for sure!
 b_surface_ellipse(b::RH, c, rx, ry) =
@@ -299,25 +299,6 @@ b_surface_ellipse(b::RH, c, rx, ry) =
 ############################################################
 # Third tier: solids
 
-#=
-# Each solid can have just one material or multiple materials
-b_generic_pyramid_frustum(b::Backend{K,T}, bs, ts, smooth, bmat, tmat, smat) where {K,T} =
-  [b_surface_polygon(b, reverse(bs), bmat),
-   b_quad_strip_closed(b, bs, ts, smooth, smat),
-   b_surface_polygon(b, ts, tmat)]
-
-b_generic_pyramid_frustum_with_holes(b::Backend{K,T}, bs, ts, smooth, bbs, tts, smooths, bmat, tmat, smat) where {K,T} =
-  [b_surface_polygon_with_holes(b, reverse(bs), bbs, bmat),
-   b_quad_strip_closed(b, bs, ts, smooth, smat),
-   [b_quad_strip_closed(b, bs, ts, smooth, smat)
-    for (bs, ts, smooth) in zip(bbs, tts, smooths)]...,
-   b_surface_polygon_with_holes(b, ts, reverse.(tts), tmat)]
-
-b_generic_pyramid(b::Backend{K,T}, bs, t, smooth, bmat, smat) where {K,T} =
-	[b_surface_polygon(b, reverse(bs), bmat),
-	 b_ngon(b, bs, t, smooth, smat)]
-
-	=#
 KhepriBase.b_generic_prism(b::RH, bs, smooth, v, bmat, tmat, smat) =
 	@remote(b, PrismWithHoles([bs], [smooth], v, tmat))
 
@@ -333,11 +314,6 @@ KhepriBase.b_pyramid(b::RH, bs, t, bmat, smat) =
 KhepriBase.b_cylinder(b::RH, c, r, h, bmat, tmat, smat) =
   @remote(b, Cylinder(c, r, c + vz(h, c.cs), smat))
 
-# b_cuboid(b::Backend{K,T}, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat) where {K,T} =
-#   [b_quad(b, pb3, pb2, pb1, pb0, mat),
-#    b_quad_strip_closed(b, [pb0, pb1, pb2, pb3], [pt0, pt1, pt2, pt3], false, mat),
-#    b_quad(b, pt0, pt1, pt2, pt3, mat)]
-
 KhepriBase.b_box(b::RH, c, dx, dy, dz, mat) =
   @remote(b, Box(c, vx(1, c.cs), vy(1, c.cs), dx, dy, dz, mat))
 
@@ -350,69 +326,7 @@ KhepriBase.b_cone(b::RH, cb, r, h, bmat, smat) =
 KhepriBase.b_cone_frustum(b::RH, cb, rb, h, rt, bmat, tmat, smat) =
   @remote(b, ConeFrustum(cb, rb, cb + vz(h, cb.cs), rt, smat))
 
-##################################################################
-# Paths and Regions
-#=
-b_surface(b::Backend{K,T}, path::ClosedPath, mat) where {K,T} =
-  b_surface_polygon(b, path_vertices(path), mat)
-
-b_surface(b::Backend{K,T}, region::Region, mat) where {K,T} =
-  b_surface_polygon_with_holes(
-    b,
-    path_vertices(outer_path(region)),
-    path_vertices.(inner_paths(region)),
-    mat)
-
-# In theory, this should be implemented using a loft
-b_path_frustum(b::Backend{K,T}, bpath, tpath, bmat, tmat, smat) where {K,T} =
-  let blength = path_length(bpath),
-	  tlength = path_length(tpath),
-	  n = max(length(path_vertices(bpath)), length(path_vertices(bpath))),
-	  bs = division(bpath, n),
-	  ts = division(tpath, n)
-	  # We should rotate one of the vertices array to minimize the distance
-	  # between corresponding so that they align better.
-	b_generic_pyramid_frustum(
-	  b, bs, ts,
-	  is_smooth_path(bpath) || is_smooth_path(tpath),
-	  bmat, tmat, smat)
-	end
-
-# Extruding a profile
-b_extrude_profile(b::Backend{K,T}, cb, h, profile, mat) where {K,T} =
-  b_extrude_profile(b, cb, h, profile, mat, mat, mat)
-
-b_extrude_profile(b::Backend{K,T}, cb, h, profile, bmat, tmat, smat) where {K,T} =
-  let path = profile
-  	b_generic_prism(
-  	  b,
-  	  path_vertices_on(path, cb),
-  	  is_smooth_path(path),
-      vz(h, cb.cs),
-  	  bmat, tmat, smat)
-  end
-
-b_extrude_profile(b::Backend{K,T}, cb, h, profile::Region, bmat, tmat, smat) where {K,T} =
-  let outer = outer_path(profile),
-      inners = inner_paths(profile)
-    isempty(inners) ?
-      b_generic_prism(b,
-        path_vertices_on(outer, cb),
-        is_smooth_path(outer),
-        vz(h, cb.cs),
-        bmat, tmat, smat) :
-      b_generic_prism_with_holes(b,
-        path_vertices_on(outer, cb),
-        is_smooth_path(outer),
-        path_vertices_on.(inners, cb),
-        is_smooth_path.(inners),
-        vz(h, cb.cs),
-        bmat, tmat, smat)
-  end
-=#
-
-#
-# # Materials
+## Materials
 # To encode materials, we use a Guid but convert it to an int,
 # taking into consideration that Guid(int) = int + 1
 encode(ns::Val{:RH}, t::Val{:MatId}, c::IO, v) =
@@ -423,6 +337,8 @@ decode(ns::Val{:RH}, t::Val{:MatId}, c::IO) =
 KhepriBase.b_get_material(b::RH, ref) =
   get_rhino_material(b, ref)
 
+get_rhino_material(b, n::Nothing) =
+  void_ref(b)
 get_rhino_material(b, path::String) =
   @remote(b, LoadRenderMaterialFromPath(path))
 
@@ -483,8 +399,8 @@ backend_map_division(b::RH, f::Function, s::Shape2D, nu::Int, nv::Int) =
         end
     end
 
-realize(b::RH, s::Torus) =
-  @remote(b, Torus(s.center, vz(1, s.center.cs), s.re, s.ri))
+KhepriBase.b_torus(b::RH, c, ra, rb, mat) =
+  @remote(b, Torus(c, vz(1, c.cs), ra, ra, mat))
 backend_right_cuboid(b::RH, cb, width, height, h, material) =
   @remote(b, XYCenteredBox(cb, vx(1, cb.cs), vy(1, cb.cs), width, height, h))
 
@@ -495,9 +411,9 @@ backend_extrusion(b::RH, s::Shape, v::Vec) =
         end,
         s)
 
-backend_sweep(b::RH, path::Shape, profile::Shape, rotation::Real, scale::Real) =
-  map_ref(profile) do profile_r
-    map_ref(path) do path_r
+KhepriBase.b_sweep(b::RH, path, profile, rotation, scale, mat) =
+  map_ref(b, profile) do profile_r
+    map_ref(b, path) do path_r
       @remote(b, SweepPathProfile(path_r, profile_r, rotation, scale))
     end
   end
@@ -639,19 +555,9 @@ realize(b::RH, s::UnionMirror) =
     UnionRef((r0,r1))
   end
 
-backend_surface_grid(b::RH, points, closed_u, closed_v, smooth_u, smooth_v) =
-  let (nu, nv) = size(points),
-      order(n) = min(max(2*floor(Int,n/30) + 1, 2), 5)
-    @remote(b, SurfaceFromGrid(nu, nv,
-                               reshape(permutedims(points), :),
-                               closed_u, closed_v,
-                               smooth_u ? order(nu) : 1,
-                               smooth_v ? order(nv) : 1))
-  end
-
 realize(b::RH, s::Thicken) =
-  and_delete_shape(
-    map_ref(s.shape) do r
+  and_mark_deleted(b,
+    map_ref(b, s.shape) do r
       @remote(b, Thicken(r, s.thickness))
     end,
     s.shape)
@@ -676,99 +582,54 @@ realize(b::RH, f::TableChairFamily) =
         f.chairs_top, f.chairs_bottom, f.chairs_right, f.chairs_left,
         f.spacing))
 
-backend_rectangular_table(b::RH, c, angle, family) =
+KhepriBase.b_table(b::RH, c, angle, family) =
     @remote(b, Table(c, angle, realize(b, family)))
 
-backend_chair(b::RH, c, angle, family) =
+KhepriBase.b_chair(b::RH, c, angle, family) =
     @remote(b, Chair(c, angle, realize(b, family)))
 
-backend_rectangular_table_and_chairs(b::RH, c, angle, family) =
+KhepriBase.b_table_and_chairs(b::RH, c, angle, family) =
     @remote(b, TableAndChairs(c, angle, realize(b, family)))
-
-backend_slab(b::RH, profile, holes, thickness, family) =
-    map_ref(b,
-            r->@remote(b, Extrusion(r, vz(thickness))),
-            ensure_ref(b, backend_fill(b, profile)))
-
-#=
-#Beams are aligned along the top axis.
-realize(b::RH, s::Beam) =
-  let profile = s.family.profile
-      profile_u0 = profile.corner
-      c = add_xy(s.cb, profile_u0.x + profile.dx/2, profile_u0.y + profile.dy/2)
-      # need to test whether it is rotation on center or on axis
-      o = add_y(loc_from_o_phi(s.cb, s.angle), -profile.dy/2)
-    @remote(b, XYCenteredBox(o, vx(1, o.cs), vy(1, o.cs), profile.dx, profile.dy, s.h))
-  end
-
-#Columns are aligned along the center axis.
-realize(b::RH, s::FreeColumn) =
-  let profile = s.family.profile
-      profile_u0 = profile.corner
-      c = add_xy(s.cb, profile_u0.x + profile.dx/2, profile_u0.y + profile.dy/2)
-      # need to test whether it is rotation on center or on axis
-      o = loc_from_o_phi(c, s.angle)
-    @remote(b, XYCenteredBox(o, vx(1, o.cs), vy(1, o.cs), profile.dx, profile.dy, s.h))
-  end
-
-realize(b::RH, s::Column) =
-  let profile = s.family.profile,
-      profile_u0 = profile.corner,
-      c = add_xy(s.cb, profile_u0.x + profile.dx/2, profile_u0.y + profile.dy/2),
-      base_height = s.bottom_level.height,
-      height = s.top_level.height - base_height,
-      # need to test whether it is rotation on center or on axis
-      o = loc_from_o_phi(s.cb + vz(base_height), s.angle)
-    @remote(b, XYCenteredBox(o, vx(1, o.cs), vy(1, o.cs), profile.dx, profile.dy, height))
-  end
-=#
-
-backend_wall(b::RH, path, height, l_thickness, r_thickness, family) =
-    @remote(b, PathWall(backend_stroke(b, offset(path, l_thickness - r_thickness)), #offset(path, (l_thickness - r_thickness)/2)),
-                        l_thickness, r_thickness,
-                        height))
 
 ############################################
 
 backend_bounding_box(b::RH, shapes::Shapes) =
   @remote(b, BoundingBox(collect_ref(shapes)))
 
-b_set_view(b::RH, camera::XYZ, target::XYZ, lens::Real, aperture::Real) =
+KhepriBase.b_set_view(b::RH, camera::XYZ, target::XYZ, lens::Real, aperture::Real) =
   @remote(b, View(camera, target, lens))
 
-b_get_view(b::RH) =
+KhepriBase.b_get_view(b::RH) =
   @remote(b, ViewCamera()), @remote(b, ViewTarget()), @remote(b, ViewLens())
 
-backend_zoom_extents(b::RH) =
+KhepriBase.b_zoom_extents(b::RH) =
   @remote(b, ZoomExtents())
 
-backend_view_top(b::RH) =
+KhepriBase.b_set_view_top(b::RH) =
   @remote(b, ViewTop())
 
-backend_delete_shapes(b::RH, shapes::Shapes) =
-  @remote(b, DeleteMany(collect_ref(shapes)))
+KhepriBase.b_delete_refs(b::RH, refs::Vector{RHId}) =
+  @remote(b, DeleteMany(refs))
 
-b_all_refs(b::RH) =
+KhepriBase.b_all_refs(b::RH) =
   @remote(b, GetAllShapes())
 
-b_delete_all_refs(b::RH) =
+KhepriBase.b_delete_all_refs(b::RH) =
   @remote(b, DeleteAll())
 
 # Layers
-RHLayer = String
-
-KhepriBase.b_current_layer(b::RH)::RHLayer =
+KhepriBase.b_current_layer(b::RH) =
   @remote(b, CurrentLayer())
 
-KhepriBase.b_current_layer(b::RH, layer::RHLayer) =
+KhepriBase.b_current_layer(b::RH, layer) =
   @remote(b, SetCurrentLayer(layer))
 
-KhepriBase.b_create_layer(b::RH, name::String, active::Bool, color::RGB) =
+KhepriBase.b_layer(b::RH, name, active, color) =
   let to255(x) = round(UInt8, x*255)
     @remote(b, CreateLayer(name, true, to255(red(color)), to255(green(color)), to255(blue(color))))
   end
 
-backend_delete_all_shapes_in_layer(b::RH, layer::RHLayer) =
+KhepriBase.b_delete_all_shapes_in_layer(b::RH, layer) =
   @remote(b, DeleteAllInLayer(layer))
 
 KhepriBase.b_shape_from_ref(b::RH, r) =
@@ -877,7 +738,7 @@ backend_generate_captured_shapes(b::RH, ss::Shapes) =
 backend_all_shapes_in_layer(b::RH, layer) =
   Shape[backend_shape_from_ref(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
 
-b_render_view(b::RH, path::String) =
+KhepriBase.b_render_view(b::RH, path::String) =
   @remote(b, Render(render_width(), render_height(), path))
 
 backend_save_view(b::RH, path::String) =
