@@ -241,16 +241,19 @@ def delete_all_shapes()->None:
     #    for obj in scene.objects:
     #        scene.objects.remove(obj, do_unlink=True)
     # only worry about data in the startup scene
-    for bpy_data_iter in (
-        D.objects,
-        D.meshes,
-        #D.cameras,
-        ):
-        for id_data in bpy_data_iter:
-            bpy_data_iter.remove(id_data, do_unlink=True)
+    for collection in D.collections:
+        for obj in collection.objects:
+            D.objects.remove(obj, do_unlink=True)
+    # for bpy_data_iter in (
+    #     D.objects,
+    #     D.meshes,
+    #     #D.cameras,
+    #     ):
+    #     for id_data in bpy_data_iter:
+    #         bpy_data_iter.remove(id_data, do_unlink=True)
 
 def delete_shape(name:Id)->None:
-    D.objects.remove(D.objects[name], do_unlink=True)
+    D.objects.remove(D.objects[str(name)], do_unlink=True)
 
 def mesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], mat:MatId)->Id:
     # id, name = new_id()
@@ -965,6 +968,14 @@ def camera_from_view()->None:
     cam.location = space.region_3d.view_location
     cam.rotation_euler = space.region_3d.view_rotation.to_euler()
     cam.data.lens = space.lens
+
+# If needed, a zoom-extents operation can be defined as follows
+# for area in C.screen.areas:
+#     if area.type == 'VIEW_3D':
+#         for region in area.regions:
+#             if region.type == 'WINDOW':
+#                 override = {'area': area, 'region': region, 'edit_object': bpy.context.edit_object}
+#                 bpy.ops.view3d.view_all(override)
 
 def set_render_size(width:int, height:int)->None:
     C.scene.render.resolution_x = width
