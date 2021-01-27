@@ -1,5 +1,6 @@
 module KhepriLibrary
+using KhepriBase
 
-# Write your package code here.
+include("TestCells.jl")
 
 end
