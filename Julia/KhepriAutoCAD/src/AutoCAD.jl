@@ -432,9 +432,6 @@ KhepriBase.b_spline(b::ACAD, ps, v0, v1, interpolator, mat) =
 KhepriBase.b_closed_spline(b::ACAD, ps, mat) =
   @remote(b, InterpClosedSpline(ps))
 
-#b_nurbs_curve(b::Backend{K,T}, order, ps, knots, weights, closed, mat) where {K,T} =
-#  b_line(b, ps, closed, mat)
-
 KhepriBase.b_circle(b::ACAD, c, r, mat) =
   @remote(b, Circle(c, vz(1, c.cs), r))
 
@@ -480,6 +477,9 @@ KhepriBase.b_surface_polygon(b::ACAD, ps, mat) =
 KhepriBase.b_surface_polygon_with_holes(b::ACAD, ps, qss, mat) =
   @remote(b, RegionWithHoles([ps, qss...], falses(1 + length(qss)), mat))
 
+KhepriBase.b_surface_closed_spline(b::ACAD, ps, mat) =
+  @remote(b, SurfaceFromCurves([@remote(b, InterpClosedSpline(path.vertices))]))
+
 KhepriBase.b_surface_circle(b::ACAD, c, r, mat) =
   @remote(b, SurfaceCircle(c, vz(1, c.cs), r, mat))
 
@@ -510,23 +510,6 @@ realize(b::ACAD, s::SurfaceEllipse) =
     @remote(b, SurfaceEllipse(s.center, vz(1, s.center.cs), vxyz(0, s.radius_y, 0, s.center.cs), s.radius_x/s.radius_y))
   end
 
-#=
-b_generic_pyramid_frustum(b::Backend{K,T}, bs, ts, smooth, bmat, tmat, smat) where {K,T} =
-  [b_surface_polygon(b, reverse(bs), bmat),
-   b_quad_strip_closed(b, bs, ts, smooth, smat),
-   b_surface_polygon(b, ts, tmat)]
-
-b_generic_pyramid_frustum_with_holes(b::Backend{K,T}, bs, ts, smooth, bbs, tts, smooths, bmat, tmat, smat) where {K,T} =
-  [b_surface_polygon_with_holes(b, reverse(bs), bbs, bmat),
-   b_quad_strip_closed(b, bs, ts, smooth, smat),
-   [b_quad_strip_closed(b, bs, ts, smooth, smat)
-    for (bs, ts, smooth) in zip(bbs, tts, smooths)]...,
-   b_surface_polygon_with_holes(b, ts, reverse.(tts), tmat)]
-
-b_generic_pyramid(b::Backend{K,T}, bs, t, smooth, bmat, smat) where {K,T} =
-	[b_surface_polygon(b, reverse(bs), bmat),
-	 b_ngon(b, bs, t, smooth, smat)]
-=#
 KhepriBase.b_generic_prism(b::ACAD, bs, smooth, v, bmat, tmat, smat) =
   @remote(b, PrismWithHoles([bs], [smooth], v, tmat))
 
@@ -556,9 +539,6 @@ KhepriBase.b_cone_frustum(b::ACAD, cb, rb, h, rt, bmat, tmat, smat) =
 
 KhepriBase.b_torus(b::ACAD, c, ra, rb, mat) =
   @remote(b, Torus(c, vz(1, c.cs), ra, rb, mat))
-
-#KhepriBase.b_cuboid(b::BLR, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat) =
-#  @remote(b, cuboid([pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3], mat))
 
 # Materials
 
@@ -643,9 +623,6 @@ acad_layer_family(name, color::RGB=rgb(1,1,1)) =
 backend_get_family_ref(b::ACAD, f::Family, af::ACADLayerFamily) =
   backend_create_layer(b, af.name, true, af.color)
 
-
-backend_fill(b::ACAD, path::ClosedSplinePath) =
-    backend_fill_curves(b, @remote(b, InterpClosedSpline(path.vertices)))
 backend_fill_curves(b::ACAD, refs::ACADIds) = @remote(b, SurfaceFromCurves(refs))
 backend_fill_curves(b::ACAD, ref::ACADId) = @remote(b, SurfaceFromCurves([ref]))
 backend_stroke_unite(b::ACAD, refs) = @remote(b, JoinCurves(refs))
@@ -941,51 +918,14 @@ realize(b::ACAD, f::TableChairFamily) =
         f.chairs_top, f.chairs_bottom, f.chairs_right, f.chairs_left,
         f.spacing))
 
-backend_rectangular_table(b::ACAD, c, angle, family) =
+KhepriBase.b_table(b::ACAD, c, angle, family) =
     @remote(b, Table(c, angle, realize(b, family)))
 
-backend_chair(b::ACAD, c, angle, family) =
+KhepriBase.b_chair(b::ACAD, c, angle, family) =
     @remote(b, Chair(c, angle, realize(b, family)))
 
-backend_rectangular_table_and_chairs(b::ACAD, c, angle, family) =
+KhepriBase.b_table_and_chairs(b::ACAD, c, angle, family) =
     @remote(b, TableAndChairs(c, angle, realize(b, family)))
-
-backend_slab(b::ACAD, profile, holes, thickness, family) =
-  let slab(profile) = map_ref(b, r -> @remote(b, Extrude(r, vz(thickness))),
-                              ensure_ref(b, backend_fill(b, profile))),
-      main_body = slab(profile),
-      holes_bodies = map(slab, holes)
-    foldl((r0, r1)->subtract_ref(b, r0, r1), holes_bodies, init=main_body)
-  end
-
-#=
-realize_beam_profile(b::ACAD, s::Union{Beam,FreeColumn,Column}, profile::CircularPath, cb::Loc, length::Real) =
-  @remote(b, Cylinder(cb, profile.radius, add_z(cb, length)))
-
-realize_beam_profile(b::ACAD, s::Union{Beam,Column}, profile::RectangularPath, cb::Loc, length::Real) =
-  let profile_u0 = profile.corner,
-      c = add_xy(s.cb, profile_u0.x + profile.dx/2, profile_u0.y + profile.dy/2)
-      # need to test whether it is rotation on center or on axis
-      o = loc_from_o_phi(c, s.angle)
-    @remote(b, CenteredBox(add_y(o, -profile.dy/2), profile.dx, profile.dy, length))
-  end
-
-#Columns are aligned along the center axis.
-realize_beam_profile(b::ACAD, s::FreeColumn, profile::RectangularPath, cb::Loc, length::Real) =
-  let profile_u0 = profile.corner,
-      c = add_xy(s.cb, profile_u0.x + profile.dx/2, profile_u0.y + profile.dy/2)
-      # need to test whether it is rotation on center or on axis
-      o = loc_from_o_phi(c, s.angle)
-    @remote(b, CenteredBox(o, profile.dx, profile.dy, length))
-  end
-=#
-
-backend_wall(b::ACAD, path, height, l_thickness, r_thickness, family) =
-  @remote(b,
-    Thicken(@remote(b,
-      Extrude(backend_stroke(b, offset(path, (l_thickness - r_thickness)/2)),
-              vz(height))),
-      r_thickness + l_thickness))
 
 ############################################
 
@@ -998,9 +938,11 @@ KhepriBase.b_set_view(b::ACAD, camera::Loc, target::Loc, lens::Real, aperture::R
 KhepriBase.b_get_view(b::ACAD) =
   @remote(b, ViewCamera()), @remote(b, ViewTarget()), @remote(b, ViewLens())
 
-backend_zoom_extents(b::ACAD) = @remote(b, ZoomExtents())
+# Only AutoCAD supports this
+# zoom_extents(b::ACAD) = @remote(b, ZoomExtents())
 
-backend_view_top(b::ACAD) = @remote(b, ViewTop())
+# Only AutoCAD supports this
+# view_top(b::ACAD) = @remote(b, ViewTop())
 
 KhepriBase.b_realistic_sky(b::ACAD, date, latitude, longitude, elevation, meridian, turbidity, withsun) =
   @remote(b, SetSkyFromDateLocation(date, latitude, longitude, meridian, elevation))
@@ -1033,25 +975,19 @@ backend_dimension(b::ACAD, p0::Loc, p1::Loc, sep::Real, scale::Real, style::Symb
     end
 
 # Layers
-backend_layer(b::ACAD, name::String, active::Bool, color::RGB) =
-  let to255(x) = round(UInt8, x*255)
-    @remote(b, CreateLayer(name, true, to255(red(color)), to255(green(color)), to255(blue(color))))
-  end
 
-ACADLayer = Int
-
-KhepriBase.b_current_layer(b::ACAD)::ACADLayer =
+KhepriBase.b_current_layer(b::ACAD) =
   @remote(b, CurrentLayer())
 
-KhepriBase.b_current_layer(b::ACAD, layer::ACADLayer) =
+KhepriBase.b_current_layer(b::ACAD, layer) =
   @remote(b, SetCurrentLayer(layer))
 
-KhepriBase.b_create_layer(b::ACAD, name::String, active::Bool, color::RGB) =
+KhepriBase.b_layer(b::ACAD, name, active, color) =
   let to255(x) = round(UInt8, x*255)
     @remote(b, CreateLayer(name, true, to255(red(color)), to255(green(color)), to255(blue(color))))
   end
 
-backend_delete_all_shapes_in_layer(b::ACAD, layer::ACADLayer) =
+KhepriBase.b_delete_all_shapes_in_layer(b::ACAD, layer) =
   @remote(b, DeleteAllInLayer(layer))
 
 switch_to_layer(to, b::ACAD) =
@@ -1060,18 +996,6 @@ switch_to_layer(to, b::ACAD) =
       set_layer_active(from, false)
       current_layer(to)
     end
-
-# Materials
-ACADMaterial = Int
-
-backend_current_material(b::ACAD)::ACADMaterial =
-  -1 #@remote(b, CurrentMaterial())
-
-backend_current_material(b::ACAD, material::ACADMaterial) =
-  -1 #@remote(b, SetCurrentMaterial(material))
-
-backend_get_material(b::ACAD, name::String) =
-  -1 #@remote(b, CreateMaterial(name))
 
 # Blocks
 
@@ -1097,14 +1021,14 @@ Khepri.create_block("Foo", [circle(radius=r) for r in 1:10])
 =#
 
 # Lights
-b_pointlight(b::ACAD, loc::Loc, color::RGB, range::Real, intensity::Real) =
+KhepriBase.b_pointlight(b::ACAD, loc::Loc, color::RGB, range::Real, intensity::Real) =
   # HACK: Fix this
   @remote(b, SpotLight(loc, intensity, range, loc+vz(-1)))
 
-b_spotlight(b::ACAD, loc::Loc, dir::Vec, hotspot::Real, falloff::Real) =
+KhepriBase.b_spotlight(b::ACAD, loc::Loc, dir::Vec, hotspot::Real, falloff::Real) =
     @remote(b, SpotLight(loc, hotspot, falloff, loc + dir))
 
-b_ieslight(b::ACAD, file::String, loc::Loc, dir::Vec, alpha::Real, beta::Real, gamma::Real) =
+KhepriBase.b_ieslight(b::ACAD, file::String, loc::Loc, dir::Vec, alpha::Real, beta::Real, gamma::Real) =
     @remote(b, IESLight(file, loc, loc + dir, vxyz(alpha, beta, gamma)))
 
 # User Selection
@@ -1327,7 +1251,7 @@ convert_render_exposure(b::ACAD, v::Real) = -4.05*v + 8.8
 #render quality: [-1, +1] -> [+1, +50]
 convert_render_quality(b::ACAD, v::Real) = round(Int, 25.5 + 24.5*v)
 
-b_render_view(b::ACAD, path::String) =
+KhepriBase.b_render_view(b::ACAD, path::String) =
     @remote(b, Render(
                render_width(), render_height(),
                path,
