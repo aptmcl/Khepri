@@ -2,16 +2,27 @@ export tikz,
        tikz_output,
        display_tikz_output
 
+take(out::IO) =
+  let contents = String(take!(out))
+    println(out, contents)
+    contents
+ end
+
 tikz_e(out::IO, arg) =
   begin
     print(out, arg)
     println(out, ";")
   end
 
-tikz_draw(out::IO, filled=false) = print(out, filled ? "\\fill " : "\\draw ")
+tikz_draw(out::IO, filled=false) =
+  print(out, filled ? "\\fill " : "\\draw ")
 
 tikz_number(out::IO, x::Real) =
-  isinteger(x) ? print(out, x) : (abs(x) < 0.0001 ? print(out, 0) : print(out, round(x*10000.0)/10000.0))
+  isinteger(x) ?
+    print(out, x) :
+    (abs(x) < 0.0001 ?
+      print(out, 0) :
+      print(out, round(x*10000.0)/10000.0))
 
 tikz_cm(out::IO, x::Real) = begin
   tikz_number(out, x)
@@ -52,8 +63,8 @@ tikz_circle(out::IO, c::Loc, r::Real, filled::Bool=false) =
     tikz_e(out, ")")
   end
 
-
-tikz_point(out::IO, c::Loc) = tizk_circle(out, c, 0.01, true)
+tikz_point(out::IO, c::Loc) =
+  tizk_circle(out, c, 0.01, true)
 
 tikz_ellipse(out::IO, c::Loc, r0::Real, r1::Real, fi::Real, filled=false) =
   begin
@@ -149,7 +160,7 @@ tikz_closed_lines(out::IO, ptss, filled::Bool=false) =
         tikz_coord(out, pt)
         print(out, "--")
       end
-      println(out, "cycle")
+      print(out, "cycle ")
     end
     println(out, ";")
   end
@@ -236,17 +247,17 @@ tikz_transform(out::IO, f::Function, c::Loc) =
   end
 
 tikz_set_view(out::IO, camera::Loc, target::Loc, lens::Real) =
-  let (v, contents) = (camera-target, get_accumulated_tikz(out))
-    print("\\tdplotsetmaincoords{")
-    tikz_number(radians_>degrees(sph_psi(v)))
-    print("}{")
-    tikz_number(radians_>degrees(sph_phi(v))+90)
-    println("}")
-    println("\\begin{tikzpicture}[tdplot_main_coords]")
-    write_bytes(contents, tikz_port)
-    println("\\end{tikzpicture}")
+  let v = camera - target,
+      contents = String(take!(out))
+    print(out, "\\tdplotsetmaincoords{")
+    tikz_number(out, rad2deg(sph_psi(v)))
+    print(out, "}{")
+    tikz_number(out, rad2deg(sph_phi(v))+90)
+    println(out, "}")
+    println(out, "\\begin{tikzpicture}[tdplot_main_coords,fill opacity=0.4]")
+    print(out, contents)
+    println(out, "\\end{tikzpicture}")
   end
-
 
 #
 
@@ -270,11 +281,7 @@ const tikz = TikZ(create_TikZ_connection())
 
 KhepriBase.backend_name(b::TikZ) = "TikZ"
 
-get_accumulated_tikz(out::IO) = String(take!(out))
-
-tikz_output(b::TikZ=current_backend()) = get_accumulated_tikz(connection(b))
-
-display_tikz_output(b::TikZ=current_backend()) = print(tikz_output(b))
+tikz_output(b::TikZ=tikz) = take(connection(b))
 
 withTikZXForm(f, out, c) =
   if is_world_cs(c.cs)
@@ -336,7 +343,7 @@ KhepriBase.b_surface_polygon(b::TikZ, ps, mat) =
 
 KhepriBase.b_surface_polygon_with_holes(b::TikZ, ps, qss, mat) =
   tikz_closed_lines(
-    connection(b), [in_world.(ps), [in_world.(reverse(qs)) for qs in qss]...], true)
+    connection(b), [in_world.(ps), [in_world.(qs) for qs in qss]...], true)
 
 KhepriBase.b_surface_circle(b::TikZ, c, r, mat) =
   withTikZXForm(connection(b), c) do out, cc
@@ -390,3 +397,46 @@ realize(b::TikZ, s::SurfaceGrid) =
 
 #backend_dimension(b::TikZ, pa, pb, sep, scale, style) =
 #  tikz_dimension(connection(b), pa, pb, )
+
+KhepriBase.b_set_view(b::TikZ, camera::XYZ, target::XYZ, lens::Real, aperture::Real) =
+  tikz_set_view(connection(b), in_world(camera), in_world(target), lens)
+
+#=openpdf()
+      pdfname = makepdf(latex)
+      if Sys.iswindows()
+          command = `cmd /K start \"\" $pdfname`
+          run(command)
+      else
+          run(`open $pdfname`)
+      end
+      pdfname
+  end
+=#
+const pdflatex_folder = Parameter("C:/Users/aml/AppData/Local/Programs/MiKTeX/miktex/bin/x64/")
+pdflatex_cmd(cmd::AbstractString="pdflatex") = pdflatex_folder() * cmd
+
+export visualize_tikz
+visualize_tikz(name="Test") =
+  let contents = tikz_output()
+    with(render_kind_dir, "TikZ",
+         render_ext, ".tex") do
+      let path = prepare_for_saving_file(render_pathname(name))
+        open(path, "w") do out
+          println(out, raw"\documentclass{standalone}")
+          println(out, raw"\usepackage{tikz}")
+          println(out, raw"\usetikzlibrary{patterns}")
+          println(out, raw"\usetikzlibrary{calc,fadings,decorations.pathreplacing}")
+          println(out, raw"\usetikzlibrary{shapes,fit}")
+          println(out, raw"\usepackage{tikz-3dplot}")
+          println(out, raw"\begin{document}")
+          println(out, contents)
+          println(out, raw"\end{document}")
+        end
+        cd(dirname(path)) do
+          output = read(`$(pdflatex_cmd()) -shell-escape -halt-on-error $(path)`, String)
+          occursin("Error:", output) && println(output)
+        end
+      end
+      @info "Tex file: $(render_pathname(name))"
+    end
+  end
