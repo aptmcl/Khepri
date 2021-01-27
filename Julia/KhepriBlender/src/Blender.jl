@@ -148,7 +148,7 @@ def set_sky(turbidity:float)->None:
 """
 
 abstract type BLRKey end
-const BLRId = Int64
+const BLRId = Union{Int32,String} # Although shapes and materials are ints, layers are strings
 const BLRIds = Vector{BLRId}
 const BLRRef = NativeRef{BLRKey, BLRId}
 const BLRRefs = Vector{BLRRef}
@@ -168,7 +168,7 @@ KhepriBase.has_boolean_ops(::Type{BLR}) = HasBooleanOps{false}()
 
 
 KhepriBase.backend(::BLRRef) = blender
-KhepriBase.void_ref(b::BLR) = BLRRef(-1)
+KhepriBase.void_ref(b::BLR) = BLRRef(-1 % Int32)
 
 # Primitives
 
@@ -200,7 +200,7 @@ KhepriBase.b_surface_polygon(b::BLR, ps, mat) =
   @remote(b, polygon(ps, mat))
 
 KhepriBase.b_surface_polygon_with_holes(b::BLR, ps, qss, mat) =
-  @remote(b, surface([ps, qss...], mat))
+  @remote(b, polygon_with_holes([ps, qss...], mat))
 
 KhepriBase.b_surface_circle(b::BLR, c, r, mat) =
   @remote(b, circle(c, vz(1, c.cs), r, mat))
@@ -275,20 +275,6 @@ KhepriBase.b_new_material(b::BLR, path, color, specularity, roughness, transmiss
 
 # BIM
 
-
-
-
-
-#=
-b_regular_pyramid_frustum(b, 32, cb, r, 0, h, r, true, mat, mat, mat)
-
-
-
-backend_surface_polygon(b::BLR, vs::Locs) =
-  @remote(b, mesh(vs, [], [collect(0:length(vs)-1)]))
-
-
-=#
 #=
 
 Default families
@@ -297,7 +283,7 @@ Default families
 export blender_family_materials
 blender_family_materials(m1, m2=m1, m3=m2, m4=m3) = (materials=(m1, m2, m3, m4), )
 
-KhepriBase.b_create_layer(b::BLR, name::String, active::Bool, color::RGB) =
+KhepriBase.b_layer(b::BLR, name, active, color) =
   @remote(b, find_or_create_collection(name, active, color))
 KhepriBase.b_current_layer(b::BLR) =
   @remote(b, get_current_collection())
@@ -332,10 +318,6 @@ KhepriBase.b_realistic_sky(b::BLR, date, latitude, longitude, elevation, meridia
 	@remote(b, set_sky(turbidity)) #Add withsun
   end
 
-KhepriBase.b_set_ground(b::BLR, level, mat) =
-  b_surface_regular_polygon(b, 16, z(level), 10000, 0, true, mat) #HACK use a proper material
-
-
 KhepriBase.b_delete_ref(b::BLR, r::BLRId) =
   @remote(b, delete_shape(r))
 
@@ -359,47 +341,6 @@ backend_dimension(b::BLR, p0::Loc, p1::Loc, sep::Real, scale::Real, style::Symbo
         angle = pol_phi(v)
         dimension(p0, p1, add_pol(p0, sep, angle + pi/2), scale, style, b)
     end
-
-# Layers
-backend_layer(b::BLR, name::String, active::Bool, color::RGB) =
-  let to255(x) = round(UInt8, x*255)
-    @remote(b, CreateLayer(name, true, to255(red(color)), to255(green(color)), to255(blue(color))))
-  end
-
-BLRLayer = Int
-
-backend_current_layer(b::BLR)::BLRLayer =
-  @remote(b, CurrentLayer())
-
-backend_current_layer(b::BLR, layer::BLRLayer) =
-  @remote(b, SetCurrentLayer(layer))
-
-backend_create_layer(b::BLR, name::String, active::Bool, color::RGB) =
-  let to255(x) = round(UInt8, x*255)
-    @remote(b, CreateLayer(name, true, to255(red(color)), to255(green(color)), to255(blue(color))))
-  end
-
-backend_delete_all_shapes_in_layer(b::BLR, layer::BLRLayer) =
-  @remote(b, DeleteAllInLayer(layer))
-
-switch_to_layer(to, b::BLR) =
-    if to != from
-      set_layer_active(to, true)
-      set_layer_active(from, false)
-      current_layer(to)
-    end
-
-# Materials
-BLRMaterial = Int
-
-backend_current_material(b::BLR)::BLRMaterial =
-  -1 #@remote(b, CurrentMaterial())
-
-backend_current_material(b::BLR, material::BLRMaterial) =
-  -1 #@remote(b, SetCurrentMaterial(material))
-
-backend_get_material(b::BLR, name::String) =
-  -1 #@remote(b, CreateMaterial(name))
 
 # Blocks
 
@@ -425,14 +366,14 @@ Khepri.create_block("Foo", [circle(radius=r) for r in 1:10])
 =#
 #=
 # Lights
-backend_pointlight(b::BLR, loc::Loc, color::RGB, range::Real, intensity::Real) =
+KhepriBase.b_pointlight(b::BLR, loc::Loc, color::RGB, range::Real, intensity::Real) =
   # HACK: Fix this
   @remote(b, SpotLight(loc, intensity, range, loc+vz(-1)))
 
-backend_spotlight(b::BLR, loc::Loc, dir::Vec, hotspot::Real, falloff::Real) =
+KhepriBase.b_spotlight(b::BLR, loc::Loc, dir::Vec, hotspot::Real, falloff::Real) =
     @remote(b, SpotLight(loc, hotspot, falloff, loc + dir))
 
-backend_ieslight(b::BLR, file::String, loc::Loc, dir::Vec, alpha::Real, beta::Real, gamma::Real) =
+KhepriBase.b_ieslight(b::BLR, file::String, loc::Loc, dir::Vec, alpha::Real, beta::Real, gamma::Real) =
     @remote(b, IESLight(file, loc, loc + dir, vxyz(alpha, beta, gamma)))
 
 # User Selection
