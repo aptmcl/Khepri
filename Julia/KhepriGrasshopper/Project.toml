@@ -1,0 +1,13 @@
+name = "KhepriGrasshopper"
+uuid = "07d5afb9-2ccb-4a01-b4e8-de8532b25eef"
+authors = ["António Menezes Leitão <antonio.menezes.leitao@gmail.com>"]
+version = "0.1.0"
+
+[compat]
+julia = "1.5"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
