@@ -106,9 +106,10 @@ const RVTUnionRef = UnionRef{RVTKey, RVTId}
 const RVTSubtractionRef = SubtractionRef{RVTKey, RVTId}
 const RVT = SocketBackend{RVTKey, RVTId}
 const RVTVoidId = -1
-void_ref(b::RVT) = RVTNativeRef(RVTVoidId)
 
-create_RVT_connection() = create_backend_connection("Revit", 11001)
+KhepriBase.void_ref(b::RVT) = RVTNativeRef(RVTVoidId)
+
+create_RVT_connection() = connect_to("Revit", revit_port)
 
 const revit = RVT(LazyParameter(TCPSocket, create_RVT_connection), revit_api)
 
@@ -251,7 +252,6 @@ locs_and_arcs(circle::CircularPath) =
         ([locs1..., locs2...], [arcs1..., arcs2...])
     end
 
-
 realize_slab(b::RVT, contour::ClosedPath, holes::Vector{<:ClosedPath}, level::Level, family::SlabFamily) =
     let (locs, arcs) = locs_and_arcs(contour)
         @assert length(holes) == 0
@@ -365,28 +365,25 @@ realize(b::RVT, s::TrussBar) =
 # Select New Family ...
 # Choose Metric Generic Model
 
-realize(b::RVT, s::Sphere) =
-  @remote(b, Sphere(s.center, s.radius))
-realize(b::RVT, s::Torus) =
-  @remote(b, Torus(s.center, vz(1, s.center.cs), s.re, s.ri))
-
-backend_pyramid(b::RVT, bs::Locs, t::Loc) =
+KhepriBase.b_pyramid(b::RVT, bs, t, bmat, smat) =
   @remote(b, Pyramid(bs, t))
-backend_pyramid_frustum(b::RVT, bs::Locs, ts::Locs) =
+KhepriBase.b_pyramid_frustum(b::RVT, bs, ts, bmat, tmat, smat) =
   @remote(b, PyramidFrustum(bs, ts))
-
 backend_right_cuboid(b::RVT, cb, width, height, h, material) =
   @remote(b, CenteredBox(cb, width, height, h))
-realize(b::RVT, s::Box) =
-  @remote(b, Box(s.c, s.dx, s.dy, s.dz))
-realize(b::RVT, s::Cone) =
-  @remote(b, Cone(s.cb, vz(1, s.cb.cs), s.r, s.h))
-realize(b::RVT, s::ConeFrustum) =
-  @remote(b, ConeFrustum(s.cb, vz(1, s.cb.cs), s.rb, s.h, s.rt))
-backend_cylinder(b::RVT, cb::Loc, r::Real, h::Real) =
+KhepriBase.b_box(b::RVT, c, dx, dy, dz, mat) =
+  @remote(b, Box(c, dx, dy, dz))
+KhepriBase.b_cone(b::RVT, cb, r, h, bmat, smat) =
+  @remote(b, Cone(cb, vz(1, cb.cs), r, h))
+KhepriBase.b_cone_frustum(b::RVT, cb, rb, h, rt, bmat, tmat, smat) =
+  @remote(b, ConeFrustum(cb, vz(1, cb.cs), rb, h, rt))
+KhepriBase.b_cylinder(b::RVT, cb, r, h, bmat, tmat, smat) =
   @remote(b, Cylinder(cb, vz(1, cb.cs), r, h))
-
 #Experiment with private Element Cylinder2(XYZ bottom, VXYZ axis, Length radius, Length height) {
+KhepriBase.b_sphere(b::RVT, c, r, mat) =
+  @remote(b, Sphere(c, r))
+realize(b::RVT, s::Torus) =
+  @remote(b, Torus(s.center, vz(1, s.center.cs), s.re, s.ri))
 
 #
 realize_prism(b::RVT, top, bot, side, path::PathSet, h::Real) =
@@ -455,13 +452,12 @@ realize(b::RVT, s::IntersectionShape) =
 backend_bounding_box(b::RVT, shapes::Shapes) =
   @remote(b, BoundingBox(collect_ref(shapes)))
 
+KhepriBase.backend_name(b::RVT) = "Revit"
 
-backend_name(b::RVT) = "Revit"
-
-set_view(camera::Loc, target::Loc, lens::Real, aperture::Real, b::RVT) =
+KhepriBase.b_set_view(b::RVT, camera::Loc, target::Loc, lens::Real, aperture::Real) =
   @remote(b, SetView(camera, target, lens))
 
-get_view(b::RVT) =
+KhepriBase.b_get_view(b::RVT) =
   @remote(b, ViewCamera()), @remote(b, ViewTarget()), @remote(b, ViewLens(c))
 
 zoom_extents(b::RVT) = @remote(b, ZoomExtents())
