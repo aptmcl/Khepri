@@ -526,7 +526,7 @@ KhepriBase.b_cylinder(b::ACAD, cb, r, h, bmat, tmat, smat) =
   @remote(b, Cylinder(cb, r, add_z(cb, h), smat))
 
 KhepriBase.b_box(b::ACAD, c, dx, dy, dz, mat) =
-  @remote(b, Box(s.c, s.dx, s.dy, s.dz))
+  @remote(b, Box(c, dx, dy, dz, mat))
 
 KhepriBase.b_sphere(b::ACAD, c, r, mat) =
   @remote(b, Sphere(c, r, mat))
@@ -731,10 +731,8 @@ let conn = connection(b)
     end
 end
 
-realize(b::ACAD, s::Text) =
-  @remote(b, Text(
-    s.str, s.corner, vx(1, s.corner.cs), vy(1, s.corner.cs), s.height))
-
+b_text(b::ACAD, str, p, size, mat) =
+  @remote(b, Text(str, p, vx(1, p.cs), vy(1, p.cs), size))
 
 backend_right_cuboid(b::ACAD, cb, width, height, h, material) =
   @remote(b, CenteredBox(cb, width, height, h))
@@ -942,19 +940,22 @@ KhepriBase.b_get_view(b::ACAD) =
 # zoom_extents(b::ACAD) = @remote(b, ZoomExtents())
 
 # Only AutoCAD supports this
-# view_top(b::ACAD) = @remote(b, ViewTop())
+KhepriBase.b_set_view_top(b::ACAD) = @remote(b, ViewTop())
 
 KhepriBase.b_realistic_sky(b::ACAD, date, latitude, longitude, elevation, meridian, turbidity, withsun) =
   @remote(b, SetSkyFromDateLocation(date, latitude, longitude, meridian, elevation))
 
 
-b_all_refs(b::ACAD) =
+KhepriBase.b_all_refs(b::ACAD) =
   @remote(b, GetAllShapes())
 
-b_delete_refs(b::ACAD, shapes::Shapes) =
-  @remote(b, DeleteMany(collect_ref(shapes)))
+KhepriBase.b_delete_refs(b::ACAD, rs::Vector{ACADId}) =
+  @remote(b, DeleteMany(rs))
 
-b_delete_all_refs(b::ACAD) =
+KhepriBase.b_delete_ref(b::ACAD, r::ACADId) =
+  @remote(b, Delete(r))
+
+KhepriBase.b_delete_all_refs(b::ACAD) =
   @remote(b, DeleteAll())
 
 backend_set_length_unit(b::ACAD, unit::String) = @remote(b, SetLengthUnit(unit))
