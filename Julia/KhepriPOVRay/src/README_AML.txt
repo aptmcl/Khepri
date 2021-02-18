@@ -11,7 +11,7 @@ The package should be installed in
 
 C:/Users/aml/Documents/POV-Ray/v3.7/include/
 
-The modifications were needed to adapt Lightsys to the Radiosity method of
+Modifications were needed to adapt Lightsys to the Radiosity method of
 POVRay. They are done by the backend itself, that injects code in the output
 to prevent the definition of a macro, namely, in file CIE_Skylight.inc:84
 

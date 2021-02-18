@@ -1,10 +1,7 @@
 #=
 A backend for POVRay
-
-WARNING: Install POVRay and then install http://www.ignorancia.org/index.php/technical/lightsys/
-so that realistic skies can be used
-
 =#
+
 export POVRay,
        povray,
        povray_material
@@ -914,31 +911,26 @@ export_to_povray(b::POVRay, path::String) =
     end
   end
 
-#=
-Simulations need to be done on a temporary folder, so that we can have multiple
-simulations running at the same time.
-=#
+povray_cmd() =
+  @static Sys.iswindows() ?
+    "C:/Program Files/POV-Ray/v3.7/bin/pvengine64" :
+    (@static Sys.isunix() ?
+      realpath(normpath(@__DIR__, "..", "bin", "povray")) :
+      error("Unsupported operating system!"))
 
-povray_simulation_path() = joinpath(string(@__DIR__), "FOO.pov")
-  #=
-  let (path, io) = mktemp(mktempdir(tempdir(), prefix="POVRay_"))
-    close(io)
-    path
-  end
- =#
-export povray_folder
-const povray_folder = Parameter("C:/Program Files/POV-Ray/v3.7/bin/")
-
-povray_cmd(cmd::AbstractString="pvengine64") = povray_folder() * cmd
+const povray_lib = Parameter(realpath(normpath(@__DIR__, "..", "lib", "include")))
+const LightsysIV_lib = Parameter(realpath(normpath(@__DIR__, "..", "lib", "LightsysIV")))
 
 ##########################################
 KhepriBase.b_render_view(b::POVRay, path::String) =
-  let povpath = path_replace_suffix(path, ".pov")
+  let povpath = path_replace_suffix(path, ".pov"),
+      options = Sys.iswindows() ?
+                  (film_active() ? ["-D", "/EXIT", "/RENDER" ] : ["/RENDER" ]) :
+                  [],
+      cmd = `$(povray_cmd()) +A +HR +L'$(povray_lib())' +L'$(LightsysIV_lib())' Width=$(render_width()) Height=$(render_height()) $options $povpath`
     @info povpath
     export_to_povray(b, povpath)
-    film_active() ?
-      run(`$(povray_cmd()) +A +HR Width=$(render_width()) Height=$(render_height()) -D /EXIT /RENDER $(povpath)`, wait=true) :
-      run(`$(povray_cmd()) +A +HR Width=$(render_width()) Height=$(render_height()) /RENDER $(povpath)`, wait=false)
+    run(cmd, wait=film_active())
   end
 
 export clay_model, realistic_model
