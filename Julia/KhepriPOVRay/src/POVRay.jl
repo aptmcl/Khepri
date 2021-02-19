@@ -924,11 +924,22 @@ const LightsysIV_lib = Parameter(realpath(normpath(@__DIR__, "..", "lib", "Light
 ##########################################
 KhepriBase.b_render_view(b::POVRay, path::String) =
   let povpath = path_replace_suffix(path, ".pov"),
+      inipath = path_replace_suffix(path, ".ini"),
       options = @static(Sys.iswindows() ? (film_active() ? ["-D", "/EXIT", "/RENDER"] : ["/RENDER"]) : []),
-      cmd = `$(povray_cmd()) +I$povpath +A +HR +L$(povray_lib()) +L$(LightsysIV_lib()) Width=$(render_width()) Height=$(render_height()) $options`
-    #@info povpath
+      cmd = `$(povray_cmd()) $options "$inipath"`
     @info cmd
     export_to_povray(b, povpath)
+    open(inipath, "w") do out
+      println(out, "Verbose=off")
+      println(out, "Library_Path='$(povray_lib())'")
+      println(out, "Library_Path='$(LightsysIV_lib())'")
+      println(out, "Width=$(render_width())")
+      println(out, "Height=$(render_height())")
+      println(out, "Antialias=on")
+      println(out, "Quality=10")
+      println(out, "High_Reproducibility=on")
+      println(out, "Input_File_Name='$(povpath)'")
+    end
     run(cmd, wait=@static(Sys.iswindows() ? film_active() : true))
   end
 
