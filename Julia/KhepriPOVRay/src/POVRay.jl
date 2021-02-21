@@ -50,10 +50,10 @@ write_povray_object(f::Function, io::IO, type, material, args...) =
       show(io, mime, arg)
     end
     write(io, '\n')
+    if ! isnothing(material)
+      write_povray_material(io, material)
+    end
     let res = f()
-      if ! isnothing(material)
-        write_povray_material(io, material)
-      end
       write(io, "}\n")
       res
     end
@@ -930,7 +930,7 @@ KhepriBase.b_render_view(b::POVRay, path::String) =
     @info cmd
     export_to_povray(b, povpath)
     open(inipath, "w") do out
-      println(out, "Verbose=off")
+      #println(out, "Debug_Console=off")
       println(out, "Library_Path='$(povray_lib())'")
       println(out, "Library_Path='$(LightsysIV_lib())'")
       println(out, "Width=$(render_width())")
