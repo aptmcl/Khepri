@@ -351,6 +351,9 @@ povray_material(name::String;
   finish { specular $(specularity) roughness $(roughness) }
 }""")
 
+const povray_grass =
+  povray_definition("Grass", "texture",
+   "{ pigment{ color <0.2,0.5,0.1>*0.5} normal { bumps 0.5 scale 0.005 }}")
 #=
 IMAGE_MAP:
   pigment {
@@ -456,10 +459,6 @@ povray_realistic_sky_string(date, latitude, longitude, meridian, turbidity, with
 vrotate(<0,0,1000000000>,<-Al,Az,0>)
 """)
 
-############################################
-# Ground models
-povray_ground_string(level, c) =
-  "plane { y, $(level) pigment { rgb <$(Float64(red(c))), $(Float64(green(c))), $(Float64(blue(c)))> } }\n"
 ####################################################
 # Clay models
 povray_clay_settings_string() =
@@ -499,13 +498,15 @@ Base.@kwdef mutable struct POVRayBackend{K,T} <: LazyBackend{K,T}
   current_layer::Union{Nothing,AbstractLayer}=nothing
   layers::Dict{AbstractLayer,Vector{Shape}}=Dict{AbstractLayer,Vector{Shape}}()
   sky::String=povray_realistic_sky_string(DateTime(2020, 9, 21, 10, 0, 0), 39, 9, 0, 5, true)
-  ground::String=povray_ground_string(0, rgb(0.3,0.3,0.3))
+  ground_level::Float64=0.0
+  ground_material::POVRayMaterial=povray_grass
   buffer::LazyParameter{IOBuffer}=LazyParameter(IOBuffer, IOBuffer)
   camera::Loc=xyz(10,10,10)
   target::Loc=xyz(0,0,0)
   lens::Real=35
   sun_altitude::Real=90
   sun_azimuth::Real=0
+  cached::Bool=false
 end
 
 const POVRay = POVRayBackend{POVRayKey, POVRayId}
@@ -527,6 +528,7 @@ save_shape!(b::POVRay, s::Shape) =
     if !isnothing(b.current_layer)
       push!(get!(b.layers, b.current_layer, Shape[]), s)
     end
+    b.cached = false
     s
   end
 
@@ -650,7 +652,7 @@ KhepriBase.b_realistic_sky(b::POVRay, date, latitude, longitude, elevation, meri
 #   b.sky = povray_realistic_sky_string(altitude, azimuth, turbidity, withsun)
 
 KhepriBase.b_set_ground(b::POVRay, level, mat) =
-  b.ground = povray_ground_string(level, mat)
+  (b.ground_level=level; b.ground_material=mat)
 
 KhepriBase.b_delete_all_refs(b::POVRay) =
   begin
@@ -659,6 +661,7 @@ KhepriBase.b_delete_all_refs(b::POVRay) =
       empty!(ss)
     end
     empty!(b.materials)
+    b.cached = false
     nothing
   end
 
@@ -882,30 +885,36 @@ realize(b::POVRay, s::Union{Door, Window}) =
 
 export_to_povray(b::POVRay, path::String) =
   let buf = b.buffer()
-    # First pass, to fill material dictionary
-    take!(buf)
-    # We cannot do this because the array might be updated during the iteration
-    for s in b.shapes
-      mark_deleted(b, s)
-    end
-    i = 1
-    while i <= length(b.shapes)
-      force_realize(b, b.shapes[i])
-      i += 1
+    if ! b.cached
+      take!(buf)
+      for s in b.shapes
+        mark_deleted(b, s)
+      end
+      i = 1
+      while i <= length(b.shapes)
+        force_realize(b, b.shapes[i])
+        i += 1
+      end
+      b.cached = true
     end
     open(path, "w") do out
       # write the sky
       write(out, b.sky)
       # write useful include
       write(out, """#include "transforms.inc"\n""")
-      # write the ground
-      write(out, b.ground)
       # write materials (removing duplicate includes)
+      save_material(b, b.ground_material)
       for m in unique(m->m isa POVRayInclude ? m.filename : m, used_materials(b))
         write_povray_definition(out, m)
       end
+      # write the ground
+      write_povray_object(out, "plane", b.ground_material, :y, b.ground_level)
       # write the objects
-      write(out, String(take!(buf)))
+      let str = String(take!(buf))
+        #save again
+        println(buf, str)
+        write(out, str)
+      end
       # write the view
       write_povray_camera(out, b.camera, b.target, b.lens)
     end
@@ -947,11 +956,13 @@ export clay_model, realistic_model
 clay_model(level::Real=0, b::POVRay=povray) =
   begin
     b.sky = povray_clay_settings_string()
-    b.ground = "plane { y, $(level) texture{ pigment { color rgb 3 } finish { reflection 0 ambient 0 }}}\n"
+    b.ground_level = level
+    b.ground_material = povray_definition("Ground", "texture", "{ pigment { color rgb 3 } finish { reflection 0 ambient 0 }}")
   end
 
 realistic_model(level::Real=0, b::POVRay=povray) =
   begin
     b.sky = povray_realistic_sky_string(DateTime(2020, 9, 21, 10, 0, 0), 39, 9, 0, 5, true)
-    b.ground = povray_ground_string(level, rgb(0.8,0.8,0.8))
+    b.ground_level = level
+    b.ground_material = povray_definition("Ground", "texture", "{ pigment { color rgb 0.8 } finish { reflection 0 ambient 0 }}")
   end
