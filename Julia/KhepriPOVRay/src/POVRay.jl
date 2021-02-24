@@ -773,6 +773,14 @@ realize(b::POVRay, s::SubtractionShape3D) =
     void_ref(b)
   end
 
+=#
+
+KhepriBase.b_pointlight(b::POVRay, loc::Loc, color::RGB, range::Real, intensity::Real) =
+  write_povray_pointlight(b.buffer(), loc, rgb(red(color)*intensity, green(color)*intensity, blue(color)*intensity))
+
+#=
+
+
 # BIM
 
 realize_box(b::POVRay, mat, p, dx, dy, dz) =
