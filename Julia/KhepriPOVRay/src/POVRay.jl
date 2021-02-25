@@ -354,6 +354,10 @@ povray_material(name::String;
 const povray_grass =
   povray_definition("Grass", "texture",
    "{ pigment{ color <0.2,0.5,0.1>*0.5} normal { bumps 0.5 scale 0.005 }}")
+
+const povray_gray_ground =
+  povray_definition("Ground", "texture", "{ pigment { color rgb 0.8 } finish { reflection 0 ambient 0 }}")
+
 #=
 IMAGE_MAP:
   pigment {
@@ -499,7 +503,7 @@ Base.@kwdef mutable struct POVRayBackend{K,T} <: LazyBackend{K,T}
   layers::Dict{AbstractLayer,Vector{Shape}}=Dict{AbstractLayer,Vector{Shape}}()
   sky::String=povray_realistic_sky_string(DateTime(2020, 9, 21, 10, 0, 0), 39, 9, 0, 5, true)
   ground_level::Float64=0.0
-  ground_material::POVRayMaterial=povray_grass
+  ground_material::POVRayMaterial=povray_gray_ground
   buffer::LazyParameter{IOBuffer}=LazyParameter(IOBuffer, IOBuffer)
   camera::Loc=xyz(10,10,10)
   target::Loc=xyz(0,0,0)
@@ -972,5 +976,5 @@ realistic_model(level::Real=0, b::POVRay=povray) =
   begin
     b.sky = povray_realistic_sky_string(DateTime(2020, 9, 21, 10, 0, 0), 39, 9, 0, 5, true)
     b.ground_level = level
-    b.ground_material = povray_definition("Ground", "texture", "{ pigment { color rgb 0.8 } finish { reflection 0 ambient 0 }}")
+    b.ground_material = povray_gray_ground
   end
