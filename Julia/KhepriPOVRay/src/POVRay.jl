@@ -563,6 +563,9 @@ KhepriBase.b_surface_polygon_with_holes(b::POVRay, ps, qss, mat) =
 KhepriBase.b_surface_circle(b::POVRay, c, r, mat) =
   	write_povray_object(buffer(b), "disc", save_material(b, mat), c, uvz(c.cs), r)
 
+KhepriBase.b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
+  b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_v, grid_interpolator(ptss), mat)
+
 KhepriBase.b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_v, interpolator, mat) =
   let io = buffer(b),
       mat = save_material(b, mat),
