@@ -1,12 +1,22 @@
 # Blender
 export blender
 
-const blender_folder = Parameter("C:/Program Files/Blender Foundation/Blender 2.91/")
-blender_cmd(cmd::AbstractString="blender.exe") = blender_folder() * cmd
+const blender_cmd =
+  Sys.iswindows() ?
+    joinpath(readdir("C:/Program Files/Blender Foundation/", join=true)[1], "blender.exe") :
+	"blender"
+
 const KhepriServerPath = Parameter(abspath(@__DIR__, "KhepriServer.py"))
 
+export headless_blender
+const headless_blender = Parameter(false)
+
 start_blender() =
-  run(detach(`$(blender_cmd()) --python $(KhepriServerPath())`), wait=false)
+  run(detach(
+  	headless_blender() ?
+  	  `$(blender_cmd) --background --python $(KhepriServerPath())` :
+  	  `$(blender_cmd) --python $(KhepriServerPath())`),
+	wait=false)
 
 #=
 sel = utils.selection_get()
@@ -211,17 +221,16 @@ KhepriBase.b_surface_grid(b::BLR, ptss, closed_u, closed_v, smooth_u, smooth_v, 
 	  @remote(blender, quad_surface(vcat(ptss...), nu, nv, closed_u, closed_v, true, mat)) :
 	  smooth_u ?
 	  	(closed_u ?
-          vcat([b_quad_strip_closed(b, ptss[i,:], ptss[i+1,:], smooth_u, mat) for i in 1:nu-1],
-	           closed_v ? [b_quad_strip_closed(b, ptss[end,:], ptss[1,:], smooth_u, mat)] : []) :
-	      vcat([b_quad_strip(b, ptss[i,:], ptss[i+1,:], smooth_u, mat) for i in 1:nu-1],
-	           closed_v ? [b_quad_strip(b, ptss[end,:], ptss[1,:], smooth_u, mat)] : [])) :
+          vcat([b_quad_strip_closed(b, ptss[:,i], ptss[:,i+1], true, mat) for i in 1:nv-1],
+	           closed_v ? [b_quad_strip_closed(b, ptss[:,end], ptss[:,1], true, mat)] : []) :
+	      vcat([b_quad_strip(b, ptss[:,i], ptss[:,i+1], true, mat) for i in 1:nv-1],
+	           closed_v ? [b_quad_strip(b, ptss[:,end], ptss[:,1], true, mat)] : [])) :
  	    (closed_v ?
-           vcat([b_quad_strip_closed(b, ptss[:,i], ptss[:,i+1], smooth_v, mat) for i in 1:nv-1],
-  	         	closed_u ? [b_quad_strip_closed(b, ptss[:,end], ptss[:,1], smooth_v, mat)] : []) :
-  	       vcat([b_quad_strip(b, ptss[:,i], ptss[:,i+1], smooth_v, mat) for i in 1:nv-1],
-  	          	closed_u ? [b_quad_strip(b, ptss[:,end], ptss[:,1], smooth_v, mat)] : []))
+           vcat([b_quad_strip_closed(b, ptss[i,:], ptss[i+1,:], smooth_v, mat) for i in 1:nu-1],
+  	         	closed_u ? [b_quad_strip_closed(b, ptss[end,:], ptss[1,:], smooth_v, mat)] : []) :
+  	       vcat([b_quad_strip(b, ptss[i,:], ptss[i+1,:], smooth_v, mat) for i in 1:nu-1],
+  	          	closed_u ? [b_quad_strip(b, ptss[end,:], ptss[1,:], smooth_v, mat)] : []))
   end
-
 
 KhepriBase.b_generic_pyramid_frustum(b::BLR, bs, ts, smooth, bmat, tmat, smat) =
   @remote(b, pyramid_frustum(bs, ts, smooth, bmat, tmat, smat))
