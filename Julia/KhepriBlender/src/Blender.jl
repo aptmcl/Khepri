@@ -14,7 +14,7 @@ const headless_blender = Parameter(false)
 start_blender() =
   run(detach(
   	headless_blender() ?
-  	  `$(blender_cmd) --background --python $(KhepriServerPath())` :
+  	  `$(blender_cmd) --noaudio --background --python $(KhepriServerPath())` :
   	  `$(blender_cmd) --python $(KhepriServerPath())`),
 	wait=false)
 
