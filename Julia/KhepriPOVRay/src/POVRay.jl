@@ -129,11 +129,12 @@ write_povray_polygons(io::IO, mat, vss) =
     mapreduce(length, +, vss) + length(vss),
     mapreduce(vs->[vs..., vs[1]], vcat, vss)...)
 
+# mesh2 cannot write materials as mesh did.
 write_povray_mesh(io::IO, mat, pts, closed_u, closed_v, smooth_u, smooth_v) =
   let (si, sj) = size(pts),
       vcs = add_z.(pts, 1) .- pts,
       idxs = quad_grid_indexes(si, sj, closed_u, closed_v)
-    write_povray_object(io, "mesh2", mat) do
+    write_povray_object(io, "mesh2", nothing) do
       write_povray_object(io, "vertex_vectors", nothing, si*sj, reshape(permutedims(pts), :)...)
       # Must understand how to handle smoothness along one direction
       if smooth_u && smooth_v
@@ -142,6 +143,7 @@ write_povray_mesh(io::IO, mat, pts, closed_u, closed_v, smooth_u, smooth_v) =
       write_povray_object(io, "face_indices", nothing, length(idxs), idxs...)
       # Must understand how to handle smoothness along one direction
       #write_povray_object(buf, "normal_indices", nothing, length(idxs), idxs...)
+      write_povray_material(io, mat)
     end
   end
 
@@ -570,12 +572,12 @@ KhepriBase.b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_
   let io = buffer(b),
       mat = save_material(b, mat),
       pts = smooth_u || smooth_v ?
-              [location_at_grid_interpolator(interpolator, u, v)
+              [location_at(interpolator, u, v)
                for u in division(0, 1, 4*size(ptss, 1)), v in division(0, 1, 4*size(ptss, 2))] :
               ptss,
       (si, sj) = size(pts),
       idxs = quad_grid_indexes(si, sj, closed_u, closed_v)
-    write_povray_object(io, "mesh2", mat) do
+    write_povray_object(io, "mesh2", nothing) do
       write_povray_object(io, "vertex_vectors", nothing, si*sj, reshape(permutedims(pts), :)...)
       # Must understand how to handle smoothness along one direction
       if smooth_u || smooth_v
@@ -583,6 +585,7 @@ KhepriBase.b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_
       end
       write_povray_object(io, "face_indices", nothing, length(idxs), idxs...)
       #write_povray_object(buf, "normal_indices", nothing, length(idxs), idxs...)
+      write_povray_material(io, mat)
     end
   end
 
@@ -946,6 +949,9 @@ const povray_lib = Parameter(realpath(normpath(@__DIR__, "..", "lib", "include")
 const LightsysIV_lib = Parameter(realpath(normpath(@__DIR__, "..", "lib", "LightsysIV")))
 
 ##########################################
+export rendered_image_area
+rendered_image_area = Parameter{Union{Missing,Tuple{Int,Int,Int,Int}}}(missing)
+
 KhepriBase.b_render_view(b::POVRay, path::String) =
   let povpath = path_replace_suffix(path, ".pov"),
       inipath = path_replace_suffix(path, ".ini"),
@@ -963,6 +969,14 @@ KhepriBase.b_render_view(b::POVRay, path::String) =
       println(out, "Quality=10")
       println(out, "High_Reproducibility=on")
       println(out, "Input_File_Name='$(povpath)'")
+      if ! ismissing(rendered_image_area())
+        let (start_col, start_row, end_col, end_row) = rendered_image_area()
+          println(out, "Start_Row=", start_row)
+          println(out, "Start_Column=", start_col)
+          println(out, "End_Row=", end_row)
+          println(out, "End_Column=", end_col)
+        end
+      end
     end
     run(cmd, wait=@static(Sys.iswindows() ? film_active() : true))
   end
