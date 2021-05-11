@@ -1,5 +1,32 @@
 export rhino
 
+### PLugin
+#=
+Whenever the plugin is updated, run this function and commit the plugin files.
+upgrade_plugin()
+=#
+
+julia_khepri = dirname(dirname(abspath(@__FILE__)))
+
+dlls = ["KhepriBase.dll", "KhepriRhinoceros.rhp"]
+local_plugin = joinpath(dirname(dirname(abspath(@__FILE__))), "Plugin")
+
+upgrade_plugin() =
+  let # 1. The dlls are updated in VisualStudio after compilation of the plugin, and they are stored in the folder.
+      # contained inside the Plugins folder, which has a specific location regarding this file itself
+      plugin_folder = joinpath(dirname(dirname(dirname(dirname(abspath(@__FILE__))))), "Plugins", "KhepriRhinoceros", "KhepriRhinoceros", "bin")
+      # 2. The bundle needs to be copied to the current folder
+      local_folder = joinpath(julia_khepri, "Plugin")
+      # 3. Now we copy the dlls to the local folder
+      for dll in dlls
+          src = joinpath(plugin_folder, dll)
+          dst = joinpath(local_folder, dll)
+          rm(dst, force=true)
+          cp(src, dst)
+      end
+  end
+
+##############################################
 # We need some additional Encoders
 # RH is a subtype of CS
 parse_signature(::Val{:RH}, sig::T) where {T} = parse_signature(Val(:CS), sig)
@@ -177,15 +204,6 @@ public FloorFamily FloorFamilyInstance(double totalThickness, double coatingThic
 public Entity LightweightPolyLine(Point2d[] pts, double[] angles, double elevation)
 public Entity SurfaceLightweightPolyLine(Point2d[] pts, double[] angles, double elevation)
 public ObjectId CreatePathFloor(Point2d[] pts, double[] angles, BIMLevel level, FloorFamily family)
-#public TableFamily FindOrCreateTableFamily(double length, double width, double height, double top_thickness, double leg_thickness)
-#public ChairFamily FindOrCreateChairFamily(double length, double width, double height, double seat_height, double thickness)
-#public TableChairFamily FindOrCreateTableChairFamily(TableFamily tableFamily, ChairFamily chairFamily, int chairsOnTop, int chairsOnBottom, int chairsOnRight, int chairsOnLeft, double spacing)
-#public Brep RectangularTable(Point3d c, double angle, TableFamily family)
-#public Brep Chair(Point3d c, double angle, ChairFamily family)
-#public Guid InstanceChair(Point3d c, double angle, ChairFamily family)
-#public Brep[] RowOfChairs(Point3d c, double angle, int n, double spacing, ChairFamily family)
-#public Brep[] CenteredRowOfChairs(Point3d c, double angle, int n, double spacing, ChairFamily family)
-#public Brep[] RectangularTableAndChairs(Point3d c, double angle, TableChairFamily f)
 =#
 
 
@@ -201,7 +219,14 @@ const RH = SocketBackend{RHKey, RHId}
 
 KhepriBase.void_ref(::RH) = 0 % UInt128
 
-create_RH_connection() = connect_to("Rhinoceros", rhino_port)
+create_RH_connection() =
+  try
+    connect_to("Rhinoceros", rhino_port)
+  catch e
+    @info("Please, ensure Khepri's Rhinoceros plugin is installed.")
+	@info("Go to Rhinoceros: Tools->Options->Plug-ins->Install")
+	@info("Location: $(joinpath(local_plugin, dlls[2]))")
+  end
 
 const rhino = RH(LazyParameter(TCPSocket, create_RH_connection), rhino_api)
 
@@ -280,7 +305,33 @@ KhepriBase.b_surface_circle(b::RH, c, r, mat) =
 KhepriBase.b_surface_arc(b::RH, c, r, α, Δα, mat) =
   @remote(b, SurfaceArc(c, vx(1, c.cs), vy(1, c.cs), r, α, α + Δα, mat))
 
+#=
+KhepriBase.b_quad(b::RH, p1, p2, p3, p4, mat) =
+ [b_trig(b, p1, p2, p3, mat),
+  b_trig(b, p1, p3, p4, mat)]
+
+KhepriBase.b_quad_strip(b::RH, ps, qs, smooth, mat) =
+ [b_quad(b, ps[i], ps[i+1], qs[i+1], qs[i], mat)
+  for i in 1:size(ps,1)-1]
+
+KhepriBase.b_quad_strip_closed(b::RH, ps, qs, smooth, mat) =
+ b_quad_strip(b, [ps..., ps[1]], [qs..., qs[1]], smooth, mat)
+
 KhepriBase.b_surface_grid(b::RH, ptss, closed_u, closed_v, smooth_u, smooth_v, interpolator, mat) =
+  let (nu, nv) = size(ptss)
+ if smooth_u && smooth_v
+  	ptss = [location_at_grid_interpolator(interpolator, u, v)
+  			for u in division(0, 1, 2 #=4*nu-7=#), v in division(0, 1, 4*nv-7)] # 2->1, 3->5, 4->9, 5->13
+  	(nu, nv) = size(ptss)
+ end
+ closed_u ?
+  	vcat([b_quad_strip_closed(b, ptss[i,:], ptss[i+1,:], smooth_u, mat) for i in 1:nu-1],
+  		 closed_v ? [b_quad_strip_closed(b, ptss[end,:], ptss[1,:], smooth_u, mat)] : []) :
+  	vcat([b_quad_strip(b, ptss[i,:], ptss[i+1,:], smooth_u, mat) for i in 1:nu-1],
+  		 closed_v ? [b_quad_strip(b, ptss[end,:], ptss[1,:], smooth_u, mat)] : [])
+  end
+=#
+KhepriBase.b_surface_grid(b::RH, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
   let (nu, nv) = size(ptss),
       order(n) = min(2*ceil(Int,n/16) + 1, 5)
     @remote(b, SurfaceFromGrid(nu, nv,
@@ -290,7 +341,6 @@ KhepriBase.b_surface_grid(b::RH, ptss, closed_u, closed_v, smooth_u, smooth_v, i
                                smooth_v ? order(nv) : 1,
 							   mat))
   end
-
 
 # This is wrong, for sure!
 b_surface_ellipse(b::RH, c, rx, ry) =
