@@ -8,6 +8,159 @@ export
     revit_systems_family,
     revit_file_family
 
+#=
+We need to ensure the Revit plugin is properly installed.
+For Revit, there are a few places where plugins can be installed:
+
+User Addins:
+%appdata%\Autodesk\Revit\Addins\<version>\
+%appdata%\Autodesk\ApplicationPlugins\
+
+Machine Addins (for all users of the machine):
+C:\ProgramData\Autodesk\Revit\Addins\<version>\
+
+Addins packaged for the Autodesk Exchange store:
+C:\ProgramData\Autodesk\ApplicationPlugins\
+
+Autodesk servers and services:
+C:\Program Files\Autodesk\Revit <version>\AddIns\
+
+C:\Users\<username>\AppData\Roaming\Autodesk\Revit \Addins\<year>
+
+=#
+
+
+julia_khepri = dirname(dirname(abspath(@__FILE__)))
+# 1. The dlls are updated in VisualStudio after compilation of the plugin.
+plugin_name = "KhepriRevit"
+khepri_dlls = ["KhepriBase.dll", plugin_name*".dll"]
+# 2. Depending on whether we are in Debug mode or Release mode,
+development_phase = "Debug" # "Release"
+# 3. the dlls are located in a folder
+dlls_folder = joinpath("bin", "x64", development_phase)
+# 4. contained inside the Plugins folder, which has a specific location regarding this file itself
+plugin_folder = joinpath(dirname(dirname(dirname(dirname(abspath(@__FILE__))))), "Plugins", plugin_name, plugin_name)
+# 5. Besides the dlls, we also need the bundle folder
+bundle_name = plugin_name*".bundle"
+bundle_dll_folder = joinpath(bundle_name, "Contents")
+# 6. which is contained in the Plugins folder
+bundle_path = joinpath(plugin_folder, bundle_name)
+pkg_cnts_name = "PackageContents.xml"
+local_plugins = joinpath(dirname(dirname(abspath(@__FILE__))), "Plugin")
+local_khepri_plugin = joinpath(local_plugins, bundle_name)
+local_khepri_plugin_dll_folder = joinpath(local_plugins, bundle_dll_folder)
+
+# This only needs to be done when the Revit plugin is updated
+upgrade_plugin(; advance_major_version=false, advance_minor_version=true) =
+  begin
+    # Update major or minor version
+    if advance_major_version || advance_minor_version
+      bundle_xml = joinpath(bundle_path, pkg_cnts_name)
+      doc = readxml(bundle_xml)
+      app_pkg = findfirst("//ApplicationPackage", doc)
+      major, minor = map(s -> parse(Int, s), split(app_pkg["AppVersion"], '.'))
+      print("Advancing version from $(major).$(minor) ")
+      major += advance_major_version ? 1 : 0
+      minor += advance_minor_version ? 1 : 0
+      println("to $(major).$(minor).")
+      app_pkg["AppVersion"] = "$(major).$(minor)"
+      write(bundle_xml, doc)
+    end
+    # 7. The bundle needs to be copied to the current folder
+    local_bundle_path = joinpath(julia_khepri, "Plugin", bundle_name)
+    # 8. but, before, we remove any previously existing bundle
+    mkpath(dirname(local_bundle_path))
+    rm(local_bundle_path, force=true, recursive=true)
+    # 9. Now we do the copy
+    cp(bundle_path, local_bundle_path)
+    # 10. and we copy the dlls to the local bundle Contents folder
+    local_bundle_contents_path = joinpath(local_bundle_path, "Contents")
+    for dll in khepri_dlls
+      src = joinpath(plugin_folder, dlls_folder, dll)
+      dst = joinpath(local_bundle_contents_path, dll)
+      rm(dst, force=true)
+      cp(src, dst)
+    end
+  end
+
+#=
+Whenever the plugin is updated, run this function and commit the plugin files.
+upgrade_plugin()
+=#
+
+
+env(name) = Sys.iswindows() ? ENV[name] : ""
+
+revit_general_plugins = joinpath(dirname(env("CommonProgramFiles")), "Autodesk", "ApplicationPlugins")
+revit_allusers_plugins = joinpath(env("ALLUSERSPROFILE"), "Autodesk", "ApplicationPlugins")
+revit_user_plugins = joinpath(env("APPDATA"), "Autodesk", "ApplicationPlugins")
+revit_khepri_plugin = joinpath(revit_user_plugins, bundle_name)
+revit_khepri_plugin_dll_folder = joinpath(revit_user_plugins, bundle_dll_folder)
+
+revit_version(path) =
+  let doc = readxml(path),
+      app_pkg = findfirst("//ApplicationPackage", doc)
+    VersionNumber(map(s -> parse(Int, s), split(app_pkg["AppVersion"], '.'))...)
+  end
+
+update_plugin() =
+  let local_path_xml = joinpath(local_khepri_plugin, pkg_cnts_name)
+      revit_path_xml = joinpath(revit_khepri_plugin, pkg_cnts_name)
+    # Do we have the bundle folder?
+    isdir(revit_khepri_plugin) || mkpath(revit_khepri_plugin)
+    isdir(revit_khepri_plugin_dll_folder) || mkpath(revit_khepri_plugin_dll_folder)
+    # Must we upgrade?
+    need_upgrade = ! isfile(revit_path_xml) || revit_version(revit_path_xml) < revit_version(local_path_xml)
+    if need_upgrade
+      # remove first to avoid loosing the local file
+      #isfile(revit_path_xml) && rm(revit_path_xml)
+      cp(local_path_xml, revit_path_xml, force=true)
+      for dll in dlls
+        let path = joinpath("Contents", dll),
+            local_path = joinpath(local_khepri_plugin, path),
+            revit_path = joinpath(revit_khepri_plugin, path)
+            # remove first to avoid loosing the local file
+            #isfile(revit_path_xml) && rm(revit_path_xml)
+            cp(local_path, revit_path, force=true)
+        end
+      end
+    end
+  end
+
+checked_plugin = false
+
+check_plugin() =
+  begin
+    global checked_plugin
+    if ! checked_plugin
+      @info("Checking Revit plugin...")
+      for i in 1:10
+        try
+          update_plugin()
+          @info("done.")
+          checked_plugin = true
+          return
+        catch exc
+          if isa(exc, Base.IOError) && i < 10
+            @error("The Revit plugin is outdated! Please, close Revit.")
+            sleep(5)
+          else
+            throw(exc)
+          end
+        end
+      end
+    end
+  end
+
+#
+const revit_template = Parameter(abspath(@__DIR__, "../Plugin/KhepriTemplate.dwt"))
+
+start_revit() =
+  run(`cmd /c cd "$(dirname(revit_template()))" \&\& $(basename(revit_template()))`, wait=false)
+
+
+
+
 #
 # RVT is a subtype of CS
 parse_signature(::Val{:RVT}, sig::T) where {T} = parse_signature(Val(:CS), sig)
@@ -25,7 +178,7 @@ decode(::Val{:RVT}, t::Val{:VXYZ}, c::IO) =
 encode(ns::Val{:RVT}, t::Union{Val{:ElementId},Val{:Element},Val{:Level},Val{:FloorFamily}}, c::IO, v) =
   encode(ns, Val(:int), c, v)
 decode(ns::Val{:RVT}, t::Union{Val{:ElementId},Val{:Element},Val{:Level},Val{:FloorFamily}}, c::IO) =
-  decode_or_error(ns, Val(:int), c, -1234)
+  decode_or_error(ns, Val(:int), c, Int32(-1234))
 
 @encode_decode_as(:RVT, Val{:Length}, Val{:double})
 
@@ -95,7 +248,7 @@ public void EnergyAnalysis()
 """
 
 abstract type RVTKey end
-const RVTId = Int
+const RVTId = Int32
 const RVTIds = Vector{RVTId}
 const RVTRef = GenericRef{RVTKey, RVTId}
 const RVTRefs = Vector{RVTRef}
@@ -105,9 +258,11 @@ const RVTNativeRef = NativeRef{RVTKey, RVTId}
 const RVTUnionRef = UnionRef{RVTKey, RVTId}
 const RVTSubtractionRef = SubtractionRef{RVTKey, RVTId}
 const RVT = SocketBackend{RVTKey, RVTId}
-const RVTVoidId = -1
+const RVTVoidId = RVTId(-1)
 
 KhepriBase.void_ref(b::RVT) = RVTNativeRef(RVTVoidId)
+
+KhepriBase.has_boolean_ops(::Type{RVT}) = HasBooleanOps{true}()
 
 create_RVT_connection() = connect_to("Revit", revit_port)
 
@@ -117,9 +272,6 @@ const revit = RVT(LazyParameter(TCPSocket, create_RVT_connection), revit_api)
 
 realize(b::RVT, s::Level) =
     @remote(b, FindOrCreateLevelAtElevation(s.height))
-
-# Revit also considers unconnected walls. These have a top level with id -1
-is_unconnected_level(level::Level) = ref(level).value == -1
 
 # Families
 #=
@@ -143,7 +295,7 @@ revit_system_family(family_map=(), instance_map=()) =
     RevitSystemFamily(
         Dict(family_map...),
         Dict(instance_map...),
-        Parameter(0)) # instead of RVTVoidId.  We need to think this carefully.
+        Parameter(RVTId(0))) # instead of RVTVoidId.  We need to think this carefully.
 
 backend_get_family_ref(b::RVT, f::Family, rvtf::RevitSystemFamily) =
   begin
@@ -255,17 +407,17 @@ locs_and_arcs(circle::CircularPath) =
 realize_slab(b::RVT, contour::ClosedPath, holes::Vector{<:ClosedPath}, level::Level, family::SlabFamily) =
     let (locs, arcs) = locs_and_arcs(contour)
         @assert length(holes) == 0
-        @remote(b, CreatePathFloor(locs, arcs, ref(level).value))
+        @remote(b, CreatePathFloor(locs, arcs, ref(b, level).value))
         # we are not using the family yet
-        # ref(s.family))
+        # ref(b, s.family))
     end
 
 realize_slab(b::RVT, contour::ClosedPolygonalPath, holes::Vector{<:ClosedPath}, level::Level, family::SlabFamily) =
   begin
     @assert length(holes) == 0
-    @remote(b, CreatePolygonalFloor(convert(ClosedPolygonalPath, contour).vertices, ref(level).value))
+    @remote(b, CreatePolygonalFloor(convert(ClosedPolygonalPath, contour).vertices, ref(b, level).value))
     # we are not using the family yet
-    # ref(s.family))
+    # ref(b, s.family))
   end
 
 realize_slab(b::RVT, contour::RectangularPath, holes::Vector{<:ClosedPath}, level::Level, family::SlabFamily) =
@@ -309,18 +461,19 @@ realize(b::RVT, s::FreeColumn) =
             ref(b, s.family)))
     end
 
-realize_wall_no_openings(b::RVT, s::Wall) =
-  if is_unconnected_level(s.top_level)
+KhepriBase.realize_wall_no_openings(b::RVT, s::Wall) =
+  # Revit also considers unconnected walls. These have a top level with id -1
+  if ref(b, s.top_level).value == RVTVoidId
       @remote(b, CreateUnconnectedLineWall(
           convert(OpenPolygonalPath, s.path).vertices,
-          ref(s.bottom_level).value,
+          ref(b, s.bottom_level).value,
           s.top_level.height - s.bottom_level.height,
           realize(b, s.family)))
   else
       @remote(b, CreateLineWall(
           convert(OpenPolygonalPath, s.path).vertices,
-          ref(s.bottom_level).value,
-          ref(s.top_level).value,
+          ref(b, s.bottom_level).value,
+          ref(b, s.top_level).value,
           realize(b, s.family)))
   end
 
@@ -339,7 +492,7 @@ realize(b::RVT, s::Window) =
     @remote(b, InsertWindow(
         s.loc.x,
         s.loc.y,
-        ref(s.wall).value,
+        ref(b, s.wall).value,
         backend_get_family_ref(b, s.family, rvtf),
         collect(params),
         [param_map[param](s.family) for param in params]))
@@ -477,13 +630,13 @@ all_levels(b::RVT) =
     [level_from_ref(r, b) for r in @remote(b, DocLevels())]
 
 level_from_ref(r, b::RVT) =
-  level(r == -1 ?
+  level(r == RVTVoidId ?
           error("Level for unconnected height") :
           @remote(b, GetLevelElevation(r)),
         backend=b, ref=LazyRef(b, RVTNativeRef(r)))
 
 unconnected_level(h::Real, b::RVT) =
-    level(h, backend=b, ref=LazyRef(b, RVTNativeRef(-1)))
+    level(h, backend=b, ref=LazyRef(b, RVTNativeRef(RVTVoidId)))
 
 all_Elements(b::RVT) =
     [element_from_ref(r, b) for r in @remote(b, DocElements())]
@@ -499,7 +652,7 @@ wall_from_ref(r, b::RVT) =
         bottom_level_id = @remote(b, ElementLevel(r))
         top_level_id = @remote(b, WallTopLevel(r))
         bottom_level = level_from_ref(bottom_level_id, b)
-        top_level = top_level_id == -1 ?
+        top_level = top_level_id == RVTVoidId ?
                         unconnected_level(bottom_level.height + @remote(b, WallHeight(r)), b) :
                         level_from_ref(top_level_id, b)
         wall(path,

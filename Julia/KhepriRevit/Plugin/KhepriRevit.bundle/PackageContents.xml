@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ApplicationPackage SchemaVersion="1.0" AutodeskProduct="Revit" AppVersion="0.2" Author="António Menezes Leitão" Name="Khepri" ProductCode="{0D9C269A-889B-42E9-8E8B-E40E12F8AD1B}" UpgradeCode="{48C05513-3767-4DDC-916F-67892B7EC69A}">
+  <CompanyDetails Name="Instituto Superior Técnico" Email="antonio.menezes.leitao@tecnico.ulisboa.pt"/>
+  <Components Description="R2019">
+    <RuntimeRequirements OS="Win64" Platform="Revit" SeriesMin="R2019" SeriesMax="R2019"/>
+    <ComponentEntry AppName="Khepri" ModuleName="./Contents/KhepriRevit.addin"/>
+  </Components>
+  <Components Description="R2020">
+    <RuntimeRequirements OS="Win64" Platform="Revit" SeriesMin="R2020" SeriesMax="R2020"/>
+    <ComponentEntry AppName="Khepri" ModuleName="./Contents/KhepriRevit.addin"/>
+  </Components>
+</ApplicationPackage>
