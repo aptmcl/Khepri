@@ -144,7 +144,7 @@ namespace KhepriGrasshopper {
      *  The use of ans allows us to simplify a bit. We will transform
      * 
      * pt  < GHPoint(""Point"", ""P"", ""Input Point"", :item, xy(1,0))
-     *     > GHNumber(""Angle"", ""A"", ""Angle of polar coordinates"", :item)
+     * _   > GHNumber(""Angle"", ""A"", ""Angle of polar coordinates"", :item)
      * 
      * pol_phi(pt)
      * 
