@@ -490,13 +490,9 @@ cylinder(tc, tr, tc+(tc-bc))";
             get;
         }
 
-        private string processedScript = "";
         private readonly string codeKey = "KhepriCode";
-        private readonly string functionNamePrefix = "_kgh_func";
         private readonly string paramNamePrefix = "_kgh_param";
-        private IntPtr funcPtr;
         private IntPtr shapesPtr;
-        private IntPtr argsPtr;
 
         private IntPtr docInps;
         private IntPtr docOuts;
@@ -683,134 +679,59 @@ cylinder(tc, tr, tc+(tc-bc))";
         }
 
         void ParseJuliaProgram(string text) {
-            if (Regex.Matches(text, IOPattern).Count > 0) {
-                // OLD SCHEME
-                toJLConverters.Clear();
-                fromJLConverters.Clear();
-                //First, save previous inputs and output parameter names
-                List<string> unusedInputNames = Params.Input.Select(p => p.Name).ToList();
-                List<string> unusedOutputNames = Params.Output.Select(p => p.Name).ToList();
-                int inputIdx = 0;
-                int outputIdx = 0;
-                List<string> outputVars = new List<string>();
-                foreach (Match m in Regex.Matches(text, IOPattern)) {
-                    string name = m.Groups["desc"].ToString();
-                    string dir = m.Groups["dir"].ToString();
-                    switch (dir) {
-                        case "<":
-                        case "=":
-                            unusedInputNames.Remove(name);
-                            ParseToJL(
-                                inputIdx++,
-                                m.Groups["func"].ToString(),
-                                name,
-                                m.Groups["shortdesc"].ToString(),
-                                m.Groups["message"].ToString(),
-                                m.Groups["access"].ToString(),
-                                m.Groups["value"].ToString());
-                            break;
-                        case ">":
-                            unusedOutputNames.Remove(name);
-                            if (m.Groups["var"].ToString() != "") {
-                                outputVars.Add(m.Groups["var"].ToString());
-                            }
-                            ParseFromJL(
-                                outputIdx++,
-                                m.Groups["func"].ToString(),
-                                name,
-                                m.Groups["shortdesc"].ToString(),
-                                m.Groups["message"].ToString(),
-                                m.Groups["access"].ToString(),
-                                m.Groups["value"].ToString());
-                            break;
-                        default:
-                            throw new Exception("Unknown data direction: " + dir);
-                    }
-                }
-                //By convention, if there are neither inputs nor outputs, this is just a text file.
-                if (inputIdx == 0 && outputIdx == 0) {
-                    JLEvaluate(text);
-                } else {
-                    inputIdx = 0;
-                    //Wrap in a function
-                    string functionBody = Regex.Replace(text, IOPattern, m => JuliaFromString(m, m.Groups["dir"].ToString() != ">" ? inputIdx++ : 0));
-                    string parameters = $"{paramNamePrefix}{LocalId}";
-                    string returnStr = outputVars.Any() ? "(" + string.Join(",", outputVars) + ",)" : "";
-                    string functionDef = $@"
-function {functionNamePrefix}{LocalId}({parameters})
-  {functionBody}
-  {returnStr}
-end
-";
-                    string args = string.Join(",", Enumerable.Range(0, inputIdx).Select(k => $"{{{k}}}"));
-                    string functionCall = $"{functionNamePrefix}{LocalId}({args})";
-                    funcPtr = JLEvaluate(functionDef);
-                    argsPtr = JLEvaluate($"__args{LocalId} = Array{{Any,1}}(undef, {toJLConverters.Count})");
-                    processedScript = functionCall;
-                }
-                //Finally, remove unused names
-                foreach (string name in unusedInputNames) {
-                    Params.UnregisterInputParameter(Params.Input.Find(p => p.Name == name));
-                }
-                foreach (string name in unusedOutputNames) {
-                    Params.UnregisterOutputParameter(Params.Output.Find(p => p.Name == name));
-                }
+            toJLConverters.Clear();
+            fromJLConverters.Clear();
+            //First, save previous inputs and output parameter names
+            List<string> unusedInputNames = Params.Input.Select(p => p.Name).ToList();
+            List<string> unusedOutputNames = Params.Output.Select(p => p.Name).ToList();
+            func = JLEvaluate($"Khepri.define_kgh_function(\"{LocalId}\", raw\"\"\"{text}\"\"\")");
+            docInps = JLEvaluate($"Main.__doc_inps_{LocalId}");
+            docOuts = JLEvaluate($"Main.__doc_outs_{LocalId}");
+            inps = JLEvaluate($"Main.__inps_{LocalId}");
+            outs = JLEvaluate($"Main.__outs_{LocalId}");
+            shapes = JLEvaluate($"Main.__shapes_{LocalId}");
+            int inpsCount = JLLength(inps);
+            int outsCount = JLLength(outs);
+            for (int idx = 0; idx < inpsCount; idx++) {
+                IntPtr doc = JLGetIndex0(docInps, idx);
+                string type = asString(JLGetIndex0(doc, 0));
+                string name = asString(JLGetIndex0(doc, 1));
+                string shortdesc = asString(JLGetIndex0(doc, 2));
+                string message = asString(JLGetIndex0(doc, 3));
+                unusedInputNames.Remove(name);
+                ParseToJL(
+                    idx,
+                    type,
+                    name,
+                    shortdesc,
+                    message,
+                    JLGetIndex0(doc, 4));
+            }
+            for (int idx = 0; idx < outsCount; idx++) {
+                IntPtr doc = JLGetIndex0(docOuts, idx);
+                string type = asString(JLGetIndex0(doc, 0));
+                string name = asString(JLGetIndex0(doc, 1));
+                string shortdesc = asString(JLGetIndex0(doc, 2));
+                string message = asString(JLGetIndex0(doc, 3));
+                unusedOutputNames.Remove(name);
+                ParseFromJL(
+                    idx,
+                    type,
+                    name,
+                    shortdesc,
+                    message);
+            }
+            //By convention, if there are neither inputs nor outputs, this is just a text file.
+            if (inpsCount == 0 && outsCount == 0) {
+                JLEvaluate(text);
             } else {
-                // NEW SCHEME
-                toJLConverters.Clear();
-                fromJLConverters.Clear();
-                //First, save previous inputs and output parameter names
-                List<string> unusedInputNames = Params.Input.Select(p => p.Name).ToList();
-                List<string> unusedOutputNames = Params.Output.Select(p => p.Name).ToList();
-                func = JLEvaluate($"Khepri.define_kgh_function(\"{LocalId}\", raw\"\"\"{text}\"\"\")");
-                docInps = JLEvaluate($"Main.__doc_inps_{LocalId}");
-                docOuts = JLEvaluate($"Main.__doc_outs_{LocalId}");
-                inps = JLEvaluate($"Main.__inps_{LocalId}");
-                outs = JLEvaluate($"Main.__outs_{LocalId}");
-                shapes = JLEvaluate($"Main.__shapes_{LocalId}");
-                int inpsCount = JLLength(inps);
-                int outsCount = JLLength(outs);
-                for (int idx = 0; idx < inpsCount; idx++) {
-                    IntPtr doc = JLGetIndex0(docInps, idx);
-                    string type = asString(JLGetIndex0(doc, 0));
-                    string name = asString(JLGetIndex0(doc, 1));
-                    string shortdesc = asString(JLGetIndex0(doc, 2));
-                    string message = asString(JLGetIndex0(doc, 3));
-                    unusedInputNames.Remove(name);
-                    ParseToJL(
-                        idx,
-                        type,
-                        name,
-                        shortdesc,
-                        message,
-                        JLGetIndex0(doc, 4));
-                }
-                for (int idx = 0; idx < outsCount; idx++) {
-                    IntPtr doc = JLGetIndex0(docOuts, idx);
-                    string type = asString(JLGetIndex0(doc, 0));
-                    string name = asString(JLGetIndex0(doc, 1));
-                    string shortdesc = asString(JLGetIndex0(doc, 2));
-                    string message = asString(JLGetIndex0(doc, 3));
-                    unusedOutputNames.Remove(name);
-                    ParseFromJL(
-                        idx,
-                        type,
-                        name,
-                        shortdesc,
-                        message);
-                }
-                //By convention, if there are neither inputs nor outputs, this is just a text file.
-                if (inpsCount == 0 && outsCount == 0) {
-                    JLEvaluate(text);
-                } else {
-                }
-                //Finally, remove unused names
-                foreach (string name in unusedInputNames) {
-                    Params.UnregisterInputParameter(Params.Input.Find(p => p.Name == name));
-                }
-                foreach (string name in unusedOutputNames) {
-                    Params.UnregisterOutputParameter(Params.Output.Find(p => p.Name == name));
-                }
+            }
+            //Finally, remove unused names
+            foreach (string name in unusedInputNames) {
+                Params.UnregisterInputParameter(Params.Input.Find(p => p.Name == name));
+            }
+            foreach (string name in unusedOutputNames) {
+                Params.UnregisterOutputParameter(Params.Output.Find(p => p.Name == name));
             }
         }
 
@@ -837,164 +758,6 @@ end
             }
         }
 
-        //OLD SCHEMA
-        void ParseToJL(int i, string func, string desc, string shortdesc, string message, string access, string value) {
-            GH_ParamAccess ghAccess = ParseAccess(access);
-            IGH_Param oldParam = Params.Input.Find(p => p.Name == desc);
-            IGH_Param newParam;
-            switch (func) {
-                case "String":
-                case "GHString":
-                    var ps = new Param_String();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        toJLConverters.Add((da, ptr) => ToJLString(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        toJLConverters.Add((da, ptr) => ToJLArrayString(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access: " + access);
-                    }
-                    if (value != "") {
-                        ps.PersistentData.Append(new GH_String(value));
-                    }
-                    newParam = ps;
-                    break;
-                case "Boolean":
-                case "GHBoolean":
-                    var pb = new Param_Boolean();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        toJLConverters.Add((da, ptr) => ToJLBool(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        toJLConverters.Add((da, ptr) => ToJLArrayBool(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access: " + access);
-                    }
-                    if (value != "") {
-                        pb.PersistentData.Append(new GH_Boolean(ParseBoolean(value)));
-                    }
-                    newParam = pb;
-                    break;
-                case "Integer":
-                case "GHInteger":
-                    var pi = new Param_Integer();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        toJLConverters.Add((da, ptr) => ToJLInt64(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        toJLConverters.Add((da, ptr) => ToJLArrayInt64(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access: " + access);
-                    }
-                    if (value != "") {
-                        pi.PersistentData.Append(new GH_Integer(ParseInteger(value)));
-                    }
-                    newParam = pi;
-                    break;
-                case "Number":
-                case "GHNumber":
-                    var pn = new Param_Number();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        toJLConverters.Add((da, ptr) => ToJLFloat64(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        toJLConverters.Add((da, ptr) => ToJLArrayFloat64(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access: " + access);
-                    }
-                    if (value != "") {
-                        pn.PersistentData.Append(new GH_Number(double.Parse(value)));
-                    }
-                    newParam = pn;
-                    break;
-                case "Point":
-                case "GHPoint":
-                    var pp = new Param_Point();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        toJLConverters.Add((da, ptr) => ToJLLoc(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        toJLConverters.Add((da, ptr) => ToJLArrayLoc(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access: " + access);
-                    }
-                    if (value != "") {
-                        pp.PersistentData.Append(new GH_Point(ParsePoint(value)));
-                    }
-                    newParam = pp;
-                    break;
-                case "Vector":
-                case "GHVector":
-                    var pv = new Param_Vector();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        toJLConverters.Add((da, ptr) => ToJLVec(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        toJLConverters.Add((da, ptr) => ToJLArrayVec(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access: " + access);
-                    }
-                    if (value != "") {
-                        pv.PersistentData.Append(new GH_Vector(ParseVector(value)));
-                    }
-                    newParam = pv;
-                    break;
-                case "Eval":
-                case "JLEval":
-                    var pe = new Param_String();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        toJLConverters.Add((da, ptr) => ToJLEval(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        toJLConverters.Add((da, ptr) => ToJLArrayEval(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access: " + access);
-                    }
-                    if (value != "") {
-                        pe.PersistentData.Append(new GH_String(value));
-                    }
-                    newParam = pe;
-                    break;
-                case "Any":
-                case "JLAny":
-                    if (value != "") {
-                        throw new Exception("Any cannot have default initialization: " + value);
-                    }
-                    var po = new Param_GenericObject();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        toJLConverters.Add((da, ptr) => ToJL(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        toJLConverters.Add((da, ptr) => ToJLArrayJL(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access: " + access);
-                    }
-                    newParam = po;
-                    break;
-                case "Dynamic":
-                    if (value != "") {
-                        throw new Exception("Dynamic cannot have default initialization: " + value);
-                    }
-                    var pd = new Param_GenericObject();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        toJLConverters.Add((da, ptr) => ToJLAny(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        toJLConverters.Add((da, ptr) => ToJLArrayAny(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access: " + access);
-                    }
-                    newParam = pd;
-                    break;
-                default:
-                    throw new Exception("Unknown function: " + func);
-            }
-            newParam.Name = desc;
-            newParam.Access = ghAccess;
-            newParam.Optional = true;
-            newParam.NickName = shortdesc;
-            newParam.Description = message;
-            if (oldParam != null) {
-                foreach (IGH_Param source in oldParam.Sources) {
-                    newParam.AddSource(source);
-                }
-                Params.UnregisterInputParameter(oldParam);
-            }
-            Params.RegisterInputParam(newParam);
-        }
-
-        //NEW SCHEMA
         IGH_Param ParamTypeForFunction(string func, string desc, string shortdesc, string message) {
             IGH_Param param =
                 func.In("String", "Strings", "Eval", "Evals") ? new Param_String() :
@@ -1132,131 +895,6 @@ end
         }
 
 
-        //OLD SCHEMA
-        void ParseFromJL(int i, string func, string desc, string shortdesc, string message, string access, string value) {
-            GH_ParamAccess ghAccess = ParseAccess(access);
-            IGH_Param oldParam = Params.Output.Find(p => p.Name == desc);
-            IGH_Param newParam;
-            switch (func) {
-                case "GHString":
-                case "String":
-                    var ps = new Param_String();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        fromJLConverters.Add((da, ptr) => FromJLString(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        fromJLConverters.Add((da, ptr) => FromJLArrayString(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access" + ghAccess);
-                    }
-                    newParam = ps;
-                    break;
-                case "Boolean":
-                case "GHBoolean":
-                    var pb = new Param_Boolean();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        fromJLConverters.Add((da, ptr) => FromJLBool(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        fromJLConverters.Add((da, ptr) => FromJLArrayBool(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access" + ghAccess);
-                    }
-                    newParam = pb;
-                    break;
-                case "Integer":
-                case "GHInteger":
-                    var pi = new Param_Integer();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        fromJLConverters.Add((da, ptr) => FromJLInt64(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        fromJLConverters.Add((da, ptr) => FromJLArrayInt64(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access" + ghAccess);
-                    }
-                    newParam = pi;
-                    break;
-                case "Number":
-                case "GHNumber":
-                    var pn = new Param_Number();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        fromJLConverters.Add((da, ptr) => FromJLFloat64(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        fromJLConverters.Add((da, ptr) => FromJLArrayFloat64(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access" + ghAccess);
-                    }
-                    newParam = pn;
-                    break;
-                case "Loc":
-                case "GHPoint":
-                    var pp = new Param_Point();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        fromJLConverters.Add((da, ptr) => FromJLLoc(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        fromJLConverters.Add((da, ptr) => FromJLArrayLoc(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access" + ghAccess);
-                    }
-                    newParam = pp;
-                    break;
-                case "Vec":
-                case "GHVector":
-                    var pv = new Param_Vector();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        fromJLConverters.Add((da, ptr) => FromJLVec(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        fromJLConverters.Add((da, ptr) => FromJLArrayVec(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access" + ghAccess);
-                    }
-                    newParam = pv;
-                    break;
-                case "Eval":
-                case "JLEval":
-                // The only different between JLEval and JLAny is the eval done by ParseToJL
-                case "Any":
-                case "JLAny":
-                    var po = new Param_GenericObject();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        fromJLConverters.Add((da, ptr) => FromJLAny(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        fromJLConverters.Add((da, ptr) => FromJLArrayAny(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access" + ghAccess);
-                    }
-                    newParam = po;
-                    break;
-                case "Dynamic":
-                    var pd = new Param_GenericObject();
-                    if (ghAccess == GH_ParamAccess.item) {
-                        fromJLConverters.Add((da, ptr) => FromJLDynamic(i, da, ptr));
-                    } else if (ghAccess == GH_ParamAccess.list) {
-                        fromJLConverters.Add((da, ptr) => FromJLArrayDynamic(i, da, ptr));
-                    } else {
-                        throw new Exception("Unknown access" + ghAccess);
-                    }
-                    newParam = pd;
-                    break;
-                default:
-                    throw new Exception("Unknown function" + func);
-            }
-            newParam.Name = desc;
-            newParam.Access = ghAccess;
-            newParam.Optional = true;
-            newParam.NickName = shortdesc;
-            newParam.Description = message;
-            List<IGH_Param> oldRecipients = oldParam != null ?
-                new List<IGH_Param>(oldParam.Recipients) :
-                new List<IGH_Param>();
-            if (oldParam != null) {
-                foreach (IGH_Param recipient in oldRecipients) {
-                    recipient.AddSource(newParam);
-                }
-                Params.UnregisterOutputParameter(oldParam);
-            }
-            Params.RegisterOutputParam(newParam);
-        }
-
-        //NEW SCHEMA
         void ParseFromJL(int i, string func, string desc, string shortdesc, string message) {
             IGH_Param oldParam = Params.Output.Find(p => p.Name == desc);
             IGH_Param newParam = ParamTypeForFunction(func, desc, shortdesc, message);
@@ -1655,18 +1293,7 @@ end
         }
 
         protected override void SolveInstance(IGH_DataAccess DA) {
-            if (funcPtr != IntPtr.Zero) {
-                if (toJLConverters.All(conv => conv(DA, argsPtr))) {
-                    IntPtr res = NativeMethods.jl_call1(funcPtr, argsPtr);
-                    CheckForException();
-                    foreach (var conv in fromJLConverters) {
-                        conv(DA, res);
-                        // We need to advance the pointer
-                        // HACK: Assume every result is 64 bits = 8 bytes.
-                        res = IntPtr.Add(res, word_size);
-                    }
-                }
-            } else if (func != IntPtr.Zero) {
+            if (func != IntPtr.Zero) {
                 if (toJLConverters.All(conv => conv(DA, inps))) {
                     IntPtr res = NativeMethods.jl_call0(func);
                     CheckForException();
@@ -1676,6 +1303,7 @@ end
                 }
             }
         }
+
         protected override void AfterSolveInstance() {
             SaveShapeCollection(LocalId);
         }
