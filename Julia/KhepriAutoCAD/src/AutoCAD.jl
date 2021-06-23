@@ -24,7 +24,7 @@ trusted locations are specified by the TRUSTEDPATHS system variable.
 
 julia_khepri = dirname(dirname(abspath(@__FILE__)))
 
-upgrade_autocad(; advance_major_version=false, advance_minor_version=true, phase="Debug") =
+upgrade_plugin(; advance_major_version=false, advance_minor_version=true, phase="Debug") =
   let # 1. The dlls are updated in VisualStudio after compilation of the plugin, and they are stored in the folder.
       dlls = ["KhepriBase.dll", "KhepriAutoCAD.dll"]
       # 2. Depending on whether we are in Debug mode or Release mode,
@@ -69,8 +69,8 @@ upgrade_autocad(; advance_major_version=false, advance_minor_version=true, phase
   end
 
 #=
-# Whenever the plugin is updated, run this function and commit the plugin files.
-upgrade_autocad()
+Whenever the plugin is updated, run this function and commit the plugin files.
+upgrade_plugin()
 =#
 
 dlls = ["KhepriBase.dll", "KhepriAutoCAD.dll"]
@@ -204,10 +204,10 @@ decode(ns::Val{:ACAD}, ::Val{:Color}, c::IO) =
 
 
 acad_api = @remote_functions :ACAD """
-public ObjectId QuadStrip(Point3d[] bpts, Point3d[] tpts, bool smooth, ObjectId matId)
-public ObjectId ClosedQuadStrip(Point3d[] bpts, Point3d[] tpts, bool smooth, ObjectId matId)
-public Entity Mesh(Point3d[] pts, int[][] faces, ObjectId matId)
-public Entity NGon(Point3d[] pts, Point3d pivot, bool smooth, ObjectId matId)
+public Entity QuadStrip(Point3d[] bpts, Point3d[] tpts, int smoothLevel, ObjectId matId)
+public Entity ClosedQuadStrip(Point3d[] bpts, Point3d[] tpts, int smoothLevel, ObjectId matId)
+public Entity Mesh(Point3d[] pts, int[][] faces, int smoothLevel, ObjectId matId)
+public Entity NGon(Point3d[] pts, Point3d pivot, int smoothLevel, ObjectId matId)
 public Entity SurfacePolygon(Point3d[] pts, ObjectId matId)
 public Entity SurfacePolygonWithHoles(Point3d[] outer, Point3d[][] inners, ObjectId matId)
 public Entity RegionWithHoles(Point3d[][] ptss, bool[] smooths, ObjectId matId)
@@ -391,17 +391,21 @@ const ACADUnionRef = UnionRef{ACADKey, ACADId}
 const ACADSubtractionRef = SubtractionRef{ACADKey, ACADId}
 const ACAD = SocketBackend{ACADKey, ACADId}
 
-KhepriBase.void_ref(b::ACAD) = ACADNativeRef(-1)
+KhepriBase.before_connecting(b::ACAD) = check_plugin()
+KhepriBase.after_connecting(b::ACAD) =
+  begin
+    set_material(autocad, material_metal, "Steel - Polished")
+    set_material(autocad, material_glass, "Clear")
+    set_material(autocad, material_wood, "Plywood - New")
+    set_material(autocad, material_concrete, "Flat - Broom Gray")
+    set_material(autocad, material_plaster, "Fine - White")
+    set_material(autocad, material_grass, "Green")
+  end
 
-create_ACAD_connection() =
-    begin
-        check_plugin()
-        start_and_connect_to("AutoCAD", start_autocad, autocad_port)
-    end
+const autocad = ACAD("AutoCAD", autocad_port, acad_api)
 
-const autocad = ACAD(LazyParameter(TCPSocket, create_ACAD_connection), acad_api)
-
-KhepriBase.backend_name(b::ACAD) = "AutoCAD"
+KhepriBase.void_ref(b::ACAD) =
+  ACADNativeRef(-1)
 
 # Primitives
 KhepriBase.b_point(b::ACAD, p) =
@@ -456,19 +460,19 @@ b_ellipse() =
   @remote(b, Ellipse(center, vz(1, center.cs), radius_x, radius_y))
 
 KhepriBase.b_trig(b::ACAD, p1, p2, p3, mat) =
-  @remote(b, Mesh([p1, p2, p3], [[0, 1, 2, 2]], mat))
+  @remote(b, Mesh([p1, p2, p3], [[0, 1, 2, 2]], 0, mat))
 
 KhepriBase.b_quad(b::ACAD, p1, p2, p3, p4, mat) =
-	@remote(b, Mesh([p1, p2, p3, p4], [[0, 1, 2, 3]], mat))
+	@remote(b, Mesh([p1, p2, p3, p4], [[0, 1, 2, 3]], 0, mat))
 
 KhepriBase.b_ngon(b::ACAD, ps, pivot, smooth, mat) =
-	@remote(b, NGon(ps, pivot, smooth, mat))
+	@remote(b, NGon(ps, pivot, smooth ? 3 : 0, mat))
 
 KhepriBase.b_quad_strip(b::ACAD, ps, qs, smooth, mat) =
-  @remote(b, QuadStrip(ps, qs, smooth, mat))
+  @remote(b, QuadStrip(ps, qs, smooth ? 3 : 0, mat))
 
 KhepriBase.b_quad_strip_closed(b::ACAD, ps, qs, smooth, mat) =
-  @remote(b, ClosedQuadStrip(ps, qs, smooth, mat))
+  @remote(b, ClosedQuadStrip(ps, qs, smooth ? 3 : 0, mat))
 
 KhepriBase.b_surface_polygon(b::ACAD, ps, mat) =
   #@remote(b, SurfacePolygon(ps, mat)) because it cretes BSubMesh and we prefer Regions
@@ -719,7 +723,6 @@ backend_map_division(b::ACAD, f::Function, s::Shape2D, nu::Int, nv::Int) =
 
 # The previous method cannot be applied to meshes in AutoCAD, which are created by surface_grid
 
-
 backend_map_division(b::ACAD, f::Function, s::SurfaceGrid, nu::Int, nv::Int) =
 let conn = connection(b)
     r = ref(s).value
@@ -745,6 +748,14 @@ backend_extrusion(b::ACAD, s::Shape, v::Vec) =
         s)
 
 backend_sweep(b::ACAD, path::Shape, profile::Shape, rotation::Real, scale::Real) =
+  and_mark_deleted(b,
+    map_ref(profile) do profile_r
+      map_ref(path) do path_r
+        @remote(b, Sweep(path_r, profile_r, rotation, scale))
+      end
+  end, [profile, path])
+
+b_sweep(b::ACAD, path, profile, rotation, scale, mat) =
   and_mark_deleted(b,
     map_ref(profile) do profile_r
       map_ref(path) do path_r
@@ -863,7 +874,27 @@ realize(b::ACAD, s::UnionMirror) =
           end
     UnionRef((r0,r1))
   end
-
+#=
+KhepriBase.b_surface_grid(b::ACAD, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
+  let (nu, nv) = size(ptss)
+    smooth_u && smooth_v ?
+      # Autocad does not allow us to distinguish smoothness along different dimensions
+      @remote(b, SurfaceFromGrid(nv, nu, reshape(ptss,:), closed_v, closed_u, 2, mat)) :
+      (smooth_u ?
+        vcat([@remote(b, SurfaceFromGrid(nu, 2, reshape(permutedims(ptss[:,i:i+1]),:), closed_u, false, 2, mat))
+              for i in 1:nv-1],
+             closed_v ?
+               [@remote(b, SurfaceFromGrid(nu, 2, reshape(permutedims(ptss[:,[end,1]]),:), closed_u, false, 2, mat))] :
+               []) :
+        (smooth_v ?
+          vcat([@remote(b, SurfaceFromGrid(2, nv, reshape(permutedims(ptss[i:i+1,:]),:), false, closed_v, 2, mat))
+                for i in 1:nu-1],
+               closed_u ?
+                 [@remote(b, SurfaceFromGrid(2, nv, reshape(permutedims(ptss[[end,1],:]),:), false, closed_v, 2, mat))] :
+                 []) :
+          @remote(b, SurfaceFromGrid(nu, nv, reshape(permutedims(ptss),:), closed_u, closed_v, 0, mat))))
+  end
+=#
 KhepriBase.b_surface_grid(b::ACAD, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
   let (nu, nv) = size(ptss)
     smooth_u && smooth_v ?
