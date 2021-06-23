@@ -219,18 +219,43 @@ const RH = SocketBackend{RHKey, RHId}
 
 KhepriBase.void_ref(::RH) = 0 % UInt128
 
-create_RH_connection() =
-  try
-    connect_to("Rhinoceros", rhino_port)
-  catch e
-    @info("Please, ensure Khepri's Rhinoceros plugin is installed.")
-	@info("Go to Rhinoceros: Tools->Options->Plug-ins->Install")
-	@info("Location: $(joinpath(local_plugin, dlls[2]))")
+KhepriBase.failed_connecting(b::RH) =
+  begin
+	@info("Please, ensure Khepri's Rhinoceros plugin is installed.")
+  	@info("Go to Rhinoceros: Tools->Options->Plug-ins->Install")
+  	@info("Location: $(joinpath(local_plugin, dlls[2]))")
   end
 
-const rhino = RH(LazyParameter(TCPSocket, create_RH_connection), rhino_api)
+KhepriBase.after_connecting(b::RH) =
+  let mat_folder = @remote(b, DefaultMaterialsFolder()),
+  	  m = match(r".+?Rhinoceros\\(.+?)\\Localization", mat_folder)
+  	if m === nothing
+	    error("Unrecognized Rhino materials folder: $(mat_folder)")
+  	else
+	    let v = VersionNumber(m[1])
+		    if v >= v"6.0"
+		      set_material(rhino, material_metal, rhino_default_material(raw"Metal\Matte\Matte Silver"))
+		      set_material(rhino, material_glass, rhino_default_material(raw"Glass\Clear Glass"))
+		      set_material(rhino, material_wood, rhino_default_material(raw"Wood\Pear polished"))
+		      set_material(rhino, material_concrete, rhino_default_material(raw"Ceramics\Stoneware"))
+		      set_material(rhino, material_plaster, rhino_default_material(raw"White Matte"))
+		      set_material(rhino, material_grass, rhino_default_material(raw"Textures\Grass"))
+	      elseif v >= v"5.0"
+          set_material(rhino, material_metal, rhino_default_material(raw"Metal\Silver"))
+    	    set_material(rhino, material_glass, rhino_default_material(raw"Transparent\Glass"))
+    	    set_material(rhino, material_wood, rhino_default_material(raw"Wood\Scots Pine"))
+    	    set_material(rhino, material_concrete, rhino_default_material(raw"Stone\Granite"))
+    	    set_material(rhino, material_plaster, rhino_default_material(raw"White Matte"))
+    	    set_material(rhino, material_grass, rhino_default_material(raw"Special\Grass"))
+	      else
+		      error("Unrecognized Rhino version: ")
+	      end
+	    end
+    end
+  end
 
-KhepriBase.backend_name(b::RH) = "Rhino"
+const rhino = RH("Rhino", rhino_port, rhino_api)
+
 KhepriBase.has_boolean_ops(::Type{RH}) = HasBooleanOps{false}()
 KhepriBase.backend(::RHRef) = rhino
 
@@ -294,7 +319,7 @@ KhepriBase.b_ngon(b::RH, ps, pivot, smooth, mat) =
 # Second tier: surfaces
 
 KhepriBase.b_surface_polygon(b::RH, ps, mat) =
-  @remote(b, SurfaceClosedPolyLine(ps, mat))
+  @remote(b, SurfaceClosedPolyLine([ps...,ps[1]], mat))
 
 KhepriBase.b_surface_polygon_with_holes(b::RH, ps, qss, mat) =
   @remote(b, SurfaceFromCurvesPoints([ps, qss...], falses(1 + length(qss)), mat))
@@ -340,6 +365,11 @@ KhepriBase.b_surface_grid(b::RH, ptss, closed_u, closed_v, smooth_u, smooth_v, m
                                smooth_u ? order(nu) : 1,
                                smooth_v ? order(nv) : 1,
 							   mat))
+  end
+
+KhepriBase.b_surface_mesh(b::RH, vertices, faces, mat) =
+  let ensure_4(v) = length(v) == 4 ? v : [v..., v[3]]
+    @remote(b, Mesh(vertices, map(face->ensure_4(face.-1), faces), mat))
   end
 
 # This is wrong, for sure!
