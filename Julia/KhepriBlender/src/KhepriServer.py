@@ -1441,8 +1441,13 @@ class Khepri(object):
     def __init__(self):
         pass
 
-bpy.app.timers.register(execute_current_action)
+if bpy.app.background:
+    while True:
+        execute_current_action()
+else:
+    bpy.app.timers.register(execute_current_action)
 
+#bpy.app.timers.register(execute_current_action)
 
 """
 def register():
