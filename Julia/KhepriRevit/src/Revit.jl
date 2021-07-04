@@ -29,7 +29,6 @@ C:\Users\<username>\AppData\Roaming\Autodesk\Revit \Addins\<year>
 
 =#
 
-
 julia_khepri = dirname(dirname(abspath(@__FILE__)))
 # 1. The dlls are updated in VisualStudio after compilation of the plugin.
 plugin_name = "KhepriRevit"
@@ -88,7 +87,6 @@ Whenever the plugin is updated, run this function and commit the plugin files.
 upgrade_plugin()
 =#
 
-
 env(name) = Sys.iswindows() ? ENV[name] : ""
 
 revit_general_plugins = joinpath(dirname(env("CommonProgramFiles")), "Autodesk", "ApplicationPlugins")
@@ -115,7 +113,7 @@ update_plugin() =
       # remove first to avoid loosing the local file
       #isfile(revit_path_xml) && rm(revit_path_xml)
       cp(local_path_xml, revit_path_xml, force=true)
-      for dll in dlls
+      for dll in khepri_dlls
         let path = joinpath("Contents", dll),
             local_path = joinpath(local_khepri_plugin, path),
             revit_path = joinpath(revit_khepri_plugin, path)
@@ -153,13 +151,10 @@ check_plugin() =
   end
 
 #
-const revit_template = Parameter(abspath(@__DIR__, "../Plugin/KhepriTemplate.dwt"))
+const revit_template = Parameter(abspath(@__DIR__, "../Plugin/KhepriTemplate.rte"))
 
 start_revit() =
   run(`cmd /c cd "$(dirname(revit_template()))" \&\& $(basename(revit_template()))`, wait=false)
-
-
-
 
 #
 # RVT is a subtype of CS
@@ -226,6 +221,7 @@ public Element CreateColumnPoints(XYZ p0, XYZ p1, Level level0, Level level1, El
 public ElementId[] CreateLineWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId)
 public ElementId[] CreateUnconnectedLineWall(XYZ[] pts, ElementId baseLevelId, double height, ElementId famId)
 public ElementId CreateSplineWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool closed)
+public ElementId CreateSplineCurtainWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool closed)
 public Element CreateLineRailing(XYZ[] pts, ElementId baseLevelId, ElementId familyId)
 public Element CreatePolygonRailing(XYZ[] pts, ElementId baseLevelId, ElementId familyId)
 public Level[] DocLevels()
@@ -264,14 +260,39 @@ KhepriBase.void_ref(b::RVT) = RVTNativeRef(RVTVoidId)
 
 KhepriBase.has_boolean_ops(::Type{RVT}) = HasBooleanOps{true}()
 
-create_RVT_connection() = connect_to("Revit", revit_port)
+#
+KhepriBase.before_connecting(b::RVT) =
+  check_plugin()
+KhepriBase.after_connecting(b::RVT) =
+  begin
+    # C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\
+    set_backend_family(default_wall_family(), revit, revit_system_family())
+    set_backend_family(default_window_family(), revit, revit_system_family())
+    set_backend_family(default_slab_family(), revit, revit_system_family())
+    set_backend_family(default_column_family(), revit, revit_file_family(
+          revit_library_path("Imperial Library", raw"../US Metric/Structural Columns/Concrete/M_Concrete-Rectangular-Column.rfa"),
+          ["b"=>f->f.profile.dx, "h"=>f->f.profile.dy]))
+    set_backend_family(default_beam_family(), revit, revit_file_family(
+          revit_library_path("Imperial Library", raw"../US Metric/Structural Framing/Wood/M_Timber.rfa"),
+          ["b"=>f->f.profile.dx, "d"=>f->f.profile.dy]))
+    set_backend_family(default_truss_bar_family(), revit, revit_file_family(
+          revit_library_path("Imperial Library", raw"../US Metric/Structural Framing/Steel/M_W-Wide Flange.rfa")))
+    set_backend_family(default_truss_node_family(), revit, revit_file_family(
+          revit_library_path("Imperial Library", raw"../US Metric/Structural Framing/Steel/M_W-Wide Flange.rfa")))
+  #=
+    #set_backend_family(default_column_family(), unity, unity_material_family("Materials/Concrete/Concrete2"))
+    #set_backend_family(default_door_family(), unity, unity_material_family("Materials/Wood/InteriorWood2"))
 
-const revit = RVT(LazyParameter(TCPSocket, create_RVT_connection), revit_api)
+    =#
+    set_backend_family(default_panel_family(), revit, revit_system_family())
+  end
+
+const revit = RVT("Revit", revit_port, revit_api)
 
 # Levels
 
 realize(b::RVT, s::Level) =
-    @remote(b, FindOrCreateLevelAtElevation(s.height))
+  @remote(b, FindOrCreateLevelAtElevation(s.height))
 
 # Families
 #=
@@ -394,6 +415,32 @@ realize(b::RVT, s::EmptyShape) =
 realize(b::RVT, s::UniversalShape) =
   RVTUniversalRef()
 
+
+KhepriBase.b_slab(b::RVT, profile::Region, level, family) =
+  let outer = outer_path(profile),
+      inners = inner_paths(profile),
+      slab_r = b_slab(b, outer, level, family)
+    for inner in inners
+      create_slab_opening(b, inner, slab_r)
+    end
+    slab_r
+  end
+
+KhepriBase.b_slab(b::RVT, contour::ClosedPolygonalPath, level, family) =
+  begin
+    @remote(b, CreatePolygonalFloor(convert(ClosedPolygonalPath, contour).vertices, ref(b, level).value))
+    # we are not using the family yet
+    # ref(b, s.family))
+  end
+
+create_slab_opening(b::RVT, contour::ClosedPolygonalPath, slab_r) =
+  @remote(b, CreatePolygonalOpening(convert(ClosedPolygonalPath, contour).vertices, slab_r))
+
+create_slab_opening(b::RVT, contour::ClosedPath, slab_r) =
+  let (locs, arcs) = locs_and_arcs(contour)
+    @remote(b, CreatePathOpening(locs, arcs, slab_r))
+  end
+
 locs_and_arcs(arc::ArcPath) =
     ([arc.center + vpol(arc.radius, arc.start_angle)],
      [arc.amplitude])
@@ -404,62 +451,33 @@ locs_and_arcs(circle::CircularPath) =
         ([locs1..., locs2...], [arcs1..., arcs2...])
     end
 
-realize_slab(b::RVT, contour::ClosedPath, holes::Vector{<:ClosedPath}, level::Level, family::SlabFamily) =
-    let (locs, arcs) = locs_and_arcs(contour)
-        @assert length(holes) == 0
-        @remote(b, CreatePathFloor(locs, arcs, ref(b, level).value))
-        # we are not using the family yet
-        # ref(b, s.family))
-    end
-
-realize_slab(b::RVT, contour::ClosedPolygonalPath, holes::Vector{<:ClosedPath}, level::Level, family::SlabFamily) =
-  begin
-    @assert length(holes) == 0
-    @remote(b, CreatePolygonalFloor(convert(ClosedPolygonalPath, contour).vertices, ref(b, level).value))
+KhepriBase.b_slab(b::RVT, contour::ClosedPath, level, family) =
+  let (locs, arcs) = locs_and_arcs(contour)
+    @remote(b, CreatePathFloor(locs, arcs, ref(b, level).value))
     # we are not using the family yet
     # ref(b, s.family))
   end
 
-realize_slab(b::RVT, contour::RectangularPath, holes::Vector{<:ClosedPath}, level::Level, family::SlabFamily) =
-    realize_slab(b, convert(ClosedPolygonalPath, contour), holes, level, family)
-
-realize_roof(b::RVT, contour::ClosedPath, holes::Vector{<:ClosedPath}, level::Level, family::RoofFamily) =
-    let (locs, arcs) = locs_and_arcs(contour)
-        @assert length(holes) == 0
-        @remote(b, CreatePathRoof(locs, arcs, ref(b, level).value, family))
-    end
-
-realize_slab_openings(b::RVT, s::Slab, s_ref, openings) =
-    let s_base_height = s.level.height
-        for opening in openings
-            realize_slab_opening(b, s, opening)
-        end
-        s_ref
-    end
-
-realize_slab_opening(b::RVT, s::Slab, contour::ClosedPath) =
-    let (locs, arcs) = locs_and_arcs(contour)
-        @remote(b, CreatePathOpening(locs, arcs, ref(b, s).value))
-    end
-realize_slab_opening(b::RVT, s::Slab, contour::ClosedPolygonalPath) =
-  @remote(b, CreatePolygonalOpening(convert(ClosedPolygonalPath, contour).vertices, ref(b, s).value))
+KhepriBase.b_roof(b::RVT, contour::ClosedPath, level, family) =
+  let (locs, arcs) = locs_and_arcs(contour)
+    @remote(b, CreatePathRoof(locs, arcs, ref(b, level).value, family))
+  end
 
 #Beams are aligned along the top axis.
-realize(b::RVT, s::Beam) =
-    let o = loc_from_o_phi(s.cb, s.angle)
-        @remote(b, CreateBeam(o, add_z(o, s.h), s.angle, realize(b, s.family)))
-    end
+KhepriBase.b_beam(b::RVT, c, h, angle, family) =
+  @remote(b, CreateBeam(c, add_z(c, h), angle, realize(b, family)))
+
+KhepriBase.b_column(b::RVT, cb, angle, bottom_level, top_level, family) =
+  @remote(b, CreateColumn(cb, realize(b, bottom_level), realize(b, top_level), realize(b, family)))
 
 #Columns are aligned along the center axis.
-
-realize(b::RVT, s::FreeColumn) =
-    let b = loc_from_o_phi(s.cb, s.angle)
-        t = add_z(o, s.h)
-        @remote(b, CreateColumnPoints(b, t,
-            @remote(b, FindOrCreateLevelAtElevation(loc_in_world(b).z)),
-            @remote(b, FindOrCreateLevelAtElevation(loc_in_world(t).z)),
-            ref(b, s.family)))
-    end
+KhepriBase.b_free_column(b::RVT, cb, h, angle, family) =
+  let ct = in_world(add_z(cb, h)),
+      cb = in_world(cb),
+      lb = @remote(b, FindOrCreateLevelAtElevation(cb.z)),
+      lt = @remote(b, FindOrCreateLevelAtElevation(ct.z))
+    @remote(b, CreateColumnPoints(cb, ct, lb, lt, realize(b, family)))
+  end
 
 KhepriBase.realize_wall_no_openings(b::RVT, s::Wall) =
   # Revit also considers unconnected walls. These have a top level with id -1
@@ -517,6 +535,11 @@ realize(b::RVT, s::TrussBar) =
 ############################################
 # Select New Family ...
 # Choose Metric Generic Model
+
+
+# Revit does not use materials!
+KhepriBase.material_ref(b::RVT, m::Material) = nothing
+
 
 KhepriBase.b_pyramid(b::RVT, bs, t, bmat, smat) =
   @remote(b, Pyramid(bs, t))
@@ -618,7 +641,7 @@ zoom_extents(b::RVT) = @remote(b, ZoomExtents())
 view_top(b::RVT) =
     @remote(b, ViewTop())
 
-backend_delete_all_shapes(b::RVT) =
+KhepriBase.b_delete_all_refs(b::RVT) =
   @remote(b, DeleteAllElements())
 
 prompt_position(prompt::String, b::RVT) =
