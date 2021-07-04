@@ -36,6 +36,8 @@ macro ghdef(name, init)
     end
   end
 end
+
+#Strings require conversion to avoid SubStrings!!!!!!!
 @ghdef(String, "")
 @ghdef(Path, "")
 @ghdef(Boolean, false)
@@ -56,6 +58,16 @@ end
 @ghdef(Many, [])
 @ghdef(Evals, [])
 @ghdef(JLs, [])
+@ghdef(Stringss, [])
+@ghdef(Pathss, [])
+@ghdef(Booleanss, [])
+@ghdef(Numberss, [])
+@ghdef(Integerss, [])
+@ghdef(Pointss, [])
+@ghdef(Vectorss, [])
+@ghdef(Manies, [])
+@ghdef(Evalss, [])
+@ghdef(JLss, [])
 
 export define_kgh_function
 
@@ -85,8 +97,18 @@ is_kgh_output(form) =
    is_kgh_io_function_call(form.args[3])) ||
   is_kgh_io_function_call(form)
 
-kgh_io_param(form) =
+kgh_input_param(form) =
   form.args[2] == :_ ? :__result : form.args[2]
+kgh_output_param(form) =
+  let e = form.args[2] == :_ ? :__result : form.args[2],
+      type = form.args[3].args[1]
+    type === :String ?
+      :(convert(String, $e)) :
+      type === :Strings ?
+        :(convert(Vector{String}, $e)) :
+        e
+  end
+
 kgh_io_call(form) =
   let param = form.args[2],
       form = form.args[3],
@@ -105,8 +127,8 @@ create_kgh_function(name::String, body::String) =
       inputs = filter(is_kgh_input, forms),
       outputs = filter(is_kgh_output, forms),
       forms = filter(f -> !(f in inputs || f in outputs), forms),
-      inp_params = map(kgh_io_param, inputs),
-      out_params = map(kgh_io_param, outputs),
+      inp_params = map(kgh_input_param, inputs),
+      out_params = map(kgh_output_param, outputs),
       inp_forms = map(kgh_io_call, inputs),
       out_forms = map(kgh_io_call, outputs),
       inps = Symbol("__inps_$name"),
@@ -148,6 +170,25 @@ create_kgh_function(name::String, body::String) =
 
 define_kgh_function(name::String, body::String) =
   Base.eval(Main, create_kgh_function(name, body))
+
+#=
+fn = """
+  a < Number("Number", "N", "Parameter N", 0.0)
+  b < Any()
+  c < Number(5)
+  d < String("Foo")
+
+  f(a + b)
+
+  c = a + 1
+
+  c > Any()
+  d > Strings("Bar")
+"""
+
+create_kgh_function("foo", fn)
+=#
+
 #=
 fn = """
 a < Number("Number", "N", "Parameter N", 0.0)
