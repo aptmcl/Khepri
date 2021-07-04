@@ -147,7 +147,12 @@ write_povray_mesh(io::IO, mat, pts, closed_u, closed_v, smooth_u, smooth_v) =
     end
   end
 
-
+write_povray_isosurface(io::IO, mat, func, contained_by, max_gradient) =
+  write_povray_object(io, "isosurface", mat) do
+    write_povray_object(io, "function", nothing, func)
+    write_povray_object(io, "contained_by", nothing, contained_by)
+    write_povray_param(io, "max_gradient", max_gradient)
+  end
 
 #=
 struct POVRayPigment
@@ -565,9 +570,6 @@ KhepriBase.b_surface_polygon_with_holes(b::POVRay, ps, qss, mat) =
 KhepriBase.b_surface_circle(b::POVRay, c, r, mat) =
   	write_povray_object(buffer(b), "disc", save_material(b, mat), c, uvz(c.cs), r)
 
-KhepriBase.b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
-  b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_v, grid_interpolator(ptss), mat)
-
 KhepriBase.b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_v, interpolator, mat) =
   let io = buffer(b),
       mat = save_material(b, mat),
@@ -645,6 +647,10 @@ KhepriBase.b_cone_frustum(b::POVRay, cb, rb, h, rt, bmat, tmat, smat) =
 #     end
 #   end
 #
+
+b_isosurface(b::POVRay, frep, bounding_box, mat) =
+  write_povray_isosurface(buffer(b), save_material(b, mat), func, bounding_box, max_gradient)
+
 
 #=
 ###################################
