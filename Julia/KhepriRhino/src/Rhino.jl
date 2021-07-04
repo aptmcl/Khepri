@@ -481,8 +481,6 @@ backend_map_division(b::RH, f::Function, s::Shape2D, nu::Int, nv::Int) =
 
 KhepriBase.b_torus(b::RH, c, ra, rb, mat) =
   @remote(b, Torus(c, vz(1, c.cs), ra, ra, mat))
-backend_right_cuboid(b::RH, cb, width, height, h, material) =
-  @remote(b, XYCenteredBox(cb, vx(1, cb.cs), vy(1, cb.cs), width, height, h))
 
 backend_extrusion(b::RH, s::Shape, v::Vec) =
     and_mark_deleted(
