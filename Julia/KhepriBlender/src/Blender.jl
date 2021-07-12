@@ -230,7 +230,7 @@ KhepriBase.b_surface_circle(b::BLR, c, r, mat) =
 KhepriBase.b_surface_grid(b::BLR, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
   let (nu, nv) = size(ptss)
 	smooth_u && smooth_v ?
-	  @remote(blender, quad_surface(vcat(ptss...), nu, nv, closed_u, closed_v, true, mat)) :
+	  @remote(b, quad_surface(vcat(ptss...), nu, nv, closed_u, closed_v, true, mat)) :
 	  smooth_u ?
 	  	(closed_u ?
           vcat([b_quad_strip_closed(b, ptss[:,i], ptss[:,i+1], true, mat) for i in 1:nv-1],
