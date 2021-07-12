@@ -142,9 +142,19 @@ const Unity = SocketBackend{UnityKey, UnityId}
 
 KhepriBase.void_ref(b::Unity) = UnityNativeRef(-1)
 
-create_Unity_connection() = connect_to("Unity", unity_port)
+KhepriBase.before_connecting(b::Unity) = nothing #check_plugin()
+KhepriBase.after_connecting(b::Unity) =
+  begin
+    set_material(unity, material_basic, "Default/Materials/White")
+    set_material(unity, material_metal, "Default/Materials/Steel")
+    set_material(unity, material_glass, "Default/Materials/Glass")
+    set_material(unity, material_wood, "Default/Materials/Wood")
+    set_material(unity, material_concrete, "Default/Materials/Concrete")
+    set_material(unity, material_plaster, "Default/Materials/Plaster")
+    set_material(unity, material_grass, "Default/Materials/Grass")
+  end
 
-const unity = Unity(LazyParameter(TCPSocket, create_Unity_connection), unity_api)
+const unity = Unity("Unity", unity_port, unity_api)
 
 # Traits
 #has_boolean_ops(::Type{Unity}) = HasBooleanOps{true}()
@@ -677,7 +687,7 @@ backend_bounding_box(b::Unity, shapes::Shapes) =
 KhepriBase.b_set_view(b::Unity, camera::Loc, target::Loc, lens::Real, aperture::Real) =
   let c = connection(b)
     @remote(b, SetView(camera, target, lens))
-    interrupt_processing(c)
+    #interrupt_processing(c)
   end
 
 KhepriBase.b_get_view(b::Unity) =
@@ -687,11 +697,11 @@ zoom_extents(b::Unity) = @remote(b, ZoomExtents())
 
 view_top(b::Unity) = @remote(b, ViewTop())
 
+KhepriBase.b_delete_refs(b::Unity, refs::Vector{UnityId}) =
+  @remote(b, DeleteMany(refs))
+
 KhepriBase.b_delete_all_refs(b::Unity) =
   @remote(b, DeleteAll())
-
-backend_delete_shapes(b::Unity, shapes::Shapes) =
-  @remote(b, DeleteMany(collect_ref(shapes)))
 
 set_length_unit(unit::String, b::Unity) = nothing # Unused, for now
 
