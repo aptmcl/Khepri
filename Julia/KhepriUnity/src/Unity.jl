@@ -679,10 +679,6 @@ backend_rectangular_table_and_chairs(b::Unity, c, angle, family) =
     @remote(b, InstantiateBIMElement(family_ref(b, family), c, -angle))
 
 ############################################
-#=
-backend_bounding_box(b::Unity, shapes::Shapes) =
-  @remote(b, BoundingBox(collect_ref(shapes)))
-=#
 
 KhepriBase.b_set_view(b::Unity, camera::Loc, target::Loc, lens::Real, aperture::Real) =
   let c = connection(b)
