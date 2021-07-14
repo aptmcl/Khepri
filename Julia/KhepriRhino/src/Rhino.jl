@@ -671,7 +671,7 @@ KhepriBase.b_table_and_chairs(b::RH, c, angle, family) =
 
 ############################################
 
-backend_bounding_box(b::RH, shapes::Shapes) =
+KhepriBase.b_bounding_box(b::RH, shapes::Shapes) =
   @remote(b, BoundingBox(collect_ref(shapes)))
 
 KhepriBase.b_set_view(b::RH, camera::XYZ, target::XYZ, lens::Real, aperture::Real) =
