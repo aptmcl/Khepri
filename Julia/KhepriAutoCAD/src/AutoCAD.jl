@@ -958,8 +958,8 @@ KhepriBase.b_table_and_chairs(b::ACAD, c, angle, family) =
 
 ############################################
 
-KhepriBase.b_bounding_box(b::ACAD, shapes::Shapes) =
-  @remote(b, BoundingBox(collect_ref(shapes)))
+# KhepriBase.b_bounding_box(b::ACAD, shapes::Shapes) =
+#   @remote(b, BoundingBox(collect_ref(shapes)))
 
 KhepriBase.b_set_view(b::ACAD, camera::Loc, target::Loc, lens::Real, aperture::Real) =
   @remote(b, View(camera, target, lens))
