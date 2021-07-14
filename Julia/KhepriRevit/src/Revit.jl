@@ -625,9 +625,6 @@ realize(b::RVT, s::IntersectionShape) =
 
 ############################################
 
-backend_bounding_box(b::RVT, shapes::Shapes) =
-  @remote(b, BoundingBox(collect_ref(shapes)))
-
 KhepriBase.backend_name(b::RVT) = "Revit"
 
 KhepriBase.b_set_view(b::RVT, camera::Loc, target::Loc, lens::Real, aperture::Real) =
