@@ -958,7 +958,7 @@ KhepriBase.b_table_and_chairs(b::ACAD, c, angle, family) =
 
 ############################################
 
-backend_bounding_box(b::ACAD, shapes::Shapes) =
+KhepriBase.b_bounding_box(b::ACAD, shapes::Shapes) =
   @remote(b, BoundingBox(collect_ref(shapes)))
 
 KhepriBase.b_set_view(b::ACAD, camera::Loc, target::Loc, lens::Real, aperture::Real) =
@@ -1157,7 +1157,7 @@ KhepriBase.b_select_position(b::ACAD, prompt::String) =
 KhepriBase.b_select_positions(b::ACAD, prompt::String) =
   let sel() =
     let p = select_position(prompt, b)
-      if p == nothing
+      if isnothing(p)
         []
       else
         [p, sel()...]
