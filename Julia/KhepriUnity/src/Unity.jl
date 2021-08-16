@@ -544,9 +544,6 @@ realize(b::Unity, s::Slice) =
   slice_ref(b, ref(s.shape), s.p, s.n)
 
 
-
-
-
 realize(b::Unity, s::Move) =
   let r = map_ref(s.shape) do r
             @remote(b, Move(r, s.v))
