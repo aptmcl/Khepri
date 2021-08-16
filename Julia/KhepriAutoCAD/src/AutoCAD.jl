@@ -19,7 +19,6 @@ trusted locations are specified by the TRUSTEDPATHS system variable.
 
 =#
 
-
 # This only needs to be done when the AutoCAD plugin is updated
 
 julia_khepri = dirname(dirname(abspath(@__FILE__)))
@@ -152,8 +151,6 @@ start_autocad() =
   run(`cmd /c cd "$(dirname(autocad_template()))" \&\& $(basename(autocad_template()))`, wait=false)
 
 
-
-
 # ACAD is a subtype of CS
 parse_signature(::Val{:ACAD}, sig::T) where {T} = parse_signature(Val(:CS), sig)
 encode(::Val{:ACAD}, t::Val{T}, c::IO, v) where {T} = encode(Val(:CS), t, c, v)
@@ -201,7 +198,6 @@ decode(ns::Val{:ACAD}, ::Val{:Color}, c::IO) =
       b = decode(ns, Val(:byte), c)
     RGB(r/255, g/255, b/255)
   end
-
 
 acad_api = @remote_functions :ACAD """
 public Entity QuadStrip(Point3d[] bpts, Point3d[] tpts, int smoothLevel, ObjectId matId)
@@ -608,24 +604,8 @@ get_autocad_material(b, m::AutoCADBasicMaterial) =
     m.illumination_model))
 
 #=
-
 Default families
-
 =#
-
-abstract type ACADFamily <: Family end
-
-struct ACADLayerFamily <: ACADFamily
-  name::String
-  color::RGB
-  ref::Parameter{Any}
-end
-
-acad_layer_family(name, color::RGB=rgb(1,1,1)) =
-  ACADLayerFamily(name, color, Parameter{Any}(nothing))
-
-backend_get_family_ref(b::ACAD, f::Family, af::ACADLayerFamily) =
-  backend_create_layer(b, af.name, true, af.color)
 
 backend_fill_curves(b::ACAD, refs::ACADIds) = @remote(b, SurfaceFromCurves(refs))
 backend_fill_curves(b::ACAD, ref::ACADId) = @remote(b, SurfaceFromCurves([ref]))
@@ -711,28 +691,28 @@ backend_surface_domain(b::ACAD, s::Shape2D) =
     tuple(@remote(b, SurfaceDomain(ref(s).value))...)
 
 backend_map_division(b::ACAD, f::Function, s::Shape2D, nu::Int, nv::Int) =
-    let conn = connection(b)
-        r = ref(s).value
-        (u1, u2, v1, v2) = @remote(b, SurfaceDomain(r))
-        map_division(u1, u2, nu) do u
-            map_division(v1, v2, nv) do v
-                f(@remote(b, SurfaceFrameAt(r, u, v)))
-            end
-        end
+  let conn = connection(b)
+      r = ref(s).value
+      (u1, u2, v1, v2) = @remote(b, SurfaceDomain(r))
+    map_division(u1, u2, nu) do u
+      map_division(v1, v2, nv) do v
+        f(@remote(b, SurfaceFrameAt(r, u, v)))
+      end
     end
+  end
 
 # The previous method cannot be applied to meshes in AutoCAD, which are created by surface_grid
 
 backend_map_division(b::ACAD, f::Function, s::SurfaceGrid, nu::Int, nv::Int) =
-let conn = connection(b)
-    r = ref(s).value
-    (u1, u2, v1, v2) = @remote(b, SurfaceDomain(r))
+  let conn = connection(b)
+      r = ref(s).value
+      (u1, u2, v1, v2) = @remote(b, SurfaceDomain(r))
     map_division(u1, u2, nu) do u
-        map_division(v1, v2, nv) do v
-            f(@remote(b, SurfaceFrameAt(r, u, v)))
-        end
+      map_division(v1, v2, nv) do v
+        f(@remote(b, SurfaceFrameAt(r, u, v)))
+      end
     end
-end
+  end
 
 b_text(b::ACAD, str, p, size, mat) =
   @remote(b, Text(str, p, vx(1, p.cs), vy(1, p.cs), size))
@@ -746,14 +726,6 @@ backend_extrusion(b::ACAD, s::Shape, v::Vec) =
             @remote(b, Extrude(r, v))
         end,
         s)
-
-backend_sweep(b::ACAD, path::Shape, profile::Shape, rotation::Real, scale::Real) =
-  and_mark_deleted(b,
-    map_ref(profile) do profile_r
-      map_ref(path) do path_r
-        @remote(b, Sweep(path_r, profile_r, rotation, scale))
-      end
-  end, [profile, path])
 
 b_sweep(b::ACAD, path, profile, rotation, scale, mat) =
   and_mark_deleted(b,
@@ -874,27 +846,7 @@ realize(b::ACAD, s::UnionMirror) =
           end
     UnionRef((r0,r1))
   end
-#=
-KhepriBase.b_surface_grid(b::ACAD, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
-  let (nu, nv) = size(ptss)
-    smooth_u && smooth_v ?
-      # Autocad does not allow us to distinguish smoothness along different dimensions
-      @remote(b, SurfaceFromGrid(nv, nu, reshape(ptss,:), closed_v, closed_u, 2, mat)) :
-      (smooth_u ?
-        vcat([@remote(b, SurfaceFromGrid(nu, 2, reshape(permutedims(ptss[:,i:i+1]),:), closed_u, false, 2, mat))
-              for i in 1:nv-1],
-             closed_v ?
-               [@remote(b, SurfaceFromGrid(nu, 2, reshape(permutedims(ptss[:,[end,1]]),:), closed_u, false, 2, mat))] :
-               []) :
-        (smooth_v ?
-          vcat([@remote(b, SurfaceFromGrid(2, nv, reshape(permutedims(ptss[i:i+1,:]),:), false, closed_v, 2, mat))
-                for i in 1:nu-1],
-               closed_u ?
-                 [@remote(b, SurfaceFromGrid(2, nv, reshape(permutedims(ptss[[end,1],:]),:), false, closed_v, 2, mat))] :
-                 []) :
-          @remote(b, SurfaceFromGrid(nu, nv, reshape(permutedims(ptss),:), closed_u, closed_v, 0, mat))))
-  end
-=#
+
 KhepriBase.b_surface_grid(b::ACAD, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
   let (nu, nv) = size(ptss)
     smooth_u && smooth_v ?
@@ -994,6 +946,8 @@ backend_set_length_unit(b::ACAD, unit::String) = @remote(b, SetLengthUnit(unit))
 # Dimensions
 
 const ACADDimensionStyles = Dict(:architectural => "_ARCHTICK", :mechanical => "")
+
+#b_dimension(b::Backend, p, q, str, size, mat) =
 
 backend_dimension(b::ACAD, p0::Loc, p1::Loc, p::Loc, scale::Real, style::Symbol) =
     @remote(b, CreateAlignedDimension(p0, p1, p,
