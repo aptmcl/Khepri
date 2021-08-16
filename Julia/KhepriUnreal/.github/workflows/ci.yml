@@ -13,8 +13,6 @@ jobs:
           - '1.6'
           - 'nightly'
         os:
-          - ubuntu-latest
-          - macOS-latest
           - windows-latest
         arch:
           - x64
