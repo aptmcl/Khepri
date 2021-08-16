@@ -85,6 +85,7 @@ def download_blenderkit_material(asset_ref):
                                   'download_url': durl,
                                   'id': r['id'],
                                   'asset_base_id': r['assetBaseId'],
+                                  'assetBaseId': r['assetBaseId'],
                                   'name': r['name'],
                                   'asset_type': r['assetType'],
                                   'tooltip': tooltip,
@@ -135,24 +136,29 @@ def download_blenderkit_material(asset_ref):
     create_asset_data(rdata, asset_type)
     asset_data = rdata['results'][0]
     has_url = blenderkit.download.get_download_url(asset_data, scene_id, api_key)
-    file_names = paths.get_download_filenames(asset_data)
+    #file_names = paths.get_download_filepaths(asset_data)
+    files_func = getattr(paths, 'get_download_filepaths', 'get_download_filenames')
+    file_names = files_func(asset_data)
     file_name = file_names[0]
     if not os.path.exists(file_name):
         with open(file_name, "wb") as f:
             print("Downloading %s" % file_name)
-            response = requests.get(asset_data['url'], stream=True)
+            res_file_info, resolution = paths.get_res_file(asset_data, 'blend')
+            response = requests.get(res_file_info['url'], stream=True)
+            #response = requests.get(asset_data['url'], stream=True)
             total_length = response.headers.get('Content-Length')
             if total_length is None:  # no content length header
                 f.write(response.content)
             else:
                 dl = 0
-                for data in response.iter_content(chunk_size=4096):
+                for data in response.iter_content(chunk_size=4096*10):
                     dl += len(data)
                     f.write(data)
     material = append_link.append_material(file_names[-1])
     return material
 
-#get_blenderkit_material("asset_base_id:31dccf38-74f4-4516-9d17-b80a45711ca7 asset_type:material")
+download_blenderkit_material("asset_base_id:1bdb5334-851e-414d-b766-f9fe05477860 asset_type:material")
+# download_blenderkit_material("asset_base_id:31dccf38-74f4-4516-9d17-b80a45711ca7 asset_type:material")
 
 
 Point3d = Vector
@@ -194,6 +200,10 @@ def assign_material(obj, mat_idx):
         mesh = obj.data
         material = materials[mat_idx]
         mesh.materials.append(material)
+# HACK: These two are formally equivalent. Normalize!
+def maybe_add_material(obj, mat):
+    if mat >= 0:
+        obj.data.materials.append(materials[mat])
 
 def add_uvs(mesh):
     mesh.use_auto_texspace = True
@@ -205,16 +215,6 @@ def add_uvs(mesh):
     uvl.active = True
     uvl.active_render = True
     return mesh
-
-def maybe_add_material(obj, mat):
-    if mat >= 0:
-        obj.data.materials.append(materials[mat])
-
-current_material = None
-def set_current_material(id:MatId)->None:
-    global current_material
-    current_material = id
-
 
 current_collection = C.collection
 def find_or_create_collection(name:str, active:bool, color:RGBA)->str:
@@ -283,11 +283,11 @@ def new_bmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[i
     if smooth:
         for f in mfaces:
             f.smooth = True
-    bm.normal_update()
     if mat_idx >= 0:
         for f in mfaces:
             f.material_index = mat_idx
             #f.select = True
+    bm.normal_update()
     return bm
 
 def add_to_bmesh(bm, verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat_idx:int)->None:
