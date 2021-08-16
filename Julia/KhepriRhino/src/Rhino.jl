@@ -230,27 +230,27 @@ KhepriBase.after_connecting(b::RH) =
   let mat_folder = @remote(b, DefaultMaterialsFolder()),
   	  m = match(r".+?Rhinoceros\\(.+?)\\Localization", mat_folder)
   	if m === nothing
-	    error("Unrecognized Rhino materials folder: $(mat_folder)")
+	  error("Unrecognized Rhino materials folder: $(mat_folder)")
   	else
-	    let v = VersionNumber(m[1])
-		    if v >= v"6.0"
-		      set_material(rhino, material_metal, rhino_default_material(raw"Metal\Matte\Matte Silver"))
-		      set_material(rhino, material_glass, rhino_default_material(raw"Glass\Clear Glass"))
-		      set_material(rhino, material_wood, rhino_default_material(raw"Wood\Pear polished"))
-		      set_material(rhino, material_concrete, rhino_default_material(raw"Ceramics\Stoneware"))
-		      set_material(rhino, material_plaster, rhino_default_material(raw"White Matte"))
-		      set_material(rhino, material_grass, rhino_default_material(raw"Textures\Grass"))
-	      elseif v >= v"5.0"
+	  let v = VersionNumber(m[1])
+	    if v >= v"6.0"
+	      set_material(rhino, material_metal, rhino_default_material(raw"Metal\Matte\Matte Silver"))
+	      set_material(rhino, material_glass, rhino_default_material(raw"Glass\Clear Glass"))
+	      set_material(rhino, material_wood, rhino_default_material(raw"Wood\Pear polished"))
+	      set_material(rhino, material_concrete, rhino_default_material(raw"Ceramics\Stoneware"))
+	      set_material(rhino, material_plaster, rhino_default_material(raw"White Matte"))
+	      set_material(rhino, material_grass, rhino_default_material(raw"Textures\Grass"))
+	    elseif v >= v"5.0"
           set_material(rhino, material_metal, rhino_default_material(raw"Metal\Silver"))
-    	    set_material(rhino, material_glass, rhino_default_material(raw"Transparent\Glass"))
-    	    set_material(rhino, material_wood, rhino_default_material(raw"Wood\Scots Pine"))
-    	    set_material(rhino, material_concrete, rhino_default_material(raw"Stone\Granite"))
-    	    set_material(rhino, material_plaster, rhino_default_material(raw"White Matte"))
-    	    set_material(rhino, material_grass, rhino_default_material(raw"Special\Grass"))
-	      else
-		      error("Unrecognized Rhino version: ")
-	      end
+          set_material(rhino, material_glass, rhino_default_material(raw"Transparent\Glass"))
+          set_material(rhino, material_wood, rhino_default_material(raw"Wood\Scots Pine"))
+          set_material(rhino, material_concrete, rhino_default_material(raw"Stone\Granite"))
+          set_material(rhino, material_plaster, rhino_default_material(raw"White Matte"))
+          set_material(rhino, material_grass, rhino_default_material(raw"Special\Grass"))
+	    else
+	      error("Unrecognized Rhino version: ")
 	    end
+	  end
     end
   end
 
