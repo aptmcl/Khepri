@@ -8,20 +8,22 @@ julia_khepri = dirname(dirname(abspath(@__FILE__)))
 =#
 
 # Unreal is a subtype of CPP
-parse_signature(::Val{:UE}, sig::AbstractString) =
-  let func_name(name) = replace(name, ":" => "_"),
-      type_name(name) = replace(name, r"[:<>]" => "_"),
-      m = match(r"^ *(public|) *(\w+) *([\[\]]*) +((?:\w|:|<|>)+) *\( *(.*) *\)", sig),
-      ret = type_name(m.captures[2]),
-      array_level = count(c -> c=='[', something(m.captures[3], "")),
-      name = m.captures[4],
-      params = split(m.captures[5], r" *, *", keepempty=false),
-      parse_c_decl(decl) =
-        let m = match(r"^ *((?:\w|:|<|>)+) *([\[\]]*) *(\w+)$", decl)
-          (type_name(m.captures[1]), count(c -> c=='[', something(m.captures[2], "")), Symbol(m.captures[3]))
-        end
-    (func_name(name), name, [parse_c_decl(decl) for decl in params], (ret, array_level))
-  end
+parse_signature(::Val{:UE}, sig::T) where {T} = parse_signature(Val(:CPP), sig)
+
+# parse_signature(::Val{:UE}, sig::AbstractString) =
+#   let func_name(name) = replace(name, ":" => "_"),
+#       type_name(name) = replace(name, r"[:<>]" => "_"),
+#       m = match(r"^ *(public|) *(\w+) *([\[\]]*) +((?:\w|:|<|>)+) *\( *(.*) *\)", sig),
+#       ret = type_name(m.captures[2]),
+#       array_level = count(c -> c=='[', something(m.captures[3], "")),
+#       name = m.captures[4],
+#       params = split(m.captures[5], r" *, *", keepempty=false),
+#       parse_c_decl(decl) =
+#         let m = match(r"^ *((?:\w|:|<|>)+) *([\[\]]*) *(\w+)$", decl)
+#           (type_name(m.captures[1]), count(c -> c=='[', something(m.captures[2], "")), Symbol(m.captures[3]))
+#         end
+#     (func_name(name), name, [parse_c_decl(decl) for decl in params], (ret, array_level))
+#   end
 
 encode(::Val{:UE}, t::Val{T}, c::IO, v) where {T} = encode(Val(:CPP), t, c, v)
 decode(::Val{:UE}, t::Val{T}, c::IO) where {T} = decode(Val(:CPP), t, c)
@@ -81,28 +83,7 @@ export unreal, fast_unreal,
 @encode_decode_as(:UE, Val{:TArray_AActor_}, Vector{Val{:AActor}})
 @encode_decode_as(:UE, Val{:TArray_TArray_FVector__}, Vector{Vector{Val{:FVector}}})
 
-abstract type UEKey end
-const UEId = Int
-const UEIds = Vector{UEId}
-const UERef = GenericRef{UEKey, UEId}
-const UERefs = Vector{UERef}
-const UEEmptyRef = EmptyRef{UEKey, UEId}
-const UEUniversalRef = UniversalRef{UEKey, UEId}
-const UENativeRef = NativeRef{UEKey, UEId}
-const UEUnionRef = UnionRef{UEKey, UEId}
-const UESubtractionRef = SubtractionRef{UEKey, UEId}
-const UE = SocketBackend{UEKey, UEId}
-
-void_ref(b::UE) = UENativeRef(-1)
-
-create_UE_connection() =
-    begin
-        #check_plugin()
-        println("Trying to Connect")
-        create_backend_connection("Unreal", 11010)
-    end
-
-unreal_functions = @remote_functions :UE """
+unreal_api = @remote_functions :UE """
 public AActor Primitive::Sphere(FVector center, float radius)
 public AActor Primitive::Box(FVector pos, FVector vx, FVector vy, FVector size)
 public AActor Primitive::RightCuboid(FVector pos, FVector vx, FVector vy, float sx, float sy, float sz, float angle)
@@ -136,10 +117,33 @@ public int Primitive::RenderView(int width, int height, String name, String path
 public AActor Primitive::Spotlight(FVector position, FVector dir, FLinearColor color, float range, float intensity, float hotspot, float falloff);
 """
 
-const unreal = UE(LazyParameter(TCPSocket, create_UE_connection),
-                      unreal_functions)
+abstract type UEKey end
+const UEId = Int
+const UEIds = Vector{UEId}
+const UERef = GenericRef{UEKey, UEId}
+const UERefs = Vector{UERef}
+const UEEmptyRef = EmptyRef{UEKey, UEId}
+const UEUniversalRef = UniversalRef{UEKey, UEId}
+const UENativeRef = NativeRef{UEKey, UEId}
+const UEUnionRef = UnionRef{UEKey, UEId}
+const UESubtractionRef = SubtractionRef{UEKey, UEId}
+const UE = SocketBackend{UEKey, UEId}
 
-backend_name(b::UE) = "Unreal"
+KhepriBase.void_ref(b::UE) = UENativeRef(-1)
+
+KhepriBase.before_connecting(b::UE) = nothing #check_plugin()
+KhepriBase.after_connecting(b::UE) =
+  begin
+    # set_material(unity, material_basic, "Default/Materials/White")
+    # set_material(unity, material_metal, "Default/Materials/Steel")
+    # set_material(unity, material_glass, "Default/Materials/Glass")
+    # set_material(unity, material_wood, "Default/Materials/Wood")
+    # set_material(unity, material_concrete, "Default/Materials/Concrete")
+    # set_material(unity, material_plaster, "Default/Materials/Plaster")
+    # set_material(unity, material_grass, "Default/Materials/Grass")
+  end
+
+const unreal = UE("Unreal", unreal_port, unreal_api)
 
 realize(b::UE, s::EmptyShape) =
   UEEmptyRef()
@@ -313,23 +317,15 @@ realize(b::UE, s::Torus) =
   UnrealTorus(connection(b), s.center, vz(1, s.center.cs), s.re, s.ri)
 =#
 
-realize(b::UE, s::Cuboid) =
-  @remote(b, Primitive__PyramidFrustum([s.b0, s.b1, s.b2, s.b3], [s.t0, s.t1, s.t2, s.t3]))
+#realize(b::UE, s::Cuboid) =
+#  @remote(b, Primitive__PyramidFrustum([s.b0, s.b1, s.b2, s.b3], [s.t0, s.t1, s.t2, s.t3]))
 
-realize(b::UE, s::RegularPyramidFrustum) =
-  @remote(b, Primitive__PyramidFrustum(
-                regular_polygon_vertices(s.edges, s.cb, s.rb, s.angle, s.inscribed),
-                regular_polygon_vertices(s.edges, add_z(s.cb, s.h), s.rt, s.angle, s.inscribed)))
+KhepriBase.b_pyramid_frustum(b::UE, bs, ts, bmat, tmat, smat) =
+  @remote(b, Primitive__PyramidFrustum(bs, ts))
 
-realize(b::UE, s::RegularPyramid) =
-  @remote(b, Primitive__Pyramid(regular_polygon_vertices(s.edges, s.cb, s.rb, s.angle, s.inscribed),
-                                add_z(s.cb, s.h)))
+KhepriBase.b_pyramid(b::UE, bs, t, bmat, smat) =
+  @remote(b, Primitive__Pyramid(bs, t))
 
-realize(b::UE, s::IrregularPyramid) =
-  @remote(b, Primitive__Pyramid(s.bs, s.t))
-
-realize(b::UE, s::IrregularPyramidFrustum) =
-  @remote(b, Primitive__PyramidFrustum(s.bs, s.ts))
 #=
 realize(b::UE, s::RegularPrism) =
   let bs = regular_polygon_vertices(s.edges, s.cb, s.r, s.angle, s.inscribed)
@@ -348,11 +344,11 @@ realize(b::UE, s::IrregularPrism) =
 
 unreal"public AActor RightCuboid(Vector3 position, Vector3 vx, Vector3 vy, float dx, float dy, float dz, float angle)"
 =#
-realize(b::UE, s::RightCuboid) =
-  @remote(b, Primitive__RightCuboid(s.cb, vx(1, s.cb.cs), vy(1, s.cb.cs), s.h, s.width, s.height,s.angle))
+#realize(b::UE, s::RightCuboid) =
+#  @remote(b, Primitive__RightCuboid(s.cb, vx(1, s.cb.cs), vy(1, s.cb.cs), s.h, s.width, s.height,s.angle))
 
-realize(b::UE, s::Box) =
-  @remote(b, Primitive__Box(s.c, vx(1, s.c.cs), vy(1, s.c.cs), xyz(s.dx, s.dy, s.dz, world_cs)))
+KhepriBase.b_box(b::UE, c, dx, dy, dz, mat) =
+  @remote(b, Primitive__Box(c, vx(1, c.cs), vy(1, c.cs), xyz(dx, dy, dz, world_cs)))
 
 #=
 realize(b::UE, s::Cone) =
@@ -365,8 +361,8 @@ realize(b::UE, s::ConeFrustum) =
 
 unreal"public AActor Cylinder(Vector3 bottom, float radius, Vector3 top)"
 =#
-realize(b::UE, s::Cylinder) =
-  @remote(b, Primitive__Cylinder(s.cb, s.r, s.cb + vz(s.h, s.cb.cs)))
+KhepriBase.b_cylinder(b::UE, c, r, h, bmat, tmat, smat) =
+  @remote(b, Primitive__Cylinder(c, r, c + vz(h, c.cs)))
 #=
 backend_extrusion(b::UE, s::Shape, v::Vec) =
     and_mark_deleted(
@@ -429,10 +425,10 @@ intersect_ref(b::UE, r0::UENativeRef, r1::UENativeRef) =
     ensure_ref(b, UnrealIntersect(connection(b), r0.value, r1.value))
 =#
 subtract_ref(b::UE, r0::UENativeRef, r1::UENativeRef) =
-let r = @remote(b, Primitive__Subtract(r0.value, r1.value))
-  @remote(b, Primitive__DeleteMany([r0.value, r1.value]))
-  r
-end
+  let r = @remote(b, Primitive__Subtract(r0.value, r1.value))
+    @remote(b, Primitive__DeleteMany([r0.value, r1.value]))
+    r
+  end
 
 #=
 slice_ref(b::UE, r::UENativeRef, p::Loc, v::Vec) =
