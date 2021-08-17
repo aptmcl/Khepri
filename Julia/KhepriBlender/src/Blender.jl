@@ -1,22 +1,20 @@
 # Blender
 export blender
 
-const blender_cmd =
-  Sys.iswindows() ?
-    joinpath(readdir("C:/Program Files/Blender Foundation/", join=true)[1], "blender.exe") :
-	"blender"
-
 const KhepriServerPath = Parameter(abspath(@__DIR__, "KhepriServer.py"))
 
 export headless_blender
 const headless_blender = Parameter(false)
 
 start_blender() =
-  run(detach(
-  	headless_blender() ?
-  	  `$(blender_cmd) -noaudio --background --python $(KhepriServerPath())` :
-  	  `$(blender_cmd) --python $(KhepriServerPath())`),
-	wait=false)
+  let blender_cmd = Sys.iswindows() ?
+      	joinpath(readdir("C:/Program Files/Blender Foundation/", join=true)[1], "blender.exe") :
+  		"blender"
+    run(detach(headless_blender() ?
+        `$(blender_cmd) -noaudio --background --python $(KhepriServerPath())` :
+    	`$(blender_cmd) --python $(KhepriServerPath())`),
+  		wait=false)
+  end
 
 #=
 sel = utils.selection_get()
