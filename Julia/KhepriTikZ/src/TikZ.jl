@@ -88,7 +88,7 @@ tikz_circle(out::IO, c::Loc, r::Real, filled::Bool=false) =
   end
 
 tikz_point(out::IO, c::Loc) =
-  tizk_circle(out, c, 0.01, true)
+  tikz_circle(out, c, 0.01, true)
 
 tikz_ellipse(out::IO, c::Loc, r0::Real, r1::Real, fi::Real, filled=false) =
   begin
@@ -294,6 +294,7 @@ tikz_set_view(out::IO, camera::Loc, target::Loc, lens::Real) =
     String(take!(out))
   end
 
+#=
 tikz_set_view(out::IO, camera::Loc, target::Loc, lens::Real) =
   let v = camera - target,
       contents = String(take(out)),
@@ -306,6 +307,7 @@ tikz_set_view(out::IO, camera::Loc, target::Loc, lens::Real) =
     println(out, raw"\end{tikzpicture}")
     String(take!(out))
   end
+=#
 
 tikz_set_view_top(out::IO) =
   let contents = String(take(out)),
@@ -336,7 +338,7 @@ const TikZ = IOBufferBackend{TikZKey, TikZId}
 
 KhepriBase.void_ref(b::TikZ) = TikZNativeRef(nothing)
 
-const tikz = TikZ(lens=0)
+const tikz = TikZ()
 
 KhepriBase.backend_name(b::TikZ) = "TikZ"
 
