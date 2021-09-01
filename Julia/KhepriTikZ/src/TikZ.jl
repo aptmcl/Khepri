@@ -345,7 +345,11 @@ KhepriBase.backend_name(b::TikZ) = "TikZ"
 tikz_output(b::TikZ=tikz) =
   b.lens == 0 ?
     tikz_set_view_top(connection(b)) :
-    tikz_set_view(connection(b), b.camera, b.target, b.lens)
+    let out = tikz_set_view(connection(b), b.camera, b.target, b.lens)
+      b.lens = 0 # Reset the lens
+      out
+    end
+
 withTikZXForm(f, out, c) =
   if is_world_cs(c.cs)
     f(out, c)
