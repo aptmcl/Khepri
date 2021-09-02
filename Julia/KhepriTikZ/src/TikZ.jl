@@ -349,7 +349,7 @@ tikz_output(b::TikZ=tikz) =
 
 tikz_output_and_reset(b::TikZ=tikz) =
   let out = tikz_output(b)
-    delete_all_shapes(b)
+    b_delete_all_refs(b)
     b.lens = 0 # Reset the lens
     out
   end
