@@ -279,8 +279,8 @@ tikz_transform(out::IO, f::Function, c::Loc) =
     tikz_e(out, "\\end{scope}")
   end
 
-tikz_set_view(out::IO, camera::Loc, target::Loc, lens::Real) =
-  let v = camera - target,
+tikz_set_view(out::IO, view, options) =
+  let v = view.camera - view.target,
       contents = String(take(out)),
       out = IOBuffer()
     print(out, "\\tdplotsetmaincoords{")
@@ -288,7 +288,7 @@ tikz_set_view(out::IO, camera::Loc, target::Loc, lens::Real) =
     print(out, "}{")
     tikz_number(out, rad2deg(sph_phi(v))+90)
     println(out, "}")
-    println(out, "\\begin{tikzpicture}[tdplot_main_coords$(use_wireframe() ? "" : ",fill=gray")]") #)opacity=0.2")]")
+    println(out, "\\begin{tikzpicture}[tdplot_main_coords$(use_wireframe() ? "" : ",fill=gray")$(options=="" ? "" : ",")$options]") #)opacity=0.2")]")
     print(out, contents)
     println(out, "\\end{tikzpicture}")
     String(take!(out))
@@ -309,10 +309,10 @@ tikz_set_view(out::IO, camera::Loc, target::Loc, lens::Real) =
   end
 =#
 
-tikz_set_view_top(out::IO) =
+tikz_set_view_top(out::IO, options) =
   let contents = String(take(out)),
       out = IOBuffer()
-    println(out, "\\begin{tikzpicture}[scale=1]")
+    println(out, "\\begin{tikzpicture}[$options]")
     print(out, contents)
     println(out, "\\end{tikzpicture}")
     String(take!(out))
@@ -338,19 +338,22 @@ const TikZ = IOBufferBackend{TikZKey, TikZId}
 
 KhepriBase.void_ref(b::TikZ) = TikZNativeRef(nothing)
 
-const tikz = TikZ()
+const tikz = TikZ(view=View(xyz(10,10,10), xyz(0,0,0), 0, 0))
 
 KhepriBase.backend_name(b::TikZ) = "TikZ"
 
-tikz_output(b::TikZ=tikz) =
-  b.lens == 0 ?
-    tikz_set_view_top(connection(b)) :
-    tikz_set_view(connection(b), b.camera, b.target, b.lens)
+tikz_output(options="") =
+  let b = tikz
+    b.view.lens == 0 ?
+      tikz_set_view_top(connection(b), options) :
+      tikz_set_view(connection(b), b.view, options)
+  end
 
-tikz_output_and_reset(b::TikZ=tikz) =
-  let out = tikz_output(b)
+tikz_output_and_reset(options="") =
+  let b = tikz,
+      out = tikz_output(options)
     b_delete_all_refs(b)
-    b.lens = 0 # Reset the lens
+    b.view.lens = 0 # Reset the lens
     out
   end
 
