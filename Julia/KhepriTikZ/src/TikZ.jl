@@ -1,6 +1,6 @@
 export tikz,
        tikz_output,
-       display_tikz_output
+       tikz_output_and_reset
 
 take(out::IO) =
   let contents = String(take!(out))
@@ -345,10 +345,14 @@ KhepriBase.backend_name(b::TikZ) = "TikZ"
 tikz_output(b::TikZ=tikz) =
   b.lens == 0 ?
     tikz_set_view_top(connection(b)) :
-    let out = tikz_set_view(connection(b), b.camera, b.target, b.lens)
-      b.lens = 0 # Reset the lens
-      out
-    end
+    tikz_set_view(connection(b), b.camera, b.target, b.lens)
+
+tikz_output_and_reset(b::TikZ=tikz) =
+  let out = tikz_output(b)
+    delete_all_shapes(b)
+    b.lens = 0 # Reset the lens
+    out
+  end
 
 withTikZXForm(f, out, c) =
   if is_world_cs(c.cs)
