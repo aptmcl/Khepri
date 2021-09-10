@@ -512,9 +512,7 @@ Base.@kwdef mutable struct POVRayBackend{K,T} <: LazyBackend{K,T}
   ground_level::Float64=0.0
   ground_material::POVRayMaterial=povray_gray_ground
   buffer::LazyParameter{IOBuffer}=LazyParameter(IOBuffer, IOBuffer)
-  camera::Loc=xyz(10,10,10)
-  target::Loc=xyz(0,0,0)
-  lens::Real=35
+  view::View=default_view()
   sun_altitude::Real=90
   sun_azimuth::Real=0
   cached::Bool=false
