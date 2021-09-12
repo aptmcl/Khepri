@@ -222,13 +222,24 @@ tikz_closed_spline(out::IO, pts::Locs, filled::Bool=false) =
 # HACK we need to handle the starting and ending vectors
 tikz_hobby_spline(out::IO, pts::Locs, filled::Bool=false) =
   begin
+    print(out, "\\begin{scope}")
+    println(out, "[use Hobby shortcut, tension=0.1]")
+    tikz_draw(out, false)
+    tikz_coord(out, first(pts))
+    for pt in Iterators.drop(pts, 1)
+      print(out, "..")
+      tikz_coord(out, pt)
+    end
+    println(out, ";")
+    tikz_e(out, "\\end{scope}")
+#=
     tikz_draw(out, filled)
-    print(out, "[hobby]")
+    print(out, "[hobby, tension=0.1]")
     print(out, "plot coordinates {")
     for pt in pts
       tikz_coord(out, pt)
     end
-    tikz_e(out, "}")
+    tikz_e(out, "}")=#
   end
 
 # HACK we need to handle the starting and ending vectors
@@ -380,8 +391,8 @@ KhepriBase.b_polygon(b::TikZ, ps, mat) =
 
 KhepriBase.b_spline(b::TikZ, ps, v0, v1, interpolator, mat) =
   if (v0 == false) && (v1 == false)
-    #TikZSpline(connection(b), s.points)
-    tikz_hobby_spline(connection(b), ps, false)
+    #tikz_hobby_spline(connection(b), ps, false)
+    tikz_spline(connection(b), ps, false)
   elseif (v0 != false) && (v1 != false)
     TikZInterpSpline(connection(b), ps, v0, v1)
   else
@@ -537,13 +548,16 @@ miktex_cmd(cmd::AbstractString="pdflatex") = miktex_folder() * cmd
 
 process_tikz(path) =
   let contents = tikz_output(),
-      path = path_replace_suffix(path, ".tex")
+      path = path_replace_suffix(path, ".tex"),
+      pdfpath = path_replace_suffix(path, ".pdf")
+    rm(pdfpath, force=true)
     open(path, "w") do out
       println(out, raw"\documentclass{standalone}")
       println(out, raw"\usepackage{tikz}")
       println(out, raw"\usetikzlibrary{patterns}")
       println(out, raw"\usetikzlibrary{calc,fadings,decorations.pathreplacing}")
       println(out, raw"\usetikzlibrary{shapes,fit}")
+      println(out, raw"\usetikzlibrary{hobby}")
       #println(out, raw"\usepackage{pgfplots}")
       #println(out, raw"\pgfplotsset{compat=1.17}")
       println(out, raw"\usepackage{tikz-3dplot}")
