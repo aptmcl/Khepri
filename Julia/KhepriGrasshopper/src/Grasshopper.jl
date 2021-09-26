@@ -97,22 +97,12 @@ is_kgh_output(form) =
    is_kgh_io_function_call(form.args[3])) ||
   is_kgh_io_function_call(form)
 
-kgh_input_param(form) =
+kgh_io_param(form) =
   form.args[2] == :_ ? :__result : form.args[2]
-kgh_output_param(form) =
-  let e = form.args[2] == :_ ? :__result : form.args[2],
-      type = form.args[3].args[1]
-    type === :String ?
-      :(convert(String, $e)) :
-      type === :Strings ?
-        :(convert(Vector{String}, $e)) :
-        e
-  end
-
 kgh_io_call(form) =
   let param = form.args[2],
       form = form.args[3],
-      func = Expr(:., :Khepri, QuoteNode(in_gh(form.args[1])))
+      func = Expr(:., :KhepriGrasshopper, QuoteNode(in_gh(form.args[1])))
     match_expr(form, :(_())) ||
     (match_expr(form, :(_(_))) && !(form.args[2] isa String)) ?
         :($(func)($(form.args[2:end]...), $(string(param)))) :
@@ -127,8 +117,8 @@ create_kgh_function(name::String, body::String) =
       inputs = filter(is_kgh_input, forms),
       outputs = filter(is_kgh_output, forms),
       forms = filter(f -> !(f in inputs || f in outputs), forms),
-      inp_params = map(kgh_input_param, inputs),
-      out_params = map(kgh_output_param, outputs),
+      inp_params = map(kgh_io_param, inputs),
+      out_params = map(kgh_io_param, outputs),
       inp_forms = map(kgh_io_call, inputs),
       out_forms = map(kgh_io_call, outputs),
       inps = Symbol("__inps_$name"),
@@ -158,9 +148,12 @@ create_kgh_function(name::String, body::String) =
         $(shapes) = Shape[]
         function $(Symbol("__func_$name"))()
           $(inp_inits...)
-          __result = begin
+          __result =
+            with(collected_shapes, $(shapes)) do
+              with(is_collecting_shapes, true) do
                 $(forms...)
               end
+            end
           $(out_inits...)
           nothing
         end
@@ -205,6 +198,7 @@ d > String("Bar")
 """
 
 create_kgh_function("foo", fn)
+
 =#
 
 #=
@@ -229,7 +223,7 @@ g(b*c)
 
 create_kgh_function("foo", fn2)
 using InteractiveUtils
-InteractiveUtils.@code_lowered Khepri.foo()
+InteractiveUtils.@code_lowered KhepriBase.foo()
 =#
 #=
 fn = """
@@ -273,6 +267,14 @@ b < Number(3)
 _ > Number()
 
 sqrt(a^2 + b^2)"""
+
+create_kgh_function("zzz", str1)
+=#
+
+#=
+a < Number()
+b < Number()
+sphere(x(a), b)
 
 create_kgh_function("zzz", str1)
 =#
