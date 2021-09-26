@@ -157,6 +157,11 @@ public int DeleteAll()
 public int DeleteAllInLayer(Guid id)
 public void Delete(Guid id)
 public void DeleteMany(Guid[] ids)
+public void Select(Guid id)
+public void SelectMany(Guid[] ids)
+public void Highlight(RhinoObject o)
+public void Unhighlight(RhinoObject o)
+public void UnhighlightAll()
 public Guid Clone(RhinoObject e)
 public Point3d[] GetPosition(string prompt)
 public Guid[] GetPoint(string prompt)
@@ -234,6 +239,7 @@ KhepriBase.after_connecting(b::RH) =
   	else
 	  let v = VersionNumber(m[1])
 	    if v >= v"6.0"
+			# Apparently, materials are not yet working in Rhino 6!!!!
 	      set_material(rhino, material_metal, rhino_default_material(raw"Metal\Matte\Matte Silver"))
 	      set_material(rhino, material_glass, rhino_default_material(raw"Glass\Clear Glass"))
 	      set_material(rhino, material_wood, rhino_default_material(raw"Wood\Pear polished"))
@@ -694,6 +700,15 @@ KhepriBase.b_all_refs(b::RH) =
 
 KhepriBase.b_delete_all_refs(b::RH) =
   @remote(b, DeleteAll())
+
+KhepriBase.b_highlight_ref(b::RH, r::RHId) =
+  @remote(b, Highlight(r))
+
+KhepriBase.b_unhighlight_ref(b::RH, r::RHId) =
+  @remote(b, Unhighlight(r))
+
+KhepriBase.b_unhighlight_all_refs(b::RH) =
+  @remote(b, UnhighlightAll())
 
 # Layers
 KhepriBase.b_current_layer(b::RH) =
