@@ -1,21 +1,6 @@
 # Blender
 export blender
 
-const KhepriServerPath = Parameter(abspath(@__DIR__, "KhepriServer.py"))
-
-export headless_blender
-const headless_blender = Parameter(false)
-
-start_blender() =
-  let blender_cmd = Sys.iswindows() ?
-      	joinpath(readdir("C:/Program Files/Blender Foundation/", join=true)[1], "blender.exe") :
-  		"blender"
-    run(detach(headless_blender() ?
-        `$(blender_cmd) -noaudio --background --python $(KhepriServerPath())` :
-    	`$(blender_cmd) --python $(KhepriServerPath())`),
-  		wait=false)
-  end
-
 #=
 sel = utils.selection_get()
                             bpy.ops.view3d.select(location=(event.mouse_region_x, event.mouse_region_y))
@@ -117,6 +102,9 @@ def set_current_collection(name:str)->None:
 def delete_all_shapes_in_collection(name:str)->None:
 def delete_all_shapes()->None:
 def delete_shape(name:Id)->None:
+def select_shape(name:Id)->None:
+def deselect_shape(name:Id)->None:
+def deselect_all_shapes()->None:
 def get_material(name:str)->MatId:
 def get_blenderkit_material(ref:str)->MatId:
 def new_material(name:str, diffuse_color:RGBA, specularity:float, roughness:float)->MatId:
@@ -166,9 +154,30 @@ const BLRUnionRef = UnionRef{BLRKey, BLRId}
 const BLRSubtractionRef = SubtractionRef{BLRKey, BLRId}
 const BLR = SocketBackend{BLRKey, BLRId}
 
-KhepriBase.before_connecting(b::BLR) = start_blender()
+const KhepriServerPath = Parameter(abspath(@__DIR__, "KhepriServer.py"))
+export headless_blender
+const headless_blender = Parameter(false)
+const starting_blender = Parameter(false)
+
+start_blender() =
+  starting_blender() ?
+    sleep(1) : # Just wait a little longer
+    let blender_cmd = Sys.iswindows() ?
+      	  joinpath(readdir("C:/Program Files/Blender Foundation/", join=true)[1], "blender.exe") :
+    	  "blender"
+	  starting_blender(true)
+      run(detach(headless_blender() ?
+            `$(blender_cmd) -noaudio --background --python $(KhepriServerPath())` :
+      	    `$(blender_cmd) --python $(KhepriServerPath())`),
+    	  wait=false)
+    end
+
+KhepriBase.retry_connecting(b::BLR) =
+  (@info("Starting $(b.name)."); start_blender(); sleep(2))
+
 KhepriBase.after_connecting(b::BLR) =
   begin
+	starting_blender(false)
 	#set_material(blender, material_basic, )
 	set_material(blender, material_metal, "asset_base_id:f1774cb0-b679-46b4-879e-e7223e2b4b5f asset_type:material")
 	#set_material(blender, material_glass, "asset_base_id:ee2c0812-17f5-40d4-992c-68c5a66261d7 asset_type:material")
@@ -588,12 +597,17 @@ backend_all_shapes(b::BLR) =
 backend_all_shapes_in_layer(b::BLR, layer) =
   Shape[backend_shape_from_ref(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
 
-backend_highlight_shape(b::BLR, s::Shape) =
-  @remote(b, SelectShapes(collect_ref(s)))
+=#
 
-backend_highlight_shapes(b::BLR, ss::Shapes) =
-  @remote(b, SelectShapes(collect_ref(ss)))
+KhepriBase.b_highlight_ref(b::BLR, r::BLRId) =
+  @remote(b, select_shape(r))
 
+KhepriBase.b_unhighlight_ref(b::BLR, r::BLRId) =
+  @remote(b, deselect_shape(r))
+
+KhepriBase.b_unhighlight_all_refs(b::BLR) =
+  @remote(b, deselect_all_shapes())
+#=
 backend_pre_selected_shapes_from_set(ss::Shapes) =
   length(ss) == 0 ? [] : pre_selected_shapes_from_set(ss, backend(ss[1]))
 

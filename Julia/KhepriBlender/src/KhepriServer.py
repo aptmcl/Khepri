@@ -137,7 +137,7 @@ def download_blenderkit_material(asset_ref):
     asset_data = rdata['results'][0]
     has_url = blenderkit.download.get_download_url(asset_data, scene_id, api_key)
     #file_names = paths.get_download_filepaths(asset_data)
-    files_func = getattr(paths, 'get_download_filepaths', 'get_download_filenames')
+    files_func = getattr(paths, 'get_download_filepaths', False) or paths.get_download_filenames
     file_names = files_func(asset_data)
     file_name = file_names[0]
     if not os.path.exists(file_name):
@@ -157,7 +157,7 @@ def download_blenderkit_material(asset_ref):
     material = append_link.append_material(file_names[-1])
     return material
 
-download_blenderkit_material("asset_base_id:1bdb5334-851e-414d-b766-f9fe05477860 asset_type:material")
+# download_blenderkit_material("asset_base_id:1bdb5334-851e-414d-b766-f9fe05477860 asset_type:material")
 # download_blenderkit_material("asset_base_id:31dccf38-74f4-4516-9d17-b80a45711ca7 asset_type:material")
 
 
@@ -216,6 +216,7 @@ def add_uvs(mesh):
     uvl.active_render = True
     return mesh
 
+# We should be using Ints for layers!
 current_collection = C.collection
 def find_or_create_collection(name:str, active:bool, color:RGBA)->str:
     if name not in D.collections:
@@ -254,6 +255,17 @@ def delete_all_shapes()->None:
 
 def delete_shape(name:Id)->None:
     D.objects.remove(D.objects[str(name)], do_unlink=True)
+
+def select_shape(name:Id)->None:
+    D.objects[str(name)].select_set(True)
+
+def deselect_shape(name:Id)->None:
+    D.objects[str(name)].select_set(False)
+
+def deselect_all_shapes()->None:
+    for collection in D.collections:
+        for obj in collection.objects:
+            obj.select_set(False)
 
 def mesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], mat:MatId)->Id:
     # id, name = new_id()
@@ -356,7 +368,7 @@ def line(ps:List[Point3d], closed:bool, mat:MatId)->Id:
     return id
 
 def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
-    print(order, ps, closed)
+    #print(order, ps, closed)
     id, name = new_id()
     kind = "NURBS"
     curve = D.curves.new(name, "CURVE")
