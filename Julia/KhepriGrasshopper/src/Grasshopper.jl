@@ -1,3 +1,40 @@
+### PLugin
+#=
+Whenever the plugin is updated, run this function and commit the plugin files.
+upgrade_plugin()
+=#
+
+const khepri_grasshopper_dlls = ["KhepriGrasshopper.gha", "FastColoredTextBox.dll"]
+const julia_khepri = dirname(dirname(abspath(@__FILE__)))
+
+upgrade_plugin() =
+  let # 1. The dlls are updated in VisualStudio after compilation of the plugin, and they are stored in the folder
+      #    contained inside the Plugins folder, which has a specific location regarding this file itself
+      plugin_folder = joinpath(dirname(dirname(julia_khepri)), "Plugins", "KhepriGrasshopper", "KhepriGrasshopper", "bin")
+      # 2. The bundle needs to be copied to the current folder
+      local_folder = joinpath(julia_khepri, "Plugin")
+      # 3. Now we copy the dlls to the local folder
+      for dll in khepri_grasshopper_dlls
+          src = joinpath(plugin_folder, dll)
+          dst = joinpath(local_folder, dll)
+          rm(dst, force=true)
+          cp(src, dst)
+      end
+  end
+
+#
+
+update_plugin() =
+  let grasshopper_user_plugins = joinpath(ENV["APPDATA"], "Grasshopper", "Libraries"),
+      local_khepri_plugin = joinpath(julia_khepri, "Plugin")
+    for dll in dlls
+      let local_path = joinpath(local_khepri_plugin, dll),
+          grasshopper_path = joinpath(grasshopper_user_plugins, dll)
+          cp(local_path, grasshopper_path, force=true)
+      end
+    end
+  end
+
 #=
 We want to support these two syntaxes
 
