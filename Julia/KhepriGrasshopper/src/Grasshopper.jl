@@ -164,7 +164,8 @@ create_kgh_function(name::String, body::String) =
       out_inits = [:($(outs)[$(i)] = $(out)) for (i, out) in enumerate(out_params)],
       inp_docs = Symbol("__doc_inps_$name"),
       out_docs = Symbol("__doc_outs_$name"),
-      shapes = Symbol("__shapes_$name")
+      shapes = Symbol("__shapes_$name"),
+      prev_collected_shapes = gensym("prev_collected_shapes")
     if isempty(inp_forms) && isempty(out_forms)
       quote
         $(inp_docs) = Any[$(inp_forms...)]
@@ -185,12 +186,13 @@ create_kgh_function(name::String, body::String) =
         $(shapes) = Shape[]
         function $(Symbol("__func_$name"))()
           $(inp_inits...)
-#          __result =
-#            with(collected_shapes, $(shapes)) do
-#              with(is_collecting_shapes, true) do
-                $(forms...)
-#              end
-#            end
+          $prev_collected_shapes = collected_shapes()
+          collected_shapes($(shapes))
+          __result = try
+            $(forms...)
+          finally
+            collected_shapes($prev_collected_shapes)
+          end
           $(out_inits...)
           nothing
         end
