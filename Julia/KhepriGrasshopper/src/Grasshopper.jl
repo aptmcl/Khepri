@@ -187,12 +187,14 @@ create_kgh_function(name::String, body::String) =
         function $(Symbol("__func_$name"))()
           $(inp_inits...)
           $prev_collected_shapes = collected_shapes()
-          collected_shapes($(shapes))
-          __result = try
+          #collected_shapes($(shapes))
+          __result = #try
+            begin
             $(forms...)
-          finally
-            collected_shapes($prev_collected_shapes)
-          end
+            end
+          #finally
+            #collected_shapes($prev_collected_shapes)
+          #end
           $(out_inits...)
           nothing
         end
