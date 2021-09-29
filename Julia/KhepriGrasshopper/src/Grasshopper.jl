@@ -185,12 +185,12 @@ create_kgh_function(name::String, body::String) =
         $(shapes) = Shape[]
         function $(Symbol("__func_$name"))()
           $(inp_inits...)
-          __result =
-            with(collected_shapes, $(shapes)) do
-              with(is_collecting_shapes, true) do
+#          __result =
+#            with(collected_shapes, $(shapes)) do
+#              with(is_collecting_shapes, true) do
                 $(forms...)
-              end
-            end
+#              end
+#            end
           $(out_inits...)
           nothing
         end
@@ -314,4 +314,122 @@ b < Number()
 sphere(x(a), b)
 
 create_kgh_function("zzz", str1)
+=#
+#=
+example = raw"""
+generate_outline_vertices(p, area, prop) =
+  let l = sqrt(area/prop)
+      w = area/l
+      [add_xy(p, 0, 0), add_xy(p, w, 0), add_xy(p, w, l), add_xy(p, 0, l)]
+  end
+
+areas = 50:50:200
+wwrs = 0.2:0.2:0.4
+rots = 0:pi/4:pi/2
+props = 1:2:5
+epocas = [1, 3, 4, 5, 6, 7, 8, 9]
+kinds = [1, 2]
+stors = 2:3:11
+ddy = sqrt(maximum(areas))
+
+
+Wmaterials = [[[0, "Reboco - 2cm", "Pedra", "Estuque_Claro_1.5"], [15.7, "Reboco - 2cm", "OSB - 2cm", "AirGap", "Isolamento XPS - 4cm", "Pedra", "Estuque_Claro_1.5" ]],
+              [[0, "Reboco - 2cm", "Pedra", "Estuque_Claro_1.5"], [15.7, "Reboco - 2cm", "OSB - 2cm", "AirGap", "Isolamento XPS - 4cm", "Pedra", "Estuque_Claro_1.5" ]],
+              [[0, "Reboco - 2cm", "Pedra", "AirGap", "Tijolo Furado_11", "Estuque_Claro_1.5"], [7, "Reboco - 2cm", "Pedra", "AirGap", "Isolamento XPS - 4cm", "Tijolo Furado_11", "Estuque_Claro_1.5"]],
+              [[0, "Reboco - 2cm", "Tijolo Furado_15", "AirGap", "Tijolo Furado_11", "Estuque_Claro_1.5"], [7, "Reboco - 2cm", "Tijolo Furado_15", "AirGap", "Isolamento XPS - 4cm", "Tijolo Furado_11", "Estuque_Claro_1.5"]],
+              [[0, "Reboco - 2cm", "Tijolo Furado_11", "AirGap", "Tijolo Furado_11", "Estuque_Claro_1.5"], [7, "Reboco - 2cm", "Tijolo Furado_11", "AirGap", "Isolamento XPS - 4cm", "Tijolo Furado_11", "Estuque_Claro_1.5"]],
+              [[0, "Reboco - 2cm", "Tijolo Furado_15", "AirGap", "Isolamento XPS - 4cm", "Tijolo Furado_11", "Estuque_Claro_1.5"], [7, "Reboco - 2cm", "Tijolo Furado_15", "AirGap", "Isolamento XPS - 4cm", "Isolamento XPS - 4cm", "Tijolo Furado_11", "Estuque_Claro_1.5"]],
+              [[0, "Reboco - 2cm", "OSB - 2cm", "AirGap", "Isolamento XPS - 4cm", "Tijolo Furado_22", "Estuque_Claro_1.5"], [7, "Reboco - 2cm", "OSB - 2cm", "AirGap", "Isolamento XPS - 4cm", "Isolamento XPS - 4cm", "Tijolo Furado_22", "Estuque_Claro_1.5"]],
+              [[0, "Reboco - 2cm", "Isolamento EPS - 6cm", "Tijolo Furado_22", "Estuque_Claro_1.5"], [7, "Reboco - 2cm", "OSB - 2cm", "Isolamento XPS - 4cm", "Isolamento EPS - 6cm", "Tijolo Furado_22", "Estuque_Claro_1.5"]],
+              [[0, "Chapa Metalica", "Isolamento EPS - 4cm", "Isolamento EPS - 6cm", "Isolamento EPS - 6cm", "Estuque_Claro_1.5"], [7, "Chapa Metalica", "Isolamento XPS - 4cm", "Isolamento EPS - 4cm", "Isolamento EPS - 6cm", "Isolamento EPS - 6cm", "Estuque_Claro_1.5"]],
+              [[0, "Chapa Metalica", "Isolamento EPS - 4cm", "Isolamento EPS - 6cm", "Isolamento EPS - 6cm", "Estuque_Claro_1.5"], [7, "Chapa Metalica", "Isolamento XPS - 4cm", "Isolamento EPS - 4cm", "Isolamento EPS - 6cm", "Isolamento EPS - 6cm", "Estuque_Claro_1.5"]]]
+
+Fmaterials = [[[0, "Paineis de Madeira_12", "Estuque_Claro_1.5"]],
+              [[0, "Paineis de Madeira_12", "Estuque_Claro_1.5"]],
+              [[0, "Paineis de Madeira_12", "Estuque_Claro_1.5"]],
+              [[0, "Ceramica vidrada - 1cm", "Betonilha de Acentamento_8", "Laje Betao_15", "Estuque_Claro_1.5"]],
+              [[0, "Ceramica vidrada - 1cm", "Betonilha de Acentamento_8", "Laje Betao_15", "Estuque_Claro_1.5"]],
+              [[0, "Ceramica vidrada - 1cm", "Betonilha de Acentamento_8", "Laje Betao_15", "Estuque_Claro_1.5"]],
+              [[0, "Ceramica vidrada - 1cm", "Betonilha de Acentamento_8", "Laje Betao_15", "Estuque_Claro_1.5"]],
+              [[0, "Ceramica vidrada - 1cm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"]],
+              [[0, "Ceramica vidrada - 1cm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"]],
+              [[0, "Ceramica vidrada - 1cm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"]]]
+
+Rmaterials = [[[0, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"], [7.5, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Isolamento XPS - 4cm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"]],
+              [[0, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"], [7.5, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Isolamento XPS - 4cm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"]],
+              [[0, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"], [7.5, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Isolamento XPS - 4cm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"]],
+              [[0, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"], [7.5, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Isolamento XPS - 4cm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"]],
+              [[0, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"], [7.5, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Isolamento XPS - 4cm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"]],
+              [[0, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"], [7.5, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Isolamento XPS - 4cm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"]],
+              [[0, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"], [7.5, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Isolamento XPS - 4cm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"]],
+              [[0, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"], [7.5, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Isolamento XPS - 4cm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"]],
+              [[0, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"], [7.5, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Isolamento XPS - 4cm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"]],
+              [[0, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"], [7.5, "Betonilha de Acentamento_8", "Tela impermeabilizacao - 2mm", "Isolamento XPS - 4cm", "Betonilha de Acentamento_8", "Laje Aligeirada_0.25", "Estuque_Claro_1.5"]]]
+
+
+Windowmaterials = [[[0, "2.69, 0.75, 0.8"], [50, "1.70, 0.38, 0.7"]],
+                   [[0, "2.69, 0.75, 0.8"], [50, "1.70, 0.38, 0.7"]],
+                   [[0, "2.69, 0.75, 0.8"], [50, "1.70, 0.38, 0.7"]],
+                   [[0, "2.69, 0.75, 0.8"], [50, "1.70, 0.38, 0.7"]],
+                   [[0, "2.69, 0.75, 0.8"], [50, "1.70, 0.38, 0.7"]],
+                   [[0, "2.69, 0.75, 0.8"], [50, "1.70, 0.38, 0.7"]],
+                   [[0, "2.69, 0.75, 0.8"], [50, "1.70, 0.38, 0.7"]],
+                   [[0, "2.69, 0.75, 0.8"], [50, "1.70, 0.38, 0.7"]],
+                   [[0, "2.69, 0.75, 0.8"], [50, "1.70, 0.38, 0.7"]],
+                   [[[0, "2.69, 0.75, 0.8"], [50, "1.70, 0.38, 0.7"]]]]
+vertss = []
+grsn = []
+grse = []
+grss = []
+grsw = []
+Wmats = []
+Rmats = []
+Fmats = []
+Windowmats = []
+Storeys = []
+dy = 0
+
+
+
+for epoca in epocas
+  dx = 0
+  for wall in kinds, roof in kinds, window in kinds
+    for wwr in wwrs
+      for area in areas
+        for rot in rots
+          for prop in props, stor in stors
+            for wn in [0, wwr], we in [0, wwr], ws in [0, wwr], ww in [0, wwr]
+              push!(vertss, generate_outline_vertices(loc_from_o_phi(xy(dx, dy), rot), area, prop))
+              push!(grsn, wn)
+              push!(grse, we)
+              push!(grss, ws)
+              push!(grsw, ww)
+              push!(Wmats, Wmaterials[epoca][wall])
+              push!(Rmats, Rmaterials[epoca][roof])
+              push!(Windowmats, Windowmaterials[epoca][window])
+              push!(Fmats, Fmaterials[epoca][1])
+              push!(Storeys, stor)
+              dx += sqrt(area) + 10
+            end
+          end
+        end
+      end
+    end
+  end
+  dy += ddy + 10
+end
+
+vertss > JLs("Verticess JL")
+grsn > Numbers("WWR'North")
+grse > Numbers("WWR'East")
+grss > Numbers("WWR'South")
+grsw > Numbers("WWR'West")
+Storeys > Integers("Number of floors")
+Wmats > JLs("Wall materials JL")
+Rmats > JLs("Roof materials JL")
+Fmats > JLs("Floor materials JL")
+Windowmats > JLs("Window materials JL")
+"""
+
+print(create_kgh_function("zzz", example))
 =#
