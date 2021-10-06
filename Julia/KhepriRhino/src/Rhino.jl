@@ -599,41 +599,38 @@ realize(b::RH, s::Slice) =
   slice_ref(b, ref(s.shape), s.p, s.n)
 
 realize(b::RH, s::Move) =
-  let r = map_ref(s.shape) do r
-            @remote(b, Move(r, s.v))
-            r
-          end
-    mark_deleted(s.shape)
-    r
-  end
+  and_mark_deleted(b,
+	map_ref(b, s.shape) do r
+      @remote(b, Move(r, s.v))
+      r
+  end,
+  s.shape)
 
 realize(b::RH, s::Scale) =
-  let r = map_ref(s.shape) do r
-            @remote(b, Scale(r, s.p, s.s))
-            r
-          end
-    mark_deleted(s.shape)
-    r
-  end
+  and_mark_deleted(b,
+  	map_ref(b, s.shape) do r
+      @remote(b, Scale(r, s.p, s.s))
+      r
+    end,
+	s.shape)
 
 realize(b::RH, s::Rotate) =
-  let r = map_ref(s.shape) do r
-            @remote(b, Rotate(r, s.p, s.v, s.angle))
-            r
-          end
-    mark_deleted(s.shape)
-    r
-  end
+  and_mark_deleted(b,
+  	map_ref(b, s.shape) do r
+      @remote(b, Rotate(r, s.p, s.v, s.angle))
+      r
+	end,
+	s.shape)
 
 realize(b::RH, s::Mirror) =
-  and_delete_shape(map_ref(s.shape) do r
+  and_delete_shape(map_ref(b, s.shape) do r
                     @remote(b, Mirror(r, s.p, s.n, false))
                    end,
                    s.shape)
 
 realize(b::RH, s::UnionMirror) =
   let r0 = ref(s.shape),
-      r1 = map_ref(r0) do r
+      r1 = map_ref(b, r0) do r
             @remote(b, Mirror(r, s.p, s.n, true))
           end
     UnionRef((r0,r1))
