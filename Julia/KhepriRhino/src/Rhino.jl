@@ -84,6 +84,7 @@ public Vector3d CircleNormal(RhinoObject obj)
 public double CircleRadius(RhinoObject obj)
 public Guid Ellipse(Point3d c, Vector3d n, double radiusX, double radiusY)
 public Guid Arc(Point3d c, Vector3d vx, Vector3d vy, double radius, double startAngle, double endAngle)
+public Guid Text(string str, Point3d c, Vector3d vx, Vector3d vy, double height)
 public Guid JoinCurves(Guid[] objs)
 public Guid Mesh(Point3d[] pts, int[][] faces, MatId mat)
 public Guid NGon(Point3d[] pts, Point3d pivot, bool smooth, MatId mat)
@@ -186,7 +187,6 @@ public byte Sync()
 public byte Disconnect()
 public Entity InterpSpline(Point3d[] pts, Vector3d tan0, Vector3d tan1)
 public Entity InterpClosedSpline(Point3d[] pts)
-public Entity Text(string str, Point3d corner, Vector3d vx, Vector3d vy, double height)
 public Guid SurfaceFromCurve(Entity curve)
 public Guid IrregularPyramidMesh(Point3d[] pts, Point3d apex)
 public Entity SolidFromGrid(int m, int n, Point3d[] pts, bool closedM, bool closedN, int level, double thickness)
@@ -414,6 +414,9 @@ KhepriBase.b_cone(b::RH, cb, r, h, bmat, smat) =
 
 KhepriBase.b_cone_frustum(b::RH, cb, rb, h, rt, bmat, tmat, smat) =
   @remote(b, ConeFrustum(cb, rb, cb + vz(h, cb.cs), rt, smat))
+
+KhepriBase.b_text(b::RH, str, c, size, mat) =
+  @remote(b, Text(str, c, vx(1, c.cs), vy(1, c.cs), size))
 
 ## Materials
 # To encode materials, we use a Guid but convert it to an int,
