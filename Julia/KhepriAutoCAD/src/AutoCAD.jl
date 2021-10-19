@@ -129,7 +129,7 @@ check_plugin() =
         try
           update_plugin()
           # Julia makes package files read-only by default
-          chmod(autocad_template, 0o555) # Read and Execute
+          chmod(autocad_template(), 0o555) # Read and Execute
           @info("done.")
           checked_plugin = true
           return
