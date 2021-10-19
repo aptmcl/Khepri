@@ -934,10 +934,10 @@ KhepriBase.b_get_view(b::ACAD) =
 
 # Only AutoCAD supports this
 KhepriBase.b_set_view_top(b::ACAD) = @remote(b, ViewTop())
-
+#=
 KhepriBase.b_set_time_place(b::ACAD, date, latitude, longitude, elevation, meridian) =
   @remote(b, SetSkyFromDateLocation(date, latitude, longitude, meridian, elevation))
-
+=#
 KhepriBase.b_all_refs(b::ACAD) =
   @remote(b, GetAllShapes())
 
