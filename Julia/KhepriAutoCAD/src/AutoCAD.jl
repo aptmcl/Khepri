@@ -81,14 +81,6 @@ local_plugins = joinpath(dirname(dirname(abspath(@__FILE__))), "Plugin")
 local_khepri_plugin = joinpath(local_plugins, bundle_name)
 local_khepri_plugin_dll_folder = joinpath(local_plugins, bundle_dll_folder)
 
-env(name) = Sys.iswindows() ? ENV[name] : ""
-
-autocad_general_plugins = joinpath(dirname(env("CommonProgramFiles")), "Autodesk", "ApplicationPlugins")
-autocad_allusers_plugins = joinpath(env("ALLUSERSPROFILE"), "Autodesk", "ApplicationPlugins")
-autocad_user_plugins = joinpath(env("APPDATA"), "Autodesk", "ApplicationPlugins")
-autocad_khepri_plugin = joinpath(autocad_user_plugins, bundle_name)
-autocad_khepri_plugin_dll_folder = joinpath(autocad_user_plugins, bundle_dll_folder)
-
 autocad_version(path) =
   let doc = readxml(path),
       app_pkg = findfirst("//ApplicationPackage", doc)
@@ -96,7 +88,12 @@ autocad_version(path) =
   end
 
 update_plugin() =
-  let local_path_xml = joinpath(local_khepri_plugin, xml_name)
+  let #autocad_general_plugins = joinpath(dirname(ENV["CommonProgramFiles"]), "Autodesk", "ApplicationPlugins")
+      #autocad_allusers_plugins = joinpath(ENV["ALLUSERSPROFILE"], "Autodesk", "ApplicationPlugins")
+      autocad_user_plugins = joinpath(ENV["APPDATA"], "Autodesk", "ApplicationPlugins")
+      autocad_khepri_plugin = joinpath(autocad_user_plugins, bundle_name)
+      autocad_khepri_plugin_dll_folder = joinpath(autocad_user_plugins, bundle_dll_folder)
+      local_path_xml = joinpath(local_khepri_plugin, xml_name)
       autocad_path_xml = joinpath(autocad_khepri_plugin, xml_name)
     # Do we have the bundle folder?
     isdir(autocad_khepri_plugin) || mkpath(autocad_khepri_plugin)
@@ -119,6 +116,8 @@ update_plugin() =
     end
   end
 
+const autocad_template = Parameter(abspath(@__DIR__, "../Plugin/KhepriTemplate.dwt"))
+
 checked_plugin = false
 
 check_plugin() =
@@ -129,6 +128,8 @@ check_plugin() =
       for i in 1:10
         try
           update_plugin()
+          # Julia makes package files read-only by default
+          chmod(autocad_template, 0o555) # Read and Execute
           @info("done.")
           checked_plugin = true
           return
@@ -144,11 +145,15 @@ check_plugin() =
     end
   end
 
-#
-const autocad_template = Parameter(abspath(@__DIR__, "../Plugin/KhepriTemplate.dwt"))
+#start_autocad() =
+#  run(`cmd /c cd "$(dirname(autocad_template()))" \&\& $(basename(autocad_template()))`, wait=false)
+#=
+Note: When the template is downloaded (during installation), windows removes the
+read&execute bit, making it impossible to start autocad automatically.
+=#
 
 start_autocad() =
-  run(`cmd /c cd "$(dirname(autocad_template()))" \&\& $(basename(autocad_template()))`, wait=false)
+  run(`cmd /c $(autocad_template())`, wait=false)
 
 
 # ACAD is a subtype of CS
@@ -387,7 +392,12 @@ const ACADUnionRef = UnionRef{ACADKey, ACADId}
 const ACADSubtractionRef = SubtractionRef{ACADKey, ACADId}
 const ACAD = SocketBackend{ACADKey, ACADId}
 
-KhepriBase.before_connecting(b::ACAD) = check_plugin()
+KhepriBase.before_connecting(b::ACAD) =
+  begin
+    check_plugin()
+    start_autocad()
+  end
+
 KhepriBase.after_connecting(b::ACAD) =
   begin
     set_material(autocad, material_metal, "Steel - Polished")
@@ -925,9 +935,8 @@ KhepriBase.b_get_view(b::ACAD) =
 # Only AutoCAD supports this
 KhepriBase.b_set_view_top(b::ACAD) = @remote(b, ViewTop())
 
-KhepriBase.b_realistic_sky(b::ACAD, date, latitude, longitude, elevation, meridian, turbidity, withsun) =
+KhepriBase.b_set_time_place(b::ACAD, date, latitude, longitude, elevation, meridian) =
   @remote(b, SetSkyFromDateLocation(date, latitude, longitude, meridian, elevation))
-
 
 KhepriBase.b_all_refs(b::ACAD) =
   @remote(b, GetAllShapes())
