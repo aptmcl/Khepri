@@ -165,6 +165,7 @@ Point3d = Vector
 Vector3d = Vector
 Id = Size
 MatId = Size
+RGB = Tuple[float,float,float]
 RGBA = Tuple[float,float,float,float]
 
 def quaternion_from_vx_vy(vx, vy):
@@ -187,23 +188,99 @@ def get_material(name:str)->MatId:
 def get_blenderkit_material(ref:str)->MatId:
     return add_material(download_blenderkit_material(ref))
 
-def new_material(name:str, diffuse_color:RGBA, specularity:float, roughness:float)->MatId:
+def new_node_material(name, type):
     mat = D.materials.new(name=name)
-    mat.diffuse_color=diffuse_color
-    #mat.specular_color=specular_color
-    mat.specular_intensity = specularity
-    mat.roughness = roughness
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    nodes.clear()
+    links.clear()
+    return mat, nodes.new(type=type)
+
+def add_node_material(mat, node):
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    node_out = nodes.new(type='ShaderNodeOutputMaterial')
+    links.new(node.outputs[0], node_out.inputs[0])
     return add_material(mat)
 
-def assign_material(obj, mat_idx):
+def new_glass_material(name:str, color:RGBA, roughness:float, ior:float)->MatId:
+    mat, node = new_node_material(name, 'ShaderNodeBsdfGlass')
+    node.distribution = 'GGX'
+    node.inputs['Color'].default_value = color
+    node.inputs['Roughness'].default_value = roughness
+    node.inputs['IOR'].default_value = ior
+    return add_node_material(mat, node)
+
+def new_mirror_material(name:str, color:RGBA)->MatId:
+    mat, node = new_node_material(name, 'ShaderNodeBsdfGlossy')
+    node.distribution = 'Sharp'
+    node.inputs['Color'].default_value = color
+    return add_node_material(mat, node)
+
+def new_metal_material(name:str, color:RGBA, roughness:float, ior:float)->MatId:
+    mat, node = new_node_material(name, 'ShaderNodeBsdfGlossy')
+    node.distribution = 'GGX'
+    node.inputs['Color'].default_value = color
+    node.inputs['Roughness'].default_value = roughness
+    return add_node_material(mat, node)
+
+# For Principled BSDF, the inputs are as follows:
+# 0, 'Base Color'
+# 1, 'Subsurface'
+# 2, 'Subsurface Radius'
+# 3, 'Subsurface Color'
+# 4, 'Metallic'
+# 5, 'Specular'
+# 6, 'Specular Tint'
+# 7, 'Roughness'
+# 8, 'Anisotropic'
+# 9, 'Anisotropic Rotation'
+# 10, 'Sheen'
+# 11, 'Sheen Tint'
+# 12, 'Clearcoat'
+# 13, 'Clearcoat Roughness'
+# 14, 'IOR'
+# 15, 'Transmission'
+# 16, 'Transmission Roughness'
+# 17, 'Emission'
+# 18, 'Alpha'
+# 19, 'Normal'
+# 20, 'Clearcoat Normal'
+# 21, 'Tangent'
+
+def new_material(name:str, base_color:RGBA, metallic:float, specular:float, roughness:float,
+                 clearcoat:float, clearcoat_roughness:float, ior:float,
+                 transmission:float, transmission_roughness:float,
+                 emission:RGBA, emission_strength:float)->MatId:
+    mat, node = new_node_material(name, 'ShaderNodeBsdfPrincipled')
+    node.inputs['Base Color'].default_value = base_color
+    #node.inputs['Subsurface'].default_value =
+    #node.inputs['Subsurface Radius'].default_value =
+    #node.inputs['Subsurface Color'].default_value =
+    node.inputs['Metallic'].default_value = metallic
+    node.inputs['Specular'].default_value = specular
+    #node.inputs['Specular Tint'].default_value =
+    node.inputs['Roughness'].default_value = roughness
+    #node.inputs['Anisotropic'].default_value =
+    #node.inputs['Anisotropic Rotation'].default_value =
+    #node.inputs['Sheen'].default_value =
+    #node.inputs['Sheen Tint'].default_value =
+    node.inputs['Clearcoat'].default_value = clearcoat
+    node.inputs['Clearcoat Roughness'].default_value = clearcoat_roughness
+    node.inputs['IOR'].default_value = ior
+    node.inputs['Transmission'].default_value = transmission
+    node.inputs['Transmission Roughness'].default_value = transmission_roughness
+    node.inputs['Emission'].default_value = emission
+    #node.inputs['Alpha'].default_value =
+    #node.inputs['Normal'].default_value =
+    #node.inputs['Clearcoat Normal'].default_value =
+    #node.inputs['Tangent'].default_value =
+    return add_node_material(mat, node)
+
+def append_material(obj, mat_idx):
     if mat_idx >= 0:
-        mesh = obj.data
-        material = materials[mat_idx]
-        mesh.materials.append(material)
-# HACK: These two are formally equivalent. Normalize!
-def maybe_add_material(obj, mat):
-    if mat >= 0:
-        obj.data.materials.append(materials[mat])
+        obj.data.materials.append(materials[mat_idx])
 
 def add_uvs(mesh):
     mesh.use_auto_texspace = True
@@ -217,6 +294,7 @@ def add_uvs(mesh):
     return mesh
 
 # We should be using Ints for layers!
+# HACK!!! Missing color!!!!!
 current_collection = C.collection
 def find_or_create_collection(name:str, active:bool, color:RGBA)->str:
     if name not in D.collections:
@@ -234,24 +312,13 @@ def set_current_collection(name:str)->None:
 
 #def all_shapes_in_collection(name:str)->List[Id]:
 def delete_all_shapes_in_collection(name:str)->None:
-    for obj in D.collections[name].objects:
-        D.objects.remove(obj, do_unlink=True)
+    D.batch_remove(D.collections[name].objects)
+    D.orphans_purge(do_linked_ids=False)
 
 def delete_all_shapes()->None:
-    #for scene in D.scenes:
-    #    for obj in scene.objects:
-    #        scene.objects.remove(obj, do_unlink=True)
-    # only worry about data in the startup scene
     for collection in D.collections:
-        for obj in collection.objects:
-            D.objects.remove(obj, do_unlink=True)
-    # for bpy_data_iter in (
-    #     D.objects,
-    #     D.meshes,
-    #     #D.cameras,
-    #     ):
-    #     for id_data in bpy_data_iter:
-    #         bpy_data_iter.remove(id_data, do_unlink=True)
+        D.batch_remove(collection.objects)
+    D.orphans_purge(do_linked_ids=False)
 
 def delete_shape(name:Id)->None:
     D.objects.remove(D.objects[str(name)], do_unlink=True)
@@ -266,16 +333,6 @@ def deselect_all_shapes()->None:
     for collection in D.collections:
         for obj in collection.objects:
             obj.select_set(False)
-
-def mesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], mat:MatId)->Id:
-    # id, name = new_id()
-    # msh = D.meshes.new(name)
-    # msh.from_pydata(verts, edges, faces)
-    # obj = D.objects.new(name, msh)
-    # assign_material(obj, mat)
-    # current_collection.objects.link(obj)
-    # return id
-    error("Don't use this. Use objmesh!")
 
 def new_bmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat_idx:int)->None:
     bm = bmesh.new()
@@ -364,7 +421,7 @@ def line(ps:List[Point3d], closed:bool, mat:MatId)->Id:
     line.points.add(len(ps) - 1)
     for (i, p) in enumerate(ps):
         line.points[i].co = (p[0], p[1], p[2], 1.0)
-    assign_material(obj, mat)
+    append_material(obj, mat)
     return id
 
 def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
@@ -383,14 +440,14 @@ def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
     for i in range(0, n):
         p = ps[i]
         spline.points[i].co = (p[0], p[1], p[2], 1.0)
-    assign_material(obj, mat)
+    append_material(obj, mat)
     return id
 
 def objmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat:MatId)->Id:
     id, name = new_id()
     obj = mesh_from_bmesh(name, new_bmesh(verts, edges, faces, smooth, -1 if mat < 0 else 0))
     current_collection.objects.link(obj)
-    assign_material(obj, mat)
+    append_material(obj, mat)
     return id
 
 def trig(p1:Point3d, p2:Point3d, p3:Point3d, mat:MatId)->Id:
@@ -459,7 +516,7 @@ def polygon_with_holes(pss:List[List[Point3d]], mat:MatId)->Id:
         edges.append((i+len(ps)-1, i))
     id, name = new_id()
     obj = mesh_from_bmesh(name, new_bmesh(verts, edges, [], False, -1 if mat < 0 else 0))
-    maybe_add_material(obj, mat)
+    append_material(obj, mat)
     current_collection.objects.link(obj)
     return id
 
@@ -472,7 +529,7 @@ def circle(c:Point3d, v:Vector3d, r:float, mat:MatId)->Id:
     obj = mesh_from_bmesh(name, bm)
     obj.rotation_euler = rot.to_euler()
     obj.location = c
-    maybe_add_material(obj, mat)
+    append_material(obj, mat)
     current_collection.objects.link(obj)
     return id
 
@@ -489,9 +546,9 @@ def pyramid_frustum(bs:List[Point3d], ts:List[Point3d], smooth:bool, bmat:MatId,
     add_to_bmesh(bm, bs + ts, [], quad_strip_closed_faces(0, n), smooth, -1 if smat < 0 else mat_idx)
     id, name = new_id()
     obj = mesh_from_bmesh(name, bm)
-    maybe_add_material(obj, bmat)
-    maybe_add_material(obj, tmat)
-    maybe_add_material(obj, smat)
+    append_material(obj, bmat)
+    append_material(obj, tmat)
+    append_material(obj, smat)
     current_collection.objects.link(obj)
     return id
 
@@ -513,7 +570,7 @@ def sphere(center:Point3d, radius:float, mat:MatId)->Id:
     obj = mesh_from_bmesh(name, bm)
     obj.location=center
     current_collection.objects.link(obj)
-    assign_material(obj, mat)
+    append_material(obj, mat)
     return id
 
 def cone_frustum(b:Point3d, br:float, t:Point3d, tr:float, bmat:MatId, tmat:MatId, smat:MatId)->Id:
@@ -546,9 +603,9 @@ def cone_frustum(b:Point3d, br:float, t:Point3d, tr:float, bmat:MatId, tmat:MatI
     obj = mesh_from_bmesh(name, bm)
     obj.rotation_euler = rot.to_euler()
     obj.location = b + trans
-    maybe_add_material(obj, bmat)
-    maybe_add_material(obj, tmat)
-    maybe_add_material(obj, smat)
+    append_material(obj, bmat)
+    append_material(obj, tmat)
+    append_material(obj, smat)
     current_collection.objects.link(obj)
     return id
 
@@ -565,7 +622,7 @@ def box(p:Point3d, vx:Vector3d, vy:Vector3d, dx:float, dy:float, dz:float, mat:M
     obj.rotation_euler = rot.to_euler()
     obj.location = p
     current_collection.objects.link(obj)
-    assign_material(obj, mat)
+    append_material(obj, mat)
     return id
 
 # def add_torus(major_rad, minor_rad, major_seg, minor_seg):
@@ -896,6 +953,48 @@ def set_sky(turbidity:float)->None:
     sky.sky_type = "NISHITA"
     sky.turbidity = turbidity
     sky.dust_density = turbidity
+    #Sun Direction
+    #Sun direction vector.
+    #
+    #Ground Albedo
+    #Amount of light reflected from the planet surface back into the atmosphere.
+    #
+    #Sun Disc
+    #Enable/Disable sun disc lighting.
+    #
+    #Sun Size
+    #Angular diameter of the sun disc (in degrees).
+    #
+    #Sun Intensity
+    #Multiplier for sun disc lighting.
+    #
+    #Sun Elevation
+    #Rotation of the sun from the horizon (in degrees).
+    #
+    #Sun Rotation
+    #Rotation of the sun around the zenith (in degrees).
+    #
+    #Altitude
+    #The distance from sea level to the location of the camera. For example, if the camera is placed on a beach then a value of 0 should be used. However, if the camera is in the cockpit of a flying airplane then a value of 10 km will be more suitable. Note, this is limited to 60 km because the mathematical model only accounts for the first two layers of the earth’s atmosphere (which ends around 60 km).
+    #
+    #Air
+    #Density of air molecules.
+    #0 no air
+    #1 clear day atmosphere
+    #2 highly polluted day
+    #
+    #Dust
+    #Density of dust and water droplets.
+    #0 no dust
+    #1 clear day atmosphere
+    #5 city like atmosphere
+    #10 hazy day
+    #
+    #Ozone
+    #Density of ozone molecules; useful to make the sky appear bluer.
+    #0 no ozone
+    #1 clear day atmosphere
+    #2 city like atmosphere
     world.node_tree.links.new(bg.inputs[0], sky.outputs[0])
 
 def current_space():
@@ -955,15 +1054,6 @@ def khepri_camera():
     else:
         return D.objects[name]
 
-# def set_camera_view(camera:Point3d, target:Point3d, lens:float)->None:
-#     direction = camera - target
-#     rot_quat = direction.to_track_quat('Z', 'Y')
-#     cam = khepri_camera()
-#     cam.rotation_euler = rot_quat.to_euler()
-#     cam.location = rot_quat @ Vector((0.0, 0.0, direction.length))
-#     cam.data.lens = lens
-#     C.scene.camera = cam
-#
 def set_camera_view(camera:Point3d, target:Point3d, lens:float)->None:
     direction = target - camera
     direction *= 2
@@ -1016,6 +1106,53 @@ def cycles_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:b
     for d in C.preferences.addons["cycles"].preferences.devices:
         d["use"] = 1
     bpy.ops.render.render(use_viewport = True, write_still=True)
+
+def freestylesvg_renderer(thickness:float, crease_angle:float, sphere_radius:float, kr_derivative_epsilon:float)->None:
+    freestylesvg = addon_utils.enable("render_freestyle_svg")
+    C.scene.render.use_freestyle = True
+    C.scene.svg_export.use_svg_export = True
+    C.scene.render.line_thickness_mode = 'ABSOLUTE'
+    D.linestyles['LineStyle'].use_export_strokes = True
+    D.linestyles['LineStyle'].thickness = thickness
+    settings = C.view_layer.freestyle_settings
+    settings.crease_angle = crease_angle
+    settings.use_culling = False
+    settings.use_advanced_options = True
+    settings.use_material_boundaries = True
+    settings.use_ridges_and_valleys = True
+    settings.use_smoothness = True
+    settings.use_suggestive_contours = True
+    settings.sphere_radius = sphere_radius
+    settings.kr_derivative_epsilon = kr_derivative_epsilon
+    bpy.ops.render.render(use_viewport = True, write_still=True)
+    C.scene.render.use_freestyle = False
+
+def clay_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool)->None:
+    C.scene.render.engine = 'CYCLES'
+    C.scene.render.use_motion_blur = motion_blur
+    C.scene.render.film_transparent = transparent
+    C.scene.view_layers[0].cycles.use_denoising = denoising
+    C.scene.view_layers[0].use_pass_ambient_occlusion = True
+    C.scene.cycles.samples = samples
+    C.scene.cycles.device = "GPU"
+    C.preferences.addons["cycles"].preferences.compute_device_type = "CUDA"
+    C.preferences.addons["cycles"].preferences.get_devices()
+    for d in C.preferences.addons["cycles"].preferences.devices:
+        d["use"] = 1
+    bpy.ops.render.render(use_viewport = True, write_still=True)
+
+def create_clay_material():
+    id = bpy.data.materials.new("Clay_Render")
+    #diffuse
+    id.diffuse_shader = "OREN_NAYAR"
+    id.diffuse_color = 0.800, 0.741, 0.536
+    id.diffuse_intensity = 1
+    id.roughness = 0.909
+    #specular
+    id.specular_shader = "COOKTORR"
+    id.specular_color = 1, 1, 1
+    id.specular_hardness = 10
+    id.specular_intensity = 0.115
 
 #######################################
 # Communication
@@ -1335,6 +1472,12 @@ min_wait_time = 0.1
 max_wait_time = 0.2
 max_repeated = 1000
 
+def set_max_repeated(n:int)->int:
+    global max_repeated
+    prev = max_repeated
+    max_repeated = n
+    return prev
+
 def read_operation(conn):
     return r_int(conn)
 
@@ -1459,8 +1602,6 @@ if bpy.app.background:
 else:
     bpy.app.timers.register(execute_current_action)
 
-#bpy.app.timers.register(execute_current_action)
-
 """
 def register():
     global server
@@ -1474,4 +1615,4 @@ def unregister():
 
 if __name__ == "__main__":
     register()
-."""
+"""
