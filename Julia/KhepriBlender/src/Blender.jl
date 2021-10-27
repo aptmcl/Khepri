@@ -2,6 +2,15 @@
 export blender
 
 #=
+
+To dribble Blender, do:
+
+blender_exe_path = raw"C:\Program Files\Blender Foundation\Blender 2.91\blender.exe"
+using OutputCollectors
+oc = OutputCollector(`$blender_exe_path $["--python", joinpath(@__DIR__, "KhepriServer.py")]`, verbose=true)
+=#
+
+#=
 sel = utils.selection_get()
                             bpy.ops.view3d.select(location=(event.mouse_region_x, event.mouse_region_y))
                             sel1 = utils.selection_get()
@@ -47,6 +56,12 @@ def mouse_raycast(context, mx, my):
 
     return has_hit, snapped_location, snapped_normal, snapped_rotation, face_index, object, matrix
 
+
+
+	def new_clay_material()->MatId:
+	    return new_material("Clay", (0.800, 0.741, 0.536), 1, (1.0, 1.0, 1.0), 0.115, 10, 0.909)
+
+
 =#
 
 # BLR is a subtype of Python
@@ -63,13 +78,7 @@ decode(ns::Val{:BLR}, t::Tuple{T1,T2,T3}, c::IO) where {T1,T2,T3} =
   (decode(ns, T1(), c),
    decode(ns, T2(), c),
    decode(ns, T3(), c))
-#=
-# We need some additional Encoders
-@encode_decode_as(:BLR, Val{:Entity}, Val{:size})
-@encode_decode_as(:BLR, Val{:ObjectId}, Val{:size})
-@encode_decode_as(:BLR, Val{:BIMLevel}, Val{:size})
-@encode_decode_as(:BLR, Val{:FloorFamily}, Val{:size})
-=#
+
 @encode_decode_as(:BLR, Val{:Id}, Val{:size})
 @encode_decode_as(:BLR, Val{:MatId}, Val{:size})
 
@@ -107,11 +116,13 @@ def deselect_shape(name:Id)->None:
 def deselect_all_shapes()->None:
 def get_material(name:str)->MatId:
 def get_blenderkit_material(ref:str)->MatId:
-def new_material(name:str, diffuse_color:RGBA, specularity:float, roughness:float)->MatId:
+def new_material(name:str, diffuse_color:RGBA, metallic:float, specular:float, roughness:float, clearcoat:float, clearcoat_roughness:float, ior:float, transmission:float, transmission_roughness:float, emission:RGBA, emission_strength:float)->MatId:
+def new_metal_material(name:str, color:RGBA, roughness:float, ior:float)->MatId:
+def new_glass_material(name:str, color:RGBA, roughness:float, ior:float)->MatId:
+def new_mirror_material(name:str, color:RGBA)->MatId:
 def line(ps:List[Point3d], closed:bool, mat:MatId)->Id:
 def spline(ps:List[Point3d], closed:bool, mat:MatId)->Id:
 def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
-def mesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], mat:MatId)->Id:
 def objmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat:MatId)->Id:
 def trig(p1:Point3d, p2:Point3d, p3:Point3d, mat:MatId)->Id:
 def quad(p1:Point3d, p2:Point3d, p3:Point3d, p4:Point3d, mat:MatId)->Id:
@@ -139,8 +150,10 @@ def set_render_size(width:int, height:int)->None:
 def set_render_path(filepath:str)->None:
 def default_renderer()->None:
 def cycles_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool)->None:
+def freestylesvg_renderer(thickness:float, crease_angle:float)->None:
 def set_sun(latitude:float, longitude:float, elevation:float, year:int, month:int, day:int, time:float, UTC_zone:float, use_daylight_savings:bool)->None:
 def set_sky(turbidity:float)->None:
+def set_max_repeated(n:Int)->Int:
 """
 
 abstract type BLRKey end
@@ -298,10 +311,36 @@ get_blender_material(b, ref::AbstractString) =
     @remote(b, get_blenderkit_material(ref)) :
     @remote(b, get_material(ref))
 
-KhepriBase.b_new_material(b::BLR, path, color, specularity, roughness, transmissivity, transmitted_specular) =
-  @remote(b, new_material(path, convert(RGBA, color), specularity, roughness))
+KhepriBase.b_new_material(b::BLR, name,
+						  base_color,
+						  metallic, specular, roughness,
+	                 	  clearcoat, clearcoat_roughness,
+						  ior,
+						  transmission, transmission_roughness,
+	                 	  emission_color,
+						  emission_strength) =
+  @remote(b, new_material(name,
+  						  convert(RGBA, base_color),
+						  metallic, specular, roughness,
+  						  clearcoat, clearcoat_roughness,
+  				  		  ior,
+  				  		  transmission, transmission_roughness,
+						  convert(RGBA, emission_color), emission_strength))
 
-# BIM
+KhepriBase.b_plastic_material(b::BLR, name, color, roughness) =
+  @remote(b, new_material(name, convert(RGBA, color), 0.0, 1.0, roughness, 0.0, 0.0, 1.4, 0.0, 0.0, RGBA(0.0, 0.0, 0.0, 1.0), 0.0))
+
+KhepriBase.b_metal_material(b::BLR, name, color, roughness, ior) =
+  @remote(b, new_metal_material(name, convert(RGBA, color), roughness, ior))
+
+KhepriBase.b_glass_material(b::BLR, name, color, roughness, ior) =
+  @remote(b, new_glass_material(name, convert(RGBA, color), roughness, ior))
+
+KhepriBase.b_mirror_material(b::BLR, name, color) =
+  @remote(b, new_mirror_material(name, convert(RGBA, color)))
+
+#KhepriBase.b_translucent_material(b::BLR, name, diffuse, specular, roughness, reflect, transmit, bump_map)
+#KhepriBase.b_substrate_material(name, diffuse, specular, roughness, bump_map)
 
 #=
 
@@ -340,11 +379,11 @@ KhepriBase.b_zoom_extents(b::BLR) = @remote(b, ZoomExtents())
 
 KhepriBase.b_set_view_top(b::BLR) = @remote(b, ViewTop())
 
-KhepriBase.b_realistic_sky(b::BLR, date, latitude, longitude, elevation, meridian, turbidity, withsun) =
-  begin
-	@remote(b, set_sun(latitude, longitude, elevation, year(date), month(date), day(date), hour(date)+minute(date)/60, meridian, false))
-	@remote(b, set_sky(turbidity)) #Add withsun
-  end
+KhepriBase.b_set_time_place(b::BLR, date, latitude, longitude, elevation, meridian) =
+  @remote(b, set_sun(latitude, longitude, elevation, year(date), month(date), day(date), hour(date)+minute(date)/60, meridian, false))
+
+KhepriBase.b_set_sky(b::BLR, turbidity, sun) =
+  @remote(b, set_sky(turbidity)) #Add withsun
 
 KhepriBase.b_delete_ref(b::BLR, r::BLRId) =
   @remote(b, delete_shape(r))
@@ -639,6 +678,24 @@ KhepriBase.b_render_view(b::BLR, path::String) =
     @remote(b, set_render_size(render_width(), render_height()))
     @remote(b, set_render_path(path))
   	@remote(b, cycles_renderer(200, true, false, false))
+  end
+
+export render_svg
+render_svg(b::BLR, path) =
+  let (camera, target, lens) = @remote(b, get_view())
+    @remote(b, set_camera_view(camera, target, lens))
+    @remote(b, set_render_size(render_width(), render_height()))
+    @remote(b, set_render_path(path))
+    @remote(b, freestylesvg_renderer(1.0, deg2rad(135), 0.001, 0.0))
+  end
+
+
+with_clay_model(f, level::Real=0, b::BLR=blender) =
+  begin
+	default_material
+    b.sky = povray_clay_settings_string()
+    b.ground_level = level
+    b.ground_material = povray_definition("Ground", "texture", "{ pigment { color rgb 3 } finish { reflection 0 ambient 0 }}")
   end
 
 #=
