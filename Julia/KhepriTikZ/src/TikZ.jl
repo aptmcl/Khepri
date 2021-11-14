@@ -345,7 +345,7 @@ const TikZUniversalRef = UniversalRef{TikZKey, TikZId}
 const TikZNativeRef = NativeRef{TikZKey, TikZId}
 const TikZUnionRef = UnionRef{TikZKey, TikZId}
 const TikZSubtractionRef = SubtractionRef{TikZKey, TikZId}
-const TikZ = IOBufferBackend{TikZKey, TikZId}
+const TikZ = IOBufferBackend{TikZKey, TikZId, Nothing}
 
 KhepriBase.void_ref(b::TikZ) = TikZNativeRef(nothing)
 
