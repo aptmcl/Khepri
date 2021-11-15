@@ -355,6 +355,7 @@ KhepriBase.backend_name(b::TikZ) = "TikZ"
 
 tikz_output(options="") =
   let b = tikz
+    realize_shapes(b)
     b.view.lens == 0 ?
       tikz_set_view_top(connection(b), options) :
       tikz_set_view(connection(b), b.view, options)
