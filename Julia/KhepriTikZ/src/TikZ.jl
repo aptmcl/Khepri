@@ -367,6 +367,7 @@ KhepriBase.backend_name(b::TikZ) = "TikZ"
 
 tikz_output(options="") =
   let b = tikz
+    truncate(connection(b), 0)
     empty!(b.extra)
     realize_shapes(b)
     painter_sorter!(b.extra, b.view.camera)
@@ -385,7 +386,7 @@ painter_sorter!(trigs, camera) =
 tikz_output_and_reset(options="") =
   let b = tikz,
       out = tikz_output(options)
-    b_delete_all_refs(b)
+    b_delete_all_shapes(b)
     b.view.lens = 0 # Reset the lens
     out
   end
@@ -398,9 +399,6 @@ withTikZXForm(f, out, c) =
       out -> f(out, u0(world_cs)),
       c)
    end
-
-KhepriBase.b_delete_all_refs(b::TikZ) =
-  truncate(connection(b), 0)
 
 KhepriBase.b_point(b::TikZ, p) =
   tikz_pgfpoint(connection(b), p)
