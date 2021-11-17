@@ -290,20 +290,20 @@ tikz_transform(out::IO, f::Function, c::Loc) =
     tikz_e(out, "\\end{scope}")
   end
 
-tikz_set_view(out::IO, view, options) =
-  let v = view.camera - view.target,
-      contents = String(take(out)),
-      out = IOBuffer()
-    print(out, "\\tdplotsetmaincoords{")
-    tikz_number(out, rad2deg(sph_psi(v)))
-    print(out, "}{")
-    tikz_number(out, rad2deg(sph_phi(v))+90)
-    println(out, "}")
-    println(out, "\\begin{tikzpicture}[tdplot_main_coords$(use_wireframe() ? "" : ",fill=gray")$(options=="" ? "" : ",")$options]") #)opacity=0.2")]")
-    print(out, contents)
-    println(out, "\\end{tikzpicture}")
-    String(take!(out))
-  end
+# tikz_set_view(out::IO, view, options) =
+#   let v = view.camera - view.target,
+#       contents = String(take(out)),
+#       out = IOBuffer()
+#     print(out, "\\tdplotsetmaincoords{")
+#     tikz_number(out, rad2deg(sph_psi(v)))
+#     print(out, "}{")
+#     tikz_number(out, rad2deg(sph_phi(v))+90)
+#     println(out, "}")
+#     println(out, "\\begin{tikzpicture}[tdplot_main_coords$(use_wireframe() ? "" : ",fill=gray")$(options=="" ? "" : ",")$options]") #)opacity=0.2")]")
+#     print(out, contents)
+#     println(out, "\\end{tikzpicture}")
+#     String(take!(out))
+#   end
 
 #=
 tikz_set_view(out::IO, camera::Loc, target::Loc, lens::Real) =
@@ -319,6 +319,18 @@ tikz_set_view(out::IO, camera::Loc, target::Loc, lens::Real) =
     String(take!(out))
   end
 =#
+
+tikz_set_view(out::IO, view, options) =
+  let v = view.target - view.camera,
+      contents = String(take(out)),
+      out = IOBuffer()
+    println(out, "\\begin{tikzpicture}[3d view={$(rad2deg(sph_phi(v))+90)}{$(rad2deg(sph_psi(v)))}$(use_wireframe() ? "" : ",fill=gray")$(options=="" ? "" : ",")$options]") #)opacity=0.2")]")
+    print(out, contents)
+    println(out, "\\end{tikzpicture}")
+    String(take!(out))
+  end
+
+
 
 tikz_set_view_top(out::IO, options) =
   let contents = String(take(out)),
@@ -345,21 +357,30 @@ const TikZUniversalRef = UniversalRef{TikZKey, TikZId}
 const TikZNativeRef = NativeRef{TikZKey, TikZId}
 const TikZUnionRef = UnionRef{TikZKey, TikZId}
 const TikZSubtractionRef = SubtractionRef{TikZKey, TikZId}
-const TikZ = IOBufferBackend{TikZKey, TikZId, Nothing}
+const TikZ = IOBufferBackend{TikZKey, TikZId, Vector}
 
 KhepriBase.void_ref(b::TikZ) = TikZNativeRef(nothing)
 
-const tikz = TikZ(view=View(xyz(10,10,10), xyz(0,0,0), 0, 0))
+const tikz = TikZ(view=View(xyz(10,10,10), xyz(0,0,0), 0, 0), extra=[])
 
 KhepriBase.backend_name(b::TikZ) = "TikZ"
 
 tikz_output(options="") =
   let b = tikz
+    empty!(b.extra)
     realize_shapes(b)
+    painter_sorter!(b.extra, b.view.camera)
+    for tri in b.extra
+      paint_trig(b, tri)
+    end
     b.view.lens == 0 ?
       tikz_set_view_top(connection(b), options) :
       tikz_set_view(connection(b), b.view, options)
   end
+
+painter_sorter!(trigs, camera) =
+  sort!(trigs, lt=(t1, t2)->distance(trig_center(t1[1:end-1]...), camera)<distance(trig_center(t2[1:end-1]...), camera))
+
 
 tikz_output_and_reset(options="") =
   let b = tikz,
@@ -441,14 +462,39 @@ KhepriBase.b_rectangle(b::TikZ, c, dx, dy, mat) =
 # KhepriBase.b_quad(b::TikZ, p1, p2, p3, p4, mat) =
 #   tikz_closed_line(connection(b), [p1, p2, p3, p4], true)
 
+# KhepriBase.b_trig(b::TikZ, p1, p2, p3, mat) =
+#   let io = connection(b)
+#     print(io, raw"\addplot3[patch,shader=interp] coordinates {")
+#     tikz_3d_coord(io, p1)
+#     tikz_3d_coord(io, p2)
+#     tikz_3d_coord(io, p3)
+#     println(io, "};")
+#   end
+
+# surfaces need to be saved so that they can be sorted
 KhepriBase.b_trig(b::TikZ, p1, p2, p3, mat) =
-  let io = connection(b)
-    print(io, raw"\addplot3[patch,shader=interp] coordinates {")
-    tikz_3d_coord(io, p1)
-    tikz_3d_coord(io, p2)
-    tikz_3d_coord(io, p3)
-    println(io, "};")
+  begin
+    push!(b.extra, (p1, p2, p3, mat))
+    nothing
   end
+
+paint_trig(b::TikZ, (p1, p2, p3, mat)) =
+  let io = connection(b),
+      #c = trig_center(p1, p2, p3),
+      n = trig_normal(p1, p2, p3),
+      v = b.view.target - b.view.camera,
+      α = round(Int, angle_between(n, v)/pi*100)
+    #if α > 0.5
+    print(io, "\\fill[black!$(α)!white] ")
+    #print(io, "\\fill[gray, opacity=$α] ")
+    tikz_3d_coord(io, p1)
+    print(io, "--")
+    tikz_3d_coord(io, p2)
+    print(io, "--")
+    tikz_3d_coord(io, p3)
+    println(io, "--cycle;")
+  #end
+end
 
 KhepriBase.b_quad(b::TikZ, p1, p2, p3, p4, mat) =
   invoke(b_quad, Tuple{Backend, Any, Any, Any, Any, Any}, b, p1, p2, p3, p4, mat)
@@ -555,13 +601,13 @@ process_tikz(path) =
     open(path, "w") do out
       println(out, raw"\documentclass{standalone}")
       println(out, raw"\usepackage{tikz}")
-      println(out, raw"\usetikzlibrary{patterns}")
+      println(out, raw"\usetikzlibrary{perspective,patterns}")
       println(out, raw"\usetikzlibrary{calc,fadings,decorations.pathreplacing}")
       println(out, raw"\usetikzlibrary{shapes,fit}")
       println(out, raw"\usetikzlibrary{hobby}")
       #println(out, raw"\usepackage{pgfplots}")
       #println(out, raw"\pgfplotsset{compat=1.17}")
-      println(out, raw"\usepackage{tikz-3dplot}")
+      #println(out, raw"\usepackage{tikz-3dplot}")
       println(out, raw"\begin{document}")
       println(out, contents)
       println(out, raw"\end{document}")
