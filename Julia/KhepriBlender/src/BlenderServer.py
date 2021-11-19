@@ -878,15 +878,17 @@ def text(txt:str, p:Point3d, vx:Vector3d, vy:Vector3d, size:float)->Id:
     return id
 
 # Lights
-def area_light(p:Point3d, v:Vector3d, size:float, color:RGBA, strength:float)->Id:
+def area_light(p:Point3d, v:Vector3d, size:float, color:RGBA, energy:float)->Id:
     id, name = new_id()
     rot = Vector((0, 0, 1)).rotation_difference(v)  # Rotation from Z axis
-    bpy.ops.object.light_add(name=name, type='AREA', location=location, rotation=rotation)
-    light = C.object.data
-    light.size = size
-    light.use_nodes = True
-    light.node_tree.nodes["Emission"].inputs["Color"].default_value = color
-    light.energy = strength
+    light_data = D.lights.new(name, 'AREA')
+    light_data.energy = energy
+    light_data.size = size
+    light_data.use_nodes = True
+    light_data.node_tree.nodes["Emission"].inputs["Color"].default_value = color
+    light = D.objects.new(name, light_data)
+    light.location=location
+    light.rotation=rotation
     return id
 
 def sun_light(p:Point3d, v:Vector3d)->Id:
@@ -897,7 +899,7 @@ def sun_light(p:Point3d, v:Vector3d)->Id:
 
 def light(p:Point3d, type:str)->Id:
     id, name = new_id()
-    light_data = D.lights.new(name, type=type)
+    light_data = D.lights.new(name, type)
     light = D.objects.new(name, light_data)
     light.location = p
     current_collection.objects.link(light)
@@ -1094,18 +1096,20 @@ def set_render_path(filepath:str)->None:
 def default_renderer()->None:
     bpy.ops.render.render(use_viewport = True, write_still=True)
 
-def cycles_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool)->None:
+def cycles_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool, exposure:float)->None:
     C.scene.render.engine = 'CYCLES'
     C.scene.render.use_motion_blur = motion_blur
     C.scene.render.film_transparent = transparent
     C.scene.view_layers[0].cycles.use_denoising = denoising
     C.scene.cycles.samples = samples
+    #C.scene.cycles.film_exposure = exposure # Just a brightness multiplier 0-10
+    C.scene.view_settings.exposure = exposure # Better approximation
     C.scene.cycles.device = "GPU"
     C.preferences.addons["cycles"].preferences.compute_device_type = "CUDA"
     C.preferences.addons["cycles"].preferences.get_devices()
     for d in C.preferences.addons["cycles"].preferences.devices:
         d["use"] = 1
-    bpy.ops.render.render(use_viewport = True, write_still=True)
+    bpy.ops.render.render(use_viewport=True, write_still=True)
 
 def freestylesvg_renderer(thickness:float, crease_angle:float, sphere_radius:float, kr_derivative_epsilon:float)->None:
     freestylesvg = addon_utils.enable("render_freestyle_svg")
@@ -1153,6 +1157,12 @@ def create_clay_material():
     id.specular_color = 1, 1, 1
     id.specular_hardness = 10
     id.specular_intensity = 0.115
+
+# Last resort
+
+def blender_cmd(expr:str)->None:
+    eval(expr)
+
 
 #######################################
 # Communication
