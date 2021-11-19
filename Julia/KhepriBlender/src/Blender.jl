@@ -56,12 +56,6 @@ def mouse_raycast(context, mx, my):
 
     return has_hit, snapped_location, snapped_normal, snapped_rotation, face_index, object, matrix
 
-
-
-	def new_clay_material()->MatId:
-	    return new_material("Clay", (0.800, 0.741, 0.536), 1, (1.0, 1.0, 1.0), 0.115, 10, 0.909)
-
-
 =#
 
 # BLR is a subtype of Python
@@ -149,11 +143,13 @@ def set_camera_view(camera:Point3d, target:Point3d, lens:float)->None:
 def set_render_size(width:int, height:int)->None:
 def set_render_path(filepath:str)->None:
 def default_renderer()->None:
-def cycles_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool)->None:
+def cycles_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool, exposure:float)->None:
 def freestylesvg_renderer(thickness:float, crease_angle:float)->None:
+def clay_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool)->None:
 def set_sun(latitude:float, longitude:float, elevation:float, year:int, month:int, day:int, time:float, UTC_zone:float, use_daylight_savings:bool)->None:
 def set_sky(turbidity:float)->None:
 def set_max_repeated(n:Int)->Int:
+def blender_cmd(expr:str)->None:
 """
 
 abstract type BLRKey end
@@ -167,7 +163,7 @@ const BLRUnionRef = UnionRef{BLRKey, BLRId}
 const BLRSubtractionRef = SubtractionRef{BLRKey, BLRId}
 const BLR = SocketBackend{BLRKey, BLRId}
 
-const KhepriServerPath = Parameter(abspath(@__DIR__, "KhepriServer.py"))
+const KhepriServerPath = Parameter(abspath(@__DIR__, "BlenderServer.py"))
 export headless_blender
 const headless_blender = Parameter(false)
 const starting_blender = Parameter(false)
@@ -203,6 +199,7 @@ KhepriBase.after_connecting(b::BLR) =
 	#set_material(blender, material_grass, "asset_base_id:97b171b4-2085-4c25-8793-2bfe65650266 asset_type:material")
 	#set_material(blender, material_grass, "asset_base_id:7b05be22-6bed-4584-a063-d0e616ddea6a asset_type:material")
 	set_material(blender, material_grass, "asset_base_id:b4be2338-d838-433b-9f0d-2aa9b97a0a8a asset_type:material")
+	set_material(blender, material_clay, b -> b_plastic_material(b, "Clay", rgb(0.9, 0.9, 0.9),	1.0))
   end
 
 const blender = BLR("Blender", blender_port, blender_api)
@@ -284,8 +281,12 @@ KhepriBase.b_sphere(b::BLR, c, r, mat) =
 
 # Materials
 
-KhepriBase.b_get_material(b::BLR, ref) =
-  get_blender_material(b, ref)
+KhepriBase.b_get_material(b::BLR, spec::AbstractString) =
+  startswith(spec, "asset_base_id") ?
+    @remote(b, get_blenderkit_material(spec)) :
+    @remote(b, get_material(spec))
+
+KhepriBase.b_get_material(b::BLR, spec::Function) = spec(b)
 
 #=
 Important source of materials:
@@ -302,14 +303,6 @@ asset_base_id:ced25dc0-d461-42f7-aa03-85cb88f671a1 asset_type:material
 4. Install material and retrive its id with:
 b_get_material(blender, "asset_base_id:ced25dc0-d461-42f7-aa03-85cb88f671a1 asset_type:material")
 =#
-
-get_blender_material(b, ref::Nothing) =
-  void_ref(b)
-
-get_blender_material(b, ref::AbstractString) =
-  startswith(ref, "asset_base_id") ?
-    @remote(b, get_blenderkit_material(ref)) :
-    @remote(b, get_material(ref))
 
 KhepriBase.b_new_material(b::BLR, name,
 						  base_color,
@@ -677,7 +670,7 @@ KhepriBase.b_render_view(b::BLR, path::String) =
     @remote(b, set_camera_view(camera, target, lens))
     @remote(b, set_render_size(render_width(), render_height()))
     @remote(b, set_render_path(path))
-  	@remote(b, cycles_renderer(200, true, false, false))
+  	@remote(b, cycles_renderer(1200, true, false, false, render_exposure()))
   end
 
 export render_svg
@@ -689,18 +682,9 @@ render_svg(b::BLR, path) =
     @remote(b, freestylesvg_renderer(1.0, deg2rad(135), 0.001, 0.0))
   end
 
-
-with_clay_model(f, level::Real=0, b::BLR=blender) =
-  begin
-	default_material
-    b.sky = povray_clay_settings_string()
-    b.ground_level = level
-    b.ground_material = povray_definition("Ground", "texture", "{ pigment { color rgb 3 } finish { reflection 0 ambient 0 }}")
-  end
-
 #=
-
-export blender_command
-blender_command(s::String) =
-  @remote(blender, Command("$(s)\n"))
+with_clay_model(f, level::Real=0) =
+  begin
+  	with(f, default_material, material_clay)
+	area_light
 =#
