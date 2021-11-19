@@ -171,9 +171,12 @@ const starting_blender = Parameter(false)
 start_blender() =
   starting_blender() ?
     sleep(1) : # Just wait a little longer
-    let blender_cmd = Sys.iswindows() ?
-      	  joinpath(readdir("C:/Program Files/Blender Foundation/", join=true)[1], "blender.exe") :
-    	  "blender"
+    let blender_cmd =
+		  Sys.iswindows() ?
+      	    joinpath(readdir("C:/Program Files/Blender Foundation/", join=true)[1], "blender.exe") :
+  		    Sys.isapple() ?
+		  	  "/Applications/Blender.app/Contents/MacOS/Blender" :
+    	      "blender"
 	  starting_blender(true)
       run(detach(headless_blender() ?
             `$(blender_cmd) -noaudio --background --python $(KhepriServerPath())` :
