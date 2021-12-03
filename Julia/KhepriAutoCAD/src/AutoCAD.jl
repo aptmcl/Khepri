@@ -398,6 +398,12 @@ KhepriBase.before_connecting(b::ACAD) =
     start_autocad()
   end
 
+KhepriBase.retry_connecting(b::ACAD) =
+  begin
+    @info("Please, select tab KhepriTemplate in AutoCAD.")
+    sleep(10)
+  end
+
 KhepriBase.after_connecting(b::ACAD) =
   begin
     set_material(autocad, material_metal, "Steel - Polished")
@@ -552,14 +558,8 @@ KhepriBase.b_torus(b::ACAD, c, ra, rb, mat) =
 
 # Materials
 
-KhepriBase.b_get_material(b::ACAD, ref) =
-  get_autocad_material(b, ref)
-
-get_autocad_material(b, ref::Nothing) =
-  void_ref(b)
-
-get_autocad_material(b, ref::AbstractString) =
-  @remote(b, GetMaterialNamed(ref))
+KhepriBase.b_get_material(b::ACAD, spec::AbstractString) =
+  @remote(b, GetMaterialNamed(spec))
 
 KhepriBase.b_new_material(b::ACAD, path, color, specularity, roughness, transmissivity, transmitted_specular) =
   @remote(b, CreateColoredMaterialNamed(path, color, specularity, transmissivity))
@@ -593,7 +593,7 @@ end
 export autocad_basic_material
 autocad_basic_material = AutoCADBasicMaterial
 
-get_autocad_material(b, m::AutoCADBasicMaterial) =
+KhepriBase.b_get_material(b::ACAD, m::AutoCADBasicMaterial) =
   @remote(b, CreateMaterialNamed(
     m.name,
     m.texture_path,
@@ -642,7 +642,7 @@ realize(b::ACAD, s::Surface) =
     ids
   end
 backend_surface_boundary(b::ACAD, s::Shape2D) =
-    map(c -> backend_shape_from_ref(b, r), @remote(b, CurvesFromSurface(ref(s).value)))
+    map(c -> b_shape_from_ref(b, r), @remote(b, CurvesFromSurface(ref(s).value)))
 
 # Iterating over curves and surfaces
 
@@ -1157,10 +1157,10 @@ KhepriBase.b_select_shapes(b::ACAD, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetShapes)
 
 backend_captured_shape(b::ACAD, handle) =
-  backend_shape_from_ref(b, @remote(b, GetShapeFromHandle(handle)))
+  b_shape_from_ref(b, @remote(b, GetShapeFromHandle(handle)))
 backend_captured_shapes(b::ACAD, handles) =
   map(handles) do handle
-      backend_shape_from_ref(b, @remote(b, GetShapeFromHandle(handle)))
+      b_shape_from_ref(b, @remote(b, GetShapeFromHandle(handle)))
   end
 
 backend_generate_captured_shape(b::ACAD, s::Shape) =
@@ -1202,7 +1202,7 @@ backend_changed_shape(b::ACAD, ss::Shapes) =
             sleep(0.1)
         end
         if length(changed) > 0
-            backend_shape_from_ref(b, changed[1])
+            b_shape_from_ref(b, changed[1])
         else
             nothing
         end
@@ -1210,12 +1210,12 @@ backend_changed_shape(b::ACAD, ss::Shapes) =
 
 
 # HACK: This should be filtered on the plugin, not here.
-b_all_shapes(b::ACAD) =
-  Shape[backend_shape_from_ref(b, r)
+KhepriBase.b_all_shapes(b::ACAD) =
+  Shape[b_shape_from_ref(b, r)
         for r in filter(r -> @remote(b, ShapeCode(r)) != 0, @remote(b, GetAllShapes()))]
 
-backend_all_shapes_in_layer(b::ACAD, layer) =
-  Shape[backend_shape_from_ref(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
+KhepriBase.b_all_shapes_in_layer(b::ACAD, layer) =
+  Shape[b_shape_from_ref(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
 
 backend_highlight_shape(b::ACAD, s::Shape) =
   @remote(b, SelectShapes(collect_ref(s)))
