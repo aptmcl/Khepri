@@ -739,8 +739,8 @@ backend_extrusion(b::ACAD, s::Shape, v::Vec) =
 
 KhepriBase.b_sweep(b::ACAD, path, profile, rotation, scale, mat) =
   let curve_mat = material_ref(b, default_curve_material()),
-      path_r = b_stroke(b, path, curve_mat),
-      profile_r = b_stroke(b, profile, curve_mat)
+      path_r = b_realize_path(b, path, curve_mat),
+      profile_r = b_realize_path(b, profile, curve_mat)
     @remote(b, Sweep(path_r, profile_r, rotation, scale))
   end
 
