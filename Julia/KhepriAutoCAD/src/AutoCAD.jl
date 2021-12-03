@@ -737,13 +737,12 @@ backend_extrusion(b::ACAD, s::Shape, v::Vec) =
         end,
         s)
 
-b_sweep(b::ACAD, path, profile, rotation, scale, mat) =
-  and_mark_deleted(b,
-    map_ref(profile) do profile_r
-      map_ref(path) do path_r
-        @remote(b, Sweep(path_r, profile_r, rotation, scale))
-      end
-  end, [profile, path])
+KhepriBase.b_sweep(b::ACAD, path, profile, rotation, scale, mat) =
+  let curve_mat = material_ref(b, default_curve_material()),
+      path_r = b_stroke(b, path, curve_mat),
+      profile_r = b_stroke(b, profile, curve_mat)
+    @remote(b, Sweep(path_r, profile_r, rotation, scale))
+  end
 
 backend_revolve_point(b::ACAD, profile::Shape, p::Loc, n::Vec, start_angle::Real, amplitude::Real) =
   realize(b, arc(loc_from_o_vz(p, n), distance(profile, p), start_angle, amplitude))
