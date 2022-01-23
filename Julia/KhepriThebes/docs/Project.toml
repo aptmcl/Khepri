@@ -1,0 +1,3 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+KhepriThebes = "fe5acd35-b311-462b-9357-e33995177d6f"
