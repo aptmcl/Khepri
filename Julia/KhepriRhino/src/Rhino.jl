@@ -83,8 +83,8 @@ public Point3d CircleCenter(RhinoObject obj)
 public Vector3d CircleNormal(RhinoObject obj)
 public double CircleRadius(RhinoObject obj)
 public Guid Ellipse(Point3d c, Vector3d n, double radiusX, double radiusY)
-public Guid Arc(Point3d c, Vector3d vx, Vector3d vy, double radius, double startAngle, double endAngle)
-public Guid Text(string str, Point3d c, Vector3d vx, Vector3d vy, double height)
+public Guid Arc(Plane p, double radius, double startAngle, double endAngle)
+public Guid Text(string str, Plane p, double height, string fontName, bool bold, bool italic)
 public Guid JoinCurves(Guid[] objs)
 public Guid Mesh(Point3d[] pts, int[][] faces, MatId mat)
 public Guid NGon(Point3d[] pts, Point3d pivot, bool smooth, MatId mat)
@@ -92,7 +92,7 @@ public Guid SurfaceFrom(Guid[] ids, MatId mat)
 public Guid SurfaceFromCurvesPoints(Point3d[][] ptss, bool[] smooths, MatId mat)
 public Guid SurfaceCircle(Point3d c, Vector3d n, double r, MatId mat)
 public Guid SurfaceEllipse(Point3d c, Vector3d n, double radiusX, double radiusY)
-public Guid SurfaceArc(Point3d c, Vector3d vx, Vector3d vy, double radius, double startAngle, double endAngle, MatId mat)
+public Guid SurfaceArc(Plane p, double radius, double startAngle, double endAngle, MatId mat)
 public Guid SurfaceClosedPolyLine(Point3d[] pts, MatId mat)
 public Guid Sphere(Point3d c, double r, MatId mat)
 public Guid Torus(Point3d c, Vector3d vz, double majorRadius, double minorRadius, MatId mat)
@@ -145,7 +145,7 @@ public Guid Chair(Point3d c, double angle, int family)
 public GeometryBase[] BaseRectangularTableAndChairs(int tableFamily, int chairFamily, double tableLength, double tableWidth, int chairsOnTop, int chairsOnBottom, int chairsOnRight, int chairsOnLeft, double spacing)
 public int CreateRectangularTableAndChairsFamily(int tableFamily, int chairFamily, double tableLength, double tableWidth, int chairsOnTop, int chairsOnBottom, int chairsOnRight, int chairsOnLeft, double spacing)
 public Guid TableAndChairs(Point3d c, double angle, int family)
-public Guid CreateLayer(String name, bool active, byte r, byte g, byte b)
+public Guid CreateLayer(String name, bool active, Color color)
 public Guid CurrentLayer()
 public void SetCurrentLayer(Guid id)
 public void SetLayerActive(Guid id, bool active) {
@@ -177,7 +177,8 @@ public Guid[] GetShape(string prompt)
 public Guid[] GetShapes(string prompt)
 public Guid[] GetAllShapes()
 public Guid[] GetAllShapesInLayer(Guid id)
-public void SetSun(DateTime dt, double latitude, double longitude, int meridian)
+public void SetTimePlace(DateTime dt, double latitude, double longitude, int meridian)
+public void SetSky(bool hasSun, float turbidity)
 public void EnableGrasshopperSolver()
 public void DisableGrasshopperSolver()
 public void RunGrasshopperSolver()
@@ -303,11 +304,11 @@ KhepriBase.b_arc(b::RH, c, r, α, Δα, mat) =
   elseif abs(Δα) >= 2*pi
     @remote(b, Circle(c, vz(1, c.cs), r))
   else
-	let β = α + amplitude
+	let β = α + Δα
   	  if β > α
-  	  	@remote(b, Arc(c, vx(1, c.cs), vy(1, c.cs), r, α, β))
+  	  	@remote(b, Arc(c, r, α, β))
   	  else
-  	  	@remote(b, Arc(c, vx(1, c.cs), vy(1, c.cs), r, β, α))
+  	  	@remote(b, Arc(c, r, β, α))
   	  end
     end
   end
@@ -337,7 +338,7 @@ KhepriBase.b_surface_circle(b::RH, c, r, mat) =
 	@remote(b, SurfaceCircle(c, vz(1, c.cs), r, mat))
 
 KhepriBase.b_surface_arc(b::RH, c, r, α, Δα, mat) =
-  @remote(b, SurfaceArc(c, vx(1, c.cs), vy(1, c.cs), r, α, α + Δα, mat))
+  @remote(b, SurfaceArc(c, r, α, α + Δα, mat))
 
 #=
 KhepriBase.b_quad(b::RH, p1, p2, p3, p4, mat) =
@@ -416,7 +417,7 @@ KhepriBase.b_cone_frustum(b::RH, cb, rb, h, rt, bmat, tmat, smat) =
   @remote(b, ConeFrustum(cb, rb, cb + vz(h, cb.cs), rt, smat))
 
 KhepriBase.b_text(b::RH, str, c, size, mat) =
-  @remote(b, Text(str, c, vx(1, c.cs), vy(1, c.cs), size))
+  @remote(b, Text(str, c, size, "ISOCP", false, false))
 
 ## Materials
 # To encode materials, we use a Guid but convert it to an int,
@@ -426,12 +427,7 @@ encode(ns::Val{:RH}, t::Val{:MatId}, c::IO, v) =
 decode(ns::Val{:RH}, t::Val{:MatId}, c::IO) =
   (decode(ns, Val(:int), c) + 1)%Guid
 
-KhepriBase.b_get_material(b::RH, ref) =
-  get_rhino_material(b, ref)
-
-get_rhino_material(b, n::Nothing) =
-  void_ref(b)
-get_rhino_material(b, path::String) =
+KhepriBase.b_get_material(b::RH, path::String) =
   @remote(b, LoadRenderMaterialFromPath(path))
 
 struct RhinoDefaultMaterial
@@ -441,12 +437,41 @@ end
 export rhino_default_material
 rhino_default_material = RhinoDefaultMaterial
 
-get_rhino_material(b, mat::RhinoDefaultMaterial) =
-  get_rhino_material(b, joinpath(@remote(b, DefaultMaterialsFolder()), mat.name*".rmtl"))
+KhepriBase.b_get_material(b::RH, mat::RhinoDefaultMaterial) =
+  b_get_material(b, joinpath(@remote(b, DefaultMaterialsFolder()), mat.name*".rmtl"))
 
-
-KhepriBase.b_new_material(b::RH, path, color, specularity, roughness, transmissivity, transmitted_specular) =
+KhepriBase.b_new_material(b::RH, name, color, specularity, roughness, transmissivity, transmitted_specular) =
   Guid(@remote(b, new_material(path, convert(RGBA, color), specularity, roughness)) + 1)
+
+#=
+KhepriBase.b_new_material(b::RH, name,
+						  base_color,
+						  metallic, specular, roughness,
+	                 	  clearcoat, clearcoat_roughness,
+						  ior,
+						  transmission, transmission_roughness,
+	                 	  emission_color,
+						  emission_strength) =
+  @remote(b, new_material(name,
+  						  convert(RGBA, base_color),
+						  metallic, specular, roughness,
+  						  clearcoat, clearcoat_roughness,
+  				  		  ior,
+  				  		  transmission, transmission_roughness,
+						  convert(RGBA, emission_color), emission_strength))
+
+KhepriBase.b_plastic_material(b::RH, name, color, roughness) =
+  @remote(b, new_material(name, convert(RGBA, color), 0.0, 1.0, roughness, 0.0, 0.0, 1.4, 0.0, 0.0, RGBA(0.0, 0.0, 0.0, 1.0), 0.0))
+
+KhepriBase.b_metal_material(b::RH, name, color, roughness, ior) =
+  @remote(b, new_metal_material(name, convert(RGBA, color), roughness, ior))
+
+KhepriBase.b_glass_material(b::RH, name, color, roughness, ior) =
+  @remote(b, new_glass_material(name, convert(RGBA, color), roughness, ior))
+
+KhepriBase.b_mirror_material(b::RH, name, color) =
+  @remote(b, new_mirror_material(name, convert(RGBA, color)))
+=#
 
 realize(b::RH, s::EmptyShape) =
   RHEmptyRef()
@@ -721,9 +746,7 @@ KhepriBase.b_current_layer(b::RH, layer) =
   @remote(b, SetCurrentLayer(layer))
 
 KhepriBase.b_layer(b::RH, name, active, color) =
-  let to255(x) = round(UInt8, x*255)
-    @remote(b, CreateLayer(name, true, to255(red(color)), to255(green(color)), to255(blue(color))))
-  end
+  @remote(b, CreateLayer(name, true, color))
 
 KhepriBase.b_delete_all_shapes_in_layer(b::RH, layer) =
   @remote(b, DeleteAllInLayer(layer))
@@ -732,12 +755,11 @@ KhepriBase.b_shape_from_ref(b::RH, r) =
   let code = @remote(b, ShapeCode(r)),
       ref = DynRefs(b=>RHNativeRef(r))
     if code == 1
-      point(@remote(b, PointPosition(r)),
-            backend=b, ref=ref)
+      point(@remote(b, PointPosition(r)), ref=ref)
     elseif code == 2
-      circle(maybe_loc_from_o_vz(@remote(b, CircleCenter(r)), @remote(b, CircleNormal(r))),
+      circle(loc_from_o_vz(@remote(b, CircleCenter(r)), @remote(b, CircleNormal(r))),
              @remote(b, CircleRadius(r)),
-             backend=b, ref=ref)
+             ref=ref)
     elseif 3 <= code <= 6
       line(@remote(b, LineVertices(r)), ref=ref)
     elseif code == 7
@@ -751,13 +773,13 @@ KhepriBase.b_shape_from_ref(b::RH, r) =
     elseif code == 41
       surface(frontier=[], ref=ref)
     elseif code == 81
-      sphere(backend=b, ref=ref)
+      sphere(ref=ref)
     elseif code == 82
-      cylinder(backend=b, ref=ref)
+      cylinder(ref=ref)
     elseif code == 83
-      cone(backend=b, ref=ref)
+      cone(ref=ref)
     elseif code == 84
-      torus(backend=b, ref=ref)
+      torus(ref=ref)
     else
       error("Unknown shape")
     end
@@ -837,8 +859,8 @@ backend_all_shapes_in_layer(b::RH, layer) =
 KhepriBase.b_render_view(b::RH, path::String) =
   @remote(b, Render(render_width(), render_height(), path))
 
-backend_save_view(b::RH, path::String) =
-  @remote(b, SaveView(render_width(), render_height(), path))
+#KhepriBase.b_save_view(b::RH, path::String) =
+#  @remote(b, SaveView(render_width(), render_height(), path))
 
 
 #=
@@ -859,8 +881,11 @@ rhino_layer_family(name, color::RGB=rgb(1,1,1)) =
 backend_get_family_ref(b::RH, f::Family, af::RhinoLayerFamily) =
   backend_create_layer(b, af.name, true, af.color)
 
-KhepriBase.b_realistic_sky(b::RH, date, latitude, longitude, elevation, meridian, turbidity, withsun) =
-  @remote(b, SetSun(date, latitude, longitude, meridian))
+KhepriBase.b_set_time_place(b::RH, date, latitude, longitude, elevation, meridian) =
+  @remote(b, SetTimePlace(date, latitude, longitude, meridian))
+
+KhepriBase.b_set_sky(b::RH, turbidity, sun) =
+  @remote(b, SetSky(sun, turbidity))
 
 export run_grasshopper_solver
 run_grasshopper_solver() =
