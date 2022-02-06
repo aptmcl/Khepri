@@ -59,6 +59,7 @@ def download_blenderkit_material(asset_ref):
     from blenderkit import paths, append_link, utils, version_checker, rerequests
     import requests
     def create_asset_data(rdata, asset_type):
+        asset_data = {}
         for r in rdata['results']:
             if r['assetType'] == asset_type and len(r['files']) > 0:
                 furl = None
