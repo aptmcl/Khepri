@@ -434,13 +434,15 @@ def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
     obj = D.objects.new(name, curve)
     current_collection.objects.link(obj)
     spline = curve.splines.new(kind)
-    #spline.order_u = order
     spline.use_cyclic_u = closed
+    spline.use_endpoint_u = not closed
     n = len(ps) - (1 if closed else 0)
     spline.points.add(n - 1)
     for i in range(0, n):
         p = ps[i]
         spline.points[i].co = (p[0], p[1], p[2], 1.0)
+    spline.order_u = max(4, order)
+    spline.resolution_u = 4
     append_material(obj, mat)
     return id
 
