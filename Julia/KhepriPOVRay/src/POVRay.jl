@@ -503,22 +503,7 @@ abstract type POVRayKey end
 const POVRayId = Any
 const POVRayRef = NativeRef{POVRayKey, POVRayId}
 
-Base.@kwdef mutable struct POVRayBackend{K,T} <: LazyBackend{K,T}
-  shapes::Shapes=Shape[]
-  materials::Set{POVRayMaterial}=Set{POVRayMaterial}()
-  current_layer::Union{Nothing,AbstractLayer}=nothing
-  layers::Dict{AbstractLayer,Vector{Shape}}=Dict{AbstractLayer,Vector{Shape}}()
-  sky::String=povray_realistic_sky_string(DateTime(2020, 9, 21, 10, 0, 0), 39, 9, 0, 5, true)
-  ground_level::Float64=0.0
-  ground_material::POVRayMaterial=povray_gray_ground
-  buffer::LazyParameter{IOBuffer}=LazyParameter(IOBuffer, IOBuffer)
-  view::View=default_view()
-  sun_altitude::Real=90
-  sun_azimuth::Real=0
-  cached::Bool=false
-end
-
-const POVRay = POVRayBackend{POVRayKey, POVRayId}
+const POVRay = IOBufferBackend{POVRayKey, POVRayId}
 
 KhepriBase.backend_name(::POVRay) = "POVRay"
 
@@ -527,49 +512,28 @@ KhepriBase.backend_name(::POVRay) = "POVRay"
 # not have boolean operations at the level of references
 KhepriBase.has_boolean_ops(::Type{POVRay}) = HasBooleanOps{false}()
 
-#=
-The POVRay backend cannot realize shapes immediately, only when requested.
-=#
-
-save_shape!(b::POVRay, s::Shape) =
-  begin
-    prepend!(b.shapes, [s])
-    if !isnothing(b.current_layer)
-      push!(get!(b.layers, b.current_layer, Shape[]), s)
-    end
-    b.cached = false
-    s
-  end
-
-save_material(b::POVRay, mat) =
-  (push!(b.materials, mat); mat)
-
-used_materials(b::POVRay) = b.materials
-
 KhepriBase.void_ref(b::POVRay) = POVRayRef(-1)
 
 const povray = POVRay()
 
-buffer(b::POVRay) = b.buffer()
-
 KhepriBase.b_trig(b::POVRay, p1, p2, p3, mat) =
-  write_povray_object(buffer(b), "triangle", save_material(b, mat), p1, p2, p3)
+  write_povray_object(connection(b), "triangle", save_material(b, mat), p1, p2, p3)
 
 KhepriBase.b_surface_polygon(b::POVRay, ps, mat) =
-  write_povray_object(buffer(b), "polygon", save_material(b, mat), length(ps) + 1, ps..., ps[1])
+  write_povray_object(connection(b), "polygon", save_material(b, mat), length(ps) + 1, ps..., ps[1])
 
 KhepriBase.b_surface_polygon_with_holes(b::POVRay, ps, qss, mat) =
   let vss = [ps, qss...]
-    write_povray_object(buffer(b), "polygon", save_material(b, mat),
+    write_povray_object(connection(b), "polygon", save_material(b, mat),
       mapreduce(length, +, vss) + length(vss),
       mapreduce(vs->[vs..., vs[1]], vcat, vss)...)
   end
 
 KhepriBase.b_surface_circle(b::POVRay, c, r, mat) =
-  	write_povray_object(buffer(b), "disc", save_material(b, mat), c, uvz(c.cs), r)
+  	write_povray_object(connection(b), "disc", save_material(b, mat), c, uvz(c.cs), r)
 
 KhepriBase.b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_v, interpolator, mat) =
-  let io = buffer(b),
+  let io = connection(b),
       mat = save_material(b, mat),
       pts = smooth_u || smooth_v ?
               [location_at(interpolator, u, v)
@@ -590,7 +554,7 @@ KhepriBase.b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_
   end
 
 KhepriBase.b_cylinder(b::POVRay, cb, r, h, bmat, tmat, smat) =
-  let buf = buffer(b)
+  let buf = connection(b)
     write_povray_object(buf, "cylinder", save_material(b, smat), [0,0,0], [0,0,h], r) do
       write_povray_matrix(buf, cb)
     end
@@ -598,10 +562,10 @@ KhepriBase.b_cylinder(b::POVRay, cb, r, h, bmat, tmat, smat) =
   end
 
 KhepriBase.b_sphere(b::POVRay, c, r, mat) =
-  write_povray_object(buffer(b), "sphere", save_material(b, mat), c, r)
+  write_povray_object(connection(b), "sphere", mat.name, c, r)
 
 KhepriBase.b_torus(b::POVRay, c, ra, rb, mat) =
-  let buf = buffer(b)
+  let buf = connection(b)
     write_povray_object(buf, "torus", save_material(b, mat), ra, rb) do
       write_povray_param(buf, "rotate", [90,0,0])
       write_povray_matrix(buf, c)
@@ -610,7 +574,7 @@ KhepriBase.b_torus(b::POVRay, c, ra, rb, mat) =
   end
 
 KhepriBase.b_box(b::POVRay, c, dx, dy, dz, mat) =
-  let buf = buffer(b)
+  let buf = connection(b)
     write_povray_object(buf, "box", save_material(b, mat), [0,0,0], [dx, dy, dz]) do
       write_povray_matrix(buf, c)
     end
@@ -618,10 +582,10 @@ KhepriBase.b_box(b::POVRay, c, dx, dy, dz, mat) =
   end
 
 KhepriBase.b_cone(b::POVRay, cb, r, h, bmat, smat) =
-  write_povray_object(buffer(b), "cone", save_material(b, smat), cb, r, add_z(cb, h), 0)
+  write_povray_object(connection(b), "cone", save_material(b, smat), cb, r, add_z(cb, h), 0)
 
 KhepriBase.b_cone_frustum(b::POVRay, cb, rb, h, rt, bmat, tmat, smat) =
-  write_povray_object(buffer(b), "cone", save_material(b, smat), cb, rb, add_z(cb, h), rt)
+  write_povray_object(connection(b), "cone", save_material(b, smat), cb, rb, add_z(cb, h), rt)
 
 # This works (including the smooth bit) BUT
 # 1. It does not seem to run faster on POVRay than multiple polygons
@@ -629,7 +593,7 @@ KhepriBase.b_cone_frustum(b::POVRay, cb, rb, h, rt, bmat, tmat, smat) =
 # 3. The vector must be strictly perpendicular to the profile
 # So..., I'm disabling it for now.
 # KhepriBase.b_generic_prism(b::POVRay, bs, smooth, v, bmat, tmat, smat) =
-#   let buf = buffer(b),
+#   let buf = connection(b),
 #       cs = cs_from_o_vz(bs[1], -v),
 #       ps = [[p.x, p.y] for p in in_cs(bs, cs)]
 #     write_povray_object(buf, "prism", save_material(b, smat)) do
@@ -647,19 +611,13 @@ KhepriBase.b_cone_frustum(b::POVRay, cb, rb, h, rt, bmat, tmat, smat) =
 #
 
 b_isosurface(b::POVRay, frep, bounding_box, mat) =
-  write_povray_isosurface(buffer(b), save_material(b, mat), func, bounding_box, max_gradient)
+  write_povray_isosurface(connection(b), save_material(b, mat), func, bounding_box, max_gradient)
 
 
 #=
 ###################################
 
-set_sun(altitude, azimuth, b::POVRay) =
-  begin
-    b.altitude = altitude
-    b.azimuth = azimuth
-  end
-=#
-KhepriBase.b_realistic_sky(b::POVRay, date, latitude, longitude, elevation, meridian, turbidity, withsun) =
+KhepriBase.b_realistic_sky(b::POVRay, date, latitude, longitude, elevation, meridian, altitude, azimuth, turbidity, with_sun) =
   b.sky = povray_realistic_sky_string(date, latitude, longitude, meridian, turbidity, withsun)
 
 # backend_realistic_sky(b::POVRay, altitude, azimuth, turbidity, withsun) =
@@ -667,42 +625,12 @@ KhepriBase.b_realistic_sky(b::POVRay, date, latitude, longitude, elevation, meri
 
 KhepriBase.b_set_ground(b::POVRay, level, mat) =
   (b.ground_level=level; b.ground_material=mat)
-
-KhepriBase.b_delete_all_refs(b::POVRay) =
-  begin
-    empty!(b.shapes)
-    for ss in values(b.layers)
-      empty!(ss)
-    end
-    empty!(b.materials)
-    b.cached = false
-    nothing
-  end
-
-#=
-KhepriBase.b_delete_shape(b::POVRay, shape::Shape) =
-  let f(s) = s!== shape
-    filter!(f, b.shapes)
-    for ss in values(b.layers)
-      filter!(f, ss)
-    end
-  end
-
-KhepriBase.b_delete_shapes(b::POVRay, shapes::Shapes) =
-  let f(s) = isnothing(findfirst(s1->s1===s, shapes))
-    filter!(f, b.shapes)
-    for ss in values(b.layers)
-      filter!(f, ss)
-    end
-  end
-=#
-
 #=
 
 realize(b::POVRay, s::SweepPath) =
   let vertices = in_world.(path_vertices(s.profile)),
       frames = map_division(identity, s.path, 20),
-      buf = buffer(b),
+      buf = connection(b),
       mat = get_material(b, s)
     write_povray_mesh(
       buf,
@@ -721,7 +649,7 @@ realize(b::POVRay, s::Thicken) =
 =#
 #=
 realize(b::POVRay, s::Move) =
-  let buf = buffer(b)
+  let buf = connection(b)
     write_povray_object(buf, "object", nothing) do
       ref(b, s.shape)
       backend_delete_shape(b, s.shape)
@@ -730,7 +658,7 @@ realize(b::POVRay, s::Move) =
   end
 
 realize(b::POVRay, s::Scale) =
-  let buf = buffer(b),
+  let buf = connection(b),
       trans = s.p-u0()
     write_povray_object(buf, "object", nothing) do
       ref(b, s.shape)
@@ -742,7 +670,7 @@ realize(b::POVRay, s::Scale) =
   end
 
 realize(b::POVRay, s::Rotate) =
-  let buf = buffer(b),
+  let buf = connection(b),
       trans = s.p-u0()
     write_povray_object(buf, "object", nothing) do
       ref(b, s.shape)
@@ -757,7 +685,7 @@ realize(b::POVRay, s::UnionShape) =
   let shapes = filter(! is_empty_shape, s.shapes)
     length(shapes) == 1 ?
       (ref(b, shapes[1]); backend_delete_shape(b, shapes[1])) :
-      write_povray_object(buffer(b), "union", nothing) do #get_material(b, s)) do
+      write_povray_object(connection(b), "union", nothing) do #get_material(b, s)) do
         for ss in shapes
           ref(b, ss)
           backend_delete_shape(b, ss)
@@ -768,7 +696,7 @@ realize(b::POVRay, s::UnionShape) =
 
 
 realize(b::POVRay, s::IntersectionShape) =
-  write_povray_object(buffer(b), "intersection", get_material(b, s)) do
+  write_povray_object(connection(b), "intersection", get_material(b, s)) do
     for ss in s.shapes
       ref(b, ss)
       backend_delete_shape(b, ss)
@@ -777,7 +705,7 @@ realize(b::POVRay, s::IntersectionShape) =
   end
 
 realize(b::POVRay, s::SubtractionShape3D) =
-  write_povray_object(buffer(b), "difference", get_material(b, s)) do
+  write_povray_object(connection(b), "difference", get_material(b, s)) do
     ref(b, s.shape)
     backend_delete_shape(b, s.shape)
     for ss in s.shapes
@@ -788,76 +716,10 @@ realize(b::POVRay, s::SubtractionShape3D) =
   end
 
 =#
-
+=#
 KhepriBase.b_pointlight(b::POVRay, loc::Loc, color::RGB, range::Real, intensity::Real) =
-  write_povray_pointlight(b.buffer(), loc, rgb(red(color)*intensity, green(color)*intensity, blue(color)*intensity))
+  write_povray_pointlight(connection(b), loc, rgb(red(color)*intensity, green(color)*intensity, blue(color)*intensity))
 
-#=
-
-
-# BIM
-
-realize_box(b::POVRay, mat, p, dx, dy, dz) =
-  let buf = buffer(b),
-      bot = p,
-      top = add_xyz(p, dx, dy, dz)
-    write_povray_object(buf, "box", mat, bot, top)
-    void_ref(b)
-  end
-
-realize_prism(b::POVRay, top, bot, side, path::PathSet, h::Real) =
-  # PathSets require a different approach
-  let buf = buffer(b),
-      v = planar_path_normal(path)*h,
-      bot_vss = map(path_vertices, path.paths),
-      top_vss = map(path_vertices, translate(path, v).paths)
-    write_povray_polygons(buf, bot, map(reverse, bot_vss))
-    write_povray_polygons(buf, top, top_vss)
-    for (bot_vs, top_vs) in zip(bot_vss, top_vss)
-      for vs in zip(bot_vs, circshift(bot_vs, 1), circshift(top_vs, 1), top_vs)
-        write_povray_polygon(buf, side, vs)
-      end
-    end
-    void_ref(b)
-  end
-
-realize_pyramid_frustum(b::POVRay, top, bot, side, bot_vs::Locs, top_vs::Locs, closed=true) =
-  let buf = buffer(b)
-    if closed
-      write_povray_polygon(buf, bot, reverse(bot_vs))
-      write_povray_polygon(buf, top, top_vs)
-    end
-    for vs in zip(bot_vs, circshift(bot_vs, 1), circshift(top_vs, 1), top_vs)
-      write_povray_polygon(buf, side, vs)
-    end
-    void_ref(b)
-  end
-
-
-#=
-POVRay families need to know the different kinds of materials
-that go on each surface.
-In some cases it might be the same material, but in others, such
-as slabs, outside walls, etc, we will have different materials.
-=#
-
-const POVRayMaterialFamily = BackendMaterialFamily{POVRayMaterial}
-povray_material_family(mat::POVRayMaterial) =
-  POVRayMaterialFamily(mat)
-
-const POVRaySlabFamily = BackendSlabFamily{POVRayMaterial}
-povray_slab_family(top::POVRayMaterial, bot::POVRayMaterial=top, side::POVRayMaterial=bot) =
-  POVRaySlabFamily(top, bot, side)
-
-const POVRayRoofFamily = BackendRoofFamily{POVRayMaterial}
-povray_roof_family(top::POVRayMaterial, bot::POVRayMaterial=top, side::POVRayMaterial=bot) =
-  POVRayRoofFamily(top, bot, side)
-
-const POVRayWallFamily = BackendWallFamily{POVRayMaterial}
-povray_wall_family(right::POVRayMaterial, left::POVRayMaterial=right) =
-  POVRayWallFamily(right, left)
-
-=#
 export povray_family_materials
 
 povray_family_materials(m1, m2=m1, m3=m2, m4=m3) = (materials=(m1, m2, m3, m4), )
@@ -903,34 +765,48 @@ realize(b::POVRay, s::Union{Door, Window}) =
   void_ref(b)
 =#
 
+povray_environment_string(b::POVRay, env::RealisticSkyEnvironment) =
+  povray_realistic_sky_string(
+    b.date,
+    b.place.latitude,
+    b.place.longitude,
+    b.place.meridian,
+    b.render_env.turbidity,
+    b.render_env.sun)
+
 ####################################################
 
 export_to_povray(b::POVRay, path::String) =
-  let buf = b.buffer()
+  let buf = connection(b)
     if ! b.cached
       take!(buf)
+#      for s in b.shapes
+#        mark_deleted(b, s)
+#      end
+#      i = 1
+#      while i <= length(b.shapes)
+#        force_realize(b, b.shapes[i])
+#        i += 1
+#      end
       for s in b.shapes
-        mark_deleted(b, s)
-      end
-      i = 1
-      while i <= length(b.shapes)
-        force_realize(b, b.shapes[i])
-        i += 1
+        force_realize(b, s)
       end
       b.cached = true
     end
     open(path, "w") do out
       # write the sky
-      write(out, b.sky)
+      write(out, povray_environment_string(b, b.render_env))
       # write useful include
       write(out, """#include "transforms.inc"\n""")
       # write materials (removing duplicate includes)
-      save_material(b, b.ground_material)
-      for m in unique(m->m isa POVRayInclude ? m.filename : m, used_materials(b))
-        write_povray_definition(out, m)
+      #save_material(b, b.ground_material)
+      let material_refs = [KhepriBase.material_ref(b, m) for m in used_materials(b)]
+        for m in unique(m->m isa POVRayInclude ? m.filename : m, material_refs)
+          write_povray_definition(out, m)
+        end
       end
       # write the ground
-      write_povray_object(out, "plane", b.ground_material, :y, b.ground_level)
+      #write_povray_object(out, "plane", b.ground_material, :y, b.ground_level)
       # write the objects
       let str = String(take!(buf))
         #save again
