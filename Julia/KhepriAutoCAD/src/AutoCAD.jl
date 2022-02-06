@@ -429,7 +429,7 @@ KhepriBase.b_line(b::ACAD, ps, mat) =
 KhepriBase.b_polygon(b::ACAD, ps, mat) =
   @remote(b, ClosedPolyLine(ps))
 
-KhepriBase.b_spline(b::ACAD, ps, v0, v1, interpolator, mat) =
+KhepriBase.b_spline(b::ACAD, ps, v0, v1, mat) =
   if (v0 == false) && (v1 == false)
     #@remote(b, Spline(s.points))
     @remote(b, InterpSpline(
@@ -797,7 +797,7 @@ unite_refs(b::ACAD, refs::Vector{<:ACADRef}) =
     ACADUnionRef(tuple(refs...))
 
 realize(b::ACAD, s::IntersectionShape) =
-  let r = foldl(intersect_ref(b), map(ref, s.shapes),
+  let r = foldl(intersect_ref(b), map(ref(b), s.shapes),
                 init=ACADUniversalRef())
     mark_deleted(b, s.shapes)
     r
