@@ -220,8 +220,12 @@ KhepriBase.b_line(b::BLR, ps, mat) =
 KhepriBase.b_polygon(b::BLR, ps, mat) =
 	@remote(b, line(ps, true, mat))
 
-KhepriBase.b_nurbs_curve(b::BLR, ps, order, cps, knots, weights, closed, mat) =
-  @remote(b, nurbs(order, ps, closed, mat))
+KhepriBase.b_spline(b::BLR, ps, v1, v2, mat) =
+  # HACK: What about v1, v2
+  @remote(b, nurbs(5, ps, false, mat))
+
+KhepriBase.b_closed_spline(b::BLR, ps, mat) =
+  @remote(b, nurbs(5, ps, true, mat))
 
 KhepriBase.b_trig(b::BLR, p1, p2, p3, mat) =
   @remote(b, trig(p1, p2, p3, mat))
