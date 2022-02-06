@@ -329,7 +329,7 @@ write_povray_definition(io::IO, m::POVRayInclude) =
 show(io::IO, ::MIMEPOVRay, m::POVRayInclude) =
   write(io, "$(m.kind) { $(m.name) }")
 
-export povray_definition, povray_include
+export povray_definition, povray_include, povray_material
 const povray_definition = POVRayDefinition
 const povray_include = POVRayInclude
 
@@ -503,7 +503,7 @@ abstract type POVRayKey end
 const POVRayId = Any
 const POVRayRef = NativeRef{POVRayKey, POVRayId}
 
-const POVRay = IOBufferBackend{POVRayKey, POVRayId}
+const POVRay = IOBufferBackend{POVRayKey, POVRayId, Nothing}
 
 KhepriBase.backend_name(::POVRay) = "POVRay"
 
@@ -516,25 +516,43 @@ KhepriBase.void_ref(b::POVRay) = POVRayRef(-1)
 
 const povray = POVRay()
 
+KhepriBase.b_new_material(b::POVRay, name,
+						              base_color,
+						              metallic, specular, roughness,
+	                        clearcoat, clearcoat_roughness,
+						              ior,
+						              transmission, transmission_roughness,
+	                        emission_color,
+						              emission_strength) =
+  povray_material()
+KhepriBase.b_plastic_material(b::POVRay, name, color, roughness) =
+  povray_material()
+KhepriBase.b_metal_material(b::POVRay, name, color, roughness, ior) =
+  povray_material()
+KhepriBase.b_glass_material(b::POVRay, name, color, roughness, ior) =
+  povray_material()
+KhepriBase.b_mirror_material(b::POVRay, name, color) =
+  povray_material()
+
+#
 KhepriBase.b_trig(b::POVRay, p1, p2, p3, mat) =
-  write_povray_object(connection(b), "triangle", save_material(b, mat), p1, p2, p3)
+  write_povray_object(connection(b), "triangle", mat, p1, p2, p3)
 
 KhepriBase.b_surface_polygon(b::POVRay, ps, mat) =
-  write_povray_object(connection(b), "polygon", save_material(b, mat), length(ps) + 1, ps..., ps[1])
+  write_povray_object(connection(b), "polygon", mat, length(ps) + 1, ps..., ps[1])
 
 KhepriBase.b_surface_polygon_with_holes(b::POVRay, ps, qss, mat) =
   let vss = [ps, qss...]
-    write_povray_object(connection(b), "polygon", save_material(b, mat),
+    write_povray_object(connection(b), "polygon", mat,
       mapreduce(length, +, vss) + length(vss),
       mapreduce(vs->[vs..., vs[1]], vcat, vss)...)
   end
 
 KhepriBase.b_surface_circle(b::POVRay, c, r, mat) =
-  	write_povray_object(connection(b), "disc", save_material(b, mat), c, uvz(c.cs), r)
+  	write_povray_object(connection(b), "disc", mat, c, uvz(c.cs), r)
 
 KhepriBase.b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_v, interpolator, mat) =
   let io = connection(b),
-      mat = save_material(b, mat),
       pts = smooth_u || smooth_v ?
               [location_at(interpolator, u, v)
                for u in division(0, 1, 4*size(ptss, 1)), v in division(0, 1, 4*size(ptss, 2))] :
@@ -555,18 +573,18 @@ KhepriBase.b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_
 
 KhepriBase.b_cylinder(b::POVRay, cb, r, h, bmat, tmat, smat) =
   let buf = connection(b)
-    write_povray_object(buf, "cylinder", save_material(b, smat), [0,0,0], [0,0,h], r) do
+    write_povray_object(buf, "cylinder", smat, [0,0,0], [0,0,h], r) do
       write_povray_matrix(buf, cb)
     end
     -1
   end
 
 KhepriBase.b_sphere(b::POVRay, c, r, mat) =
-  write_povray_object(connection(b), "sphere", mat.name, c, r)
+  write_povray_object(connection(b), "sphere", mat, c, r)
 
 KhepriBase.b_torus(b::POVRay, c, ra, rb, mat) =
   let buf = connection(b)
-    write_povray_object(buf, "torus", save_material(b, mat), ra, rb) do
+    write_povray_object(buf, "torus", mat, ra, rb) do
       write_povray_param(buf, "rotate", [90,0,0])
       write_povray_matrix(buf, c)
     end
@@ -575,17 +593,17 @@ KhepriBase.b_torus(b::POVRay, c, ra, rb, mat) =
 
 KhepriBase.b_box(b::POVRay, c, dx, dy, dz, mat) =
   let buf = connection(b)
-    write_povray_object(buf, "box", save_material(b, mat), [0,0,0], [dx, dy, dz]) do
+    write_povray_object(buf, "box", mat, [0,0,0], [dx, dy, dz]) do
       write_povray_matrix(buf, c)
     end
     -1
   end
 
 KhepriBase.b_cone(b::POVRay, cb, r, h, bmat, smat) =
-  write_povray_object(connection(b), "cone", save_material(b, smat), cb, r, add_z(cb, h), 0)
+  write_povray_object(connection(b), "cone", smat, cb, r, add_z(cb, h), 0)
 
 KhepriBase.b_cone_frustum(b::POVRay, cb, rb, h, rt, bmat, tmat, smat) =
-  write_povray_object(connection(b), "cone", save_material(b, smat), cb, rb, add_z(cb, h), rt)
+  write_povray_object(connection(b), "cone", smat, cb, rb, add_z(cb, h), rt)
 
 # This works (including the smooth bit) BUT
 # 1. It does not seem to run faster on POVRay than multiple polygons
@@ -596,7 +614,7 @@ KhepriBase.b_cone_frustum(b::POVRay, cb, rb, h, rt, bmat, tmat, smat) =
 #   let buf = connection(b),
 #       cs = cs_from_o_vz(bs[1], -v),
 #       ps = [[p.x, p.y] for p in in_cs(bs, cs)]
-#     write_povray_object(buf, "prism", save_material(b, smat)) do
+#     write_povray_object(buf, "prism", smat) do
 #       if smooth
 #         write(buf, "linear_sweep cubic_spline ")
 #         write_povray_values(buf, [0, norm(v), length(ps) + 3, ps[end], ps..., ps[1], ps[2]])
@@ -611,8 +629,7 @@ KhepriBase.b_cone_frustum(b::POVRay, cb, rb, h, rt, bmat, tmat, smat) =
 #
 
 b_isosurface(b::POVRay, frep, bounding_box, mat) =
-  write_povray_isosurface(connection(b), save_material(b, mat), func, bounding_box, max_gradient)
-
+  write_povray_isosurface(connection(b), mat, func, bounding_box, max_gradient)
 
 #=
 ###################################
@@ -622,9 +639,9 @@ KhepriBase.b_realistic_sky(b::POVRay, date, latitude, longitude, elevation, meri
 
 # backend_realistic_sky(b::POVRay, altitude, azimuth, turbidity, withsun) =
 #   b.sky = povray_realistic_sky_string(altitude, azimuth, turbidity, withsun)
+=#
 
-KhepriBase.b_set_ground(b::POVRay, level, mat) =
-  (b.ground_level=level; b.ground_material=mat)
+#=
 #=
 
 realize(b::POVRay, s::SweepPath) =
@@ -774,39 +791,28 @@ povray_environment_string(b::POVRay, env::RealisticSkyEnvironment) =
     b.render_env.turbidity,
     b.render_env.sun)
 
+povray_environment_string(b::POVRay, env::ClayEnvironment) =
+  povray_clay_settings_string()
+
 ####################################################
 
 export_to_povray(b::POVRay, path::String) =
   let buf = connection(b)
-    if ! b.cached
-      take!(buf)
-#      for s in b.shapes
-#        mark_deleted(b, s)
-#      end
-#      i = 1
-#      while i <= length(b.shapes)
-#        force_realize(b, b.shapes[i])
-#        i += 1
-#      end
-      for s in b.shapes
-        force_realize(b, s)
-      end
-      b.cached = true
-    end
+    realize_shapes(b)
     open(path, "w") do out
       # write the sky
       write(out, povray_environment_string(b, b.render_env))
       # write useful include
       write(out, """#include "transforms.inc"\n""")
       # write materials (removing duplicate includes)
-      #save_material(b, b.ground_material)
-      let material_refs = [KhepriBase.material_ref(b, m) for m in used_materials(b)]
-        for m in unique(m->m isa POVRayInclude ? m.filename : m, material_refs)
-          write_povray_definition(out, m)
-        end
+      for m in unique(m->m isa POVRayInclude ? m.filename : m,
+                      material_refs(b, used_materials(b)))
+        write_povray_definition(out, m)
       end
       # write the ground
-      #write_povray_object(out, "plane", b.ground_material, :y, b.ground_level)
+      if !isnothing(b.ground_material)
+        write_povray_object(out, "plane", material_ref(b, b.ground_material), :y, b.ground_level)
+      end
       # write the objects
       let str = String(take!(buf))
         #save again
