@@ -734,7 +734,7 @@ realize(b::POVRay, s::SubtractionShape3D) =
 
 =#
 =#
-KhepriBase.b_pointlight(b::POVRay, loc::Loc, color::RGB, range::Real, intensity::Real) =
+KhepriBase.b_pointlight(b::POVRay, loc::Loc, color::RGB, intensity::Real, range::Real) =
   write_povray_pointlight(connection(b), loc, rgb(red(color)*intensity, green(color)*intensity, blue(color)*intensity))
 
 export povray_family_materials
