@@ -735,7 +735,8 @@ realize(b::POVRay, s::SubtractionShape3D) =
 =#
 =#
 KhepriBase.b_pointlight(b::POVRay, loc::Loc, color::RGB, intensity::Real, range::Real) =
-  write_povray_pointlight(connection(b), loc, rgb(red(color)*intensity, green(color)*intensity, blue(color)*intensity))
+  # assume 1500 candela intensity as default
+  write_povray_pointlight(connection(b), loc, rgb(red(color)*intensity/1500, green(color)*intensity/1500, blue(color)*intensity/1500))
 
 export povray_family_materials
 
