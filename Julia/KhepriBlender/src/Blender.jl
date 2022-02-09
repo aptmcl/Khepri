@@ -433,7 +433,7 @@ Khepri.create_block("Foo", [circle(radius=r) for r in 1:10])
 =#
 #=
 # Lights
-KhepriBase.b_pointlight(b::BLR, loc::Loc, color::RGB, range::Real, intensity::Real) =
+KhepriBase.b_pointlight(b::BLR, loc::Loc, color::RGB, intensity::Real, range::Real) =
   # HACK: Fix this
   @remote(b, SpotLight(loc, intensity, range, loc+vz(-1)))
 
