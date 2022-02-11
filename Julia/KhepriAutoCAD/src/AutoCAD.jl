@@ -352,6 +352,7 @@ public void DeleteAll()
 public void DeleteAllInLayer(ObjectId layerId)
 public void Delete(ObjectId id)
 public void DeleteMany(ObjectId[] ids)
+public Entity PointLight(Point3d position, Color color, double intensity)
 public Entity SpotLight(Point3d position, double hotspot, double falloff, Point3d target)
 public Entity IESLight(String webFile, Point3d position, Point3d target, Vector3d rotation)
 public Point3d[] GetPosition(string prompt)
@@ -1016,8 +1017,7 @@ Khepri.create_block("Foo", [circle(radius=r) for r in 1:10])
 
 # Lights
 KhepriBase.b_pointlight(b::ACAD, loc::Loc, color::RGB, intensity::Real, range::Real) =
-  # HACK: Fix this
-  @remote(b, SpotLight(loc, intensity, range, loc+vz(-1)))
+  @remote(b, PointLight(loc, color, intensity))
 
 KhepriBase.b_spotlight(b::ACAD, loc::Loc, dir::Vec, hotspot::Real, falloff::Real) =
     @remote(b, SpotLight(loc, hotspot, falloff, loc + dir))
