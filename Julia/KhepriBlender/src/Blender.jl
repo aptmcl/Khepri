@@ -58,6 +58,33 @@ def mouse_raycast(context, mx, my):
 
 =#
 
+# A BlenderKit downloader:
+#=
+using HTTP
+using JSON
+using UUIDs
+using Downloads
+
+download_blenderkit_material(asset_ref, folder=tempdir()) =
+  let (asset_base_id_str, asset_type_str) = split(asset_ref),
+      asset_type = split(asset_type_str, ":")[2],
+      reqstr = "?query=$asset_base_id_str+$asset_type_str+order:_score&addon_version=1.0.30",
+      url = "https://www.blenderkit.com/api/v1/search/$reqstr",
+      assets = JSON.parse(String(HTTP.get(url).body))["results"],
+      asset = assets[end], # To jump over publicity&such
+      file = filter(file -> file["fileType"] == "blend", asset["files"])[1],
+      download_url = file["downloadUrl"],
+      scene_uuid = string(UUIDs.uuid4()),
+      data = JSON.parse(String(HTTP.get("$download_url?scene_uuid=$scene_uuid", ["User-agent"=>"Mozilla/5.0"]).body)),
+      file_path = data["filePath"],
+      output_path = joinpath(folder, asset["id"] * ".blend")
+    if ! isfile(output_path)
+      Downloads.download(file_path, output_path)
+    end
+    output_path
+  end
+=#
+
 # BLR is a subtype of Python
 parse_signature(::Val{:BLR}, sig::T) where {T} = parse_signature(Val(:PY), sig)
 encode(::Val{:BLR}, t::Val{T}, c::IO, v) where {T} = encode(Val(:PY), t, c, v)
@@ -148,6 +175,7 @@ def freestylesvg_renderer(thickness:float, crease_angle:float)->None:
 def clay_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool)->None:
 def set_sun(latitude:float, longitude:float, elevation:float, year:int, month:int, day:int, time:float, UTC_zone:float, use_daylight_savings:bool)->None:
 def set_sky(turbidity:float)->None:
+def set_sun_sky(sun_elevation:float, sun_rotation:float, turbidity:float, with_sun:bool)->None:
 def set_max_repeated(n:Int)->Int:
 def blender_cmd(expr:str)->None:
 """
@@ -186,6 +214,8 @@ start_blender() =
 
 KhepriBase.retry_connecting(b::BLR) =
   (@info("Starting $(b.name)."); start_blender(); sleep(2))
+
+
 
 KhepriBase.after_connecting(b::BLR) =
   begin
@@ -379,11 +409,9 @@ KhepriBase.b_zoom_extents(b::BLR) = @remote(b, ZoomExtents())
 
 KhepriBase.b_set_view_top(b::BLR) = @remote(b, ViewTop())
 
-KhepriBase.b_set_time_place(b::BLR, date, latitude, longitude, elevation, meridian) =
-  @remote(b, set_sun(latitude, longitude, elevation, year(date), month(date), day(date), hour(date)+minute(date)/60, meridian, false))
-
-KhepriBase.b_set_sky(b::BLR, turbidity, sun) =
-  @remote(b, set_sky(turbidity)) #Add withsun
+KhepriBase.b_realistic_sky(b::BLR, altitude, azimuth, turbidity, sun) =
+  @remote(b, set_sun_sky(deg2rad(altitude), deg2rad(azimuth), turbidity, sun))
+  #set_sun(latitude, longitude, elevation, year(date), month(date), day(date), hour(date)+minute(date)/60, meridian, false))
 
 KhepriBase.b_delete_ref(b::BLR, r::BLRId) =
   @remote(b, delete_shape(r))

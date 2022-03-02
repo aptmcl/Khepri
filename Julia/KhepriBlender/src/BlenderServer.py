@@ -11,11 +11,11 @@ bl_info = {
 }
 
 # To easily test this, on a command prompt do:
-# "C:\Program Files\Blender Foundation\Blender 2.91\blender.exe" --python KhepriServer.py
+# "C:\Program Files\Blender Foundation\Blender 2.91\blender.exe" --python BlenderServer.py
 # To test this while still allowing redefinitions do:
 # "C:\Program Files\Blender Foundation\Blender 2.91\blender.exe"
 # and then, in Blender's Python console
-# exec(open("KhepriServer.py").read())
+# exec(open("BlenderServer.py").read())
 
 
 import sys
@@ -38,7 +38,7 @@ import addon_utils
 # After activating a BlenderKit account (from addon BlenderKit)
 blenderkit = addon_utils.enable("blenderkit")
 #dynamicsky = addon_utils.enable("lighting_dynamic_sky")
-sunposition = addon_utils.enable("sun_position")
+#sunposition = addon_utils.enable("sun_position")
 
 # level = 0
 # def trace(func):
@@ -135,7 +135,8 @@ def download_blenderkit_material(asset_ref):
     r = rerequests.get(url, headers=headers)
     rdata = r.json()
     create_asset_data(rdata, asset_type)
-    asset_data = rdata['results'][0]
+    # BlenderKit might return publicity in the front
+    asset_data = rdata['results'][-1]
     has_url = blenderkit.download.get_download_url(asset_data, scene_id, api_key)
     #file_names = paths.get_download_filepaths(asset_data)
     files_func = getattr(paths, 'get_download_filepaths', False) or paths.get_download_filenames
@@ -155,12 +156,19 @@ def download_blenderkit_material(asset_ref):
                 for data in response.iter_content(chunk_size=4096*10):
                     dl += len(data)
                     f.write(data)
-    material = append_link.append_material(file_names[-1])
-    return material
+    return append_blend_material(file_names[-1])
+
+def append_blend_material(file_name):
+    materials = bpy.data.materials[:]
+    with bpy.data.libraries.load(file_name, link=False, relative=True) as (data_from, data_to):
+        matname = data_from.materials[0]
+        data_to.materials = [matname]
+    mat = bpy.data.materials.get(matname)
+    mat.use_fake_user = True
+    return mat
 
 # download_blenderkit_material("asset_base_id:1bdb5334-851e-414d-b766-f9fe05477860 asset_type:material")
 # download_blenderkit_material("asset_base_id:31dccf38-74f4-4516-9d17-b80a45711ca7 asset_type:material")
-
 
 Point3d = Vector
 Vector3d = Vector
@@ -188,6 +196,9 @@ def get_material(name:str)->MatId:
 
 def get_blenderkit_material(ref:str)->MatId:
     return add_material(download_blenderkit_material(ref))
+
+def get_blend_material(file_path:str)->MatId:
+    return add_material(append_blend_material(file_path))
 
 def new_node_material(name, type):
     mat = D.materials.new(name=name)
@@ -283,17 +294,69 @@ def append_material(obj, mat_idx):
     if mat_idx >= 0:
         obj.data.materials.append(materials[mat_idx])
 
-def add_uvs(mesh):
-    mesh.use_auto_texspace = True
-    uvl = mesh.uv_layers.new(name='KhepriUVs')
-    mesh.uv_layers.active = uvl
-    for polygon in mesh.polygons:
-        for vert, loop in zip(polygon.vertices, polygon.loop_indices):
-            uvl.data[loop].uv = Vector((0, 0))
-    uvl.active = True
-    uvl.active_render = True
-    return mesh
+# def add_uvs(mesh):
+#     mesh.use_auto_texspace = True
+#     uvl = mesh.uv_layers.new(name='KhepriUVs')
+#     mesh.uv_layers.active = uvl
+#     for polygon in mesh.polygons:
+#         for vert, loop in zip(polygon.vertices, polygon.loop_indices):
+#             uvl.data[loop].uv = Vector(, 0))
+#     uvl.active = True
+#     uvl.active_render = True
+#     return mesh
 
+def add_bm_uvs(mesh, bm):
+    uv_layer = bm.loops.layers.uv.verify()
+    for face in bm.faces:
+        normal = face.normal
+        dx=abs(normal[0])
+        dy=abs(normal[1])
+        dz=abs(normal[2])
+        if (dz > dx):
+            u = Vector([1,0,0])
+            if (dz>dy):
+                v = Vector([0,1,0])
+            else:
+                v = Vector([0,0,1])
+        else:
+            v = Vector([0,0,1])
+            if dx>dy:
+                u = Vector([0,1,0])
+            else:
+                u = Vector([1,0,0])
+        for loop in face.loops:
+            loop_uv = loop[uv_layer]
+            loop_uv.uv = [ u.dot(loop.vert.co),
+                           v.dot(loop.vert.co)]
+
+# def set_uvs_for_face(bm, fi, uv_layer):
+#     face = bm.faces[fi]
+#     normal = face.normal
+#     dx=abs(normal[0])
+#     dy=abs(normal[1])
+#     dz=abs(normal[2])
+#     if (dz > dx):
+#         u = Vector([1,0,0])
+#         if (dz>dy):
+#             v = Vector([0,1,0])
+#         else:
+#             v = Vector([0,0,1])
+#     else:
+#         v = Vector([0,0,1])
+#         if dx>dy:
+#             u = Vector([0,1,0])
+#         else:
+#             u = Vector([1,0,0])
+#     for i in range(len(face.loops)):
+#         l = face.loops[i]
+#         l[uv_layer].uv = [ u.dot(l.vert.co),
+#                            v.dot(l.vert.co)]
+
+# def set_uvs(bm, name=None):
+#     uv_layer = bm.loops.layers.uv['KhepriUVs']
+#     for fi in range(len(bm.faces)):
+#         set_uvs_for_face(bm, fi, uv_layer)
+#     bm.to_mesh(mesh)
 # We should be using Ints for layers!
 # HACK!!! Missing color!!!!!
 current_collection = C.collection
@@ -314,12 +377,12 @@ def set_current_collection(name:str)->None:
 #def all_shapes_in_collection(name:str)->List[Id]:
 def delete_all_shapes_in_collection(name:str)->None:
     D.batch_remove(D.collections[name].objects)
-    D.orphans_purge(do_linked_ids=False)
+    #D.orphans_purge(do_linked_ids=False)
 
 def delete_all_shapes()->None:
     for collection in D.collections:
         D.batch_remove(collection.objects)
-    D.orphans_purge(do_linked_ids=False)
+    #D.orphans_purge(do_linked_ids=False)
 
 def delete_shape(name:Id)->None:
     D.objects.remove(D.objects[str(name)], do_unlink=True)
@@ -383,9 +446,10 @@ def add_to_bmesh(bm, verts:List[Point3d], edges:List[Tuple[int,int]], faces:List
 
 def mesh_from_bmesh(name, bm):
     mesh_data = D.meshes.new(name)
+    add_bm_uvs(mesh_data, bm)
     bm.to_mesh(mesh_data)
     bm.free()
-    add_uvs(mesh_data)
+    #add_uvs(mesh_data)
     return D.objects.new(name, mesh_data)
 
 def automap(tob, target_slot=0, tex_size=1):
@@ -907,16 +971,26 @@ def light(p:Point3d, type:str)->Id:
     light.location = p
     current_collection.objects.link(light)
 
+# HACK! This should not be used as we now resort to Nishita!!!!
 def khepri_sun():
+    raise RuntimeError("Don't use this!!! Use Nishita!!!")
     name = 'KhepriSun'
     name = 'Sun'
     if D.objects.find(name) == -1:
-        bpy.ops.object.light_add(type='SUN')
+        C.view_layer.active_layer_collection = C.view_layer.layer_collection
+        light_data = bpy.data.lights.new(name="Sun", type='SUN')
+        light_data.energy = 30
+        light_object = bpy.data.objects.new(name="Sun", object_data=light_data)
+        light_object.location = (5, 5, 5)
+        C.collection.objects.link(light_object)
+        C.view_layer.objects.active = light_object
+        #bpy.ops.object.light_add(type='SUN')
     return D.objects[name]
 
 def set_sun(latitude:float, longitude:float, elevation:float,
             year:int, month:int, day:int, time:float,
             UTC_zone:float, use_daylight_savings:bool)->None:
+    raise RuntimeError("Don't use this!!! Use Nishita!!!")
     sun_props = C.scene.sun_pos_properties #sunposition.sun_calc.sun
     sun_props.usage_mode = 'NORMAL'
     sun_props.use_daylight_savings = False
@@ -932,7 +1006,7 @@ def set_sun(latitude:float, longitude:float, elevation:float,
     sun_props.sun_distance = 100
     sun_props.use_daylight_savings = use_daylight_savings
     # Using Sky Texture => It creates its own sun.
-    #sun_props.sun_object = khepri_sun()
+    # sun_props.sun_object = khepri_sun()
     sunposition.sun_calc.update_time(C)
     sunposition.sun_calc.move_sun(C)
 
@@ -948,7 +1022,25 @@ def find_or_create_world(name):
             return world
     return D.worlds.new(name)
 
+def set_sun_sky(sun_elevation:float, sun_rotation:float, turbidity:float, with_sun:bool)->None:
+    C.scene.render.engine = 'CYCLES'
+    sky = C.scene.world.node_tree.nodes.new("ShaderNodeTexSky")
+    bg = C.scene.world.node_tree.nodes["Background"]
+    C.scene.world.node_tree.links.new(bg.inputs[0], sky.outputs[0])
+    sky.sky_type = "NISHITA"
+    sky.turbidity = turbidity
+    sky.dust_density = turbidity
+    sky.sun_elevation = sun_elevation
+    sky.sun_rotation = sun_rotation
+    sky.sun_disc = with_sun
+
+
+#bpy.context.scene.view_settings.view_transform = 'False Color'
+#bpy.context.scene.world.light_settings.use_ambient_occlusion = True
+
+
 def set_sky(turbidity:float)->None:
+    raise RuntimeError("Don't use this!!! Use Nishita!!!")
     C.scene.render.engine = 'CYCLES'
     world = find_or_create_world("World")
     world.use_nodes = True
@@ -1042,7 +1134,7 @@ def get_view()->Tuple[Point3d, Point3d, float]:
 def khepri_camera():
     name = 'KhepriCamera'
     name = 'Camera'
-    if D.objects.find(name) is -1:
+    if D.objects.find(name) == -1:
         cam = D.cameras.new(name)
         # Simulate Sony's FE 85mm F1.4 GM
         # cam.sensor_fit = 'HORIZONTAL'
