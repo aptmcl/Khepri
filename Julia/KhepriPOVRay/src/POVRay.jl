@@ -632,16 +632,6 @@ b_isosurface(b::POVRay, frep, bounding_box, mat) =
   write_povray_isosurface(connection(b), mat, func, bounding_box, max_gradient)
 
 #=
-###################################
-
-KhepriBase.b_realistic_sky(b::POVRay, date, latitude, longitude, elevation, meridian, altitude, azimuth, turbidity, with_sun) =
-  b.sky = povray_realistic_sky_string(date, latitude, longitude, meridian, turbidity, withsun)
-
-# backend_realistic_sky(b::POVRay, altitude, azimuth, turbidity, withsun) =
-#   b.sky = povray_realistic_sky_string(altitude, azimuth, turbidity, withsun)
-=#
-
-#=
 #=
 
 realize(b::POVRay, s::SweepPath) =
