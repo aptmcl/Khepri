@@ -177,8 +177,7 @@ public Guid[] GetShape(string prompt)
 public Guid[] GetShapes(string prompt)
 public Guid[] GetAllShapes()
 public Guid[] GetAllShapesInLayer(Guid id)
-public void SetTimePlace(DateTime dt, double latitude, double longitude, int meridian)
-public void SetSky(bool hasSun, float turbidity)
+public void SunLight(DateTime dt, double latitude, double longitude, int meridian, float turbidity, bool hasSun)
 public Guid PointLight(Point3d p, Color c, double power)
 public void EnableGrasshopperSolver()
 public void DisableGrasshopperSolver()
@@ -894,11 +893,8 @@ rhino_layer_family(name, color::RGB=rgb(1,1,1)) =
 backend_get_family_ref(b::RH, f::Family, af::RhinoLayerFamily) =
   backend_create_layer(b, af.name, true, af.color)
 
-KhepriBase.b_set_time_place(b::RH, date, latitude, longitude, elevation, meridian) =
-  @remote(b, SetTimePlace(date, latitude, longitude, meridian))
-
-KhepriBase.b_set_sky(b::RH, turbidity, sun) =
-  @remote(b, SetSky(sun, turbidity))
+KhepriBase.b_realistic_sky(b::RH, date, latitude, longitude, elevation, meridian, turbidity, sun) =
+  @remote(b, SunLight(date, latitude, longitude, meridian, turbidity, true))
 
 export run_grasshopper_solver
 run_grasshopper_solver() =
