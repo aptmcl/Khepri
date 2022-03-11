@@ -128,7 +128,11 @@ check_plugin() =
       for i in 1:10
         try
           update_plugin()
-          # Julia makes package files read-only by default
+          #=
+          Note: When the template is downloaded (during installation), windows removes the
+          read&execute bit, making it impossible to start autocad automatically.
+          We fix that here:
+          =#
           chmod(autocad_template(), 0o555) # Read and Execute
           @info("done.")
           checked_plugin = true
@@ -147,10 +151,6 @@ check_plugin() =
 
 #start_autocad() =
 #  run(`cmd /c cd "$(dirname(autocad_template()))" \&\& $(basename(autocad_template()))`, wait=false)
-#=
-Note: When the template is downloaded (during installation), windows removes the
-read&execute bit, making it impossible to start autocad automatically.
-=#
 
 start_autocad() =
   run(`cmd /c $(autocad_template())`, wait=false)
