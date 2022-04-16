@@ -731,12 +731,13 @@ b_text(b::ACAD, str, p, size, mat) =
 backend_right_cuboid(b::ACAD, cb, width, height, h, material) =
   @remote(b, CenteredBox(cb, width, height, h))
 
-backend_extrusion(b::ACAD, s::Shape, v::Vec) =
-    and_mark_deleted(b,
-        map_ref(s) do r
-            @remote(b, Extrude(r, v))
-        end,
-        s)
+
+KhepriBase.b_extrusion(b::ACAD, s::Shape, v, cb, bmat, tmat, smat) =
+  and_mark_deleted(b,
+    map_ref(b, s) do r
+      @remote(b, Extrude(r, v))
+    end,
+    s)
 
 KhepriBase.b_sweep(b::ACAD, path, profile, rotation, scale, mat) =
   let curve_mat = material_ref(b, default_curve_material()),
@@ -744,6 +745,10 @@ KhepriBase.b_sweep(b::ACAD, path, profile, rotation, scale, mat) =
       profile_r = b_realize_path(b, profile, curve_mat)
     @remote(b, Sweep(path_r, profile_r, rotation, scale))
   end
+
+#KhepriBase.b_loft(b::ACAD, profiles::Shapes, closed, smooth, mat) =
+
+
 
 backend_revolve_point(b::ACAD, profile::Shape, p::Loc, n::Vec, start_angle::Real, amplitude::Real) =
   realize(b, arc(loc_from_o_vz(p, n), distance(profile, p), start_angle, amplitude))
@@ -805,7 +810,7 @@ realize(b::ACAD, s::IntersectionShape) =
   end
 
 realize(b::ACAD, s::Slice) =
-  slice_ref(b, ref(s.shape), s.p, s.n)
+  slice_ref(b, ref(b, s.shape), s.p, s.n)
 
 realize(b::ACAD, s::Move) =
   let r = map_ref(b, s.shape) do r
