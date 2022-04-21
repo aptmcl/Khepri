@@ -367,6 +367,7 @@ KhepriBase.backend_name(b::TikZ) = "TikZ"
 
 tikz_output(options="") =
   let b = tikz
+    b.cached = false
     truncate(connection(b), 0)
     empty!(b.extra)
     realize_shapes(b)
@@ -374,7 +375,7 @@ tikz_output(options="") =
     for tri in b.extra
       paint_trig(b, tri)
     end
-    b.view.lens == 0 ?
+    norm(cross(b.view.target - b.view.camera, vz(1))) < 1e-9 ? # aligned with Z
       tikz_set_view_top(connection(b), options) :
       tikz_set_view(connection(b), b.view, options)
   end
@@ -409,7 +410,7 @@ KhepriBase.b_line(b::TikZ, ps, mat) =
 KhepriBase.b_polygon(b::TikZ, ps, mat) =
   tikz_closed_line(connection(b), ps)
 
-KhepriBase.b_spline(b::TikZ, ps, v0, v1, interpolator, mat) =
+KhepriBase.b_spline(b::TikZ, ps, v0, v1, mat) =
   if (v0 == false) && (v1 == false)
     #tikz_hobby_spline(connection(b), ps, false)
     tikz_spline(connection(b), ps, false)
@@ -480,7 +481,7 @@ paint_trig(b::TikZ, (p1, p2, p3, mat)) =
   let io = connection(b),
       #c = trig_center(p1, p2, p3),
       n = trig_normal(p1, p2, p3),
-      v = b.view.target - b.view.camera,
+      v = rotate_vector(b.view.target - b.view.camera, vz(1), pi/4),
       α = round(Int, angle_between(n, v)/pi*100)
     #if α > 0.5
     print(io, "\\fill[black!$(α)!white] ")
