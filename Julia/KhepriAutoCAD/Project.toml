@@ -14,7 +14,7 @@ Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 [compat]
 ColorTypes = "0.11"
 EzXML = "1.1"
-KhepriBase = "0.4"
+KhepriBase = "0.4.4"
 Reexport = "0.2, 1.0"
 julia = "1.7"
 
