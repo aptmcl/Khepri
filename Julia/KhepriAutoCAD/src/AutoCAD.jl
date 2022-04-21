@@ -421,7 +421,7 @@ KhepriBase.void_ref(b::ACAD) =
   ACADNativeRef(-1)
 
 # Primitives
-KhepriBase.b_point(b::ACAD, p) =
+KhepriBase.b_point(b::ACAD, p, mat) =
   @remote(b, Point(p))
 
 KhepriBase.b_line(b::ACAD, ps, mat) =
@@ -487,6 +487,9 @@ KhepriBase.b_quad_strip(b::ACAD, ps, qs, smooth, mat) =
 KhepriBase.b_quad_strip_closed(b::ACAD, ps, qs, smooth, mat) =
   @remote(b, ClosedQuadStrip(ps, qs, smooth ? 3 : 0, mat))
 
+KhepriBase.b_surface_rectangle(b::ACAD, c, dx, dy, mat) =
+  @remote(b, SurfaceClosedPolyLine([c, add_x(c, dx), add_xy(c, dx, dy), add_y(c, dy)], mat))
+
 KhepriBase.b_surface_polygon(b::ACAD, ps, mat) =
   #@remote(b, SurfacePolygon(ps, mat)) because it cretes BSubMesh and we prefer Regions
   @remote(b, SurfaceClosedPolyLine(ps, mat))
@@ -495,7 +498,7 @@ KhepriBase.b_surface_polygon_with_holes(b::ACAD, ps, qss, mat) =
   @remote(b, RegionWithHoles([ps, qss...], falses(1 + length(qss)), mat))
 
 KhepriBase.b_surface_closed_spline(b::ACAD, ps, mat) =
-  @remote(b, SurfaceFromCurves([@remote(b, InterpClosedSpline(path.vertices))]))
+  @remote(b, SurfaceFromCurves([@remote(b, InterpClosedSpline(path.vertices))], mat))
 
 KhepriBase.b_surface_circle(b::ACAD, c, r, mat) =
   @remote(b, SurfaceCircle(c, vz(1, c.cs), r, mat))
@@ -512,11 +515,13 @@ KhepriBase.b_surface_arc(b::ACAD, c, r, α, Δα, mat) =
         if β > α
             @remote(b, SurfaceFromCurves(
                 [@remote(b, Arc(c, vz(1, c.cs), r, α, β)),
-                 @remote(b, PolyLine([add_pol(c, r, β), add_pol(c, r, α)]))]))
+                 @remote(b, PolyLine([add_pol(c, r, β), add_pol(c, r, α)]))],
+                mat))
         else
             @remote(b, SurfaceFromCurves(
                 [@remote(b, Arc(c, vz(1, c.cs), r, β, α)),
-                 @remote(b, PolyLine([add_pol(c, r, α), add_pol(c, r, β)]))]))
+                 @remote(b, PolyLine([add_pol(c, r, α), add_pol(c, r, β)]))],
+                mat))
         end
     end
 
@@ -636,10 +641,12 @@ realize(b::ACAD, s::Ellipse) =
 realize(b::ACAD, s::EllipticArc) =
   error("Finish this")
 
-realize(b::ACAD, s::Surface) =
+KhepriBase.b_surface(b::ACAD, frontier::Shapes, mat) =
   let #ids = map(r->@remote(b, NurbSurfaceFrom(r)), @remote(b, SurfaceFromCurves(collect_ref(s.frontier))))
-      ids = @remote(b, SurfaceFromCurves(collect_ref(s.frontier)))
-    foreach(mark_deleted, s.frontier)
+      ids = @remote(b, SurfaceFromCurves(collect_ref(b, frontier), mat))
+    for s in frontier
+      mark_deleted(b, s)
+    end
     ids
   end
 backend_surface_boundary(b::ACAD, s::Shape2D) =
@@ -746,43 +753,39 @@ KhepriBase.b_sweep(b::ACAD, path, profile, rotation, scale, mat) =
     @remote(b, Sweep(path_r, profile_r, rotation, scale))
   end
 
-#KhepriBase.b_loft(b::ACAD, profiles::Shapes, closed, smooth, mat) =
+KhepriBase.b_revolve_point(b::ACAD, profile, p, n, start_angle, amplitude, mat) =
+  b_arc(b, loc_from_o_vz(p, n), distance(point_position(profile), p), start_angle, amplitude, mat)
+KhepriBase.b_revolve_curve(b::ACAD, profile, p, n, start_angle, amplitude, mat) =
+  acad_revolution(b, profile, p, n, start_angle, amplitude, mat)
+KhepriBase.b_revolve_surface(b::ACAD, profile, p, n, start_angle, amplitude, mat) =
+  acad_revolution(b, profile, p, n, start_angle, amplitude, mat)
 
-
-
-backend_revolve_point(b::ACAD, profile::Shape, p::Loc, n::Vec, start_angle::Real, amplitude::Real) =
-  realize(b, arc(loc_from_o_vz(p, n), distance(profile, p), start_angle, amplitude))
-backend_revolve_curve(b::ACAD, profile::Shape, p::Loc, n::Vec, start_angle::Real, amplitude::Real) =
-  acad_revolution(b, profile, p, n, start_angle, amplitude)
-backend_revolve_surface(b::ACAD, profile::Shape, p::Loc, n::Vec, start_angle::Real, amplitude::Real) =
-  acad_revolution(b, profile, p, n, start_angle, amplitude)
-
-acad_revolution(b::ACAD, profile::Shape, p::Loc, n::Vec, start_angle::Real, amplitude::Real) =
+acad_revolution(b::ACAD, profile::Shape, p, n, start_angle, amplitude, mat) =
   and_delete_shape(
-    map_ref(profile) do r
+    map_ref(b, profile) do r
       @remote(b, Revolve(r, p, n, start_angle, amplitude))
     end,
     profile)
 
-backend_loft_curves(b::ACAD, profiles::Shapes, rails::Shapes, ruled::Bool, closed::Bool) =
+KhepriBase.b_loft_curves(b::ACAD, profiles, rails, ruled, closed, mat) =
   and_delete_shapes(@remote(b, Loft(
-                             collect_ref(profiles),
-                             collect_ref(rails),
+                             collect_ref(b, profiles),
+                             collect_ref(b, rails),
                              ruled, closed)),
                     vcat(profiles, rails))
 
-backend_loft_surfaces(b::ACAD, profiles::Shapes, rails::Shapes, ruled::Bool, closed::Bool) =
-    backend_loft_curves(b, profiles, rails, ruled, closed)
+KhepriBase.b_loft_surfaces(b::ACAD, profiles, rails, ruled, closed, mat) =
+    b_loft_curves(b, profiles, rails, ruled, closed, mat)
 
-backend_loft_curve_point(b::ACAD, profile::Shape, point::Shape) =
+KhepriBase.b_loft_curve_point(b::ACAD, profile, point, mat) =
     and_delete_shapes(@remote(b, Loft(
-                               vcat(collect_ref(profile), collect_ref(point)),
+                               vcat(collect_ref(b, profile), collect_ref(b, point)),
                                [],
                                true, false)),
                       [profile, point])
 
-backend_loft_surface_point(b::ACAD, profile::Shape, point::Shape) =
-    backend_loft_curve_point(b, profile, point)
+KhepriBase.b_loft_surface_point(b::ACAD, profile, point, mat) =
+    b_loft_curve_point(b, profile, point, mat)
 
 unite_ref(b::ACAD, r0::ACADNativeRef, r1::ACADNativeRef) =
     ensure_ref(b, @remote(b, Unite(r0.value, r1.value)))
@@ -1000,11 +1003,11 @@ switch_to_layer(to, b::ACAD) =
 # Blocks
 
 realize(b::ACAD, s::Block) =
-    @remote(b, CreateBlockFromShapes(s.name, collect_ref(s.shapes)))
+    @remote(b, CreateBlockFromShapes(s.name, collect_ref(b, s.shapes)))
 
 realize(b::ACAD, s::BlockInstance) =
     @remote(b, CreateBlockInstance(
-        collect_ref(s.block)[1],
+        collect_ref(b, s.block)[1],
         center_scaled_cs(s.loc, s.scale, s.scale, s.scale)))
 
 #=
@@ -1222,10 +1225,10 @@ KhepriBase.b_all_shapes_in_layer(b::ACAD, layer) =
   Shape[b_shape_from_ref(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
 
 backend_highlight_shape(b::ACAD, s::Shape) =
-  @remote(b, SelectShapes(collect_ref(s)))
+  @remote(b, SelectShapes(collect_ref(b, s)))
 
 backend_highlight_shapes(b::ACAD, ss::Shapes) =
-  @remote(b, SelectShapes(collect_ref(ss)))
+  @remote(b, SelectShapes(collect_ref(b, ss)))
 
 backend_pre_selected_shapes_from_set(ss::Shapes) =
   length(ss) == 0 ? [] : pre_selected_shapes_from_set(ss, backend(ss[1]))
