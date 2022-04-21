@@ -8,6 +8,7 @@ include("TikZ.jl")
 
 function __init__()
   add_current_backend(tikz)
+  set_view_top()
 end
 
 end
