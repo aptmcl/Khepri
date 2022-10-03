@@ -243,7 +243,7 @@ public Point3d CircleCenter(Entity ent)
 public Vector3d CircleNormal(Entity ent)
 public double CircleRadius(Entity ent)
 public Entity Ellipse(Point3d c, Vector3d n, Vector3d majorAxis, double radiusRatio)
-public Entity Arc(Point3d c, Vector3d n, double radius, double startAngle, double endAngle)
+public Entity Arc(Point3d c, Vector3d vx, Vector3d vy, double radius, double startAngle, double endAngle)
 public Point3d ArcCenter(Entity ent)
 public Vector3d ArcNormal(Entity ent)
 public double ArcRadius(Entity ent)
@@ -254,7 +254,7 @@ public Entity Text(string str, Point3d corner, Vector3d vx, Vector3d vy, double 
 public Entity SurfaceFromCurve(Entity curve, ObjectId matId)
 public Entity SurfaceCircle(Point3d c, Vector3d n, double r, ObjectId matId)
 public Entity SurfaceEllipse(Point3d c, Vector3d n, Vector3d majorAxis, double radiusRatio, ObjectId matId)
-public Entity SurfaceArc(Point3d c, Vector3d n, double radius, double startAngle, double endAngle, ObjectId matId)
+public Entity SurfaceArc(Point3d c, Vector3d vx, Vector3d vy, double radius, double startAngle, double endAngle, ObjectId matId)
 public Entity SurfaceClosedPolyLine(Point3d[] pts, ObjectId matId)
 public ObjectId[] SurfaceFromCurves(ObjectId[] ids, ObjectId matId)
 public ObjectId[] CurvesFromSurface(ObjectId id)
@@ -270,13 +270,17 @@ public ObjectId IrregularPyramidFrustum(Point3d[] bpts, Point3d[] tpts, ObjectId
 public ObjectId Thicken(ObjectId obj, double thickness)
 public ObjectId NurbSurfaceFrom(ObjectId id)
 public ObjectId Extrude(ObjectId profileId, Vector3d dir)
+public ObjectId ExtrudeWithMaterial(ObjectId profileId, Vector3d dir, ObjectId matId)
 public ObjectId Sweep(ObjectId pathId, ObjectId profileId, double rotation, double scale)
+public ObjectId SweepWithMaterial(ObjectId pathId, ObjectId profileId, double rotation, double scale, ObjectId matId)
 public ObjectId Loft(ObjectId[] profilesIds, ObjectId[] guidesIds, bool ruled, bool closed)
+public ObjectId LoftWithMaterial(ObjectId[] profilesIds, ObjectId[] guidesIds, bool ruled, bool closed, ObjectId matId)
 public ObjectId Unite(ObjectId objId0, ObjectId objId1)
 public ObjectId Intersect(ObjectId objId0, ObjectId objId1)
 public ObjectId Subtract(ObjectId objId0, ObjectId objId1)
 public void Slice(ObjectId id, Point3d p, Vector3d n)
 public ObjectId Revolve(ObjectId profileId, Point3d p, Vector3d n, double startAngle, double amplitude)
+public ObjectId RevolveWithMaterial(ObjectId profileId, Point3d p, Vector3d n, double startAngle, double amplitude, ObjectId matId)
 public void Transform(ObjectId id, Frame3d frame)
 public void Move(ObjectId id, Vector3d v)
 public void Scale(ObjectId id, Point3d p, double s)
@@ -412,6 +416,7 @@ KhepriBase.after_connecting(b::ACAD) =
     set_material(autocad, material_wood, "Plywood - New")
     set_material(autocad, material_concrete, "Flat - Broom Gray")
     set_material(autocad, material_plaster, "Fine - White")
+    set_material(autocad, material_clay, "Ceramic")
     set_material(autocad, material_grass, "Green")
   end
 
@@ -460,7 +465,7 @@ KhepriBase.b_arc(b::ACAD, c, r, α, Δα, mat) =
   elseif abs(Δα) >= 2*pi
     @remote(b, Circle(c, vz(1, c.cs), r))
   else
-	  let β = α + amplitude
+	  let β = α + Δα
   	  if β > α
   	  	@remote(b, Arc(c, vx(1, c.cs), vy(1, c.cs), r, α, β))
   	  else
@@ -514,12 +519,12 @@ KhepriBase.b_surface_arc(b::ACAD, c, r, α, Δα, mat) =
         β = α + Δα
         if β > α
             @remote(b, SurfaceFromCurves(
-                [@remote(b, Arc(c, vz(1, c.cs), r, α, β)),
+                [@remote(b, Arc(c, vx(1, c.cs), vy(1, c.cs), r, α, β)),
                  @remote(b, PolyLine([add_pol(c, r, β), add_pol(c, r, α)]))],
                 mat))
         else
             @remote(b, SurfaceFromCurves(
-                [@remote(b, Arc(c, vz(1, c.cs), r, β, α)),
+                [@remote(b, Arc(c, vx(1, c.cs), vy(1, c.cs), r, β, α)),
                  @remote(b, PolyLine([add_pol(c, r, α), add_pol(c, r, β)]))],
                 mat))
         end
@@ -738,11 +743,14 @@ b_text(b::ACAD, str, p, size, mat) =
 backend_right_cuboid(b::ACAD, cb, width, height, h, material) =
   @remote(b, CenteredBox(cb, width, height, h))
 
+KhepriBase.b_extrusion(b::ACAD, s::Shape, v, cb, mat) =
+  b_extrusion(b, s, v, cb, mat, mat, mat)
 
 KhepriBase.b_extrusion(b::ACAD, s::Shape, v, cb, bmat, tmat, smat) =
   and_mark_deleted(b,
     map_ref(b, s) do r
-      @remote(b, Extrude(r, v))
+      #@remote(b, Extrude(r, v))
+      @remote(b, ExtrudeWithMaterial(r, v, smat))
     end,
     s)
 
@@ -750,8 +758,20 @@ KhepriBase.b_sweep(b::ACAD, path, profile, rotation, scale, mat) =
   let curve_mat = material_ref(b, default_curve_material()),
       path_r = b_realize_path(b, path, curve_mat),
       profile_r = b_realize_path(b, profile, curve_mat)
-    @remote(b, Sweep(path_r, profile_r, rotation, scale))
+    #@remote(b, Sweep(path_r, profile_r, rotation, scale))
+    @remote(b, SweepWithMaterial(path_r, profile_r, rotation, scale, mat))
   end
+
+KhepriBase.b_sweep(b::ACAD, path::Shape1D, profile::Shape, rotation, scale, mat) =
+  and_mark_deleted(b,
+    map_ref(b, path) do path_r
+      map_ref(b, profile) do profile_r
+        #@remote(b, Sweep(path_r, profile_r, rotation, scale))
+        @remote(b, SweepWithMaterial(path_r, profile_r, rotation, scale, mat))
+      end
+    end,
+    [path, profile])
+
 
 KhepriBase.b_revolve_point(b::ACAD, profile, p, n, start_angle, amplitude, mat) =
   b_arc(b, loc_from_o_vz(p, n), distance(point_position(profile), p), start_angle, amplitude, mat)
@@ -763,25 +783,26 @@ KhepriBase.b_revolve_surface(b::ACAD, profile, p, n, start_angle, amplitude, mat
 acad_revolution(b::ACAD, profile::Shape, p, n, start_angle, amplitude, mat) =
   and_delete_shape(
     map_ref(b, profile) do r
-      @remote(b, Revolve(r, p, n, start_angle, amplitude))
+      #@remote(b, Revolve(r, p, n, start_angle, amplitude))
+      @remote(b, RevolveWithMaterial(r, p, n, start_angle, amplitude, mat))
     end,
     profile)
 
 KhepriBase.b_loft_curves(b::ACAD, profiles, rails, ruled, closed, mat) =
-  and_delete_shapes(@remote(b, Loft(
+  and_delete_shapes(@remote(b, LoftWithMaterial(
                              collect_ref(b, profiles),
                              collect_ref(b, rails),
-                             ruled, closed)),
+                             ruled, closed, mat)),
                     vcat(profiles, rails))
 
 KhepriBase.b_loft_surfaces(b::ACAD, profiles, rails, ruled, closed, mat) =
     b_loft_curves(b, profiles, rails, ruled, closed, mat)
 
 KhepriBase.b_loft_curve_point(b::ACAD, profile, point, mat) =
-    and_delete_shapes(@remote(b, Loft(
+    and_delete_shapes(@remote(b, LoftWithMaterial(
                                vcat(collect_ref(b, profile), collect_ref(b, point)),
                                [],
-                               true, false)),
+                               true, false, mat)),
                       [profile, point])
 
 KhepriBase.b_loft_surface_point(b::ACAD, profile, point, mat) =
@@ -1092,7 +1113,7 @@ KhepriBase.b_shape_from_ref(b::ACAD, r) =
             surface_grid(reshape(pts, (n, m)), n_closed == 1, m_closed == 1, ref=ref)
         end
     elseif 12 <= code <= 14
-        surface(Shapes1D[], ref=ref)
+        surface(Shape1D[], ref=ref)
     elseif 103 <= code <= 106
         polygon(@remote(b, LineVertices(r)),
                 ref=ref)
