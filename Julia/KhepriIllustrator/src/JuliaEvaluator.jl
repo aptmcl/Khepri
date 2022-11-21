@@ -15,7 +15,8 @@ mutable struct Environment
 end
 
 create_initial_environment(bindings...) =
- Environment([bindings...], nothing)
+  Environment(map(b -> make_binding(b.first, b.second), bindings),
+              nothing)
 
 augment_environment(names, values, env) =
  Environment(map(make_binding, names, values),
@@ -32,11 +33,6 @@ get_environment_binding(name, env) =
       end
       get_environment_binding(name, env.parent)
     end
-
-
-create_initial_environment(bindings...) =
-  Environment(map(b -> make_binding(b.first, b.second), bindings),
-              nothing)
 
 #=
 Regarding the syntax:
@@ -64,6 +60,10 @@ is_name(expr) = expr isa Symbol
 eval_name(name, env) =
   binding_value(get_environment_binding(name, env))
 
+is_vect(expr) = expr isa Expr && expr.head === :vect
+eval_vect(expr, env) =
+  [eval_expr(expri, env) for expri in expr.args]
+
 eval_expr(expr, env) =
   if is_self_evaluating(expr)
     expr
@@ -71,6 +71,8 @@ eval_expr(expr, env) =
     eval_name(expr, env)
   elseif is_quote(expr)
     eval_quote(expr, env)
+  elseif is_vect(expr)
+    eval_vect(expr, env)
   elseif is_lambda(expr)
     eval_lambda(expr, env)
   elseif is_if(expr)
@@ -106,6 +108,9 @@ struct LexicalFunction
   body
   environment
 end
+
+Base.show(io::IO, f::LexicalFunction) =
+  print(io, "<function>")
 
 make_function(parameters, body, env) = LexicalFunction(parameters, body, env)
 is_function(obj) = obj isa LexicalFunction
@@ -145,6 +150,24 @@ eval_mdef(expr, env) =
     value
   end
 
+illustrate(func::Any, args...) = missing
+
+const pause_illustration = Parameter(false)
+export pause_illustration
+
+illustrate_and_maybe_pause(func, args...) =
+  begin
+    illustrate(func, args...)
+    if pause_illustration() && length(tikz.shapes) > 0
+      render_view()
+      readline()
+    end
+  end
+
+stack = []
+export recursive_levels
+recursive_levels = Parameter(0)
+#render_n = 0
 eval_call(expr, env) =
   let func = eval_expr(call_operator(expr), env),
       exprs = call_operands(expr)
@@ -154,9 +177,22 @@ eval_call(expr, env) =
         eval_expr(expansion, env)
       end :
       let args = map(expr -> eval_expr(expr, env), exprs)
-        apply_function(func, args, env)
+        if length(stack) - length(unique(stack)) <= recursive_levels()
+          illustrate(func, args..., exprs...)
+          #if !ismissing(illustrate(func, args..., exprs...))
+          #  global render_n += 1
+          #  render_view("IllustrationStep$render_n")
+          #end
+        end
+        push!(stack, call_operator(expr))
+        try
+          apply_function(func, args, env)
+        finally
+          pop!(stack)
+        end
       end
   end
+
 
 make_primitive(f) = f
 is_primitive(obj) = obj isa Function
@@ -179,28 +215,65 @@ eval_if(expr, env) =
 For the initial environment, we also need to clean things a bit:
 =#
 
+macro predef(sym)
+  :($(QuoteNode(sym)) => make_primitive($sym))
+end
+
 initial_environment =
   create_initial_environment(
-    :pi => 3.14159,
-    :e  => 2.17828,
-    :nothing => nothing,
-    :+  => make_primitive(+),
-    :*  => make_primitive(*),
-    :-  => make_primitive(-),
-    :/  => make_primitive(/),
-    :(==) => make_primitive(==),
-    :<  => make_primitive(<),
-    :>  => make_primitive(>),
-    :<= => make_primitive(<=),
-    :>= => make_primitive(>=),
-    :!  => make_primitive(!),
-    :read => make_primitive(julia_read),
-    :print => make_primitive(print),
-    :println => make_primitive(println),
-    :tuple => make_primitive(tuple),
-    :Expr => make_primitive(Expr),
-    :gensym => make_primitive(gensym),
-    :eval => make_primitive(eval_expr))
+    @predef(pi),
+    @predef(π),
+    @predef(nothing),
+    @predef(+),
+    @predef(*),
+    @predef(-),
+    @predef(/),
+    @predef((==)),
+    @predef(<),
+    @predef(>),
+    @predef(<=),
+    @predef(>=),
+    @predef(!),
+    @predef(^),
+    @predef(sqrt),
+    @predef(cbrt),
+    @predef(sin),
+    @predef(asin),
+    @predef(cos),
+    @predef(acos),
+    @predef(tan),
+    @predef(atan),
+    @predef(print),
+    @predef(println),
+    @predef(tuple),
+    @predef(Expr),
+    @predef(gensym),
+    @predef(circle),
+    @predef(line),
+    @predef(polygon),
+    @predef(arc),
+    @predef(regular_polygon),
+    @predef(surface_regular_polygon),
+    @predef(surface_circle),
+    @predef(rectangle),
+    @predef(u0),
+    @predef(x),
+    @predef(vx),
+    @predef(y),
+    @predef(vy),
+    @predef(xy),
+    @predef(vxy),
+    @predef(z),
+    @predef(vz),
+    @predef(xz),
+    @predef(vxz),
+    @predef(xyz),
+    @predef(vxyz),
+    @predef(pol),
+    @predef(vpol),
+    #@predef(label),
+    @predef(box)
+    )
 
 eval_expr(expr) = eval_expr(expr, initial_environment)
 
@@ -212,7 +285,6 @@ is_self_evaluating(expr) = expr isa Number || expr isa String || expr isa Bool |
   expr isa LineNumberNode
 
 
-is_call(expr) = expr isa Expr && expr.head === :call
 call_operator(expr) = expr.args[1]
 call_operands(expr) = expr.args[2:end]
 
@@ -247,22 +319,37 @@ lambda_body(expr) = expr.args[2]
 
 #=
 Julia does not have flet, only let but it also supports local function
-definitions.
+definitions. Moreover, let is more like let*.
 =#
 
 is_let(expr) = expr isa Expr && expr.head === :let
-let_bindings(expr) =
+let_scopes(expr) =
   expr.args[1].head === :block ?
     expr.args[1].args :
     [expr.args[1]]
 let_body(expr) = expr.args[end]
+let_scope_names(scope) =
+  scope.args[1] isa Expr && scope.args[1].head === :tuple ?
+    scope.args[1].args :
+    [let_binding_name(scope)]
+let_scope_inits(scope) =
+  scope.args[1] isa Expr && scope.args[1].head === :tuple ?
+    scope.args[2].args :
+    [let_binding_init(scope)]
 eval_let(expr, env) =
-  let bindings = let_bindings(expr),
-      names = map(let_binding_name, bindings),
-      inits = map(binding -> eval_expr(let_binding_init(binding), env),
-                  bindings),
-      extended_env = augment_environment(names, inits, env)
-    eval_expr(let_body(expr), extended_env)
+  let scopes = let_scopes(expr),
+      body = let_body(expr)
+    if isempty(scopes)
+      # Let always create an augmented environment
+      eval_expr(body, augment_environment([], [], env))
+    else
+      let scope = scopes[1],
+          names = let_scope_names(scope),
+          inits = map(init->eval_expr(init, env), let_scope_inits(scope)),
+          extended_env = augment_environment(names, inits, env)
+        eval_let(:(let $(scopes[2:end]...); $body end), extended_env)
+      end
+    end
   end
 
 #=
@@ -425,8 +512,6 @@ is_true(value) =
       false :
       error("Non boolean used in a boolean context")
 
-is_if(expr) = expr isa Expr && expr.head === :if
-
 if_condition(expr) = expr.args[1]
 if_consequent(expr) = expr.args[2]
 if_alternative(expr) = expr.args[3]
@@ -534,10 +619,8 @@ eval_expr(jl"1+2")
 @test eval_expr(jl"((x,y)->x+y)(1,2)") == 3
 
 @test eval_expr(jl"1+2") == 3
-@test eval_expr(jl"pi+1") === 4.14159
-@test eval_expr(jl"pi+pi") == 6.28318
+@test eval_expr(jl"pi+1") === 4.141592653589793
 @test eval_expr(jl"let x=1; x; end") === 1
-@test eval_expr(jl"let x=2; x*pi; end") == 6.28318
 @test eval_expr(jl"let a=1, b=2; let a=3; a+b; end; end") == 5
 @test eval_expr(jl"""
 let a = 1
@@ -559,7 +642,6 @@ eval_expr(jl"triple(a) = a + a + a")
 @test eval_expr(jl"baz = 3") === 3
 @test eval_expr(jl"let x = 0; baz = 5; end + baz") === 8
 @test eval_expr(jl"let ; baz = 6; end + baz") === 9
-
 @test eval_expr(jl"counter = 0") === 0
 eval_expr(jl"incr() = global counter = counter + 1")
 @test eval_expr(jl"incr()") === 1
@@ -864,6 +946,26 @@ quotient_or_false(a, b) =
 @test eval_expr(jl"quotient_or_false(6, 2)") === 3.0
 @test eval_expr(jl"quotient_or_false(6, 0)") === false
 
+@test eval_expr(jl"""
+let x = 1, y = 2
+  x + y
+end
+""") == 3
+
+@test eval_expr(jl"""
+let (x, y) = (1, 2)
+  x + y
+end
+""") == 3
+
+@test eval_expr(jl"""
+let x = 1, y = x + 1
+  y
+end
+""") === 2
+
+
+
 julia_repl() =
   while true
     prompt_for_input()
@@ -872,3 +974,10 @@ julia_repl() =
       println(stdout, value)
     end
   end
+
+macro illustrate(call)
+  :(eval_expr($(QuoteNode(call))))
+end
+
+export @illustrate,
+       illustrate
