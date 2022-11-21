@@ -31,18 +31,7 @@ illustrate_xyz(p, key) =
         end
     end
 
-#=
-illustrate_length(d::dist, p::XYZ, a::Real, key::String) =
-    let pf = p+vpol(d, a) # p final, end of segment
-        ap = a-pi/2 # angle perpendicular
-        dp = d*0.1 # distance for text
-        pm = p+vpol(d/2, a) # middle point between p and pf
-        with(current_layer, annotations) do
-            line(p, p+vpol(dp,ap), pf+vpol(dp,ap), pf)
-            text(key, pm+vpol(2dp, ap), 0.2)
-        end
-    end # dimention away from line
-=#
+
 illustrate_length(p::XYZ, q::XYZ, key::String) =
     let ap = pol_phi(q-p)-pi/2 # angle perpendicular
         dp = pol_rho(q-p)*0.1 # distance for text
@@ -192,39 +181,6 @@ illustrate_rectangle(p, dx, dy, p_str, dx_str, dy_str) =
 
     end
 
-# -------------------- illustrate tests
-
-# delete_all_shapes()
-
-# illustrate_ang(ang(pi/2), x(10), pi/8, "alfa")
-# illustrate_ang(ang(pi/6), x(10), pi/4+pi, "alfa")
-
-# illustrate_ang(ang(-pi/2), x(10), pi/8, "alfa")
-# illustrate_ang(ang(-pi/6), x(10), pi/4+pi, "alfa")
-
-# illustrate_xyz(xy(10,5), "starting point")
-
-# p1 = x(15)
-# line(p1, p1+vpol(3, pi/6))
-# illustrate_length(dist(3), p1, pi/6, "dist with ang")
-
-# p2 = xy(15,5)
-# p3 = xy(16,9)
-# line(p2, p3)
-# illustrate_length(p2, p3, "dist p-q")
-# illustrate_dist(p2, p3, "dist p-q")
-
-# p5 = xy(15,11)
-# p6 = xy(21,11)
-# line(p5, p6)
-# illustrate_length(p5, p6, "dist p-q")
-# illustrate_length(p6, p5, "dist p-q")
-# illustrate_dist(p5, p6, "dist p-q")
-# illustrate_dist(p6, p5, "dist p-q")
-
-# illustrate_vxy(xy(5,5), vxy(6,8), "vxy(6,8)")
-
-# illustrate_vpol(u0(), 10, pi/3, "rho", "alpha")
 
 # ---------------------- multiple dishpatch/overload illustrate
 # not sure if we're gonna need this
