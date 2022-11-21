@@ -17,6 +17,11 @@ tikz_e(out::IO, arg) =
 export use_wireframe
 use_wireframe = Parameter(false)
 
+tikz_options(out::IO, options::Nothing) =
+  nothing
+tikz_options(out::IO, options::String) =
+  print(out, "[$(options)]")
+
 tikz_draw(out::IO, filled=false) =
   print(out, filled && ! use_wireframe() ? "\\fill " : "\\draw ")
 
@@ -69,18 +74,26 @@ tikz_coord(out::IO, c::Loc) =
 tikz_pgfpoint(out::IO, c::Loc) =
   let c = in_world(c)
     if ! iszero(c.z)
-      error("Can't handle 3D coords")
+      print(out, "\\pgfpointxyz{")
+      tikz_cm(out, c.x)
+      print(out, "}{")
+      tikz_cm(out, c.y)
+      print(out, "}{")
+      tikz_cm(out, c.z)
+      print(out, "}")
+    else
+      print(out, "\\pgfpoint{")
+      tikz_cm(out, c.x)
+      print(out, "}{")
+      tikz_cm(out, c.y)
+      print(out, "}")
     end
-    print(out, "\\pgfpoint{")
-    tikz_cm(out, c.x)
-    print(out, "}{")
-    tikz_cm(out, c.y)
-    print(out, "}")
   end
 
-tikz_circle(out::IO, c::Loc, r::Real, filled::Bool=false) =
+tikz_circle(out::IO, c::Loc, r::Real, filled::Bool=false, options=nothing) =
   begin
     tikz_draw(out, filled)
+    tikz_options(out, options)
     tikz_coord(out, c)
     print(out, "circle(")
     tikz_cm(out, r)
@@ -88,7 +101,7 @@ tikz_circle(out::IO, c::Loc, r::Real, filled::Bool=false) =
   end
 
 tikz_point(out::IO, c::Loc) =
-  tikz_circle(out, c, 0.01, true)
+  tikz_circle(out, c, 0.03, true, nothing)
 
 tikz_ellipse(out::IO, c::Loc, r0::Real, r1::Real, fi::Real, filled=false) =
   begin
@@ -107,9 +120,10 @@ tikz_ellipse(out::IO, c::Loc, r0::Real, r1::Real, fi::Real, filled=false) =
     tikz_e(out, ")")
   end
 
-tikz_arc(out::IO, c::Loc, r::Real, ai::Real, af::Real, filled=false) =
+tikz_arc(out::IO, c::Loc, r::Real, ai::Real, af::Real, filled::Bool, options) =
   begin
     tikz_draw(out, filled)
+    tikz_options(out, options)
     if filled
       tikz_coord(out, c)
       print(out, "--")
@@ -127,27 +141,27 @@ tikz_arc(out::IO, c::Loc, r::Real, ai::Real, af::Real, filled=false) =
     println(out, ";")
   end
 
-tikz_maybe_arc(out::IO, c::Loc, r::Real, ai::Real, da::Real, filled=false) =
+tikz_maybe_arc(out::IO, c::Loc, r::Real, ai::Real, da::Real, filled::Bool, options) =
   if iszero(r)
     tikz_point(out, c)
   elseif iszero(da)
     tikz_point(out, c + vpol(r, ai))
-  elseif abs(da) >= 2*pi
-    tikz_circle(out, c, r, filled)
+  #elseif abs(da) >= 2*pi # Some options (e.g., arraws) only make sense for arcs
+  #  tikz_circle(out, c, r, filled, options)
   else
     let af = ai + da
       if af > ai
-        tikz_arc(out, c, r, ai, af, filled)
+        tikz_arc(out, c, r, ai, af, filled, options)
       else
-        tikz_arc(out, c, r, af, ai, filled)
+        tikz_arc(out, c, r, af, ai, filled, options)
       end
     end
   end
 
-tikz_line(out::IO, pts::Locs, options::String="") =
+tikz_line(out::IO, pts::Locs, options) =
   begin
     tikz_draw(out, false)
-    print(out, options)
+    tikz_options(out, options)
     tikz_coord(out, first(pts))
     for pt in Iterators.drop(pts, 1)
       print(out, "--")
@@ -158,6 +172,7 @@ tikz_line(out::IO, pts::Locs, options::String="") =
 
 tikz_dimension(out::IO, p::Loc, q::Loc, text::AbstractString) =
   begin
+    error("Bum")
     print(out, "\\dimline{")
     tikz_coord(out, p)
     print(out, "}{")
@@ -169,12 +184,34 @@ tikz_dimension(out::IO, p::Loc, q::Loc, text::AbstractString) =
 
 tikz_dim_line(out::IO, p::Loc, q::Loc, text::AbstractString, outside) =
   begin
-    print(out, "\\draw[fill=black,latex-latex, very thin]")
+    print(out, "\\draw[dimension,latex-latex]")
     tikz_coord(out, p)
     print(out, "--")
     tikz_coord(out, q)
-    println(out, "node[midway,auto=left]{$text};")
+    println(out, "node[very near end=0.95,auto=left]{$text};")
   end
+
+tikz_node(out::IO, p, txt, options) =
+  begin
+    tikz_draw(out)
+    tikz_coord(out, p)
+    print(out, "node")
+    tikz_options(out, options)
+    print(out, "{")
+    print(out, txt)
+    tikz_e(out, "}")
+  end
+
+tikz_dim_arc(out::IO, c, r, ai, da, r_text, da_text) =
+  da ≈ 0.0 || r ≈ 0.0 ?
+    nothing :
+    let f = random_range(0.2, 0.5)
+      tikz_line(out, [c, c+vpol(r*f, ai)], "dimension")
+      tikz_line(out, [c, c+vpol(r, ai + da)], "latex-latex,dimension")
+      tikz_maybe_arc(out, c, r*f, ai, da, false, "latex-latex,dimension")
+      tikz_node(out, intermediate_loc(c, c + vpol(r, ai + da)), r_text, "dimension")
+      tikz_node(out, c + vpol(r*(f+0.05), ai + da/2), da_text, "dimension")
+    end
 
 tikz_closed_line(out::IO, pts::Locs, filled::Bool=false) =
   begin
@@ -324,7 +361,7 @@ tikz_set_view(out::IO, view, options) =
   let v = view.target - view.camera,
       contents = String(take(out)),
       out = IOBuffer()
-    println(out, "\\begin{tikzpicture}[3d view={$(rad2deg(sph_phi(v))+90)}{$(rad2deg(sph_psi(v)))}$(use_wireframe() ? "" : ",fill=gray")$(options=="" ? "" : ",")$options]") #)opacity=0.2")]")
+    println(out, "\\begin{tikzpicture}[3d view={$(rad2deg(sph_phi(v))-90)}{$(rad2deg(sph_psi(v))-90)}$(use_wireframe() ? "" : ",fill=gray")$(options=="" ? "" : ",")$options]") #)opacity=0.2")]")
     print(out, contents)
     println(out, "\\end{tikzpicture}")
     String(take!(out))
@@ -348,7 +385,7 @@ tikz_set_view_top(out::IO, options) =
 #
 
 abstract type TikZKey end
-const TikZId = Nothing
+const TikZId = Any
 const TikZIds = Vector{TikZId}
 const TikZRef = GenericRef{TikZKey, TikZId}
 const TikZRefs = Vector{TikZRef}
@@ -361,21 +398,52 @@ const TikZ = IOBufferBackend{TikZKey, TikZId, Vector}
 
 KhepriBase.void_ref(b::TikZ) = TikZNativeRef(nothing)
 
-const tikz = TikZ(view=View(xyz(10,10,10), xyz(0,0,0), 0, 0), extra=[])
+const tikz = TikZ(view=top_view(), extra=[])
 
 KhepriBase.backend_name(b::TikZ) = "TikZ"
+
+export tikz_option
+tikz_option(str) = material(str, tikz=>str)
+
+export very_thin, thin, thick, very_thick
+very_thin = tikz_option("very thin")
+thin = tikz_option("thin")
+thick = tikz_option("thick")
+very_thick = tikz_option("very thick")
+
+export var"<->", var"->", var"<-", latex_latex, latex_, _latex
+var"<->" = tikz_option("<->")
+var"->" = tikz_option("->")
+var"<-" = tikz_option("<-")
+latex_latex = tikz_option("latex-latex")
+_latex = tikz_option("-latex")
+latex_ = tikz_option("latex-")
+
+KhepriBase.merge_backend_materials(b::TikZ, m1::String, m2::String) =
+  join(union(split(m1, ","), split(m2, ",")), ",")
+
+
+KhepriBase.after_connecting(b::TikZ) =
+  begin
+    set_material()
+	#set_material(blender, material_grass, "asset_base_id:97b171b4-2085-4c25-8793-2bfe65650266 asset_type:material")
+	#set_material(blender, material_grass, "asset_base_id:7b05be22-6bed-4584-a063-d0e616ddea6a asset_type:material")
+  end
+
+
 
 tikz_output(options="") =
   let b = tikz
     b.cached = false
     truncate(connection(b), 0)
     empty!(b.extra)
+    sort_illustrations!(b)
     realize_shapes(b)
     painter_sorter!(b.extra, b.view.camera)
     for tri in b.extra
       paint_trig(b, tri)
     end
-    norm(cross(b.view.target - b.view.camera, vz(1))) < 1e-9 ? # aligned with Z
+    b.view.is_top_view ?
       tikz_set_view_top(connection(b), options) :
       tikz_set_view(connection(b), b.view, options)
   end
@@ -392,20 +460,31 @@ tikz_output_and_reset(options="") =
     out
   end
 
-withTikZXForm(f, out, c) =
-  if is_world_cs(c.cs)
-    f(out, c)
-  else
-    tikz_transform(out,
-      out -> f(out, u0(world_cs)),
-      c)
-   end
+withTikZXForm(f, b, c) =
+  let out = connection(b)
+    if b.view.is_top_view
+      if is_world_cs(c.cs)
+        f(out, c)
+      else
+        tikz_transform(out,
+          out -> f(out, u0(world_cs)),
+          c)
+      end
+    elseif is_world_cs(c.cs)
+      # Don't transform latex println(out, "\\begin{scope}[canvas is xy plane at z=$(c.z),transform shape]")
+      println(out, "\\begin{scope}[canvas is xy plane at z=$(c.z)]")
+      f(out, xy(c.x, c.y, world_cs))
+      println(out, "\\end{scope}")
+    else
+      error("Unfinished!!!")
+    end
+  end
 
-KhepriBase.b_point(b::TikZ, p) =
-  tikz_pgfpoint(connection(b), p)
+KhepriBase.b_point(b::TikZ, p, mat) =
+  tikz_point(connection(b), p)
 
 KhepriBase.b_line(b::TikZ, ps, mat) =
-  tikz_line(connection(b), ps)
+  tikz_line(connection(b), ps, mat)
 
 KhepriBase.b_polygon(b::TikZ, ps, mat) =
   tikz_closed_line(connection(b), ps)
@@ -427,17 +506,17 @@ KhepriBase.b_closed_spline(b::TikZ, ps, mat) =
   tikz_hobby_closed_spline(connection(b), ps)
 
 KhepriBase.b_circle(b::TikZ, c, r, mat) =
-  withTikZXForm(connection(b), c) do out, cc
+  withTikZXForm(b, c) do out, cc
     tikz_circle(out, cc, r)
   end
 
 KhepriBase.b_arc(b::TikZ, c, r, α, Δα, mat) =
-  withTikZXForm(connection(b), c) do out, cc
-    tikz_maybe_arc(out, cc, r, α, Δα, false)
+  withTikZXForm(b, c) do out, cc
+    tikz_maybe_arc(out, cc, r, α, Δα, false, mat)
   end
 
 KhepriBase.b_rectangle(b::TikZ, c, dx, dy, mat) =
-  withTikZXForm(connection(b), c) do out, cc
+  withTikZXForm(b, c) do out, cc
     tikz_rectangle(out, cc, dx, dy)
   end
 
@@ -477,6 +556,26 @@ KhepriBase.b_trig(b::TikZ, p1, p2, p3, mat) =
     nothing
   end
 
+# To better map to TikZ, we also provide a non-portable specialized version of TikZ paths
+#=
+KhepriBase.@defshape(Shape1D, tikz_path, args::Vector=[])
+tikz_path(arg, args...) = tikz_path([arg, args...])
+
+struct TikZNode
+  p1::Loc
+  p2::Loc
+  label::String
+  options::String
+end
+
+macro n_str(label)
+  :($label, $options)
+end
+
+tikz_path([x(1),x(2), n"sin(x)", "below"),
+=#
+
+
 paint_trig(b::TikZ, (p1, p2, p3, mat)) =
   let io = connection(b),
       #c = trig_center(p1, p2, p3),
@@ -496,6 +595,7 @@ paint_trig(b::TikZ, (p1, p2, p3, mat)) =
 end
 
 KhepriBase.b_quad(b::TikZ, p1, p2, p3, p4, mat) =
+  #tikz_closed_line(connection(b), [p1, p2, p3, p4])
   invoke(b_quad, Tuple{Backend, Any, Any, Any, Any, Any}, b, p1, p2, p3, p4, mat)
   # let io = connection(b)
   #   print(io, raw"\addplot3[patch,shader=interp] coordinates {")
@@ -514,22 +614,22 @@ KhepriBase.b_surface_polygon_with_holes(b::TikZ, ps, qss, mat) =
   tikz_closed_lines(connection(b), [ps, qss...], true)
 
 KhepriBase.b_surface_circle(b::TikZ, c, r, mat) =
-  withTikZXForm(connection(b), c) do out, cc
+  withTikZXForm(b, c) do out, cc
     tikz_circle(out, cc, r, true)
   end
 
 KhepriBase.b_surface_arc(b::TikZ, c, r, α, Δα, mat) =
-  withTikZXForm(connection(b), c) do out, cc
+  withTikZXForm(b, c) do out, cc
     tikz_maybe_arc(out, cc, r, α, Δα, true)
   end
 =#
 # realize(b::TikZ, s::Ellipse) =
-#   withTikZXForm(connection(b), s.center) do out, c
+#   withTikZXForm(b, s.center) do out, c
 #     tikz_ellipse(out, c, s.radius_x, s.radius_y, 0, false)
 #   end
 #
 # realize(b::TikZ, s::SurfaceEllipse) =
-#   withTikZXForm(connection(b), s.center) do out, c
+#   withTikZXForm(b, s.center) do out, c
 #     tikz_ellipse(out, c, s.radius_x, s.radius_y, 0, true)
 #   end
 #
@@ -539,13 +639,13 @@ KhepriBase.b_surface_arc(b::TikZ, c, r, α, Δα, mat) =
 #realize(b::TikZ, s::SurfaceElliptic_Arc) = TikZCircle(connection(b),
 
 # KhepriBase.b_surface_rectangle(b::TikZ, c, dx, dy, mat) =
-#   withTikZXForm(connection(b), c) do out, cc
+#   withTikZXForm(b, c) do out, cc
 #     tikz_rectangle(out, cc, dx, dy, true)
 #   end
 
 KhepriBase.b_text(b::TikZ, str, p, size, mat) =
   #invoke(b_text, Tuple{Backend, Any, Any, Any, Any}, b, str, p, size, mat)
-  withTikZXForm(connection(b), p) do out, c
+  withTikZXForm(b, p) do out, c
     tikz_text(out, str, c, size)
   end
 
@@ -554,7 +654,13 @@ KhepriBase.b_dim_line(b::TikZ, p, q, tv, str, size, outside, mat) =
   tikz_dim_line(connection(b), p, q, str, outside)
 
 KhepriBase.b_ext_line(b::TikZ, p, q, mat) =
-  tikz_line(connection(b), [p, q], "[very thin]")
+  tikz_line(connection(b), [p, q], "illustration")
+
+KhepriBase.b_arc_dimension(b::TikZ, c, r, α, Δα, rstr, Δstr, size, offset, mat) =
+  withTikZXForm(b, c) do out, cc
+    tikz_dim_arc(out, c, r, α, Δα, rstr, Δstr)
+  end
+
 
 # realize(b::TikZ, s::SurfaceGrid) =
 #   invoke(realize, Tuple{Backend, SurfaceGrid}, b, s)
@@ -592,14 +698,19 @@ add_tikz(str) =
 const miktex_folder = Parameter("C:/Users/aml/AppData/Local/Programs/MiKTeX/miktex/bin/x64/")
 miktex_cmd(cmd::AbstractString="pdflatex") = miktex_folder() * cmd
 
+export tikz_as_png
+const tikz_as_png = Parameter(false)
+
 process_tikz(path) =
   let contents = tikz_output(),
       path = path_replace_suffix(path, ".tex"),
-      pdfpath = path_replace_suffix(path, ".pdf")
-    rm(pdfpath, force=true)
+      outpath = path_replace_suffix(path, ".pdf")
+    rm(outpath, force=true)
     open(path, "w") do out
-      println(out, raw"\documentclass{standalone}")
-      println(out, raw"\usepackage{tikz}")
+      println(out, tikz_as_png() ?
+                     raw"\documentclass[convert={density=300,outext=.png}]{standalone}" :
+                     raw"\documentclass{standalone}")
+      println(out, raw"\usepackage{tikz,tikz-3dplot}")
       println(out, raw"\usetikzlibrary{perspective,patterns}")
       println(out, raw"\usetikzlibrary{calc,fadings,decorations.pathreplacing}")
       println(out, raw"\usetikzlibrary{shapes,fit}")
@@ -608,6 +719,8 @@ process_tikz(path) =
       #println(out, raw"\pgfplotsset{compat=1.17}")
       #println(out, raw"\usepackage{tikz-3dplot}")
       println(out, raw"\begin{document}")
+      println(out, raw"\tikzset{illustration/.style={ultra thin,blue!50}}")
+      println(out, raw"\tikzset{dimension/.style={very thin,lightgray}}")
       println(out, contents)
       println(out, raw"\end{document}")
     end
@@ -616,10 +729,14 @@ process_tikz(path) =
     #   occursin("Error:", output) && println(output)
     # end
     cd(dirname(path)) do
-      run(`$(miktex_cmd("texify")) --pdf --engine=luatex --run-viewer $(path)`, wait=true)
+      run(tikz_as_png() ?
+            `$(miktex_cmd("texify")) --pdf --engine=luatex $(path)` :
+            `$(miktex_cmd("texify")) --pdf --engine=luatex --run-viewer $(path)`,
+          wait=true)
       #output = read(`$(miktex_cmd("texify")) --run-viewer $(path)`, String)
       #occursin("Error:", output) && println(output)
     end
+    println(path)
   end
 
 export visualize_tikz
@@ -635,3 +752,101 @@ KhepriBase.b_render_pathname(b::TikZ, name::String) =
 
 KhepriBase.b_render_view(b::TikZ, path) =
   process_tikz(path)
+
+# Illustrations
+KhepriBase.b_textify(b::TikZ, expr) = latexify(expr)
+
+KhepriBase.b_labels(b::TikZ, p, strs, mat) =
+  withTikZXForm(b, p) do out, c
+    tikz_node(out, c, "",
+      "fill,circle,outer sep=0,inner sep=0,minimum size=2pt,illustration,"*
+      join(["label={[illustration]$ϕ:$str}" for (str,ϕ) in zip(strs, division(-45, 315, length(strs), false))], ","))
+  end
+
+KhepriBase.b_radii_illustration(b::TikZ, c, rs, rs_txts, mat) =
+  withTikZXForm(b, c) do out, cc
+    for (r, r_txt, ϕ) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false))
+      tikz_line(out, [c, c+vpol(r, ϕ)], "latex-latex,illustration")
+      tikz_node(out, intermediate_loc(c, c + vpol(r, ϕ)), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(ϕ+π/2)):$r_txt}")
+    end
+  end
+
+KhepriBase.b_vectors_illustration(b::TikZ, p, a, rs, rs_txts, mat) =
+  withTikZXForm(b, p) do out, c
+    for (r, r_txt) in zip(rs, rs_txts)
+      tikz_line(out, [c, c+vpol(r, a)], "latex-latex,illustration")
+      tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", "outer sep=0,inner sep=0,label={[illustration]$(rad2deg(a-π/2)):$r_txt}")
+    end
+  end
+
+KhepriBase.b_angles_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, mat) =
+  withTikZXForm(b, c) do out, cc
+    let maxr = maximum(rs),
+        n = length(rs),
+        ars = division(0.2maxr, 0.7maxr, n, false),
+        idxs = sortperm(as),
+        (rs, ss, as, r_txts, s_txts, a_txts) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs])
+      for (r, ar, s, a, r_txt, s_txt, a_txt) in zip(rs, ars, ss, as, r_txts, s_txts, a_txts)
+        if !(r ≈ 0.0)
+          if !(s ≈ 0.0)
+            tikz_line(out, [c, c+vpol(ar, 0)], "illustration")
+            tikz_maybe_arc(out, c, ar, 0, s, false, "-latex,illustration")
+            tikz_node(out, c + vpol(ar, s/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s/2)):$s_txt}")
+          end
+          if !(a ≈ 0.0)
+            tikz_line(out, [c, c+vpol(ar, s)], "illustration")
+            tikz_line(out, [c, c+vpol(r, s + a)], "-latex,illustration")
+            (a > 0.0) ?
+              tikz_maybe_arc(out, c, ar, s, a, false, "-latex,illustration") :
+              tikz_maybe_arc(out, c, ar, s, a, false, "latex-,illustration")
+            tikz_node(out, c + vpol(ar, s + a/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s + a/2)):$a_txt}")
+          else
+            tikz_line(out, [c, c+vpol(maxr, a)], "-latex,illustration")
+          end
+        end
+        tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "", "inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s + a - π/2)):$r_txt}")
+      end
+    end
+  end
+
+KhepriBase.b_arcs_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, mat) =
+  withTikZXForm(b, c) do out, cc
+    let maxr = maximum(rs),
+        n = length(rs),
+        ars = division(0.2maxr, 0.7maxr, n, false),
+        idxs = sortperm(ss),
+        (rs, ss, as, r_txts, s_txts, a_txts) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs])
+      for (i, r, ar, s, a, r_txt, s_txt, a_txt) in zip(1:n, rs, ars, ss, as, r_txts, s_txts, a_txts)
+        if !(r ≈ 0.0)
+          if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
+            tikz_line(out, [c, c+vpol(ar, 0)], "illustration")
+            tikz_maybe_arc(out, c, ar, 0, s, false, "-latex,illustration")
+            tikz_node(out, c + vpol(ar, s/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s/2)):$s_txt}")
+          end
+          if !(a ≈ 0.0)
+            #let ar = ((i == 1) || !(s ≈ ss[i-1] + as[i-1])) ? ar : ars[i-1]
+            tikz_line(out, [c, c+vpol(maxr, s)], "illustration")
+            tikz_line(out, [c, c+vpol(maxr, s + a)], "-latex,illustration")
+            tikz_maybe_arc(out, c, ar, s, a, false, "-latex,illustration")
+            tikz_node(out, c + vpol(ar, s + a/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s + a/2)):$a_txt}")
+          end
+          tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s + a - π/2)):$r_txt}")
+        end
+      end
+    end
+  end
+
+#
+is_illustration(s) =
+  is_labels(s) ||
+  is_vectors_illustration(s) ||
+  is_radii_illustration(s) ||
+  is_angles_illustration(s) ||
+  is_arcs_illustration(s)
+
+sort_illustrations!(b::TikZ) =
+  # WHERE IS PARTITION????
+  let illustrations = filter(is_illustration, b.shapes),
+      non_illustrations = filter(s->! is_illustration(s), b.shapes)
+    b.shapes = Shape[non_illustrations..., illustrations...]
+  end
