@@ -328,7 +328,11 @@ public ObjectId CreateChairFamily(double length, double width, double height, do
 public ObjectId Chair(Point3d c, double angle, ObjectId family)
 public ObjectId CreateRectangularTableAndChairsFamily(ObjectId tableFamily, ObjectId chairFamily, double tableLength, double tableWidth, int chairsOnTop, int chairsOnBottom, int chairsOnRight, int chairsOnLeft, double spacing)
 public ObjectId TableAndChairs(Point3d c, double angle, ObjectId family)
-public ObjectId CreateAlignedDimension(Point3d p0, Point3d p1, Point3d p, double scale, String mark)
+public ObjectId[] CreateLeaderDimension(String text, Point3d p0, Point3d p1, double scale, String mark, Options props)
+public ObjectId CreateAlignedDimension(String text, Point3d p0, Point3d p1, Point3d p, double scale, String mark, Options props)
+public ObjectId CreateRadialDimension(String text, Point3d c, Point3d chord, double leader, double scale, String mark, Options props)
+public ObjectId CreateDiametricDimension(String text, Point3d p0, Point3d p1, double leader, double scale, String mark, Options props)
+public ObjectId CreateAngularDimension(String text, Point3d p0, Point3d p1, Point3d q0, Point3d q1, Point3d c, double scale, String mark, Options props)
 public String TextString(Entity ent)
 public Point3d TextPosition(Entity ent)
 public double TextHeight(Entity ent)
@@ -737,8 +741,14 @@ backend_map_division(b::ACAD, f::Function, s::SurfaceGrid, nu::Int, nv::Int) =
     end
   end
 
-b_text(b::ACAD, str, p, size, mat) =
-  @remote(b, Text(str, p, vx(1, p.cs), vy(1, p.cs), size))
+export use_shx
+const use_shx = Parameter(false)
+
+KhepriBase.b_text(b::ACAD, str, p, size, mat) =
+  use_shx() ?
+    Base.@invoke(KhepriBase.b_text(b::Backend, str, p, size, mat)) :
+    @remote(b, Text(str, p, vx(1, p.cs), vy(1, p.cs), size))
+  
 
 backend_right_cuboid(b::ACAD, cb, width, height, h, material) =
   @remote(b, CenteredBox(cb, width, height, h))
@@ -988,15 +998,96 @@ const ACADDimensionStyles = Dict(:architectural => "_ARCHTICK", :mechanical => "
 #b_dimension(b::Backend, p, q, str, size, mat) =
 
 backend_dimension(b::ACAD, p0::Loc, p1::Loc, p::Loc, scale::Real, style::Symbol) =
-    @remote(b, CreateAlignedDimension(p0, p1, p,
-        scale,
-        ACADDimensionStyles[style]))
+  @remote(b, CreateAlignedDimension("FooBar", p0, p1, p, scale, ACADDimensionStyles[style]))
 
 backend_dimension(b::ACAD, p0::Loc, p1::Loc, sep::Real, scale::Real, style::Symbol) =
-    let v = p1 - p0
-        angle = pol_phi(v)
-        dimension(p0, p1, add_pol(p0, sep, angle + pi/2), scale, style, b)
+  let v = p1 - p0,
+      angle = pol_phi(v)
+      dimension(p0, p1, add_pol(p0, sep, angle + pi/2), scale, style, b)
+  end
+
+export annotation_scale
+const annotation_scale = Parameter(1.0)
+no_props = Dict()
+angular_props = Dict("Dimatfit"=>Int32(1), "Dimtad"=>Int32(2), "Dimtix"=>true)
+diametric_props = Dict("Dimcen"=> Float64(0.0), "Dimatfit"=>Int32(1), "Dimtofl"=>true)
+
+KhepriBase.b_labels(b::ACAD, p, strs, mat) =
+  [@remote(b, CreateLeaderDimension(str, p, p+vpol(annotation_scale(), ϕ), annotation_scale(), mark, no_props))
+   for (str, ϕ, mark)
+     in zip(strs,
+            division(-π/4, 7π/4, length(strs), false),
+            Iterators.flatten((Iterators.repeated("_DOT", 1), Iterators.repeated("_NONE"))))]
+
+#
+KhepriBase.b_radii_illustration(b::ACAD, c, rs, rs_txts, mat) =
+  [@remote(b, CreateDiametricDimension(r_txt, c, c+vpol(r, ϕ), 0.0, annotation_scale(), "", no_props))
+   for (r, r_txt, ϕ) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false))]
+
+# Maybe merge the texts when the radii are the same.
+KhepriBase.b_vectors_illustration(b::ACAD, p, a, rs, rs_txts, mat) =
+  [@remote(b, CreateDiametricDimension(r_txt, p, p+vpol(r, a), 0.0, annotation_scale(), "", no_props))
+   for (r, r_txt) in zip(rs, rs_txts)]
+      #tikz_line(out, [c, ], "latex-latex,illustration")
+      #tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", "outer sep=0,inner sep=0,label={[illustration]$(rad2deg(a-π/2)):$r_txt}")
+
+KhepriBase.b_angles_illustration(b::ACAD, c, rs, ss, as, r_txts, s_txts, a_txts, mat) =
+  let refs = [],
+      maxr = maximum(rs),
+      n = length(rs),
+      ars = division(0.2maxr, 0.7maxr, n, false),
+      idxs = sortperm(as),
+      (rs, ss, as, r_txts, s_txts, a_txts) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs])
+    for (r, ar, s, a, r_txt, s_txt, a_txt) in zip(rs, ars, ss, as, r_txts, s_txts, a_txts)
+      if !(r ≈ 0.0)
+        if !(s ≈ 0.0)
+          push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.5*ar, 0), c, c+vpol(0.8*ar, s), c+vpol(ar, s/2), annotation_scale(), "", no_props)))
+        end
+        if !(a ≈ 0.0)
+          push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.8*ar, s), c, c+vpol(0.5*ar, s + a), c+vpol(ar, s+a/2), annotation_scale(), "", no_props)))
+#          tikz_line(out, [c, c+vpol(ar, s)], "illustration")
+#          tikz_line(out, [c, c+vpol(r, s + a)], "-latex,illustration")
+#          (a > 0.0) ?
+#            tikz_maybe_arc(out, c, ar, s, a, false, "-latex,illustration") :
+#            tikz_maybe_arc(out, c, ar, s, a, false, "latex-,illustration")
+#          tikz_node(out, c + vpol(ar, s + a/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s + a/2)):$a_txt}")
+        else
+          #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "")))
+        end
+      end
+      push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "", diametric_props)))
     end
+    refs
+  end
+
+KhepriBase.b_arcs_illustration(b::ACAD, c, rs, ss, as, r_txts, s_txts, a_txts, mat) =
+  let refs = [],
+      maxr = maximum(rs),
+      n = length(rs),
+      ars = division(0.2maxr, 0.7maxr, n, false),
+      idxs = sortperm(ss),
+      (rs, ss, as, r_txts, s_txts, a_txts) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs])
+    for (i, r, ar, s, a, r_txt, s_txt, a_txt) in zip(1:n, rs, ars, ss, as, r_txts, s_txts, a_txts)
+      if !(r ≈ 0.0)
+        if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
+          push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.5*ar, 0), c, c+vpol(0.8*ar, s), c+vpol(ar, s/2), annotation_scale(), "", angular_props)))
+          #tikz_line(out, [c, c+vpol(ar, 0)], "illustration")
+          #tikz_maybe_arc(out, c, ar, 0, s, false, "-latex,illustration")
+          #tikz_node(out, c + vpol(ar, s/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s/2)):$s_txt}")
+        end
+        if !(a ≈ 0.0)
+          push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.8*ar, s), c, c+vpol(0.5*ar, s + a), c+vpol(ar, s+a/2), annotation_scale(), "", angular_props)))
+          #tikz_line(out, [c, c+vpol(maxr, s)], "illustration")
+          #tikz_line(out, [c, c+vpol(maxr, s + a)], "-latex,illustration")
+          #tikz_maybe_arc(out, c, ar, s, a, false, "-latex,illustration")
+          #tikz_node(out, c + vpol(ar, s + a/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s + a/2)):$a_txt}")
+        end
+        push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "", diametric_props)))
+        #tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s + a - π/2)):$r_txt}")
+      end
+    end
+    refs
+  end
 
 # Layers
 
