@@ -165,7 +165,10 @@ create_kgh_function(name::String, body::String) =
       inp_docs = Symbol("__doc_inps_$name"),
       out_docs = Symbol("__doc_outs_$name"),
       shapes = Symbol("__shapes_$name"),
-      prev_collected_shapes = gensym("prev_collected_shapes")
+      func_name = Symbol("__func_$name"),
+      tracing_func_name = Symbol("__tracing_func_$name"),
+      prev_collected_shapes = gensym("prev_collected_shapes"),
+      prev_is_collecting_shapes = gensym("prev_is_collecting_shapes")
     if isempty(inp_forms) && isempty(out_forms)
       quote
         $(inp_docs) = Any[$(inp_forms...)]
@@ -173,7 +176,10 @@ create_kgh_function(name::String, body::String) =
         $(inps) = Array{Any,1}(undef, $(length(inp_inits)))
         $(outs) = Array{Any,1}(undef, $(length(out_inits)))
         $(shapes) = Shape[]
-        function $(Symbol("__func_$name"))()
+        function $(func_name)()
+          nothing
+        end
+        function $(tracing_func_name)()
           nothing
         end
       end
@@ -184,18 +190,25 @@ create_kgh_function(name::String, body::String) =
         $(inps) = Array{Any,1}(undef, $(length(inp_inits)))
         $(outs) = Array{Any,1}(undef, $(length(out_inits)))
         $(shapes) = Shape[]
-        function $(Symbol("__func_$name"))()
+        function $(func_name)()
           $(inp_inits...)
-          $prev_collected_shapes = collected_shapes()
-          #collected_shapes($(shapes))
-          __result = #try
-            begin
+          __result = begin
             $(forms...)
-            end
-          #finally
-            #collected_shapes($prev_collected_shapes)
-          #end
+          end
           $(out_inits...)
+          nothing
+        end
+        function $(tracing_func_name)()
+          $prev_collected_shapes = collected_shapes()
+          $prev_is_collecting_shapes = is_collecting_shapes()
+          collected_shapes($(shapes))
+          is_collecting_shapes(true)
+          try
+            $(func_name)()
+          finally
+            is_collecting_shapes($prev_is_collecting_shapes)
+            collected_shapes($prev_collected_shapes)
+          end
           nothing
         end
       end
