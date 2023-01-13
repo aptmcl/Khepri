@@ -695,7 +695,7 @@ add_tikz(str) =
       pdfname
   end
 =#
-const miktex_folder = Parameter(joinpath(ENV["APPDATA"], "Local", "Programs", "MiKTeX", "miktex", "bin", "x64"))
+const miktex_folder = Parameter(normpath(joinpath(ENV["APPDATA"], "..", "Local", "Programs", "MiKTeX", "miktex", "bin", "x64")))
 miktex_cmd(cmd::AbstractString="pdflatex") = joinpath(miktex_folder(), cmd)
 
 export tikz_as_png
