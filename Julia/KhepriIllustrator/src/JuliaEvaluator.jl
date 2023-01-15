@@ -60,9 +60,27 @@ is_name(expr) = expr isa Symbol
 eval_name(name, env) =
   binding_value(get_environment_binding(name, env))
 
+is_splat(expr) = expr isa Expr && expr.head === :...
 is_vect(expr) = expr isa Expr && expr.head === :vect
 eval_vect(expr, env) =
-  [eval_expr(expri, env) for expri in expr.args]
+  let r = []
+    for expri in expr.args
+      if is_splat(expri)
+        append!(r, eval_expr(expri.args[1], env))
+      else
+        push!(r, eval_expr(expri, env))
+      end
+    end
+    r
+  end
+  #[eval_expr(expri, env) for expri in expr.args]
+
+is_ref(expr) = expr isa Expr && expr.head === :ref
+eval_ref(expr, env) =
+  let v = eval_expr(expr.args[1], env),
+      i = eval_expr(expr.args[2], env)
+    v[i]
+  end
 
 eval_expr(expr, env) =
   if is_self_evaluating(expr)
@@ -73,6 +91,8 @@ eval_expr(expr, env) =
     eval_quote(expr, env)
   elseif is_vect(expr)
     eval_vect(expr, env)
+  elseif is_ref(expr)
+    eval_ref(expr, env)
   elseif is_lambda(expr)
     eval_lambda(expr, env)
   elseif is_if(expr)
@@ -253,6 +273,7 @@ initial_environment =
     @predef(polygon),
     @predef(arc),
     @predef(regular_polygon),
+    @predef(regular_polygon_vertices),
     @predef(surface_regular_polygon),
     @predef(surface_circle),
     @predef(rectangle),
