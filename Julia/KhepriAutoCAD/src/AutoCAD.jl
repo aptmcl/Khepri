@@ -1052,13 +1052,13 @@ KhepriBase.b_angles_illustration(b::ACAD, c, rs, ss, as, r_txts, s_txts, a_txts,
       if !(r ≈ 0.0)
         if !(s ≈ 0.0)
           let arrows = s > 0 ? ("_NONE", "",) : ("", "_NONE")
-            push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.5*ar, 0), c, c+vpol(0.8*ar, s), c+vpol(ar, s/2), annotation_scale(), 
+            push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.8*ar, 0), c, c+vpol(0.8*ar, s), c+vpol(ar, s/2), annotation_scale(), 
                                                           arrows..., angular_start_props)))
           end
         end
         if !(a ≈ 0.0)
           let arrows = a > 0 ? ("_NONE", "",) : ("", "_NONE")
-            push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.8*ar, s), c, c+vpol(0.5*ar, s + a), c+vpol(ar, s+a/2), annotation_scale(),
+            push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.8*ar, s), c, c+vpol(0.8*ar, s + a), c+vpol(ar, s+a/2), annotation_scale(),
                                                           arrows..., angular_ampli_props)))
           end
         else
@@ -1082,13 +1082,13 @@ KhepriBase.b_arcs_illustration(b::ACAD, c, rs, ss, as, r_txts, s_txts, a_txts, m
       if !(r ≈ 0.0)
         if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
           let arrows = s > 0 ? ("_NONE", "",) : ("", "_NONE")
-            push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.5*ar, 0), c, c+vpol(0.8*ar, s), c+vpol(ar, s/2), annotation_scale(), 
+            push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.8*ar, 0), c, c+vpol(0.8*ar, s), c+vpol(ar, s/2), annotation_scale(), 
                                                           arrows..., angular_props)))
           end
         end
         if !(a ≈ 0.0)
           let arrows = a > 0 ? ("_NONE", "",) : ("", "_NONE")
-            push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.8*ar, s), c, c+vpol(0.5*ar, s + a), c+vpol(ar, s+a/2), annotation_scale(),
+            push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.8*ar, s), c, c+vpol(0.8*ar, s + a), c+vpol(ar, s+a/2), annotation_scale(),
                                                           arrows..., angular_props)))
           end
         end
