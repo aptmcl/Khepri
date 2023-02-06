@@ -177,12 +177,16 @@ public Guid[] GetShape(string prompt)
 public Guid[] GetShapes(string prompt)
 public Guid[] GetAllShapes()
 public Guid[] GetAllShapesInLayer(Guid id)
+public Guid CreateDiametricDimension(String text, Plane c, Point3d p, Point3d pdim, double scale, String mark, Options props)
+public Guid CreateAngularDimension(String text, Plane p, Point3d p0, Point3d p1, Point3d ptdim, double scale, String mark, Options props) {
 public void SunLight(DateTime dt, double latitude, double longitude, int meridian, float turbidity, bool hasSun)
 public Guid PointLight(Point3d p, Color c, double power)
 public void EnableGrasshopperSolver()
 public void DisableGrasshopperSolver()
 public void RunGrasshopperSolver()
 """
+#public Guid CreateAngularDimension(string text, Plane p, double radius, double startAngle, double endAngle, double scale, double offset, Options props)
+
 #=
 public byte Sync()
 public byte Disconnect()
@@ -270,7 +274,7 @@ KhepriBase.has_boolean_ops(::Type{RH}) = HasBooleanOps{false}()
 KhepriBase.backend(::RHRef) = rhino
 
 # Primitives
-KhepriBase.b_point(b::RH, p) =
+KhepriBase.b_point(b::RH, p, mat) =
   @remote(b, Point(p))
 
 KhepriBase.b_line(b::RH, ps, mat) =
@@ -481,7 +485,7 @@ realize(b::RH, s::UniversalShape) =
 
 backend_map_division(b::RH, f::Function, s::Shape1D, n::Int) =
   let conn = connection(b),
-      r = ref(s).value,
+      r = ref(b, s).value,
       (t1, t2) = @remote(b, CurveDomain(r)),
       ti = division(t1, t2, n),
       ps = @remote(b, CurvePointsAt(r, ti)),
@@ -493,7 +497,7 @@ backend_map_division(b::RH, f::Function, s::Shape1D, n::Int) =
 
 
 realize(b::RH, s::Surface) =
-  let ids = @remote(b, SurfaceFrom(collect_ref(s.frontier)))
+  let ids = @remote(b, SurfaceFrom(collect_ref(b, s.frontier)))
     foreach(mark_deleted, s.frontier)
     ids
   end
@@ -503,11 +507,11 @@ realize(b::RH, s::Text) =
 =#
 
 backend_surface_domain(b::RH, s::Shape2D) =
-    tuple(@remote(b, SurfaceDomain(ref(s).value)...))
+    tuple(@remote(b, SurfaceDomain(ref(b, s).value)...))
 
 backend_map_division(b::RH, f::Function, s::Shape2D, nu::Int, nv::Int) =
     let conn = connection(b)
-        r = ref(s).value
+        r = ref(b, s).value
         (u1, u2, v1, v2) = @remote(b, SurfaceDomain(r))
         map_division(u1, u2, nu) do u
             map_division(v1, v2, nv) do v
@@ -521,7 +525,7 @@ KhepriBase.b_torus(b::RH, c, ra, rb, mat) =
 
 backend_extrusion(b::RH, s::Shape, v::Vec) =
     and_mark_deleted(
-        map_ref(s) do r
+        map_ref(b, s) do r
             @remote(b, Extrusion(r, v))
         end,
         s)
@@ -536,21 +540,21 @@ KhepriBase.b_sweep(b::RH, path, profile, rotation, scale, mat) =
 #=
 realize(b::RH, s::Revolve) =
   and_delete_shape(
-    map_ref(s.profile) do r
+    map_ref(b, s.profile) do r
       @remote(b, Revolve(r, s.p, s.n, s.start_angle, s.amplitude))
     end,
     s.profile)
 
 backend_loft_points(b::Backend, profiles::Shapes, rails::Shapes, ruled::Bool, closed::Bool) =
   let f = (ruled ? (closed ? polygon : line) : (closed ? closed_spline : spline))
-    and_delete_shapes(ref(f(map(point_position, profiles), backend=b)),
+    and_delete_shapes(ref(b, f(map(point_position, profiles), backend=b)),
                       vcat(profiles, rails))
   end
 
 backend_loft_curves(b::RH, profiles::Shapes, rails::Shapes, ruled::Bool, closed::Bool) =
   and_delete_shapes(RHLoft(connection(b),
-                             collect_ref(profiles),
-                             collect_ref(rails),
+                             collect_ref(b, profiles),
+                             collect_ref(b, rails),
                              ruled, closed),
                     vcat(profiles, rails))
 
@@ -559,7 +563,7 @@ backend_loft_surfaces(b::RH, profiles::Shapes, rails::Shapes, ruled::Bool, close
 
 backend_loft_curve_point(b::RH, profile::Shape, point::Shape) =
   and_delete_shapes(RHLoft(connection(b),
-                             vcat(collect_ref(profile), collect_ref(point)),
+                             vcat(collect_ref(b, profile), collect_ref(b, point)),
                              [],
                              true, false),
                     [profile, point])
@@ -627,7 +631,7 @@ realize(b::RH, s::IntersectionShape) =
   =#
 
 realize(b::RH, s::Slice) =
-  slice_ref(b, ref(s.shape), s.p, s.n)
+  slice_ref(b, ref(b, s.shape), s.p, s.n)
 
 realize(b::RH, s::Move) =
   and_mark_deleted(b,
@@ -660,7 +664,7 @@ realize(b::RH, s::Mirror) =
                    s.shape)
 
 realize(b::RH, s::UnionMirror) =
-  let r0 = ref(s.shape),
+  let r0 = ref(b, s.shape),
       r1 = map_ref(b, r0) do r
             @remote(b, Mirror(r, s.p, s.n, true))
           end
@@ -707,6 +711,81 @@ KhepriBase.b_table_and_chairs(b::RH, c, angle, family) =
 KhepriBase.b_pointlight(b::RH, loc::Loc, color::RGB, intensity::Real, range::Real) =
   @remote(b, PointLight(loc, color, intensity))
 
+
+
+# Dimensioning
+
+export annotation_scale
+const annotation_scale = Parameter(1.0)
+no_props = Dict()
+angular_props = Dict("Dimatfit"=>Int32(1), "Dimtad"=>Int32(2), "Dimtix"=>true)
+diametric_props = Dict("Dimcen"=> Float64(0.0), "Dimatfit"=>Int32(1), "Dimtofl"=>true)
+
+KhepriBase.b_labels(b::RH, p, strs, mat) =
+  [@remote(b, CreateLeaderDimension(str, p, p+vpol(annotation_scale(), ϕ), annotation_scale(), mark, no_props))
+   for (str, ϕ, mark)
+     in zip(strs,
+            division(-π/4, 7π/4, length(strs), false),
+            Iterators.flatten((Iterators.repeated("_DOT", 1), Iterators.repeated("_NONE"))))]
+
+#
+KhepriBase.b_radii_illustration(b::RH, c, rs, rs_txts, mat) =
+  [@remote(b, CreateDiametricDimension(r_txt, c, c+vpol(r, ϕ), 0.0, annotation_scale(), "", no_props))
+   for (r, r_txt, ϕ) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false))]
+
+# Maybe merge the texts when the radii are the same.
+KhepriBase.b_vectors_illustration(b::RH, p, a, rs, rs_txts, mat) =
+  [@remote(b, CreateDiametricDimension(r_txt, p, p+vpol(r, a), p+vpol(0.1, a+pi/2), annotation_scale(), "", no_props))
+   for (r, r_txt) in zip(rs, rs_txts)]
+      #tikz_line(out, [c, ], "latex-latex,illustration")
+      #tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", "outer sep=0,inner sep=0,label={[illustration]$(rad2deg(a-π/2)):$r_txt}")
+
+KhepriBase.b_angles_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, mat) =
+  let refs = [],
+      maxr = maximum(rs),
+      n = length(rs),
+      ars = division(0.2maxr, 0.7maxr, n, false),
+      idxs = sortperm(as),
+      (rs, ss, as, r_txts, s_txts, a_txts) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs])
+    for (r, ar, s, a, r_txt, s_txt, a_txt) in zip(rs, ars, ss, as, r_txts, s_txts, a_txts)
+      if !(r ≈ 0.0)
+        if !(s ≈ 0.0)
+        #  push!(refs, @remote(b, CreateAngularDimension(s_txt, c, ar, 0, s, annotation_scale(), 5, no_props)))
+          push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.8*ar, 0), c+vpol(0.8*ar, s), c+vpol(ar, s/2), annotation_scale(), "", no_props)))
+        end
+        if !(a ≈ 0.0)
+        #  push!(refs, @remote(b, CreateAngularDimension(a_txt, c, ar, s, s + a, annotation_scale(), 5, no_props)))
+        push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.5*ar, s), c+vpol(0.5*ar, s + a), c+vpol(ar, s+a/2), annotation_scale(), "", no_props)))
+        else
+          #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "")))
+        end
+      end
+      #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "", diametric_props)))
+    end
+    refs
+  end
+
+KhepriBase.b_arcs_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, mat) =
+  let refs = [],
+      maxr = maximum(rs),
+      n = length(rs),
+      ars = division(0.2maxr, 0.7maxr, n, false),
+      idxs = sortperm(ss),
+      (rs, ss, as, r_txts, s_txts, a_txts) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs])
+    for (i, r, ar, s, a, r_txt, s_txt, a_txt) in zip(1:n, rs, ars, ss, as, r_txts, s_txts, a_txts)
+      if !(r ≈ 0.0)
+        if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
+          push!(refs, @remote(b, CreateAngularDimension(s_txt, c, 0.5*ar, 0, s, annotation_scale(), 0.3*ar, angular_props)))
+        end
+        if !(a ≈ 0.0)
+          push!(refs, @remote(b, CreateAngularDimension(a_txt, c, 0.5*ar, s, s + a, annotation_scale(), 0.3*ar, angular_props)))
+        end
+        #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "", diametric_props)))
+      end
+    end
+    refs
+  end
+
 #=
 KhepriBase.b_spotlight(b::ACAD, loc::Loc, dir::Vec, hotspot::Real, falloff::Real) =
     @remote(b, SpotLight(loc, hotspot, falloff, loc + dir))
@@ -718,7 +797,7 @@ KhepriBase.b_ieslight(b::ACAD, file::String, loc::Loc, dir::Vec, alpha::Real, be
 ############################################
 
 # KhepriBase.b_bounding_box(b::RH, shapes::Shapes) =
-#   @remote(b, BoundingBox(collect_ref(shapes)))
+#   @remote(b, BoundingBox(collect_ref(b, shapes)))
 
 KhepriBase.b_set_view(b::RH, camera::XYZ, target::XYZ, lens::Real, aperture::Real) =
   @remote(b, View(camera, target, lens))
@@ -853,12 +932,12 @@ backend_captured_shapes(b::RH, handles) =
   end
 
 backend_generate_captured_shape(b::RH, s::Shape) =
-    println("captured_shape(rhino, $(ref(s).value))")
+    println("captured_shape(rhino, $(ref(b, s).value))")
 backend_generate_captured_shapes(b::RH, ss::Shapes) =
   begin
     print("captured_shapes(rhino, [")
     for s in ss
-      print(ref(s).value)
+      print(ref(b, s).value)
       print(", ")
     end
     println("])")
