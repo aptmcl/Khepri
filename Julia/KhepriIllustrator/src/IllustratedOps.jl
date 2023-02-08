@@ -217,40 +217,56 @@ include_illustrate_bindings() = KhepriBase.Parameter(true)
 
 # AML CODE
 
+with_recursive_illustration(f) =
+  let opacity = 1.0/(1+current_recursive_level()),
+      opacity_material = material(layer("opacity_$(opacity)", true, rgba(1.0, 1.0, 1.0, opacity)))
+      #opacity_material = material(layer("opacity_$(opacity)", true, rgba(opacity, 0.0, 0.5, opacity)))
+    with(default_material, opacity_material, default_curve_material, opacity_material, default_point_material, opacity_material) do
+      f()
+    end
+  end
+
+
+
 is_op_call(op, expr) =
   expr isa Expr && expr.head == :call && expr.args[1] == op
 
 illustrate(f::typeof(+), p::Union{X,XY,Pol}, v::Union{VPol}, p_expr, v_expr) =
-  let (ρ, ϕ) = is_op_call(:vpol, v_expr) ? v_expr.args[2:3] :
-                 v_expr isa Symbol ? (Symbol(v_expr, "_ρ"), Symbol(v_expr, "_ϕ")) :
-                 (:⊕, :⊗)
-    label(p, textify(p_expr))
-    #dimension(p, p+v, textify(ρ), size=0.1, offset=0)
-    angle_illustration(p, pol_rho(v), 0, pol_phi(v), textify(ρ), textify(0), textify(ϕ))
+  with_recursive_illustration() do
+    let (ρ, ϕ) = is_op_call(:vpol, v_expr) ? v_expr.args[2:3] :
+                   v_expr isa Symbol ? (Symbol(v_expr, "_ρ"), Symbol(v_expr, "_ϕ")) :
+                   (:⊕, :⊗)
+      label(p, textify(p_expr))
+      #dimension(p, p+v, textify(ρ), size=0.1, offset=0)
+      angle_illustration(p, pol_rho(v), 0, pol_phi(v), textify(ρ), textify(0), textify(ϕ))
+    end
   end
 
 #
 illustrate(f::typeof(+), p::Union{X,XY,Pol}, v::Union{VXY}, p_expr, v_expr) =
-  let (x, y) = is_op_call(:vxy, v_expr) ? v_expr.args[2:3] :
-                 is_op_call(:vy, v_expr) ? (:dummy, v_expr.args[2]) :
-                   v_expr isa Symbol ?
-                     (cx(v) ≈ 0.0 || cy(v) ≈ 0.0) ?
-                       (v_expr, v_expr) :
-                         (Symbol(v_expr, "_x"), Symbol(v_expr, "_y")) :
-                         (:⊕, :⊗)
-    label(p, textify(p_expr))
-    cx(v) ≈ 0.0 ? nothing : KhepriBase.vector_illustration(p, 0, cx(v), textify(x))
-    cy(v) ≈ 0.0 ? nothing : KhepriBase.vector_illustration(p+vx(cx(v)), π/2, cy(v), textify(y))
+  with_recursive_illustration() do
+    let (x, y) = is_op_call(:vxy, v_expr) ? v_expr.args[2:3] :
+                   is_op_call(:vy, v_expr) ? (:dummy, v_expr.args[2]) :
+                     v_expr isa Symbol ?
+                       (cx(v) ≈ 0.0 || cy(v) ≈ 0.0) ?
+                         (v_expr, v_expr) :
+                           (Symbol(v_expr, "_x"), Symbol(v_expr, "_y")) :
+                           (:⊕, :⊗)
+      label(p, textify(p_expr))
+      cx(v) ≈ 0.0 ? nothing : KhepriBase.vector_illustration(p, 0, cx(v), textify(x))
+      cy(v) ≈ 0.0 ? nothing : KhepriBase.vector_illustration(p+vx(cx(v)), π/2, cy(v), textify(y))
+    end
   end
-
 #
 illustrate(f::typeof(+), p::Union{X,XY,Pol}, v::Union{VX}, p_expr, v_expr) =
-  let d = v_expr isa Expr && v_expr.head == :call && v_expr.args[1] == :vx ?
-                 v_expr.args[2] :
-                 v_expr isa Symbol ? v_expr :
-                 :⊗
-    label(p, textify(p_expr))
-    KhepriBase.vector_illustration(p, 0, cx(v), textify(d))
+  with_recursive_illustration() do
+    let d = v_expr isa Expr && v_expr.head == :call && v_expr.args[1] == :vx ?
+                   v_expr.args[2] :
+                   v_expr isa Symbol ? v_expr :
+                   :⊗
+      label(p, textify(p_expr))
+      KhepriBase.vector_illustration(p, 0, cx(v), textify(d))
+    end
   end
 
 #
@@ -291,28 +307,32 @@ illustrate(f::typeof(line), args...) =
       end
     end
   else
-    # half of ps are locations, the other half are expressions
-    let n = length(args)÷2,
-        ps = args[1:n],
-        ps_exprs = args[n+1:end]
-      for (p, p_expr) in zip(ps, ps_exprs)
-          label(p, textify(p_expr))
+    with_recursive_illustration() do
+      # half of ps are locations, the other half are expressions
+      let n = length(args)÷2,
+          ps = args[1:n],
+          ps_exprs = args[n+1:end]
+        for (p, p_expr) in zip(ps, ps_exprs)
+            label(p, textify(p_expr))
+        end
       end
     end
   end
 
 illustrate(f::typeof(circle), c, r, c_expr, r_expr) =
   if include_illustrate_circles()
-    label(c, textify(c_expr))
-    radius_illustration(c, r, textify(r_expr))
+    with_recursive_illustration() do
+      label(c, textify(c_expr))
+      radius_illustration(c, r, textify(r_expr))
+    end
   end
 
 illustrate(f::typeof(regular_polygon), n, c, r, a, n_expr, c_expr, r_expr, a_expr) =
   illustrate(+, c, vpol(r, a), c_expr, :(vpol($r_expr, $a_expr)))
 
 illustrate(f::typeof(arc), c, ρ, α, Δα, c_e, ρ_e, α_e, Δα_e) =
-  begin
-     label(c, textify(c_e))
-     #dimension(c, c+vpol(ρ, α), textify(ρ_e), size=0.1, offset=0)
-     arc_illustration(c, ρ, α, Δα, textify(ρ_e), textify(α_e), textify(Δα_e))
+  with_recursive_illustration() do
+    label(c, textify(c_e))
+    #dimension(c, c+vpol(ρ, α), textify(ρ_e), size=0.1, offset=0)
+    arc_illustration(c, ρ, α, Δα, textify(ρ_e), textify(α_e), textify(Δα_e))
   end

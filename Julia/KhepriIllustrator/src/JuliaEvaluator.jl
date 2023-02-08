@@ -184,10 +184,12 @@ illustrate_and_maybe_pause(func, args...) =
     end
   end
 
-stack = []
-export recursive_levels
-recursive_levels = Parameter(0)
-#render_n = 0
+export recursive_levels_limit, current_recursive_level, illustrations_stack, step_by_step
+const illustrations_stack = []
+const recursive_levels_limit = Parameter(0)
+const current_recursive_level = Parameter(0)
+const step_by_step = Parameter(false)
+render_n = 0
 eval_call(expr, env) =
   let func = eval_expr(call_operator(expr), env),
       exprs = call_operands(expr)
@@ -196,19 +198,25 @@ eval_call(expr, env) =
         replace(expr, expansion)
         eval_expr(expansion, env)
       end :
-      let args = map(expr -> eval_expr(expr, env), exprs)
-        if length(stack) - length(unique(stack)) <= recursive_levels()
-          illustrate(func, args..., exprs...)
-          #if !ismissing(illustrate(func, args..., exprs...))
-          #  global render_n += 1
-          #  render_view("IllustrationStep$render_n")
-          #end
+      let args = map(expr -> eval_expr(expr, env), exprs),
+          recursive_level = length(illustrations_stack) - length(unique(illustrations_stack))
+        if recursive_level <= recursive_levels_limit()
+          with(current_recursive_level, recursive_level) do
+            if step_by_step()
+              if !ismissing(illustrate(func, args..., exprs...))
+                global render_n += 1
+                render_view("IllustrationStep$render_n")
+              end
+            else
+              illustrate(func, args..., exprs...)
+            end
+          end
         end
-        push!(stack, call_operator(expr))
+        push!(illustrations_stack, call_operator(expr))
         try
           apply_function(func, args, env)
         finally
-          pop!(stack)
+          pop!(illustrations_stack)
         end
       end
   end
