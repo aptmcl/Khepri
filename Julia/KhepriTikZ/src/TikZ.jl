@@ -423,6 +423,21 @@ KhepriBase.merge_backend_materials(b::TikZ, m1::String, m2::String) =
   join(union(split(m1, ","), split(m2, ",")), ",")
 
 
+KhepriBase.b_get_material(b::TikZ, layer, spec) =
+  let c = layer.color
+    c == rgba(1,1,1,1) ?
+      void_ref(b) : 
+      join(vcat(c.alpha ≈ 1.0 ?
+                  [] :
+                  ["opacity=$(Float64(c.alpha))"],
+                c.r ≈ 1.0 && c.g ≈ 1.0 && c.b ≈ 1.0 ?
+                  [] :
+                  ["color={rgb:red,$(c.r);green,$(c.g);blue,$(c.b)}"]),
+            ",")
+  end        
+  
+KhepriBase.b_get_material(b::TikZ, spec::Nothing) = void_ref(b)
+
 KhepriBase.after_connecting(b::TikZ) =
   begin
     set_material()
@@ -449,7 +464,7 @@ tikz_output(options="") =
   end
 
 painter_sorter!(trigs, camera) =
-  sort!(trigs, lt=(t1, t2)->distance(trig_center(t1[1:end-1]...), camera)<distance(trig_center(t2[1:end-1]...), camera))
+  sort!(trigs, lt=(t2, t1)->distance(trig_center(t1[1:end-1]...), camera)<distance(trig_center(t2[1:end-1]...), camera))
 
 
 tikz_output_and_reset(options="") =
@@ -460,19 +475,23 @@ tikz_output_and_reset(options="") =
     out
   end
 
-withTikZXForm(f, b, c) =
+withTikZXForm(f, b, c, mat) =
   let out = connection(b)
     if b.view.is_top_view
-      if is_world_cs(c.cs)
+      if is_world_cs(c.cs) && isnothing(mat)
         f(out, c)
-      else
+      elseif isnothing(mat)
         tikz_transform(out,
           out -> f(out, u0(world_cs)),
           c)
+      else
+        println(out, "\\begin{scope}[$mat]")
+        withTikZXForm(f, b, c, nothing)
+        println(out, "\\end{scope}")
       end
     elseif is_world_cs(c.cs)
       # Don't transform latex println(out, "\\begin{scope}[canvas is xy plane at z=$(c.z),transform shape]")
-      println(out, "\\begin{scope}[canvas is xy plane at z=$(c.z)]")
+      println(out, "\\begin{scope}[canvas is xy plane at z=$(c.z)$(isnothing(mat) ? "" : ",$mat")]")
       f(out, xy(c.x, c.y, world_cs))
       println(out, "\\end{scope}")
     else
@@ -506,17 +525,17 @@ KhepriBase.b_closed_spline(b::TikZ, ps, mat) =
   tikz_hobby_closed_spline(connection(b), ps)
 
 KhepriBase.b_circle(b::TikZ, c, r, mat) =
-  withTikZXForm(b, c) do out, cc
+  withTikZXForm(b, c, mat) do out, cc
     tikz_circle(out, cc, r)
   end
 
 KhepriBase.b_arc(b::TikZ, c, r, α, Δα, mat) =
-  withTikZXForm(b, c) do out, cc
+  withTikZXForm(b, c, mat) do out, cc
     tikz_maybe_arc(out, cc, r, α, Δα, false, mat)
   end
 
 KhepriBase.b_rectangle(b::TikZ, c, dx, dy, mat) =
-  withTikZXForm(b, c) do out, cc
+  withTikZXForm(b, c, mat) do out, cc
     tikz_rectangle(out, cc, dx, dy)
   end
 
@@ -583,7 +602,7 @@ paint_trig(b::TikZ, (p1, p2, p3, mat)) =
       v = rotate_vector(b.view.target - b.view.camera, vz(1), pi/4),
       α = round(Int, angle_between(n, v)/pi*100)
     #if α > 0.5
-    print(io, "\\fill[black!$(α)!white] ")
+    print(io, "\\fill[white!$(α)!black] ")
     #print(io, "\\fill[gray, opacity=$α] ")
     tikz_3d_coord(io, p1)
     print(io, "--")
@@ -614,22 +633,22 @@ KhepriBase.b_surface_polygon_with_holes(b::TikZ, ps, qss, mat) =
   tikz_closed_lines(connection(b), [ps, qss...], true)
 
 KhepriBase.b_surface_circle(b::TikZ, c, r, mat) =
-  withTikZXForm(b, c) do out, cc
+  withTikZXForm(b, c, mat) do out, cc
     tikz_circle(out, cc, r, true)
   end
 
 KhepriBase.b_surface_arc(b::TikZ, c, r, α, Δα, mat) =
-  withTikZXForm(b, c) do out, cc
+  withTikZXForm(b, c, mat) do out, cc
     tikz_maybe_arc(out, cc, r, α, Δα, true)
   end
 =#
 # realize(b::TikZ, s::Ellipse) =
-#   withTikZXForm(b, s.center) do out, c
+#   withTikZXForm(b, s.center, mat) do out, c
 #     tikz_ellipse(out, c, s.radius_x, s.radius_y, 0, false)
 #   end
 #
 # realize(b::TikZ, s::SurfaceEllipse) =
-#   withTikZXForm(b, s.center) do out, c
+#   withTikZXForm(b, s.center, mat) do out, c
 #     tikz_ellipse(out, c, s.radius_x, s.radius_y, 0, true)
 #   end
 #
@@ -639,13 +658,13 @@ KhepriBase.b_surface_arc(b::TikZ, c, r, α, Δα, mat) =
 #realize(b::TikZ, s::SurfaceElliptic_Arc) = TikZCircle(connection(b),
 
 # KhepriBase.b_surface_rectangle(b::TikZ, c, dx, dy, mat) =
-#   withTikZXForm(b, c) do out, cc
+#   withTikZXForm(b, c, mat) do out, cc
 #     tikz_rectangle(out, cc, dx, dy, true)
 #   end
 
 KhepriBase.b_text(b::TikZ, str, p, size, mat) =
   #invoke(b_text, Tuple{Backend, Any, Any, Any, Any}, b, str, p, size, mat)
-  withTikZXForm(b, p) do out, c
+  withTikZXForm(b, p, mat) do out, c
     tikz_text(out, str, c, size)
   end
 
@@ -657,7 +676,7 @@ KhepriBase.b_ext_line(b::TikZ, p, q, mat) =
   tikz_line(connection(b), [p, q], "illustration")
 
 KhepriBase.b_arc_dimension(b::TikZ, c, r, α, Δα, rstr, Δstr, size, offset, mat) =
-  withTikZXForm(b, c) do out, cc
+  withTikZXForm(b, c, mat) do out, cc
     tikz_dim_arc(out, c, r, α, Δα, rstr, Δstr)
   end
 
@@ -720,6 +739,7 @@ process_tikz(path) =
       #println(out, raw"\usepackage{tikz-3dplot}")
       println(out, raw"\begin{document}")
       println(out, raw"\tikzset{illustration/.style={ultra thin,blue!50}}")
+      #println(out, raw"\tikzset{illustration/.style={ultra thin}}")
       println(out, raw"\tikzset{dimension/.style={very thin,lightgray}}")
       println(out, contents)
       println(out, raw"\end{document}")
@@ -757,14 +777,14 @@ KhepriBase.b_render_view(b::TikZ, path) =
 KhepriBase.b_textify(b::TikZ, expr) = latexify(expr)
 
 KhepriBase.b_labels(b::TikZ, p, strs, mat) =
-  withTikZXForm(b, p) do out, c
+  withTikZXForm(b, p, mat) do out, c
     tikz_node(out, c, "",
       "fill,circle,outer sep=0,inner sep=0,minimum size=2pt,illustration,"*
       join(["label={[illustration]$ϕ:$str}" for (str,ϕ) in zip(strs, division(-45, 315, length(strs), false))], ","))
   end
 
 KhepriBase.b_radii_illustration(b::TikZ, c, rs, rs_txts, mat) =
-  withTikZXForm(b, c) do out, cc
+  withTikZXForm(b, c, mat) do out, cc
     for (r, r_txt, ϕ) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false))
       tikz_line(out, [c, c+vpol(r, ϕ)], "latex-latex,illustration")
       tikz_node(out, intermediate_loc(c, c + vpol(r, ϕ)), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(ϕ+π/2)):$r_txt}")
@@ -772,7 +792,7 @@ KhepriBase.b_radii_illustration(b::TikZ, c, rs, rs_txts, mat) =
   end
 
 KhepriBase.b_vectors_illustration(b::TikZ, p, a, rs, rs_txts, mat) =
-  withTikZXForm(b, p) do out, c
+  withTikZXForm(b, p, mat) do out, c
     for (r, r_txt) in zip(rs, rs_txts)
       tikz_line(out, [c, c+vpol(r, a)], "latex-latex,illustration")
       tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", "outer sep=0,inner sep=0,label={[illustration]$(rad2deg(a-π/2)):$r_txt}")
@@ -780,7 +800,7 @@ KhepriBase.b_vectors_illustration(b::TikZ, p, a, rs, rs_txts, mat) =
   end
 
 KhepriBase.b_angles_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, mat) =
-  withTikZXForm(b, c) do out, cc
+  withTikZXForm(b, c, mat) do out, cc
     let maxr = maximum(rs),
         n = length(rs),
         ars = division(0.2maxr, 0.7maxr, n, false),
@@ -804,13 +824,13 @@ KhepriBase.b_angles_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts,
             tikz_line(out, [c, c+vpol(maxr, a)], "-latex,illustration")
           end
         end
-        tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "", "inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s + a - π/2)):$r_txt}")
+        tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "", "label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s + a - π/2)):$r_txt}")
       end
     end
   end
 
 KhepriBase.b_arcs_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, mat) =
-  withTikZXForm(b, c) do out, cc
+  withTikZXForm(b, c, mat) do out, cc
     let maxr = maximum(rs),
         n = length(rs),
         ars = division(0.2maxr, 0.7maxr, n, false),
