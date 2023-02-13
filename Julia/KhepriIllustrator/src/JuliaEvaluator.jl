@@ -186,7 +186,7 @@ illustrate_and_maybe_pause(func, args...) =
 
 export recursive_levels_limit, current_recursive_level, illustrations_stack, step_by_step
 const illustrations_stack = []
-const recursive_levels_limit = Parameter(0)
+const recursive_levels_limit = Parameter(1)
 const current_recursive_level = Parameter(0)
 const step_by_step = Parameter(false)
 render_n = 0
@@ -199,7 +199,9 @@ eval_call(expr, env) =
         eval_expr(expansion, env)
       end :
       let args = map(expr -> eval_expr(expr, env), exprs),
-          recursive_level = length(illustrations_stack) - length(unique(illustrations_stack))
+          prev = isempty(illustrations_stack) ? nothing : illustrations_stack[end], 
+          recursive_level = count(==(prev), illustrations_stack)
+        #println(recursive_level, " ", illustrations_stack)
         if recursive_level <= recursive_levels_limit()
           with(current_recursive_level, recursive_level) do
             if step_by_step()

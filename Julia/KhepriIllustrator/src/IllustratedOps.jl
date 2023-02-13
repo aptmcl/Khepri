@@ -217,11 +217,43 @@ include_illustrate_bindings() = KhepriBase.Parameter(true)
 
 # AML CODE
 
+#illustration_colors = [rgb(0,0,0.5), rgb(0,0.5,0), rgb(0.5,0,0), rgb(0.5,0.5,0)]
+illustration_colors = [rgb(128/255, 128/255, 255/255),
+                       rgb(130/255, 173/255, 253/255),
+                       rgb(106/255, 186/255, 236/255),
+                       rgb(255/255, 128/255, 128/255),
+                       rgb(255/255, 197/255, 100/255),
+                       rgb(222/255, 145/255, 122/255),
+                       rgb(153/255, 239/255, 147/255),
+                       rgb(203/255, 238/255,  98/255),
+                       rgb( 98/255, 230/255, 206/255)]
+#
+illustration_colors = [rgb(128/255, 128/255, 255/255),
+                       rgb(255/255, 128/255, 128/255),
+                       rgb(153/255, 239/255, 147/255),
+                       rgb(130/255, 173/255, 253/255),
+                       rgb(106/255, 186/255, 236/255),
+                       rgb(222/255, 145/255, 122/255),
+                       rgb(255/255, 197/255, 100/255),
+                       rgb(203/255, 238/255,  98/255),
+                       rgb( 98/255, 230/255, 206/255)]
+
+
 with_recursive_illustration(f) =
-  let opacity = 1.0/(1+current_recursive_level()),
-      opacity_material = material(layer("opacity_$(opacity)", true, rgba(1.0, 1.0, 1.0, opacity)))
+  let last = isempty(illustrations_stack) ? nothing : illustrations_stack[end],
+      recursive_level = length(illustrations_stack), #count(==(prev), illustrations_stack)
+      idx = findfirst(==(last), unique(illustrations_stack)),
+      opacity = 1.0/(recursive_level-idx+1),
+      color = rgba(illustration_colors[idx], opacity),
+      opacity_material = material(layer("illustration_$(idx)_$(opacity)", true, color))
       #opacity_material = material(layer("opacity_$(opacity)", true, rgba(opacity, 0.0, 0.5, opacity)))
-    with(default_material, opacity_material, default_curve_material, opacity_material, default_point_material, opacity_material) do
+    #println("current_recursive_level:", current_recursive_level(), "  Opacity:", opacity)
+    #println(illustrations_stack, " ", last, " ", recursive_level, " ", idx, " ", opacity_material)
+    with(default_annotation_material, opacity_material, 
+         #default_material, opacity_material, 
+         #default_curve_material, opacity_material, 
+         #default_point_material, opacity_material
+         ) do
       f()
     end
   end
