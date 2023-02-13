@@ -316,6 +316,15 @@ tikz_text(out::IO, txt, p::Loc, h::Real) =
     tikz_e(out, "}")
   end
 
+tikz_color(c) =
+  join(vcat(c.alpha ≈ 1.0 ?
+              [] :
+              ["opacity=$(Float64(c.alpha))"],
+            c.r ≈ 1.0 && c.g ≈ 1.0 && c.b ≈ 1.0 ?
+              [] :
+              ["color={rgb:red,$(c.r);green,$(c.g);blue,$(c.b)}"]),
+       ",")
+
 tikz_transform(out::IO, f::Function, c::Loc) =
   let m = c.cs.transform,
       t = in_world(c),
@@ -427,14 +436,8 @@ KhepriBase.b_get_material(b::TikZ, layer, spec) =
   let c = layer.color
     c == rgba(1,1,1,1) ?
       void_ref(b) : 
-      join(vcat(c.alpha ≈ 1.0 ?
-                  [] :
-                  ["opacity=$(Float64(c.alpha))"],
-                c.r ≈ 1.0 && c.g ≈ 1.0 && c.b ≈ 1.0 ?
-                  [] :
-                  ["color={rgb:red,$(c.r);green,$(c.g);blue,$(c.b)}"]),
-            ",")
-  end        
+      tikz_color(c)
+  end
   
 KhepriBase.b_get_material(b::TikZ, spec::Nothing) = void_ref(b)
 
@@ -738,8 +741,8 @@ process_tikz(path) =
       #println(out, raw"\pgfplotsset{compat=1.17}")
       #println(out, raw"\usepackage{tikz-3dplot}")
       println(out, raw"\begin{document}")
-      println(out, raw"\tikzset{illustration/.style={ultra thin,blue!50}}")
-      #println(out, raw"\tikzset{illustration/.style={ultra thin}}")
+      #println(out, raw"\tikzset{illustration/.style={ultra thin,blue!50}}")
+      println(out, raw"\tikzset{illustration/.style={ultra thin}}")
       println(out, raw"\tikzset{dimension/.style={very thin,lightgray}}")
       println(out, contents)
       println(out, raw"\end{document}")
@@ -776,81 +779,88 @@ KhepriBase.b_render_view(b::TikZ, path) =
 # Illustrations
 KhepriBase.b_textify(b::TikZ, expr) = latexify(expr)
 
-KhepriBase.b_labels(b::TikZ, p, strs, mat) =
+KhepriBase.b_labels(b::TikZ, p, strs, mats, mat) =
   withTikZXForm(b, p, mat) do out, c
     tikz_node(out, c, "",
-      "fill,circle,outer sep=0,inner sep=0,minimum size=2pt,illustration,"*
-      join(["label={[illustration]$ϕ:$str}" for (str,ϕ) in zip(strs, division(-45, 315, length(strs), false))], ","))
+      "fill,circle,outer sep=0,inner sep=0,minimum size=2pt,illustration,$(tikz_color(mats[1].layer.color)),"*
+      join(["label={[illustration,$(tikz_color(mat.layer.color))]$ϕ:$str}"
+            for (str,ϕ,mat) in zip(strs, division(-45, 315, length(strs), false), mats)], ","))
   end
 
-KhepriBase.b_radii_illustration(b::TikZ, c, rs, rs_txts, mat) =
+KhepriBase.b_radii_illustration(b::TikZ, c, rs, rs_txts, mats, mat) =
   withTikZXForm(b, c, mat) do out, cc
-    for (r, r_txt, ϕ) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false))
-      tikz_line(out, [c, c+vpol(r, ϕ)], "latex-latex,illustration")
-      tikz_node(out, intermediate_loc(c, c + vpol(r, ϕ)), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(ϕ+π/2)):$r_txt}")
+    for (r,r_txt,ϕ,mat) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false), mats)
+      color = tikz_color(mat.layer.color)
+      tikz_line(out, [c, c+vpol(r, ϕ)], "latex-latex,illustration,$color")
+      tikz_node(out, intermediate_loc(c, c + vpol(r, ϕ)), "", 
+        "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(rad2deg(ϕ+π/2)):$r_txt}")
     end
   end
 
-KhepriBase.b_vectors_illustration(b::TikZ, p, a, rs, rs_txts, mat) =
+KhepriBase.b_vectors_illustration(b::TikZ, p, a, rs, rs_txts, mats, mat) =
   withTikZXForm(b, p, mat) do out, c
-    for (r, r_txt) in zip(rs, rs_txts)
-      tikz_line(out, [c, c+vpol(r, a)], "latex-latex,illustration")
-      tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", "outer sep=0,inner sep=0,label={[illustration]$(rad2deg(a-π/2)):$r_txt}")
+    for (r, r_txt, mat) in zip(rs, rs_txts, mats)
+      color = tikz_color(mat.layer.color)
+      tikz_line(out, [c, c+vpol(r, a)], "latex-latex,illustration,$color")
+      tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", "outer sep=0,inner sep=0,label={[illustration,$color]$(rad2deg(a-π/2)):$r_txt}")
     end
   end
 
-KhepriBase.b_angles_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, mat) =
+KhepriBase.b_angles_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, mats, mat) =
   withTikZXForm(b, c, mat) do out, cc
     let maxr = maximum(rs),
         n = length(rs),
         ars = division(0.2maxr, 0.7maxr, n, false),
         idxs = sortperm(as),
-        (rs, ss, as, r_txts, s_txts, a_txts) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs])
-      for (r, ar, s, a, r_txt, s_txt, a_txt) in zip(rs, ars, ss, as, r_txts, s_txts, a_txts)
+        (rs, ss, as, r_txts, s_txts, a_txts, mats) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs], mats[idxs])
+      for (r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
+        color = tikz_color(mat.layer.color)
         if !(r ≈ 0.0)
           if !(s ≈ 0.0)
-            tikz_line(out, [c, c+vpol(ar, 0)], "illustration")
-            tikz_maybe_arc(out, c, ar, 0, s, false, "-latex,illustration")
-            tikz_node(out, c + vpol(ar, s/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s/2)):$s_txt}")
+            tikz_line(out, [c, c+vpol(ar, 0)], "illustration,$color")
+            tikz_maybe_arc(out, c, ar, 0, s, false, "-latex,illustration,$color")
+            tikz_node(out, c + vpol(ar, s/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(rad2deg(s/2)):$s_txt}")
           end
           if !(a ≈ 0.0)
-            tikz_line(out, [c, c+vpol(ar, s)], "illustration")
-            tikz_line(out, [c, c+vpol(r, s + a)], "-latex,illustration")
+            tikz_line(out, [c, c+vpol(ar, s)], "illustration,$color")
+            tikz_line(out, [c, c+vpol(r, s + a)], "-latex,illustration,$color")
             (a > 0.0) ?
-              tikz_maybe_arc(out, c, ar, s, a, false, "-latex,illustration") :
-              tikz_maybe_arc(out, c, ar, s, a, false, "latex-,illustration")
-            tikz_node(out, c + vpol(ar, s + a/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s + a/2)):$a_txt}")
+              tikz_maybe_arc(out, c, ar, s, a, false, "-latex,illustration,$color") :
+              tikz_maybe_arc(out, c, ar, s, a, false, "latex-,illustration,$color")
+            tikz_node(out, c + vpol(ar, s + a/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(rad2deg(s + a/2)):$a_txt}")
           else
-            tikz_line(out, [c, c+vpol(maxr, a)], "-latex,illustration")
+            tikz_line(out, [c, c+vpol(maxr, a)], "-latex,illustration,$color")
           end
         end
-        tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "", "label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s + a - π/2)):$r_txt}")
+        tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "", "label={[outer sep=0,inner sep=0,illustration,$color]$(rad2deg(s + a - π/2)):$r_txt}")
       end
     end
   end
 
-KhepriBase.b_arcs_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, mat) =
+KhepriBase.b_arcs_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, mats, mat) =
   withTikZXForm(b, c, mat) do out, cc
     let maxr = maximum(rs),
         n = length(rs),
         ars = division(0.2maxr, 0.7maxr, n, false),
         idxs = sortperm(ss),
-        (rs, ss, as, r_txts, s_txts, a_txts) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs])
-      for (i, r, ar, s, a, r_txt, s_txt, a_txt) in zip(1:n, rs, ars, ss, as, r_txts, s_txts, a_txts)
+        (rs, ss, as, r_txts, s_txts, a_txts, mats) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs], mats[idxs])
+      for (i, r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(1:n, rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
+        color = tikz_color(mat.layer.color)
         if !(r ≈ 0.0)
           if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
-            tikz_line(out, [c, c+vpol(ar, 0)], "illustration")
-            tikz_maybe_arc(out, c, ar, 0, s, false, "-latex,illustration")
-            tikz_node(out, c + vpol(ar, s/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s/2)):$s_txt}")
+            tikz_line(out, [c, c+vpol(ar, 0)], "illustration,$color")
+            tikz_maybe_arc(out, c, ar, 0, s, false, "-latex,illustration,$color")
+            tikz_node(out, c + vpol(ar, s/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(rad2deg(s/2)):$s_txt}")
           end
           if !(a ≈ 0.0)
             #let ar = ((i == 1) || !(s ≈ ss[i-1] + as[i-1])) ? ar : ars[i-1]
-            tikz_line(out, [c, c+vpol(maxr, s)], "illustration")
-            tikz_line(out, [c, c+vpol(maxr, s + a)], "-latex,illustration")
-            tikz_maybe_arc(out, c, ar, s, a, false, "-latex,illustration")
-            tikz_node(out, c + vpol(ar, s + a/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s + a/2)):$a_txt}")
+            tikz_line(out, [c, c+vpol(maxr, s)], "illustration,$color")
+            tikz_line(out, [c, c+vpol(maxr, s + a)], "-latex,illustration,$color")
+            tikz_maybe_arc(out, c, ar, s, a, false, "-latex,illustration,$color")
+            tikz_node(out, c + vpol(ar, s + a/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(rad2deg(s + a/2)):$a_txt}")
           end
-          tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration]$(rad2deg(s + a - π/2)):$r_txt}")
+          tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "",           
+          "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(rad2deg(s + a - π/2)):$r_txt}")
         end
       end
     end
