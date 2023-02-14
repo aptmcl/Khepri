@@ -225,8 +225,8 @@ illustration_colors = [rgb(128/255, 128/255, 255/255),
                        rgb(255/255, 197/255, 100/255),
                        rgb(222/255, 145/255, 122/255),
                        rgb(153/255, 239/255, 147/255),
-                       rgb(203/255, 238/255,  98/255),
-                       rgb( 98/255, 230/255, 206/255)]
+                       rgb(203/255, 238/255, 098/255),
+                       rgb(098/255, 230/255, 206/255)]
 #
 illustration_colors = [rgb(128/255, 128/255, 255/255),
                        rgb(255/255, 128/255, 128/255),
@@ -235,8 +235,8 @@ illustration_colors = [rgb(128/255, 128/255, 255/255),
                        rgb(106/255, 186/255, 236/255),
                        rgb(222/255, 145/255, 122/255),
                        rgb(255/255, 197/255, 100/255),
-                       rgb(203/255, 238/255,  98/255),
-                       rgb( 98/255, 230/255, 206/255)]
+                       rgb(203/255, 238/255, 098/255),
+                       rgb(098/255, 230/255, 206/255)]
 
 
 with_recursive_illustration(f) =
@@ -244,7 +244,7 @@ with_recursive_illustration(f) =
       recursive_level = length(illustrations_stack), #count(==(prev), illustrations_stack)
       idx = findfirst(==(last), unique(illustrations_stack)),
       opacity = 1.0/(recursive_level-idx+1),
-      color = rgba(illustration_colors[idx], opacity),
+      color = rgba(illustration_colors[(idx-1)%(length(illustration_colors))+1], opacity),
       opacity_material = material(layer("illustration_$(idx)_$(opacity)", true, color))
       #opacity_material = material(layer("opacity_$(opacity)", true, rgba(opacity, 0.0, 0.5, opacity)))
     #println("current_recursive_level:", current_recursive_level(), "  Opacity:", opacity)
