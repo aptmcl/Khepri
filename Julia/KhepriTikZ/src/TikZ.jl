@@ -322,7 +322,7 @@ tikz_color(c) =
               ["opacity=$(Float64(c.alpha))"],
             c.r ≈ 1.0 && c.g ≈ 1.0 && c.b ≈ 1.0 ?
               [] :
-              ["color={rgb:red,$(c.r);green,$(c.g);blue,$(c.b)}"]),
+              ["color={rgb,1:red,$(c.r);green,$(c.g);blue,$(c.b)}"]),
        ",")
 
 tikz_transform(out::IO, f::Function, c::Loc) =
