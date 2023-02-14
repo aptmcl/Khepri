@@ -186,7 +186,7 @@ illustrate_and_maybe_pause(func, args...) =
 
 export recursive_levels_limit, current_recursive_level, illustrations_stack, step_by_step
 const illustrations_stack = []
-const recursive_levels_limit = Parameter(1)
+const recursive_levels_limit = Parameter{Real}(1)
 const current_recursive_level = Parameter(0)
 const step_by_step = Parameter(false)
 render_n = 0
