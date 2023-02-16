@@ -24,7 +24,16 @@ augment_environment(names, values, env) =
 
 get_environment_binding(name, env) =
   isnothing(env) ?
-    error("Unbound name: ", name) :
+    # if the binging can't be found, we might go down one language level
+    if isdefined(KhepriBase, name)
+      make_binding(
+        name,
+        let val = getproperty(KhepriBase, name)
+          val isa Function ? make_primitive(val) : val
+        end)
+    else
+      error("Unbound name: ", name)
+    end :
     begin
       for binding in env.bindings
         if name === binding_name(binding)
@@ -82,6 +91,15 @@ eval_ref(expr, env) =
     v[i]
   end
 
+#
+is_dot(expr) = expr isa Expr && expr.head === :.
+eval_dot(expr, env) =
+  let v = eval_expr(expr.args[1], env),
+      i = expr.args[2].value
+    getproperty(v, i)
+  end
+
+
 eval_expr(expr, env) =
   if is_self_evaluating(expr)
     expr
@@ -93,6 +111,8 @@ eval_expr(expr, env) =
     eval_vect(expr, env)
   elseif is_ref(expr)
     eval_ref(expr, env)
+  elseif is_dot(expr)
+    eval_dot(expr, env)
   elseif is_lambda(expr)
     eval_lambda(expr, env)
   elseif is_if(expr)
@@ -202,21 +222,23 @@ eval_call(expr, env) =
           prev = isempty(illustrations_stack) ? nothing : illustrations_stack[end], 
           recursive_level = count(==(prev), illustrations_stack)
         #println(recursive_level, " ", illustrations_stack)
-        if recursive_level <= recursive_levels_limit()
-          with(current_recursive_level, recursive_level) do
-            if step_by_step()
-              if !ismissing(illustrate(func, args..., exprs...))
-                global render_n += 1
-                render_view("IllustrationStep$render_n")
-              end
-            else
-              illustrate(func, args..., exprs...)
-            end
-          end
-        end
         push!(illustrations_stack, call_operator(expr))
         try
-          apply_function(func, args, env)
+          let res = apply_function(func, args, env)
+            if recursive_level <= recursive_levels_limit()
+              with(current_recursive_level, recursive_level) do
+                if step_by_step()
+                  if !ismissing(illustrate(func, args..., exprs...))
+                    global render_n += 1
+                    render_view("IllustrationStep$render_n")
+                  end
+                else
+                  illustrate(func, args..., exprs...)
+                end
+              end
+            end
+            res
+          end
         finally
           pop!(illustrations_stack)
         end
@@ -995,8 +1017,6 @@ let x = 1, y = x + 1
 end
 """) === 2
 
-
-
 julia_repl() =
   while true
     prompt_for_input()
@@ -1007,7 +1027,10 @@ julia_repl() =
   end
 
 macro illustrate(call)
-  :(eval_expr($(QuoteNode(call))))
+  :(begin
+    empty!(illustrations_stack)
+    eval_expr($(QuoteNode(call)))
+  end)
 end
 
 export @illustrate,
