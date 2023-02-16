@@ -215,35 +215,49 @@ include_illustrate_vxyz() = KhepriBase.Parameter(true)
 
 include_illustrate_bindings() = KhepriBase.Parameter(true)
 
-# AML CODE
+# AML
+# Colors
+reds = [
+  rgb(255/255, 197/255, 100/255), # Tangerine Orange
+  rgb(255/255, 128/255, 128/255), # Samon Red
+  rgb(222/255, 145/255, 122/255), # Light Brown
+  rgb(240/255, 131/255, 162/255)] # Bubble Gum Pink
 
-#illustration_colors = [rgb(0,0,0.5), rgb(0,0.5,0), rgb(0.5,0,0), rgb(0.5,0.5,0)]
-illustration_colors = [rgb(128/255, 128/255, 255/255),
-                       rgb(130/255, 173/255, 253/255),
-                       rgb(106/255, 186/255, 236/255),
-                       rgb(255/255, 128/255, 128/255),
-                       rgb(255/255, 197/255, 100/255),
-                       rgb(222/255, 145/255, 122/255),
-                       rgb(153/255, 239/255, 147/255),
-                       rgb(203/255, 238/255, 098/255),
-                       rgb(098/255, 230/255, 206/255)]
-#
-illustration_colors = [rgb(128/255, 128/255, 255/255),
-                       rgb(255/255, 128/255, 128/255),
-                       rgb(153/255, 239/255, 147/255),
-                       rgb(130/255, 173/255, 253/255),
-                       rgb(106/255, 186/255, 236/255),
-                       rgb(222/255, 145/255, 122/255),
-                       rgb(255/255, 197/255, 100/255),
-                       rgb(203/255, 238/255, 098/255),
-                       rgb(098/255, 230/255, 206/255)]
+greens = [
+  rgb(165/255, 223/255, 130/255), # Light Olive Green
+  rgb(203/255, 238/255, 098/255), # Lime Green
+  rgb(153/255, 239/255, 147/255), # Emerald Green
+  rgb(098/255, 230/255, 206/255)] # Jade Green
 
+blues = [
+  rgb(130/255, 173/255, 253/255), # Light Blue Purple hint
+  rgb(113/255, 219/255, 243/255), # Celestial Blue
+  rgb(106/255, 186/255, 236/255), # Light Blue Green hint
+  rgb(093/255, 133/255, 185/255)] # Dark Blue
+
+purples = [
+  rgb(195/255, 142/255, 220/255), # Dark/Old Pink
+  rgb(128/255, 128/255, 255/255), # Lilac Blue
+  rgb(123/255, 110/255, 202/255), # Dark Purple
+  rgb(179/255, 172/255, 252/255)] # lilac Light Purple
+
+# only one color set
+# illustration_colors = blues
+# illustration_colors = greens
+# illustration_colors = purples
+# illustration_colors = reds
+
+# mixed set
+illustration_colors = vcat([[blues[i], purples[i], reds[i], greens[i]] for i in 1:length(blues)]...)
 
 with_recursive_illustration(f) =
   let last = isempty(illustrations_stack) ? nothing : illustrations_stack[end],
-      recursive_level = length(illustrations_stack), #count(==(prev), illustrations_stack)
-      idx = findfirst(==(last), unique(illustrations_stack)),
-      opacity = 1.0/(recursive_level-idx+1),
+      recursive_level = length(illustrations_stack),
+      #recursive_level = count(==(last), illustrations_stack),
+      idx = findfirst(==(last), unique(illustrations_stack))-1,
+      #idx = findfirst(==(last), unique(illustrations_stack))-1,
+      opacity = 1.0/(recursive_level-idx),
+      #opacity = 1.0/(recursive_level),
       color = rgba(illustration_colors[(idx-1)%(length(illustration_colors))+1], opacity),
       opacity_material = material(layer("illustration_$(idx)_$(opacity)", true, color))
       #opacity_material = material(layer("opacity_$(opacity)", true, rgba(opacity, 0.0, 0.5, opacity)))
