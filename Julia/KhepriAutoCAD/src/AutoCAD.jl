@@ -332,6 +332,7 @@ public ObjectId Chair(Point3d c, double angle, ObjectId family)
 public ObjectId CreateRectangularTableAndChairsFamily(ObjectId tableFamily, ObjectId chairFamily, double tableLength, double tableWidth, int chairsOnTop, int chairsOnBottom, int chairsOnRight, int chairsOnLeft, double spacing)
 public ObjectId TableAndChairs(Point3d c, double angle, ObjectId family)
 public ObjectId[] CreateLeaderDimension(String text, Point3d p0, Point3d p1, double scale, String mark, Options props)
+public ObjectId CreateNonLeaderDimension(String text, Point3d p0, Point3d p1, double scale, String mark, Options props)
 public ObjectId CreateAlignedDimension(String text, Point3d p0, Point3d p1, Point3d p, double scale, String mark, Options props)
 public ObjectId CreateRadialDimension(String text, Point3d c, Point3d chord, double leader, double scale, String mark, Options props)
 public ObjectId CreateDiametricDimension(String text, Point3d p0, Point3d p1, double leader, double scale, String mark1, String mark2, Options props)
@@ -1027,7 +1028,8 @@ radii_props = merge(Dict("Dimatfit"=>Int32(1), "Dimsah"=>true, "Dimtad"=>Int32(2
 
 KhepriBase.b_labels(b::ACAD, p, strs, mats, mat) =
   [with(current_layer, mat.layer) do
-    @remote(b, CreateLeaderDimension(str, p, p+vpol(annotation_scale(), ϕ), annotation_scale(), mark, label_props))
+    #@remote(b, CreateLeaderDimension(str, p, p+vpol(annotation_scale(), ϕ), annotation_scale(), mark, label_props))
+    @remote(b, CreateNonLeaderDimension(str, p, p+vpol(0.1*annotation_scale(), ϕ), annotation_scale(), mark, label_props))
    end
    for (str, ϕ, mark, mat)
      in zip(strs,
