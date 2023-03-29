@@ -14,8 +14,12 @@
   "contributes": {
     "commands": [
       {
-        "command": "vsckhepri.helloWorld",
-        "title": "Hello World"
+        "command": "vsckhepri.generatedShapes",
+        "title": "Khepri Shapes"
+      },
+      {
+        "command": "vsckhepri.generatingCode",
+        "title": "Khepri Code"
       }
     ]
   },
