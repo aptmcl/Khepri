@@ -16,16 +16,12 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.showInformationMessage("Could not find the Julia extension!");
 	} else if (juliaExtension.isActive === false) {
 			juliaExtension.activate().then( 
-						function(){
-							console.log("Julia extension activated");
-						},
-						function(){
-							console.log("Julia extension activation failed!");
-						});
+						function(){ console.log("Julia extension activated"); },
+						function(){ console.log("Julia extension activation failed!"); });
 	}
 	vscode.commands.executeCommand("language-julia.startREPL");
 	let juliaAPI = juliaExtension?.exports;
-	let disposable1 = vscode.commands.registerCommand('khepriide.generatingCode', () => {
+	let disposable1 = vscode.commands.registerCommand('vsckhepri.generatingCode', () => {
 		juliaAPI.executeInREPL('KhepriBase.select_shape_sources_string()', 
 		                       { showCodeInREPL:false, showResultInREPL:false }).then((res: { all: string; }) => {
 			const editor = vscode.window.activeTextEditor;
@@ -47,7 +43,7 @@ export function activate(context: vscode.ExtensionContext) {
 		});
 	});
 	context.subscriptions.push(disposable1);
-	let disposable2 = vscode.commands.registerCommand('khepriide.generatedShapes', () => {
+	let disposable2 = vscode.commands.registerCommand('vsckhepri.generatedShapes', () => {
 		const editor = vscode.window.activeTextEditor;
 		if (editor) {
 			clearHighlightDecorationTypes(editor);
