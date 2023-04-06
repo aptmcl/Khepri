@@ -134,7 +134,10 @@ def delete_all_shapes()->None:
 def delete_shape(name:Id)->None:
 def select_shape(name:Id)->None:
 def deselect_shape(name:Id)->None:
+def select_shapes(names:List[Id])->None:
+def deselect_shapes(names:List[Id])->None:
 def deselect_all_shapes()->None:
+def selected_shapes(prompt:str)->List[Id]:
 def get_material(name:str)->MatId:
 def get_blenderkit_material(ref:str)->MatId:
 def new_material(name:str, diffuse_color:RGBA, metallic:float, specular:float, roughness:float, clearcoat:float, clearcoat_roughness:float, ior:float, transmission:float, transmission_roughness:float, emission:RGBA, emission_strength:float)->MatId:
@@ -407,7 +410,7 @@ KhepriBase.b_get_view(b::BLR) =
 
 KhepriBase.b_zoom_extents(b::BLR) = @remote(b, ZoomExtents())
 
-KhepriBase.b_set_view_top(b::BLR) = @remote(b, ViewTop())
+#KhepriBase.b_set_view_top(b::BLR) = @remote(b, ViewTop())
 
 KhepriBase.b_realistic_sky(b::BLR, altitude, azimuth, turbidity, sun) =
   @remote(b, set_sun_sky(deg2rad(altitude), deg2rad(azimuth), turbidity, sun))
@@ -427,8 +430,34 @@ KhepriBase.b_highlight_ref(b::BLR, r::BLRId) =
 KhepriBase.b_unhighlight_ref(b::BLR, r::BLRId) =
   @remote(b, deselect_shape(r))
 
+KhepriBase.b_highlight_refs(b::BLR, rs::BLRIds) =
+  @remote(b, select_shapes(rs))
+
+KhepriBase.b_unhighlight_refs(b::BLR, rs::BLRIds) =
+  @remote(b, deselect_shapes(rs))
+
 KhepriBase.b_unhighlight_all_refs(b::BLR) =
   @remote(b, deselect_all_shapes())
+
+
+##############
+KhepriBase.b_select_shape(b::BLR, prompt::String) =
+  let get_it() = select_one_with_prompt(prompt, b, @get_remote b selected_shapes)
+    @remote(b, deselect_all_shapes())
+    let sh = get_it()
+      while isnothing(sh)
+        sleep(1)
+        sh = get_it()
+      end
+      sh
+    end
+  end
+
+#
+KhepriBase.b_shape_from_ref(b::BLR, r) = begin
+  error("Unknown shape with reference $r")
+end
+##############
 
 KhepriBase.b_render_view(b::BLR, path::String) =
   let (camera, target, lens) = @remote(b, get_view())
