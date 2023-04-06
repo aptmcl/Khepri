@@ -390,6 +390,8 @@ public bool WasCanceled()
 public ObjectId[] GetAllShapes()
 public ObjectId[] GetAllShapesInLayer(ObjectId layerId)
 public void SelectShapes(ObjectId[] ids)
+public void DeselectShapes(ObjectId[] ids)
+public void DeselectAllShapes()
 public void Render(int width, int height, string path, int levels, double exposure)
 """
 
@@ -1241,7 +1243,6 @@ KhepriBase.b_shape_from_ref(b::ACAD, r) =
         #error("Unknown shape with code $(code)")
     end
   end
-#
 
 #=
 In case we need to realize an Unknown shape, we just copy it
@@ -1360,11 +1361,15 @@ KhepriBase.b_all_shapes(b::ACAD) =
 KhepriBase.b_all_shapes_in_layer(b::ACAD, layer) =
   Shape[b_shape_from_ref(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
 
-backend_highlight_shape(b::ACAD, s::Shape) =
-  @remote(b, SelectShapes(collect_ref(b, s)))
+KhepriBase.b_highlight_refs(b::ACAD, rs::Vector{ACADId}) =
+  @remote(b, SelectShapes(rs))
 
-backend_highlight_shapes(b::ACAD, ss::Shapes) =
-  @remote(b, SelectShapes(collect_ref(b, ss)))
+KhepriBase.b_unhighlight_refs(b::ACAD, rs::Vector{ACADId}) =
+  @remote(b, DeselectShapes(rs))
+
+KhepriBase.b_unhighlight_all_refs(b::ACAD) =
+  @remote(b, DeselectAllShapes())
+
 
 backend_pre_selected_shapes_from_set(ss::Shapes) =
   length(ss) == 0 ? [] : pre_selected_shapes_from_set(ss, backend(ss[1]))
