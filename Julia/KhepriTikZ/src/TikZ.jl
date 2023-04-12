@@ -32,6 +32,13 @@ tikz_number(out::IO, x::Real) =
       print(out, 0) :
       print(out, round(x*10000.0)/10000.0))
 
+tikz_number_string(x::Real) =
+  sprint(tikz_number, x)
+
+
+tikz_deg_string(x) =
+  tikz_number_string(rad2deg(x))
+
 tikz_cm(out::IO, x::Real) = begin
   tikz_number(out, x)
   print(out, "cm")
@@ -43,6 +50,15 @@ tikz_2d_coord(out::IO, c::Loc) =
     tikz_number(out, c.x)
     print(out, ",")
     tikz_number(out, c.y)
+    print(out, ")")
+  end
+
+tikz_vpol_coord(out::IO, c::VPol) =
+  let c = in_world(c)
+    print(out, "(")
+    tikz_number(out, rad2deg(c.ϕ))
+    print(out, ":")
+    tikz_number(out, c.ρ)
     print(out, ")")
   end
 
@@ -167,6 +183,16 @@ tikz_line(out::IO, pts::Locs, options) =
       print(out, "--")
       tikz_coord(out, pt)
     end
+    println(out, ";")
+  end
+
+tikz_polar_segment(out::IO, p::Loc, v::VPol, options) =
+  begin
+    tikz_draw(out, false)
+    tikz_options(out, options)
+    tikz_coord(out, p)
+    print(out, "--+")
+    tikz_vpol_coord(out, v)
     println(out, ";")
   end
 
@@ -319,10 +345,10 @@ tikz_text(out::IO, txt, p::Loc, h::Real) =
 tikz_color(c) =
   join(vcat(c.alpha ≈ 1.0 ?
               [] :
-              ["opacity=$(Float64(c.alpha))"],
+              ["opacity=$(tikz_number_string(c.alpha))"],
             c.r ≈ 1.0 && c.g ≈ 1.0 && c.b ≈ 1.0 ?
               [] :
-              ["color={rgb,1:red,$(c.r);green,$(c.g);blue,$(c.b)}"]),
+              ["color={rgb,1:red,$(tikz_number_string(c.r));green,$(tikz_number_string(c.g));blue,$(tikz_number_string(c.b))}"]),
        ",")
 
 tikz_transform(out::IO, f::Function, c::Loc) =
@@ -791,9 +817,9 @@ KhepriBase.b_radii_illustration(b::TikZ, c, rs, rs_txts, mats, mat) =
   withTikZXForm(b, c, mat) do out, cc
     for (r,r_txt,ϕ,mat) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false), mats)
       color = tikz_color(mat.layer.color)
-      tikz_line(out, [c, c+vpol(r, ϕ)], "latex-latex,illustration,$color")
+      tikz_polar_segment(out, c, vpol(r, ϕ), "latex-latex,illustration,$color")
       tikz_node(out, intermediate_loc(c, c + vpol(r, ϕ)), "", 
-        "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(rad2deg(ϕ+π/2)):$r_txt}")
+        "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(ϕ+π/2)):$r_txt}")
     end
   end
 
@@ -801,8 +827,8 @@ KhepriBase.b_vectors_illustration(b::TikZ, p, a, rs, rs_txts, mats, mat) =
   withTikZXForm(b, p, mat) do out, c
     for (r, r_txt, mat) in zip(rs, rs_txts, mats)
       color = tikz_color(mat.layer.color)
-      tikz_line(out, [c, c+vpol(r, a)], "latex-latex,illustration,$color")
-      tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", "outer sep=0,inner sep=0,label={[illustration,$color]$(rad2deg(a-π/2)):$r_txt}")
+      tikz_polar_segment(out, c, vpol(r, a), "latex-latex,illustration,$color")
+      tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", "outer sep=0,inner sep=0,label={[illustration,$color]$(tikz_deg_string(a-π/2)):$r_txt}")
     end
   end
 
@@ -817,22 +843,22 @@ KhepriBase.b_angles_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts,
         color = tikz_color(mat.layer.color)
         if !(r ≈ 0.0)
           if !(s ≈ 0.0)
-            tikz_line(out, [c, c+vpol(ar, 0)], "illustration,$color")
+            tikz_polar_segment(out, c, vpol(ar, 0), "illustration,$color")
             tikz_maybe_arc(out, c, ar, 0, s, false, "-latex,illustration,$color")
-            tikz_node(out, c + vpol(ar, s/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(rad2deg(s/2)):$s_txt}")
+            tikz_node(out, c + vpol(ar, s/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(s/2)):$s_txt}")
           end
           if !(a ≈ 0.0)
-            tikz_line(out, [c, c+vpol(ar, s)], "illustration,$color")
-            tikz_line(out, [c, c+vpol(r, s + a)], "-latex,illustration,$color")
+            tikz_polar_segment(out, c, vpol(ar, s), "illustration,$color")
+            tikz_polar_segment(out, c, vpol(r, s + a), "-latex,illustration,$color")
             (a > 0.0) ?
               tikz_maybe_arc(out, c, ar, s, a, false, "-latex,illustration,$color") :
               tikz_maybe_arc(out, c, ar, s, a, false, "latex-,illustration,$color")
-            tikz_node(out, c + vpol(ar, s + a/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(rad2deg(s + a/2)):$a_txt}")
+            tikz_node(out, c + vpol(ar, s + a/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(s + a/2)):$a_txt}")
           else
-            tikz_line(out, [c, c+vpol(maxr, a)], "-latex,illustration,$color")
+            tikz_polar_segment(out, c, vpol(maxr, a), "-latex,illustration,$color")
           end
         end
-        tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "", "label={[outer sep=0,inner sep=0,illustration,$color]$(rad2deg(s + a - π/2)):$r_txt}")
+        tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "", "label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(s + a - π/2)):$r_txt}")
       end
     end
   end
@@ -850,17 +876,17 @@ KhepriBase.b_arcs_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, m
           if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
             tikz_line(out, [c, c+vpol(ar, 0)], "illustration,$color")
             tikz_maybe_arc(out, c, ar, 0, s, false, "-latex,illustration,$color")
-            tikz_node(out, c + vpol(ar, s/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(rad2deg(s/2)):$s_txt}")
+            tikz_node(out, c + vpol(ar, s/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(s/2)):$s_txt}")
           end
           if !(a ≈ 0.0)
             #let ar = ((i == 1) || !(s ≈ ss[i-1] + as[i-1])) ? ar : ars[i-1]
             tikz_line(out, [c, c+vpol(maxr, s)], "illustration,$color")
             tikz_line(out, [c, c+vpol(maxr, s + a)], "-latex,illustration,$color")
             tikz_maybe_arc(out, c, ar, s, a, false, "-latex,illustration,$color")
-            tikz_node(out, c + vpol(ar, s + a/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(rad2deg(s + a/2)):$a_txt}")
+            tikz_node(out, c + vpol(ar, s + a/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(s + a/2)):$a_txt}")
           end
           tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "",           
-          "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(rad2deg(s + a - π/2)):$r_txt}")
+          "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(s + a - π/2)):$r_txt}")
         end
       end
     end
