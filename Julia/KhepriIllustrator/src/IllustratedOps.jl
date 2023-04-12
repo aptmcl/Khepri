@@ -382,3 +382,14 @@ illustrate(f::typeof(arc), c, ρ, α, Δα, c_e, ρ_e, α_e, Δα_e) =
     #dimension(c, c+vpol(ρ, α), textify(ρ_e), size=0.1, offset=0)
     arc_illustration(c, ρ, α, Δα, textify(ρ_e), textify(α_e), textify(Δα_e))
   end
+
+# We need to complement the automatic illustrations with manual ones.
+
+with_annotation_material(f) =
+  with(f, default_curve_material, material(layer("illustration_1_1.0", true, rgba(illustration_colors[1], 1.0))))
+
+macro extra_illustrations(body)
+  :(with_annotation_material(()->$body))
+end
+
+export with_annotation_material, @extra_illustrations
