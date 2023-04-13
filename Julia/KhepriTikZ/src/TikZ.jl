@@ -116,8 +116,8 @@ tikz_circle(out::IO, c::Loc, r::Real, filled::Bool=false, options=nothing) =
     tikz_e(out, ")")
   end
 
-tikz_point(out::IO, c::Loc) =
-  tikz_circle(out, c, 0.03, true, nothing)
+tikz_point(out::IO, c::Loc, options=nothing) =
+  tikz_circle(out, c, 0.03, true, options)
 
 tikz_ellipse(out::IO, c::Loc, r0::Real, r1::Real, fi::Real, filled=false) =
   begin
@@ -159,9 +159,9 @@ tikz_arc(out::IO, c::Loc, r::Real, ai::Real, af::Real, filled::Bool, options) =
 
 tikz_maybe_arc(out::IO, c::Loc, r::Real, ai::Real, da::Real, filled::Bool, options) =
   if iszero(r)
-    tikz_point(out, c)
+    tikz_point(out, c, options)
   elseif iszero(da)
-    tikz_point(out, c + vpol(r, ai))
+    tikz_point(out, c + vpol(r, ai), options)
   #elseif abs(da) >= 2*pi # Some options (e.g., arraws) only make sense for arcs
   #  tikz_circle(out, c, r, filled, options)
   else
@@ -529,13 +529,13 @@ withTikZXForm(f, b, c, mat) =
   end
 
 KhepriBase.b_point(b::TikZ, p, mat) =
-  tikz_point(connection(b), p)
+  tikz_point(connection(b), p, mat)
 
 KhepriBase.b_line(b::TikZ, ps, mat) =
   tikz_line(connection(b), ps, mat)
 
 KhepriBase.b_polygon(b::TikZ, ps, mat) =
-  tikz_closed_line(connection(b), ps)
+  tikz_closed_line(connection(b), ps, mat)
 
 KhepriBase.b_spline(b::TikZ, ps, v0, v1, mat) =
   if (v0 == false) && (v1 == false)
