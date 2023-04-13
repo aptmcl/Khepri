@@ -119,9 +119,10 @@ tikz_circle(out::IO, c::Loc, r::Real, filled::Bool=false, options=nothing) =
 tikz_point(out::IO, c::Loc, options=nothing) =
   tikz_circle(out, c, 0.03, true, options)
 
-tikz_ellipse(out::IO, c::Loc, r0::Real, r1::Real, fi::Real, filled=false) =
+tikz_ellipse(out::IO, c::Loc, r0::Real, r1::Real, fi::Real, filled=false, options=nothing) =
   begin
     tikz_draw(out, filled)
+    tikz_options(out, options)
     print(out, "[shift={")
     tikz_coord(out, c)
     print(out, "}]")
@@ -136,7 +137,7 @@ tikz_ellipse(out::IO, c::Loc, r0::Real, r1::Real, fi::Real, filled=false) =
     tikz_e(out, ")")
   end
 
-tikz_arc(out::IO, c::Loc, r::Real, ai::Real, af::Real, filled::Bool, options) =
+tikz_arc(out::IO, c::Loc, r::Real, ai::Real, af::Real, filled::Bool, options=nothing) =
   begin
     tikz_draw(out, filled)
     tikz_options(out, options)
@@ -157,7 +158,7 @@ tikz_arc(out::IO, c::Loc, r::Real, ai::Real, af::Real, filled::Bool, options) =
     println(out, ";")
   end
 
-tikz_maybe_arc(out::IO, c::Loc, r::Real, ai::Real, da::Real, filled::Bool, options) =
+tikz_maybe_arc(out::IO, c::Loc, r::Real, ai::Real, da::Real, filled::Bool, options=nothing) =
   if iszero(r)
     tikz_point(out, c, options)
   elseif iszero(da)
@@ -174,7 +175,7 @@ tikz_maybe_arc(out::IO, c::Loc, r::Real, ai::Real, da::Real, filled::Bool, optio
     end
   end
 
-tikz_line(out::IO, pts::Locs, options) =
+tikz_line(out::IO, pts::Locs, options=nothing) =
   begin
     tikz_draw(out, false)
     tikz_options(out, options)
@@ -239,9 +240,10 @@ tikz_dim_arc(out::IO, c, r, ai, da, r_text, da_text) =
       tikz_node(out, c + vpol(r*(f+0.05), ai + da/2), da_text, "dimension")
     end
 
-tikz_closed_line(out::IO, pts::Locs, filled::Bool=false) =
+tikz_closed_line(out::IO, pts::Locs, filled::Bool=false, options=nothing) =
   begin
     tikz_draw(out, filled)
+    tikz_options(out, options)
     for pt in pts
       tikz_coord(out, pt)
       print(out, "--")
@@ -249,9 +251,10 @@ tikz_closed_line(out::IO, pts::Locs, filled::Bool=false) =
     tikz_e(out, "cycle")
   end
 
-tikz_closed_lines(out::IO, ptss, filled::Bool=false) =
+tikz_closed_lines(out::IO, ptss, filled::Bool=false, options=nothing) =
   begin
     tikz_draw(out, filled)
+    tikz_options(out, options)
     for pts in ptss
       for pt in pts
         tikz_coord(out, pt)
@@ -655,7 +658,7 @@ KhepriBase.b_quad(b::TikZ, p1, p2, p3, p4, mat) =
   # end
 
 KhepriBase.b_surface_polygon(b::TikZ, ps, mat) =
-  tikz_closed_line(connection(b), ps, true)
+  tikz_closed_line(connection(b), ps, true, mat)
   #=
 
 KhepriBase.b_surface_polygon_with_holes(b::TikZ, ps, qss, mat) =
