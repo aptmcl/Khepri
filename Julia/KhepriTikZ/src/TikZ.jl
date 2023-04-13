@@ -538,7 +538,7 @@ KhepriBase.b_line(b::TikZ, ps, mat) =
   tikz_line(connection(b), ps, mat)
 
 KhepriBase.b_polygon(b::TikZ, ps, mat) =
-  tikz_closed_line(connection(b), ps, mat)
+  tikz_closed_line(connection(b), ps, false, mat)
 
 KhepriBase.b_spline(b::TikZ, ps, v0, v1, mat) =
   if (v0 == false) && (v1 == false)
