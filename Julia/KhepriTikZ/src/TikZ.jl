@@ -883,12 +883,12 @@ KhepriBase.b_arcs_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, m
           end
           if !(a ≈ 0.0)
             #let ar = ((i == 1) || !(s ≈ ss[i-1] + as[i-1])) ? ar : ars[i-1]
-            tikz_line(out, [c, c+vpol(maxr, s)], "illustration,$color")
-            tikz_line(out, [c, c+vpol(maxr, s + a)], "-latex,illustration,$color")
+            tikz_line(out, [c, c+vpol(r, s)], "illustration,$color")
+            tikz_line(out, [c, c+vpol(r, s + a)], "-latex,illustration,$color")
             tikz_maybe_arc(out, c, ar, s, a, false, "-latex,illustration,$color")
             tikz_node(out, c + vpol(ar, s + a/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(s + a/2)):$a_txt}")
           end
-          tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "",           
+          tikz_node(out, intermediate_loc(c, c + vpol(r, s + a)), "",           
           "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(s + a - π/2)):$r_txt}")
         end
       end
