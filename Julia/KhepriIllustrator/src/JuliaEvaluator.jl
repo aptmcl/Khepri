@@ -24,7 +24,7 @@ augment_environment(names, values, env) =
 
 get_environment_binding(name, env) =
   isnothing(env) ?
-    # if the binging can't be found, we might go down one language level
+    # if the binding can't be found, we might go down one language level
     if isdefined(KhepriBase, name)
       make_binding(
         name,
@@ -219,14 +219,20 @@ eval_call(expr, env) =
         eval_expr(expansion, env)
       end :
       let args = map(expr -> eval_expr(expr, env), exprs),
-          prev = isempty(illustrations_stack) ? nothing : illustrations_stack[end], 
-          recursive_level = count(==(prev), illustrations_stack)
+          #prev = isempty(illustrations_stack) ? nothing : illustrations_stack[end], 
+          recursive_level = length(illustrations_stack) #count(==(prev), illustrations_stack)
         #println(recursive_level, " ", illustrations_stack)
-        push!(illustrations_stack, call_operator(expr))
         try
-          let res = apply_function(func, args, env)
-            if recursive_level <= recursive_levels_limit()
-              with(current_recursive_level, recursive_level) do
+          with(current_recursive_level, recursive_level) do
+            let res = 
+              is_primitive(func) ?
+                apply_primitive(func, args) :
+                let params = function_parameters(func),
+                    extended_env = augment_environment(params, args,  function_environment(func))
+                  push!(illustrations_stack, call_operator(expr))
+                  eval_expr(function_body(func), extended_env)
+                end                        
+              if current_recursive_level() <= recursive_levels_limit()
                 if step_by_step()
                   if !ismissing(illustrate(func, args..., exprs...))
                     global render_n += 1
@@ -236,11 +242,11 @@ eval_call(expr, env) =
                   illustrate(func, args..., exprs...)
                 end
               end
+              res
             end
-            res
           end
         finally
-          pop!(illustrations_stack)
+          is_primitive(func) || pop!(illustrations_stack)
         end
       end
   end
@@ -400,7 +406,15 @@ eval_let(expr, env) =
           names = let_scope_names(scope),
           inits = map(init->eval_expr(init, env), let_scope_inits(scope)),
           extended_env = augment_environment(names, inits, env)
-        eval_let(:(let $(scopes[2:end]...); $body end), extended_env)
+        #println((current_recursive_level(), recursive_levels_limit()))
+        if current_recursive_level() <= recursive_levels_limit()
+          let res = eval_let(:(let $(scopes[2:end]...); $body end), extended_env)
+            illustrate_bindings(names, inits)
+            res
+          end
+        else
+          eval_let(:(let $(scopes[2:end]...); $body end), extended_env)
+        end
       end
     end
   end

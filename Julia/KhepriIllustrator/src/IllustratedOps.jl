@@ -248,18 +248,18 @@ purples = [
 # illustration_colors = reds
 
 # mixed set
-illustration_colors = vcat([[blues[i], purples[i], reds[i], greens[i]] for i in 1:length(blues)]...)
+illustration_colors = vcat([[blues[i], purples[i], reds[i], greens[i]] for i in eachindex(blues)]...)
 
-with_recursive_illustration(f) =
+with_recursive_illustration(f) = begin
+  #println(illustrations_stack)
   let last = isempty(illustrations_stack) ? nothing : illustrations_stack[end],
       recursive_level = length(illustrations_stack),
-      #recursive_level = count(==(last), illustrations_stack),
-      idx = findfirst(==(last), unique(illustrations_stack))-1,
-      #idx = findfirst(==(last), unique(illustrations_stack))-1,
-      opacity = 1.0/(recursive_level-idx),
-      #opacity = 1.0/(recursive_level),
-      color = rgba(illustration_colors[(idx-1)%(length(illustration_colors))+1], opacity),
-      opacity_material = material(layer("illustration_$(idx)_$(opacity)", true, color))
+      funcs = unique(illustrations_stack),
+      func_idx = findfirst(==(last), funcs),
+      opacity = 1.0/max(recursive_level, 1),
+      color = rgba(illustration_colors[(func_idx-1)%(length(illustration_colors))+1], opacity),
+      #color = rgba(illustration_colors[1], opacity),
+      opacity_material = material(layer("illustration_$(func_idx)_$(opacity)", true, color))
       #opacity_material = material(layer("opacity_$(opacity)", true, rgba(opacity, 0.0, 0.5, opacity)))
     #println("current_recursive_level:", current_recursive_level(), "  Opacity:", opacity)
     #println(illustrations_stack, " ", last, " ", recursive_level, " ", idx, " ", opacity_material)
@@ -271,8 +271,19 @@ with_recursive_illustration(f) =
       f()
     end
   end
+end
 
-
+#
+illustrate_bindings(names, inits) =
+  if current_recursive_level() <= recursive_levels_limit()
+    with_recursive_illustration() do
+      for (name, init) in zip(names, inits)
+        if init isa Loc
+          label(init, textify(name))
+        end
+      end
+    end
+  end
 
 is_op_call(op, expr) =
   expr isa Expr && expr.head == :call && expr.args[1] == op
@@ -381,6 +392,11 @@ illustrate(f::typeof(arc), c, ρ, α, Δα, c_e, ρ_e, α_e, Δα_e) =
     label(c, textify(c_e))
     #dimension(c, c+vpol(ρ, α), textify(ρ_e), size=0.1, offset=0)
     arc_illustration(c, ρ, α, Δα, textify(ρ_e), textify(α_e), textify(Δα_e))
+  end
+
+illustrate(f::typeof(point), p, p_expr) =
+  with_recursive_illustration() do
+    label(p, textify(p_expr))
   end
 
 # We need to complement the automatic illustrations with manual ones.
