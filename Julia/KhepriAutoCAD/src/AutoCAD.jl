@@ -759,9 +759,6 @@ KhepriBase.b_text(b::ACAD, str, p, size, mat) =
 backend_right_cuboid(b::ACAD, cb, width, height, h, material) =
   @remote(b, CenteredBox(cb, width, height, h))
 
-KhepriBase.b_extrusion(b::ACAD, s::Shape, v, cb, mat) =
-  b_extrusion(b, s, v, cb, mat, mat, mat)
-
 KhepriBase.b_extrusion(b::ACAD, s::Shape, v, cb, bmat, tmat, smat) =
   and_mark_deleted(b,
     map_ref(b, s) do r
