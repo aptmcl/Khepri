@@ -2,12 +2,11 @@
 export blender
 
 #=
+#To dribble Blender, do:
 
-To dribble Blender, do:
-
-blender_exe_path = raw"C:\Program Files\Blender Foundation\Blender 2.91\blender.exe"
+blender_exe_path = raw"C:\Program Files\Blender Foundation\Blender 3.6\blender.exe"
 using OutputCollectors
-oc = OutputCollector(`$blender_exe_path $["--python", joinpath(@__DIR__, "KhepriServer.py")]`, verbose=true)
+oc = OutputCollector(`$blender_exe_path $["--python", joinpath(@__DIR__, "BlenderServer.py")]`, verbose=true)
 =#
 
 #=
@@ -172,6 +171,7 @@ def get_view()->Tuple[Point3d, Point3d, float]:
 def set_camera_view(camera:Point3d, target:Point3d, lens:float)->None:
 def set_render_size(width:int, height:int)->None:
 def set_render_path(filepath:str)->None:
+def add_render_background(d:float, w:float, mat:MatId)->Id:
 def default_renderer()->None:
 def cycles_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool, exposure:float)->None:
 def freestylesvg_renderer(thickness:float, crease_angle:float)->None:
@@ -181,6 +181,8 @@ def set_sky(turbidity:float)->None:
 def set_sun_sky(sun_elevation:float, sun_rotation:float, turbidity:float, with_sun:bool)->None:
 def set_max_repeated(n:Int)->Int:
 def blender_cmd(expr:str)->None:
+def set_hdri_background(hdri_path:str)->None:
+def set_hdri_background_with_rotation(hdri_path:str, rotation:float)->None:
 """
 
 abstract type BLRKey end
@@ -246,6 +248,9 @@ KhepriBase.backend(::BLRRef) = blender
 KhepriBase.void_ref(b::BLR) = BLRRef(-1 % Int32)
 
 # Primitives
+
+KhepriBase.unite_ref(b::BLR, r0::BLRRef, r1::BLRRef) =
+    ensure_ref(b, [r0.value, r1.value])
 
 KhepriBase.b_line(b::BLR, ps, mat) =
   @remote(b, line(ps, false, mat))
@@ -459,21 +464,25 @@ KhepriBase.b_shape_from_ref(b::BLR, r) = begin
 end
 ##############
 
-KhepriBase.b_render_view(b::BLR, path::String) =
+# We have different renderers in Blender
+
+with_render_setup(f, b, path) =
   let (camera, target, lens) = @remote(b, get_view())
     @remote(b, set_camera_view(camera, target, lens))
     @remote(b, set_render_size(render_width(), render_height()))
     @remote(b, set_render_path(path))
+    f()
+  end
+
+KhepriBase.b_render_view(b::BLR, path::String) =
+  with_render_setup(b, path) do
   	@remote(b, cycles_renderer(1200, true, false, false, render_exposure()))
   end
 
 export render_svg
 render_svg(b::BLR, path) =
-  let (camera, target, lens) = @remote(b, get_view())
-    @remote(b, set_camera_view(camera, target, lens))
-    @remote(b, set_render_size(render_width(), render_height()))
-    @remote(b, set_render_path(path))
-    @remote(b, freestylesvg_renderer(1.0, deg2rad(135), 0.001, 0.0))
+  with_render_setup(b, path) do
+    @remote(b, freestylesvg_renderer(1.0, 0.0))
   end
 
 #=
@@ -481,4 +490,23 @@ with_clay_model(f, level::Real=0) =
   begin
   	with(f, default_material, material_clay)
 	area_light
+=#
+
+KhepriBase.b_render_clay_view(b::BLR, path) =
+  let (c, t, l) = get_view()
+    with_render_setup(b, path) do
+      @remote(b, set_hdri_background_with_rotation(joinpath(@__DIR__, "studio_small_05_4k.exr"), 2π - (c - t).ϕ))
+      @remote(b, cycles_renderer(1200, true, false, true, render_exposure()))
+    end
+  end
+
+#=
+render_size(1920,1080)
+#@remote(blender, add_render_background(0.1, 10000, b_plastic_material(b, "Black", rgb(0.0, 0.0, 0.0),	1.0)
+start_film("SombrasTrans")
+for α in division(0, 2pi, 128, false)
+  @remote(blender, set_hdri_background_with_rotation(joinpath(@__DIR__, "studio_small_05_4k.exr"), α))
+  save_film_frame()
+end
+KhepriBase.create_mp4_from_frames()
 =#
