@@ -14,7 +14,8 @@ bl_info = {
 # "C:\Program Files\Blender Foundation\Blender 2.91\blender.exe" --python BlenderServer.py
 # To test this while still allowing redefinitions do:
 # "C:\Program Files\Blender Foundation\Blender 2.91\blender.exe"
-# and then, in Blender's Python console
+# and then, in Blender's Python console:
+# __file__=os.getcwd()+"/src"
 # exec(open("BlenderServer.py").read())
 
 # This loads the shared part of the Khepri server
@@ -30,7 +31,7 @@ from mathutils import Vector, Matrix
 import addon_utils
 # We will use BlenderKit to download materials.
 # After activating a BlenderKit account (from addon BlenderKit)
-blenderkit = addon_utils.enable("blenderkit")
+#blenderkit = addon_utils.enable("blenderkit")
 #dynamicsky = addon_utils.enable("lighting_dynamic_sky")
 #sunposition = addon_utils.enable("sun_position")
 
@@ -199,7 +200,12 @@ def new_node_material(name, type):
     links.clear()
     return mat, nodes.new(type=type)
 
-def add_node_material(mat, node):
+def new_clay_material(name:str, color:RGBA)->MatId:
+    mat, diffuse_shader = new_node_material(name, "ShaderNodeBsdfDiffuse")
+    diffuse_shader.inputs[0].default_value = color
+    return add_node_output_material(mat, diffuse_shader)
+
+def add_node_output_material(mat, node):
     nodes = mat.node_tree.nodes
     links = mat.node_tree.links
     node_out = nodes.new(type='ShaderNodeOutputMaterial')
@@ -279,6 +285,39 @@ def new_material(name:str, base_color:RGBA, metallic:float, specular:float, roug
     #node.inputs['Clearcoat Normal'].default_value =
     #node.inputs['Tangent'].default_value =
     return add_node_material(mat, node)
+
+
+def set_hdri_background(hdri_path:str)->None:
+    world = C.scene.world
+    world.use_nodes = True
+    nodes = world.node_tree.nodes
+    nodes.clear()
+    env_texture = nodes.new(type='ShaderNodeTexEnvironment')
+    env_texture.image = bpy.data.images.load(hdri_path)
+    env_texture.location = (-300,0)
+    background = nodes.new(type='ShaderNodeBackground')
+    world_output = nodes.new(type='ShaderNodeOutputWorld')
+    world.node_tree.links.new(env_texture.outputs[0], background.inputs[0])
+    world.node_tree.links.new(background.outputs[0], world_output.inputs[0])
+    C.scene.render.film_transparent = True
+
+def set_hdri_background_with_rotation(hdri_path:str, rotation:float)->None:
+    world = C.scene.world
+    world.use_nodes = True
+    nodes = world.node_tree.nodes
+    nodes.clear()
+    tex_coord = nodes.new(type='ShaderNodeTexCoord')
+    mapping = nodes.new(type='ShaderNodeMapping')
+    mapping.inputs['Rotation'].default_value[2] = rotation
+    env_texture = nodes.new(type='ShaderNodeTexEnvironment')
+    env_texture.image = bpy.data.images.load(hdri_path)
+    background = nodes.new(type='ShaderNodeBackground')
+    world_output = nodes.new(type='ShaderNodeOutputWorld')
+    world.node_tree.links.new(tex_coord.outputs['Generated'], mapping.inputs[0])
+    world.node_tree.links.new(mapping.outputs[0], env_texture.inputs[0])
+    world.node_tree.links.new(env_texture.outputs[0], background.inputs[0])
+    world.node_tree.links.new(background.outputs[0], world_output.inputs[0])
+    C.scene.render.film_transparent = True
 
 def append_material(obj, mat_idx):
     if mat_idx >= 0:
@@ -628,7 +667,7 @@ def pyramid_frustum(bs:List[Point3d], ts:List[Point3d], smooth:bool, bmat:MatId,
 
 def sphere(center:Point3d, radius:float, mat:MatId)->Id:
     bm = bmesh.new()
-    bmesh.ops.create_uvsphere(bm, u_segments=32, v_segments=16, diameter=radius, )
+    bmesh.ops.create_uvsphere(bm, u_segments=32, v_segments=16, radius=radius, )
     for f in bm.faces:
         f.smooth = True
     if mat >= 0:
@@ -655,7 +694,7 @@ def cone_frustum(b:Point3d, br:float, t:Point3d, tr:float, bmat:MatId, tmat:MatI
                                 calc_uvs=True)
         mat_idx += 0 if bmat < 0 else 1
     bmesh.ops.create_cone(bm, cap_ends=False, segments=32,
-                          diameter1=br, diameter2=tr, depth=depth,
+                          radius1=br, radius2=tr, depth=depth,
                           calc_uvs=True)
     for f in bm.faces:
         f.smooth = True
@@ -976,6 +1015,14 @@ def light(p:Point3d, type:str)->Id:
     light.location = p
     current_collection.objects.link(light)
 
+def light_probe(p:Point3d, type:str)->Id:
+    id, name = new_id()
+    light_data = D.lights.new(name, type)
+    light = D.objects.new(name, light_data)
+    light.location = p
+    current_collection.objects.link(light)
+
+
 # HACK! This should not be used as we now resort to Nishita!!!!
 def khepri_sun():
     raise RuntimeError("Don't use this!!! Use Nishita!!!")
@@ -1245,26 +1292,36 @@ def clay_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:boo
         d["use"] = 1
     bpy.ops.render.render(use_viewport = True, write_still=True)
 
-def create_clay_material():
-    id = bpy.data.materials.new("Clay_Render")
-    #diffuse
-    id.diffuse_shader = "OREN_NAYAR"
-    id.diffuse_color = 0.800, 0.741, 0.536
-    id.diffuse_intensity = 1
-    id.roughness = 0.909
-    #specular
-    id.specular_shader = "COOKTORR"
-    id.specular_color = 1, 1, 1
-    id.specular_hardness = 10
-    id.specular_intensity = 0.115
-
 # Last resort
 
 def blender_cmd(expr:str)->None:
     eval(expr)
 
+# Bounding box
+
+def get_global_bbox()->Tuple[Point3d, Point3d]:
+    min_coord = [float('inf')] * 3
+    max_coord = [float('-inf')] * 3
+    for collection in D.collections:
+        for obj in collection.objects:
+            if obj.type == 'MESH' and obj.bound_box:
+                for local_bbox_corner in obj.bound_box:
+                    world_bbox_corner = obj.matrix_world @ Point3d(local_bbox_corner)
+                    for i in range(3):
+                        min_coord[i] = min(min_coord[i], world_bbox_corner[i])
+                        max_coord[i] = max(max_coord[i], world_bbox_corner[i])
+    return Point3d(min_coord), Point3d(max_coord)
+
+def add_render_background(d:float, w:float, mat:MatId)->Id:
+    p0, p1 = get_global_bbox()
+    return quad(Point3d((p0[0]-w, p0[1]-w, p0[2]-d)),
+                Point3d((p1[0]+w, p0[1]-w, p0[2]-d)),
+                Point3d((p1[0]+w, p1[1]+w, p0[2]-d)),
+                Point3d((p0[0]-w, p1[1]+w, p0[2]-d)),
+                mat)
 
 """
+    com.light_cache_bake()
 
 
 class _Point3dArray(object):
@@ -1340,7 +1397,7 @@ def r_Vector(conn)->Vector:
     return Vector(r_float3(conn))
 
 def w_Vector(e:Vector, conn)->None:
-    w_float3((e.x, e.y, e.z))
+    w_float3((e.x, e.y, e.z), conn)
 
 e_Vector = e_float3
 
