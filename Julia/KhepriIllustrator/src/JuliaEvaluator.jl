@@ -90,7 +90,7 @@ eval_ref(expr, env) =
   let v = eval_expr(expr.args[1], env)
     if expr.args[2] == :end
       v[end]
-    elseif expr.args[2] isa Expr && expr.args[2].head == :call 
+    elseif expr.args[2] isa Expr && expr.args[2].head == :call && expr.args[2].args[1] == :(:)
       i = expr.args[2].args[2] == :begin ? 1 : eval_expr(expr.args[2].args[2], env)
       j = expr.args[2].args[3] == :end ? length(v) : eval_expr(expr.args[2].args[3], env)
       v[i:j]
