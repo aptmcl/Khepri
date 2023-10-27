@@ -360,7 +360,8 @@ illustrate(f::typeof(line), args...) =
         illustrate(f, pts..., [:($expr[$i]) for i in 1:length(pts)]...)
       else # something else
         #HACK: what should we do?
-        error("Can't handle line($(args...)")
+        #error("Can't handle line($(args...)")
+        illustrate(f, pts..., [:(λ[$i]) for i in 1:length(pts)]...)
       end
     end
   else
