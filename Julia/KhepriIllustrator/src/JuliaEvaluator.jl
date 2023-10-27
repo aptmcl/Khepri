@@ -71,9 +71,10 @@ eval_name(name, env) =
 
 is_splat(expr) = expr isa Expr && expr.head === :...
 is_vect(expr) = expr isa Expr && expr.head === :vect
-eval_vect(expr, env) =
+eval_vect(expr, env) = eval_args(expr.args, env)
+eval_args(exprs, env) =
   let r = []
-    for expri in expr.args
+    for expri in exprs
       if is_splat(expri)
         append!(r, eval_expr(expri.args[1], env))
       else
@@ -86,9 +87,17 @@ eval_vect(expr, env) =
 
 is_ref(expr) = expr isa Expr && expr.head === :ref
 eval_ref(expr, env) =
-  let v = eval_expr(expr.args[1], env),
+  let v = eval_expr(expr.args[1], env)
+    if expr.args[2] == :end
+      v[end]
+    elseif expr.args[2] isa Expr && expr.args[2].head == :call 
+      i = expr.args[2].args[2] == :begin ? 1 : eval_expr(expr.args[2].args[2], env)
+      j = expr.args[2].args[3] == :end ? length(v) : eval_expr(expr.args[2].args[3], env)
+      v[i:j]
+    else
       i = eval_expr(expr.args[2], env)
-    v[i]
+      v[i]
+    end
   end
 
 #
@@ -99,7 +108,22 @@ eval_dot(expr, env) =
     getproperty(v, i)
   end
 
+#
+is_comprehension(expr) = expr isa Expr && expr.head === :comprehension
+eval_comprehension(expr, env) =
+  let vals = eval_expr(expr.args[1].args[2].args[2], env),
+      var = expr.args[1].args[2].args[1],
+      body = expr.args[1].args[1]
+    [eval_expr(:(let $(var) = $(v); $(body) end), env) for v in vals]
+  end
 
+is_range(expr) = expr isa Expr && expr.head === :call && expr.args[1] == :(:)
+eval_range(expr, env) =
+  let a = eval_expr(expr.args[2], env),
+      b = eval_expr(expr.args[3], env)
+    a:b
+  end 
+#
 eval_expr(expr, env) =
   if is_self_evaluating(expr)
     expr
@@ -113,6 +137,10 @@ eval_expr(expr, env) =
     eval_ref(expr, env)
   elseif is_dot(expr)
     eval_dot(expr, env)
+  elseif is_comprehension(expr)
+    eval_comprehension(expr, env)
+  elseif is_range(expr)
+    eval_range(expr, env) 
   elseif is_lambda(expr)
     eval_lambda(expr, env)
   elseif is_if(expr)
@@ -141,7 +169,7 @@ eval_expr(expr, env) =
     println("I will generate an error! Here is the dump of the expression:")
     dump(expr)
     error("Unknown expression type: ", expr)
-  end
+  end 
 
 struct LexicalFunction
   parameters
@@ -218,7 +246,7 @@ eval_call(expr, env) =
         replace(expr, expansion)
         eval_expr(expansion, env)
       end :
-      let args = map(expr -> eval_expr(expr, env), exprs),
+      let args = eval_args(exprs, env),
           #prev = isempty(illustrations_stack) ? nothing : illustrations_stack[end], 
           recursive_level = length(illustrations_stack) #count(==(prev), illustrations_stack)
         #println(recursive_level, " ", illustrations_stack)
