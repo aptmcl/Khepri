@@ -87,17 +87,10 @@ eval_args(exprs, env) =
 
 is_ref(expr) = expr isa Expr && expr.head === :ref
 eval_ref(expr, env) =
-  let v = eval_expr(expr.args[1], env)
-    if expr.args[2] == :end
-      v[end]
-    elseif expr.args[2] isa Expr && expr.args[2].head == :call && expr.args[2].args[1] == :(:)
-      i = expr.args[2].args[2] == :begin ? 1 : eval_expr(expr.args[2].args[2], env)
-      j = expr.args[2].args[3] == :end ? length(v) : eval_expr(expr.args[2].args[3], env)
-      v[i:j]
-    else
+  let v = eval_expr(expr.args[1], env),
+      env = augment_environment([:begin, :end], [1, length(v)], env),
       i = eval_expr(expr.args[2], env)
-      v[i]
-    end
+    v[i]
   end
 
 #
