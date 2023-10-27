@@ -255,7 +255,7 @@ with_recursive_illustration(f) = begin
   let last = isempty(illustrations_stack) ? nothing : illustrations_stack[end],
       recursive_level = length(illustrations_stack),
       funcs = unique(illustrations_stack),
-      func_idx = findfirst(==(last), funcs),
+      func_idx = something(findfirst(==(last), funcs), 1),
       opacity = 1.0/max(recursive_level, 1),
       color = rgba(illustration_colors[(func_idx-1)%(length(illustration_colors))+1], opacity),
       #color = rgba(illustration_colors[1], opacity),
