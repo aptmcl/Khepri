@@ -112,7 +112,7 @@ eval_comprehension(expr, env) =
   let vals = eval_expr(expr.args[1].args[2].args[2], env),
       var = expr.args[1].args[2].args[1],
       body = expr.args[1].args[1]
-    [eval_expr(:(let $(var) = $(v); $(body) end), env) for v in vals]
+    [eval_expr(:(let $(var) = $(Expr(:quote, v)); $(body) end), env) for v in vals]
   end
 
 is_range(expr) = expr isa Expr && expr.head === :call && expr.args[1] == :(:)
@@ -168,6 +168,9 @@ eval_expr(expr, env) =
   else
     println("I will generate an error! Here is the dump of the expression:")
     dump(expr)
+    for e in illustrations_stack
+      println(e)
+    end
     error("Unknown expression type: ", expr)
   end 
 
