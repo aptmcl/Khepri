@@ -119,7 +119,7 @@ is_range(expr) = expr isa Expr && expr.head === :call && expr.args[1] == :(:)
 eval_range(expr, env) =
   length(expr.args) == 2 ?
     (eval_expr(expr.args[2], env):eval_expr(expr.args[3], env)) :
-    (eval_expr(expr.args[2], env):eval_expr(expr.args[3], env):eval_expr(expr.args[3], env))
+    (eval_expr(expr.args[2], env):eval_expr(expr.args[3], env):eval_expr(expr.args[4], env))
 
 #
 eval_expr(expr, env) =
