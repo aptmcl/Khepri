@@ -400,6 +400,28 @@ illustrate(f::typeof(point), p, p_expr) =
     label(p, textify(p_expr))
   end
 
+
+illustrate(f::typeof(intermediate_loc), p, q, p_expr, q_expr) =
+  let m = intermediate_loc(p, q)
+    with_recursive_illustration() do
+      label(p, textify(p_expr))
+      label(q, textify(q_expr))
+      vector_illustration(p, (m-p).ϕ, distance(p, m), " ")
+      vector_illustration(q, (m-q).ϕ, distance(m, q), " ")
+    end
+  end
+  
+illustrate(f::typeof(intermediate_loc), p, q, factor, p_expr, q_expr, f_expr) =
+  let m = intermediate_loc(p, q, factor)
+    with_recursive_illustration() do
+      label(p, textify(p_expr))
+      label(q, textify(q_expr))
+      factor isa Number ?
+        vector_illustration(p, (m-p).ϕ, distance(p, m), "f=$(factor)") :
+          vector_illustration(p, (m-p).ϕ, distance(p, m), textify(f_expr)*"=$(factor)")
+      vector_illustration(q, (m-q).ϕ, distance(m, q), " ")
+    end
+  end
 # We need to complement the automatic illustrations with manual ones.
 
 with_annotation_material(f) =
