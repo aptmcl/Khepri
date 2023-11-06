@@ -192,6 +192,11 @@ function_environment(f) = f.environment
 eval_lambda(expr, env) =
   make_function(lambda_parameters(expr), lambda_body(expr), env)
 
+(f::LexicalFunction)(args...) = 
+  let params = function_parameters(f),
+      extended_env = augment_environment(params, args,  function_environment(f))
+    eval_expr(function_body(f), extended_env)
+  end
 #=
 Regarding the implementation of macros, they are just like functions (with
 lexical environment, et al), but are called differently, as they receive the
