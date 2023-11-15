@@ -427,14 +427,10 @@ const TikZId = Any
 const TikZIds = Vector{TikZId}
 const TikZRef = GenericRef{TikZKey, TikZId}
 const TikZRefs = Vector{TikZRef}
-const TikZEmptyRef = EmptyRef{TikZKey, TikZId}
-const TikZUniversalRef = UniversalRef{TikZKey, TikZId}
 const TikZNativeRef = NativeRef{TikZKey, TikZId}
-const TikZUnionRef = UnionRef{TikZKey, TikZId}
-const TikZSubtractionRef = SubtractionRef{TikZKey, TikZId}
 const TikZ = IOBufferBackend{TikZKey, TikZId, Vector}
 
-KhepriBase.void_ref(b::TikZ) = TikZNativeRef(nothing)
+KhepriBase.void_ref(b::TikZ) = nothing
 
 const tikz = TikZ(view=top_view(), extra=[])
 
@@ -799,11 +795,8 @@ visualize_tikz(name="Test") =
     @info "Tex file: $(render_pathname(name))"
   end
 
-KhepriBase.b_render_pathname(b::TikZ, name::String) =
-  path_replace_suffix(render_pathname(name), ".pdf")
-
-KhepriBase.b_render_view(b::TikZ, path) =
-  process_tikz(path)
+KhepriBase.b_render_and_save_view(b::TikZ, path) =
+  process_tikz(path_replace_suffix(path, ".pdf"))
 
 # Illustrations
 KhepriBase.b_textify(b::TikZ, expr) = latexify(expr)
@@ -853,6 +846,9 @@ KhepriBase.b_angles_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts,
           if !(a ≈ 0.0)
             tikz_polar_segment(out, c, vpol(ar, s), "illustration,$color")
             tikz_polar_segment(out, c, vpol(r, s + a), "-latex,illustration,$color")
+            if (ar > r)
+              tikz_polar_segment(out, pol(r, s + a), vpol(ar-r, s + a), "dashed,illustration,$color")
+            end
             (a > 0.0) ?
               tikz_maybe_arc(out, c, ar, s, a, false, "-latex,illustration,$color") :
               tikz_maybe_arc(out, c, ar, s, a, false, "latex-,illustration,$color")
