@@ -133,7 +133,7 @@ check_plugin() =
           read&execute bit, making it impossible to start autocad automatically.
           We fix that here:
           =#
-          chmod(autocad_template(), 0o555) # Read and Execute
+          #chmod(autocad_template(), 0o555) # Read and Execute
           @info("done.")
           checked_plugin = true
           return
@@ -152,9 +152,10 @@ check_plugin() =
 #start_autocad() =
 #  run(`cmd /c cd "$(dirname(autocad_template()))" \&\& $(basename(autocad_template()))`, wait=false)
 
-start_autocad() =
-  run(`cmd /c $(autocad_template())`, wait=false)
+#start_autocad() =
+#  run(`cmd /c $(autocad_template())`, wait=false)
 
+start_autocad() = println("Please, start AutoCAD!")
 
 # ACAD is a subtype of CS
 parse_signature(::Val{:ACAD}, sig::T) where {T} = parse_signature(Val(:CS), sig)
@@ -392,7 +393,7 @@ public ObjectId[] GetAllShapesInLayer(ObjectId layerId)
 public void SelectShapes(ObjectId[] ids)
 public void DeselectShapes(ObjectId[] ids)
 public void DeselectAllShapes()
-public void Render(int width, int height, string path, int levels, double exposure)
+public void Render(int width, int height, string path, int renderLevel, string iblEnv, double rotation, double exposure)
 """
 
 abstract type ACADKey end
@@ -400,11 +401,7 @@ const ACADId = Int64
 const ACADIds = Vector{ACADId}
 const ACADRef = GenericRef{ACADKey, ACADId}
 const ACADRefs = Vector{ACADRef}
-const ACADEmptyRef = EmptyRef{ACADKey, ACADId}
-const ACADUniversalRef = UniversalRef{ACADKey, ACADId}
 const ACADNativeRef = NativeRef{ACADKey, ACADId}
-const ACADUnionRef = UnionRef{ACADKey, ACADId}
-const ACADSubtractionRef = SubtractionRef{ACADKey, ACADId}
 const ACAD = SocketBackend{ACADKey, ACADId}
 
 KhepriBase.before_connecting(b::ACAD) =
@@ -421,19 +418,18 @@ KhepriBase.retry_connecting(b::ACAD) =
 
 KhepriBase.after_connecting(b::ACAD) =
   begin
-    set_material(autocad, material_metal, "Steel - Polished")
-    set_material(autocad, material_glass, "Clear")
-    set_material(autocad, material_wood, "Plywood - New")
-    set_material(autocad, material_concrete, "Flat - Broom Gray")
-    set_material(autocad, material_plaster, "Fine - White")
-    set_material(autocad, material_clay, "Ceramic")
-    set_material(autocad, material_grass, "Green")
+    #set_material(autocad, material_metal, "Steel - Polished")
+    #set_material(autocad, material_glass, "Clear")
+    #set_material(autocad, material_wood, "Plywood - New")
+    #set_material(autocad, material_concrete, "Flat - Broom Gray")
+    #set_material(autocad, material_plaster, "Fine - White")
+    #set_material(autocad, material_clay, "Ceramic")
+    #set_material(autocad, material_grass, "Green")
   end
 
 const autocad = ACAD("AutoCAD", autocad_port, acad_api)
 
-KhepriBase.void_ref(b::ACAD) =
-  ACADNativeRef(-1)
+KhepriBase.void_ref(b::ACAD) = -1
 
 # Primitives
 KhepriBase.b_point(b::ACAD, p, mat) =
@@ -483,9 +479,10 @@ KhepriBase.b_arc(b::ACAD, c, r, α, Δα, mat) =
   	  end
     end
   end
-
+#=
 b_ellipse() =
   @remote(b, Ellipse(center, vz(1, center.cs), radius_x, radius_y))
+=#
 
 KhepriBase.b_trig(b::ACAD, p1, p2, p3, mat) =
   @remote(b, Mesh([p1, p2, p3], [[0, 1, 2, 2]], 0, mat))
@@ -638,14 +635,10 @@ KhepriBase.b_get_material(b::ACAD, m::AutoCADBasicMaterial) =
 Default families
 =#
 
+#=
 backend_fill_curves(b::ACAD, refs::ACADIds) = @remote(b, SurfaceFromCurves(refs))
 backend_fill_curves(b::ACAD, ref::ACADId) = @remote(b, SurfaceFromCurves([ref]))
 backend_stroke_unite(b::ACAD, refs) = @remote(b, JoinCurves(refs))
-
-realize(b::ACAD, s::EmptyShape) =
-  ACADEmptyRef()
-realize(b::ACAD, s::UniversalShape) =
-  ACADUniversalRef()
 
 realize(b::ACAD, s::Ellipse) =
   if s.radius_x > s.radius_y
@@ -655,6 +648,7 @@ realize(b::ACAD, s::Ellipse) =
   end
 realize(b::ACAD, s::EllipticArc) =
   error("Finish this")
+=#
 
 KhepriBase.b_surface(b::ACAD, frontier::Shapes, mat) =
   let #ids = map(r->@remote(b, NurbSurfaceFrom(r)), @remote(b, SurfaceFromCurves(collect_ref(s.frontier))))
@@ -759,15 +753,7 @@ KhepriBase.b_text(b::ACAD, str, p, size, mat) =
 backend_right_cuboid(b::ACAD, cb, width, height, h, material) =
   @remote(b, CenteredBox(cb, width, height, h))
 
-KhepriBase.b_extrusion(b::ACAD, s::Shape1D, v, cb, bmat, tmat, smat) =
-  and_mark_deleted(b,
-    map_ref(b, s) do r
-      #@remote(b, Extrude(r, v))
-      @remote(b, ExtrudeWithMaterial(r, v, smat))
-    end,
-    s)
-
-KhepriBase.b_extrusion(b::ACAD, s::Shape2D, v, cb, bmat, tmat, smat) =
+KhepriBase.b_extrusion(b::ACAD, s::Union{Shape1D,Shape2D}, v, cb, bmat, tmat, smat) =
   and_mark_deleted(b,
     map_ref(b, s) do r
       #@remote(b, Extrude(r, v))
@@ -829,33 +815,18 @@ KhepriBase.b_loft_curve_point(b::ACAD, profile, point, mat) =
 KhepriBase.b_loft_surface_point(b::ACAD, profile, point, mat) =
     b_loft_curve_point(b, profile, point, mat)
 
-unite_ref(b::ACAD, r0::ACADNativeRef, r1::ACADNativeRef) =
-    ensure_ref(b, @remote(b, Unite(r0.value, r1.value)))
+KhepriBase.b_unite_ref(b::ACAD, r0, r1) =
+    @remote(b, Unite(r0, r1))
 
-intersect_ref(b::ACAD, r0::ACADNativeRef, r1::ACADNativeRef) =
-    ensure_ref(b, @remote(b, Intersect(r0.value, r1.value)))
+KhepriBase.b_intersect_ref(b::ACAD, r0, r1) =
+    @remote(b, Intersect(r0, r1))
 
-subtract_ref(b::ACAD, r0::ACADNativeRef, r1::ACADNativeRef) =
-    ensure_ref(b, @remote(b, Subtract(r0.value, r1.value)))
+KhepriBase.b_subtract_ref(b::ACAD, r0, r1) =
+    @remote(b, Subtract(r0, r1))
 
-slice_ref(b::ACAD, r::ACADNativeRef, p::Loc, v::Vec) =
-    (@remote(b, Slice(r.value, p, v)); r)
+KhepriBase.b_slice_ref(b::ACAD, r, p, v) =
+    (@remote(b, Slice(r, p, v)); r)
 
-slice_ref(b::ACAD, r::ACADUnionRef, p::Loc, v::Vec) =
-    ACADUnionRef(map(r->slice_ref(b, r, p, v), r.values))
-
-unite_refs(b::ACAD, refs::Vector{<:ACADRef}) =
-    ACADUnionRef(tuple(refs...))
-
-realize(b::ACAD, s::IntersectionShape) =
-  let r = foldl(intersect_ref(b), map(ref(b), s.shapes),
-                init=ACADUniversalRef())
-    mark_deleted(b, s.shapes)
-    r
-  end
-
-realize(b::ACAD, s::Slice) =
-  slice_ref(b, ref(b, s.shape), s.p, s.n)
 
 realize(b::ACAD, s::Move) =
   let r = map_ref(b, s.shape) do r
@@ -892,7 +863,8 @@ realize(b::ACAD, s::Rotate) =
     mark_deleted(b, s.shape)
     r
   end
-
+  
+#=
 realize(b::ACAD, s::Mirror) =
   and_mark_deleted(b, map_ref(s.shape) do r
                     @remote(b, Mirror(r, s.p, s.n, false))
@@ -906,6 +878,7 @@ realize(b::ACAD, s::UnionMirror) =
           end
     UnionRef((r0,r1))
   end
+=#
 
 KhepriBase.b_surface_grid(b::ACAD, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
   let (nu, nv) = size(ptss)
@@ -1061,7 +1034,7 @@ KhepriBase.b_vectors_illustration(b::ACAD, p, a, rs, rs_txts, mats, mat) =
       #tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", "outer sep=0,inner sep=0,label={[illustration]$(rad2deg(a-π/2)):$r_txt}")
 
 KhepriBase.b_angles_illustration(b::ACAD, c, rs, ss, as, r_txts, s_txts, a_txts, mats, mat) =
-  let refs = [],
+  let refs = new_refs(b),
       maxr = maximum(rs),
       n = length(rs),
       ars = division(0.2maxr, 0.7maxr, n, false),
@@ -1093,7 +1066,7 @@ KhepriBase.b_angles_illustration(b::ACAD, c, rs, ss, as, r_txts, s_txts, a_txts,
   end
 
 KhepriBase.b_arcs_illustration(b::ACAD, c, rs, ss, as, r_txts, s_txts, a_txts, mats, mat) = begin
-  let refs = [],
+  let refs = new_refs(b),
       maxr = maximum(rs),
       n = length(rs),
       ars = division(0.2maxr, 0.7maxr, n, false),
@@ -1167,14 +1140,14 @@ Khepri.create_block("Foo", [circle(radius=r) for r in 1:10])
 =#
 
 # Lights
-KhepriBase.b_pointlight(b::ACAD, loc::Loc, color::RGB, intensity::Real, range::Real) =
+KhepriBase.b_pointlight(b::ACAD, loc, color, intensity, range) =
   @remote(b, PointLight(loc, color, intensity))
 
-KhepriBase.b_spotlight(b::ACAD, loc::Loc, dir::Vec, hotspot::Real, falloff::Real) =
-    @remote(b, SpotLight(loc, hotspot, falloff, loc + dir))
+KhepriBase.b_spotlight(b::ACAD, loc, dir, hotspot, falloff) =
+  @remote(b, SpotLight(loc, hotspot, falloff, loc + dir))
 
-KhepriBase.b_ieslight(b::ACAD, file::String, loc::Loc, dir::Vec, alpha::Real, beta::Real, gamma::Real) =
-    @remote(b, IESLight(file, loc, loc + dir, vxyz(alpha, beta, gamma)))
+KhepriBase.b_ieslight(b::ACAD, file, loc, dir, alpha, beta, gamma) =
+  @remote(b, IESLight(file, loc, loc + dir, vxyz(alpha, beta, gamma)))
 
 # User Selection
 
@@ -1399,14 +1372,32 @@ convert_render_exposure(b::ACAD, v::Real) = -4.05*v + 8.8
 #render quality: [-1, +1] -> [+1, +50]
 convert_render_quality(b::ACAD, v::Real) = round(Int, 25.5 + 24.5*v)
 
-KhepriBase.b_render_view(b::ACAD, path::String) =
-    @remote(b, Render(
-               render_width(), render_height(),
-               path,
-               convert_render_quality(b, render_quality()),
-               convert_render_exposure(b, render_exposure())))
+KhepriBase.b_render_and_save_view(b::ACAD, path::String) =
+  let kind = render_kind(),
+      (w, h) = (render_width(), render_height()),
+      quality = convert_render_quality(b, render_quality()),
+      exposure = convert_render_exposure(b, render_exposure()),
+      hdrfile = joinpath("C:\\Program Files\\Autodesk\\AutoCAD 2024\\Environments\\studio_03_grids.hdr")
+    if kind == :realistic
+      @remote(b, Render(w, h, path, quality,
+                        "C:\\Program Files\\Autodesk\\AutoCAD 2024\\Environments\\mi360_Plaza.hdr",
+                        0.0, exposure))
+    else
+      let (camera, target) = (@remote(b, ViewCamera()), @remote(b, ViewTarget())),
+          rot = (11π/6 - π/2 - (camera - target).ϕ)*180/π,
+          hdrfile = joinpath(@__DIR__, "studio_small_05_4k.exr")
+        println(rot)
+        if render_kind() == :white
+          @remote(b, Render(w, h, path, 10, hdrfile, rot, 0))
+        elseif render_kind() == :black
+          @remote(b, Render(w, h, path, 10, hdrfile, rot, 0))
+        else
+          error("Unknown render kind $kind")
+        end
+      end
+    end
+  end
 
-export mentalray_render_view
 mentalray_render_view(name::String) =
     let b = autocad
         @remote(b, SetSystemVariableInt("SKYSTATUS", 2)) # skystatus:background-and-illumination
