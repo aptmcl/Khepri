@@ -31,6 +31,12 @@ get_environment_binding(name, env) =
         let val = getproperty(KhepriBase, name)
           val isa Function ? make_primitive(val) : val
         end)
+    elseif isdefined(Main, name)
+      make_binding(
+        name,
+        let val = getproperty(Main, name)
+          val isa Function ? make_primitive(val) : val
+        end)
     else
       error("Unbound name: ", name)
     end :
@@ -122,6 +128,12 @@ eval_range(expr, env) =
     (eval_expr(expr.args[2], env):eval_expr(expr.args[3], env):eval_expr(expr.args[4], env))
 
 #
+
+# do syntax
+is_do(expr) = expr isa Expr && expr.head === :do
+eval_do(expr, env) =
+  eval_expr(Expr(:call, expr.args[1].args[1], expr.args[2], expr.args[1].args[2:end]...), env)
+
 eval_expr(expr, env) =
   if is_self_evaluating(expr)
     expr
@@ -163,6 +175,8 @@ eval_expr(expr, env) =
     eval_and(expr, env)
   elseif is_or(expr)
     eval_or(expr, env)
+  elseif is_do(expr)
+    eval_do(expr, env)
   elseif is_call(expr)
     eval_call(expr, env)
   else
@@ -240,10 +254,13 @@ illustrate_and_maybe_pause(func, args...) =
     end
   end
 
+apply(func::Function, args_exprs...) = func(args_exprs[1:end/2]...)
+
 export recursive_levels_limit, current_recursive_level, illustrations_stack, step_by_step
 const illustrations_stack = []
-const recursive_levels_limit = Parameter{Real}(1)
+const recursive_levels_limit = Parameter{Real}(5)
 const current_recursive_level = Parameter(0)
+without_illustration(f) = with(f, recursive_levels_limit, -1)
 const step_by_step = Parameter(false)
 render_n = 0
 eval_call(expr, env) =
@@ -262,12 +279,12 @@ eval_call(expr, env) =
           with(current_recursive_level, recursive_level) do
             let res = 
               is_primitive(func) ?
-                apply_primitive(func, args) :
+                apply(func, args..., exprs...) :
                 let params = function_parameters(func),
                     extended_env = augment_environment(params, args,  function_environment(func))
                   push!(illustrations_stack, call_operator(expr))
                   eval_expr(function_body(func), extended_env)
-                end                        
+                end
               if current_recursive_level() <= recursive_levels_limit()
                 if step_by_step()
                   if !ismissing(illustrate(func, args..., exprs...))
@@ -367,7 +384,8 @@ initial_environment =
     @predef(pol),
     @predef(vpol),
     #@predef(label),
-    @predef(box)
+    @predef(box),
+    @predef(without_illustration)
     )
 
 eval_expr(expr) = eval_expr(expr, initial_environment)
@@ -708,8 +726,10 @@ replace(source, target) =
     source.args = target.args
   end
 
+#=
 @test eval_expr(jl"1") == 1
 @test eval_expr(jl"\"Hello, World!\"") == "Hello, World!"
+=#
 
 julia_repl() =
   while true
@@ -720,12 +740,14 @@ julia_repl() =
     end
   end
 
-macro illustrate(call)
+macro illustrator(call)
   :(begin
     empty!(illustrations_stack)
     eval_expr($(QuoteNode(call)))
   end)
 end
 
-export @illustrate,
-       illustrate
+export @illustrator,
+       illustrate,
+       apply,
+       without_illustration
