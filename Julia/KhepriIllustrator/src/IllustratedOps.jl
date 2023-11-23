@@ -411,14 +411,14 @@ illustrate(f::typeof(intermediate_loc), p, q, p_expr, q_expr) =
     end
   end
   
-illustrate(f::typeof(intermediate_loc), p, q, factor, p_expr, q_expr, f_expr) =
+illustrate(f::typeof(intermediate_loc), p, q, factor, p_expr, q_expr, factor_expr) =
   let m = intermediate_loc(p, q, factor)
     with_recursive_illustration() do
       label(p, textify(p_expr))
       label(q, textify(q_expr))
       factor isa Number ?
         vector_illustration(p, (m-p).ϕ, distance(p, m), "f=$(factor)") :
-          vector_illustration(p, (m-p).ϕ, distance(p, m), textify(f_expr)*"=$(factor)")
+          vector_illustration(p, (m-p).ϕ, distance(p, m), textify(factor_expr)*"=$(factor)")
       vector_illustration(q, (m-q).ϕ, distance(m, q), " ")
     end
   end
@@ -427,8 +427,8 @@ illustrate(f::typeof(intermediate_loc), p, q, factor, p_expr, q_expr, f_expr) =
 with_annotation_material(f) =
   with(f, default_curve_material, material(layer("illustration_1_1.0", true, rgba(illustration_colors[1], 1.0))))
 
-macro extra_illustrations(body)
-  :(with_annotation_material(()->$body))
+macro illustrator_plus(body)
+  :(without_illustration(()->with_annotation_material(()->$body)))
 end
 
-export with_annotation_material, @extra_illustrations
+export with_annotation_material, @illustrator_plus
