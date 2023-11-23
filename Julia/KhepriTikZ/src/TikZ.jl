@@ -750,9 +750,7 @@ const tikz_as_png = Parameter(false)
 
 process_tikz(path) =
   let contents = tikz_output(),
-      path = path_replace_suffix(path, ".tex"),
-      outpath = path_replace_suffix(path, ".pdf")
-    rm(outpath, force=true)
+      path = path_replace_suffix(path, ".tex")
     open(path, "w") do out
       println(out, tikz_as_png() ?
                      raw"\documentclass[convert={density=300,outext=.png}]{standalone}" :
@@ -795,8 +793,13 @@ visualize_tikz(name="Test") =
     @info "Tex file: $(render_pathname(name))"
   end
 
+KhepriBase.b_render_pathname(::TikZ, name::String) = 
+  with(render_ext, tikz_as_png() ? ".png" : ".pdf") do
+    render_default_pathname(name)
+  end
+
 KhepriBase.b_render_and_save_view(b::TikZ, path) =
-  process_tikz(path_replace_suffix(path, ".pdf"))
+  process_tikz(path)
 
 # Illustrations
 KhepriBase.b_textify(b::TikZ, expr) = latexify(expr)
