@@ -33,6 +33,7 @@ julia_khepri = dirname(dirname(abspath(@__FILE__)))
 # 1. The dlls are updated in VisualStudio after compilation of the plugin.
 plugin_name = "KhepriRevit"
 khepri_dlls = ["KhepriBase.dll", plugin_name*".dll"]
+addin_name = plugin_name*".addin"
 # 2. Depending on whether we are in Debug mode or Release mode,
 development_phase = "Debug" # "Release"
 # 3. the dlls are located in a folder
@@ -113,7 +114,7 @@ update_plugin() =
       # remove first to avoid loosing the local file
       #isfile(revit_path_xml) && rm(revit_path_xml)
       cp(local_path_xml, revit_path_xml, force=true)
-      for dll in khepri_dlls
+      for dll in [khepri_dlls..., addin_name]
         let path = joinpath("Contents", dll),
             local_path = joinpath(local_khepri_plugin, path),
             revit_path = joinpath(revit_khepri_plugin, path)
@@ -171,14 +172,15 @@ decode(::Val{:RVT}, t::Val{:XYZ}, c::IO) =
 decode(::Val{:RVT}, t::Val{:VXYZ}, c::IO) =
   vxyz(decode(Val(:CS), Val(:double3), c)..., world_cs)
 encode(ns::Val{:RVT}, t::Union{Val{:ElementId},Val{:Element},Val{:Level},Val{:FloorFamily}}, c::IO, v) =
-  encode(ns, Val(:int), c, v)
+  encode(ns, Val(:long), c, v)
 decode(ns::Val{:RVT}, t::Union{Val{:ElementId},Val{:Element},Val{:Level},Val{:FloorFamily}}, c::IO) =
-  decode_or_error(ns, Val(:int), c, Int32(-1234))
+  decode_or_error(ns, Val(:long), c, Int64(-1234))
 
 @encode_decode_as(:RVT, Val{:Length}, Val{:double})
 
-
 revit_api = @remote_functions :RVT """
+public bool ConvertIFCFile(string file)
+public bool LoadRVTFile(string file)
 public Element Sphere(XYZ centre, Length radius)
 public Element ConeFrustumNamed(string name, XYZ bottom, VXYZ axis, Length bottomRadius, Length height, Length topRadius)
 public Element ConeFrustum(XYZ bottom, VXYZ axis, Length bottomRadius, Length height, Length topRadius)
@@ -224,6 +226,7 @@ public ElementId CreateSplineWall(XYZ[] pts, ElementId baseLevelId, ElementId to
 public ElementId CreateSplineCurtainWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool closed)
 public Element CreateLineRailing(XYZ[] pts, ElementId baseLevelId, ElementId familyId)
 public Element CreatePolygonRailing(XYZ[] pts, ElementId baseLevelId, ElementId familyId)
+public Element CreateElementLocDirOnHost(XYZ location, XYZ direction, Element host, ElementId famId)
 public Level[] DocLevels()
 public Element[] DocElements()
 public Element[] DocFamilies()
@@ -239,20 +242,20 @@ public void HighlightElement(ElementId id)
 public ElementId[] GetSelectedElements()
 public bool IsProject()
 public void DeleteAllElements()
-public void SetView(XYZ camera, XYZ target, double focal_length)
+public void SetView(XYZ camera, XYZ target, int width, int height, double lens)
+public XYZ GetCamera()
+public XYZ GetTarget()
+public double GetLens()
+public void RenderView(string path)
 public void EnergyAnalysis()
 """
 
 abstract type RVTKey end
-const RVTId = Int32
+const RVTId = Int64
 const RVTIds = Vector{RVTId}
 const RVTRef = GenericRef{RVTKey, RVTId}
 const RVTRefs = Vector{RVTRef}
-const RVTEmptyRef = EmptyRef{RVTKey, RVTId}
-const RVTUniversalRef = UniversalRef{RVTKey, RVTId}
 const RVTNativeRef = NativeRef{RVTKey, RVTId}
-const RVTUnionRef = UnionRef{RVTKey, RVTId}
-const RVTSubtractionRef = SubtractionRef{RVTKey, RVTId}
 const RVT = SocketBackend{RVTKey, RVTId}
 const RVTVoidId = RVTId(-1)
 
@@ -260,26 +263,38 @@ KhepriBase.void_ref(b::RVT) = RVTNativeRef(RVTVoidId)
 
 KhepriBase.has_boolean_ops(::Type{RVT}) = HasBooleanOps{true}()
 
+const to_feet = 3.28084 # In most cases, the plugin accepts SI
 #
 KhepriBase.before_connecting(b::RVT) =
   check_plugin()
 KhepriBase.after_connecting(b::RVT) =
   begin
-    # C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\
     set_backend_family(default_wall_family(), revit, revit_system_family())
-    set_backend_family(default_window_family(), revit, revit_system_family())
+    set_backend_family(default_window_family(), revit, revit_file_family(
+      revit_library_path("Metric Library", raw"Windows\M_Instance-Window-Fixed.rfa"),
+      [], ["Width"=>f->f.width*to_feet, "Height"=>f->f.height*to_feet],
+      (f, p)->p+vx(f.width/2, p.cs)))
+    set_backend_family(default_door_family(), revit, revit_system_family(
+      [], [], (f, p)->p+vx(f.width/2, p.cs)))
     set_backend_family(default_slab_family(), revit, revit_system_family())
     set_backend_family(default_column_family(), revit, revit_file_family(
-          revit_library_path("Imperial Library", raw"../US Metric/Structural Columns/Concrete/M_Concrete-Rectangular-Column.rfa"),
+          revit_library_path("Metric Library", raw"Structural Columns\Concrete\M_Concrete-Rectangular-Column.rfa"),
           ["b"=>f->f.profile.dx, "h"=>f->f.profile.dy]))
     set_backend_family(default_beam_family(), revit, revit_file_family(
-          revit_library_path("Imperial Library", raw"../US Metric/Structural Framing/Wood/M_Timber.rfa"),
+          revit_library_path("Metric Library", raw"Structural Framing\Wood\M_Timber.rfa"),
           ["b"=>f->f.profile.dx, "d"=>f->f.profile.dy]))
     set_backend_family(default_truss_bar_family(), revit, revit_file_family(
-          revit_library_path("Imperial Library", raw"../US Metric/Structural Framing/Steel/M_W-Wide Flange.rfa")))
+          revit_library_path("Metric Library", raw"Structural Framing\Steel\M_W-Wide Flange.rfa")))
     set_backend_family(default_truss_node_family(), revit, revit_file_family(
-          revit_library_path("Imperial Library", raw"../US Metric/Structural Framing/Steel/M_W-Wide Flange.rfa")))
-  #=
+          revit_library_path("Metric Library", raw"Structural Framing\Steel\M_W-Wide Flange.rfa")))
+    set_backend_family(default_toilet_family(), revit, revit_file_family(
+          revit_library_path("Metric Library", raw"Plumbing\Architectural\Fixtures\Water Closets\M_Toilet-Domestic-3D.rfa"),
+          [], [], (f, c)->c+vx(0.5, c.cs)))
+    set_backend_family(default_closet_family(), revit, revit_file_family(
+          revit_library_path("Metric Library", raw"Furniture\Storage\M_Shelving.rfa")))
+    set_backend_family(default_sink_family(), revit, revit_file_family(
+            revit_library_path("Metric Library", raw"Plumbing\Architectural\Fixtures\Sinks\M_Sink Vanity-Square.rfa")))
+    #=
     #set_backend_family(default_column_family(), unity, unity_material_family("Materials/Concrete/Concrete2"))
     #set_backend_family(default_door_family(), unity, unity_material_family("Materials/Wood/InteriorWood2"))
 
@@ -289,6 +304,21 @@ KhepriBase.after_connecting(b::RVT) =
 
 const revit = RVT("Revit", revit_port, revit_api)
 
+# IFC
+export convert_ifc_file
+convert_ifc_file(path) =
+  @remote(revit, ConvertIFCFile(path))
+export load_rvt_file
+load_rvt_file(path) =
+  @remote(revit, LoadRVTFile(path))
+
+export convert_and_load_ifc_file
+convert_and_load_ifc_file(path) =
+  begin
+    convert_ifc_file(path)
+    #KhepriBase.interrupt_processing(connection(revit))
+    load_rvt_file(Base.Filesystem.splitext(path)[begin]*".rvt")
+  end
 # Levels
 
 realize(b::RVT, s::Level) =
@@ -307,16 +337,18 @@ Revit families are divided into
 abstract type RevitFamily <: Family end
 
 struct RevitSystemFamily <: RevitFamily
-    family_map::Dict{String, Function}
-    instance_map::Dict{String, Function}
-    instance_ref::Parameter{RVTId}
+  family_map::Dict{String, Function}
+  instance_map::Dict{String, Function}
+  location_transform::Function
+  instance_ref::Parameter{RVTId}
 end
 
-revit_system_family(family_map=(), instance_map=()) =
-    RevitSystemFamily(
-        Dict(family_map...),
-        Dict(instance_map...),
-        Parameter(RVTId(0))) # instead of RVTVoidId.  We need to think this carefully.
+revit_system_family(family_map=(), instance_map=(), location_transform=(f, p)->p) =
+  RevitSystemFamily(
+    Dict(family_map...),
+    Dict(instance_map...),
+    location_transform,
+    Parameter(RVTId(0))) # instead of RVTVoidId.  We need to think this carefully.
 
 backend_get_family_ref(b::RVT, f::Family, rvtf::RevitSystemFamily) =
   begin
@@ -326,7 +358,7 @@ backend_get_family_ref(b::RVT, f::Family, rvtf::RevitSystemFamily) =
         rvtf.instance_ref(
             @remote(b, FamilyElement(
                 0,
-                collect(keys),
+                collect(params),
                 [param_map[param](f) for param in params])))
       end
     end
@@ -334,20 +366,22 @@ backend_get_family_ref(b::RVT, f::Family, rvtf::RevitSystemFamily) =
   end
 
 struct RevitFileFamily <: RevitFamily
-    path::String
-    family_map::Dict{String, Function}
-    instance_map::Dict{String, Function}
-    family_ref::Parameter{RVTId}
-    instance_ref::Parameter{RVTId}
+  path::String
+  family_map::Dict{String, Function}
+  instance_map::Dict{String, Function}
+  location_transform::Function
+  family_ref::Parameter{RVTId}
+  instance_ref::Parameter{RVTId}
 end
 
-revit_file_family(path, family_map=(), instance_map=()) =
-    RevitFileFamily(
-        path,
-        Dict(family_map...),
-        Dict(instance_map...),
-        Parameter(RVTVoidId),
-        Parameter(RVTVoidId))
+revit_file_family(path, family_map=(), instance_map=(), location_transform=(f, p)->p) =
+  RevitFileFamily(
+    path,
+    Dict(family_map...),
+    Dict(instance_map...),
+    location_transform,
+    Parameter(RVTVoidId),
+    Parameter(RVTVoidId))
 
 backend_get_family_ref(b::RVT, f::Family, rvtf::RevitFileFamily) =
   begin
@@ -410,12 +444,6 @@ backend_rectangular_table_and_chairs(b::RVT, c, angle, family) =
     @remote(b, TableAndChairs(c, angle, ref(family)))
 =#
 
-realize(b::RVT, s::EmptyShape) =
-  RVTEmptyRef()
-realize(b::RVT, s::UniversalShape) =
-  RVTUniversalRef()
-
-
 KhepriBase.b_slab(b::RVT, profile::Region, level, family) =
   let outer = outer_path(profile),
       inners = inner_paths(profile),
@@ -429,6 +457,13 @@ KhepriBase.b_slab(b::RVT, profile::Region, level, family) =
 KhepriBase.b_slab(b::RVT, contour::ClosedPolygonalPath, level, family) =
   begin
     @remote(b, CreatePolygonalFloor(convert(ClosedPolygonalPath, contour).vertices, ref(b, level).value))
+    # we are not using the family yet
+    # ref(b, s.family))
+  end
+
+KhepriBase.b_slab(b::RVT, contour::RectangularPath, level, family) =
+  begin
+    @remote(b, CreatePolygonalFloor(path_vertices(contour), ref(b, level).value))
     # we are not using the family yet
     # ref(b, s.family))
   end
@@ -506,14 +541,25 @@ realize_wall_openings(b::RVT, w::Wall, w_ref, openings) =
 realize(b::RVT, s::Window) =
   let rvtf = backend_family(b, s.family),
       param_map = rvtf.instance_map,
-      params = keys(param_map)
+      params = keys(param_map),
+      pt = in_world(rvtf.location_transform(s.family, s.loc))
     @remote(b, InsertWindow(
-        s.loc.x,
-        s.loc.y,
+        pt.x,
+        pt.y,
         ref(b, s.wall).value,
         backend_get_family_ref(b, s.family, rvtf),
         collect(params),
         [param_map[param](s.family) for param in params]))
+  end
+
+realize(b::RVT, s::Door) =
+  let rvtf = backend_family(b, s.family),
+    pt = in_world(rvtf.location_transform(s.family, s.loc))
+    @remote(b, InsertDoor(
+        pt.x,
+        pt.y,
+        ref(b, s.wall).value,
+        backend_get_family_ref(b, s.family, rvtf)))
   end
 
 backend_add_door(b::RVT, w::Wall, loc::Loc, family::DoorFamily) = finish_this()
@@ -525,6 +571,22 @@ backend_add_window(b::RVT, w::Wall, loc::Loc, family::WindowFamily) =
         end
         w
     end
+#
+
+KhepriBase.b_toilet(b::RVT, c, host, family) =
+  let rvtf = backend_family(b, family)
+    @remote(b, CreateElementLocDirOnHost(rvtf.location_transform(rvtf, c), vy(1, c.cs), ref(b, host).value, realize(b, family)))
+  end
+
+KhepriBase.b_closet(b::RVT, c, host, family) =
+  let rvtf = backend_family(b, family)
+    @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref(b, host).value, realize(b, family)))
+  end
+
+KhepriBase.b_sink(b::RVT, c, host, family) =
+  let rvtf = backend_family(b, family)
+    @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref(b, host).value, realize(b, family)))
+  end
 
 realize(b::RVT, s::TrussNode) =
   @remote(b, CreateBeam(s.p, add_x(s.p, 0.1), 0, realize(b, s.family)))
@@ -582,7 +644,7 @@ backend_surface_grid(b::RVT, points, closed_u, closed_v, smooth_u, smooth_v) =
         closed_v,
         0))
 
-#
+#=
 unite_ref(b::RVT, r0::RVTNativeRef, r1::RVTNativeRef) =
     ensure_ref(b, @remote(b, Union(r0.value, r1.value)))
 
@@ -594,13 +656,7 @@ subtract_ref(b::RVT, r0::RVTNativeRef, r1::RVTNativeRef) =
 
 unite_refs(b::RVT, refs::Vector{<:RVTRef}) =
     RVTUnionRef(tuple(refs...))
-
-realize(b::RVT, s::IntersectionShape) =
-  let r = foldl((r0,r1)->intersect_ref(b,r0,r1), map(ref, s.shapes),
-                init=RVTUniversalRef())
-    mark_deleted(s.shapes)
-    r
-  end
+=#
 ############################################
 
 # Create 4 (3) reference planes that give the panel outline
@@ -628,10 +684,18 @@ realize(b::RVT, s::IntersectionShape) =
 KhepriBase.backend_name(b::RVT) = "Revit"
 
 KhepriBase.b_set_view(b::RVT, camera::Loc, target::Loc, lens::Real, aperture::Real) =
-  @remote(b, SetView(camera, target, lens))
+  let width = render_width(),
+      height = render_height()
+    @remote(b, SetView(camera, target, width, height, lens))
+  end
 
 KhepriBase.b_get_view(b::RVT) =
-  @remote(b, ViewCamera()), @remote(b, ViewTarget()), @remote(b, ViewLens(c))
+  @remote(b, GetCamera()), @remote(b, GetTarget()), @remote(b, GetLens())
+
+KhepriBase.b_render_and_save_view(b::RVT, path::String) =
+  @remote(b, RenderView(path))
+
+
 
 zoom_extents(b::RVT) = @remote(b, ZoomExtents())
 
@@ -653,10 +717,10 @@ level_from_ref(r, b::RVT) =
   level(r == RVTVoidId ?
           error("Level for unconnected height") :
           @remote(b, GetLevelElevation(r)),
-        backend=b, ref=LazyRef(b, RVTNativeRef(r)))
+        ref=DynRefs(b=>RVTNativeRef(r)))
 
 unconnected_level(h::Real, b::RVT) =
-    level(h, backend=b, ref=LazyRef(b, RVTNativeRef(RVTVoidId)))
+    level(h, ref=DynRefs(b=>RVTNativeRef(RVTVoidId)))
 
 all_Elements(b::RVT) =
     [element_from_ref(r, b) for r in @remote(b, DocElements())]
@@ -678,8 +742,7 @@ wall_from_ref(r, b::RVT) =
         wall(path,
              bottom_level=bottom_level,
              top_level=top_level,
-             backend=b,
-             ref=LazyRef(b, RVTNativeRef(r)))
+             ref=DynRefs(b=>RVTNativeRef(r)))
     end
 
 #=
