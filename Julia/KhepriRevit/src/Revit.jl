@@ -289,11 +289,12 @@ KhepriBase.after_connecting(b::RVT) =
           revit_library_path("Metric Library", raw"Structural Framing\Steel\M_W-Wide Flange.rfa")))
     set_backend_family(default_toilet_family(), revit, revit_file_family(
           revit_library_path("Metric Library", raw"Plumbing\Architectural\Fixtures\Water Closets\M_Toilet-Domestic-3D.rfa"),
-          [], [], (f, c)->c+vx(0.5, c.cs)))
+          [], [], (f, c)->add_y(loc_from_o_phi(c, π/2), -0.12)))
     set_backend_family(default_closet_family(), revit, revit_file_family(
           revit_library_path("Metric Library", raw"Furniture\Storage\M_Shelving.rfa")))
     set_backend_family(default_sink_family(), revit, revit_file_family(
-            revit_library_path("Metric Library", raw"Plumbing\Architectural\Fixtures\Sinks\M_Sink Vanity-Square.rfa")))
+            revit_library_path("Metric Library", raw"Plumbing\Architectural\Fixtures\Sinks\M_Sink Vanity-Square.rfa"),
+            [], [], (f, c)->add_y(loc_from_o_phi(c, π/2), 0.0)))
     #=
     #set_backend_family(default_column_family(), unity, unity_material_family("Materials/Concrete/Concrete2"))
     #set_backend_family(default_door_family(), unity, unity_material_family("Materials/Wood/InteriorWood2"))
@@ -574,17 +575,20 @@ backend_add_window(b::RVT, w::Wall, loc::Loc, family::WindowFamily) =
 #
 
 KhepriBase.b_toilet(b::RVT, c, host, family) =
-  let rvtf = backend_family(b, family)
-    @remote(b, CreateElementLocDirOnHost(rvtf.location_transform(rvtf, c), vy(1, c.cs), ref(b, host).value, realize(b, family)))
+  let rvtf = backend_family(b, family),
+      c = rvtf.location_transform(rvtf, c)
+    @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref(b, host).value, realize(b, family)))
   end
 
 KhepriBase.b_closet(b::RVT, c, host, family) =
-  let rvtf = backend_family(b, family)
+  let rvtf = backend_family(b, family),
+      c = rvtf.location_transform(rvtf, c)
     @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref(b, host).value, realize(b, family)))
   end
 
 KhepriBase.b_sink(b::RVT, c, host, family) =
-  let rvtf = backend_family(b, family)
+  let rvtf = backend_family(b, family),
+      c = rvtf.location_transform(rvtf, c)
     @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref(b, host).value, realize(b, family)))
   end
 
