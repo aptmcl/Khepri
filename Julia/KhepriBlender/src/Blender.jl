@@ -162,12 +162,20 @@ def sphere(center:Point3d, radius:float, mat:MatId)->Id:
 def cone_frustum(b:Point3d, br:float, t:Point3d, tr:float, bmat:MatId, tmat:MatId, smat:MatId)->Id:
 def box(p:Point3d, vx:Vector3d, vy:Vector3d, dx:float, dy:float, dz:float, mat:MatId)->Id:
 def text(txt:str, p:Point3d, vx:Vector3d, vy:Vector3d, size:float)->Id:
-def area_light(p:Point3d, v:Vector3d, size:float, color:RGBA, strength:float)->Id:
+def union(id1:Id, id2:Id)->Id:
+def intersect(id1:Id, id2:Id)->Id:
+def difference(id1:Id, id2:Id)->Id:
+def slice(id:Id, p:Point3d, v:Vector3d)->Id:
+def pointlight(p:Point3d, energy:float, color:RGB)->Id:
+def arealight(p:Point3d, v:Vector3d, size:float, energy:float, color:RGB)->Id:
+def spotlight(p:Point3d, v:Vector3d, size:float, blend:float, energy:float, color:RGB)->Id:
+def ieslight(p:Point3d, v:Vector3d, ies_file_path:string, energy:float)->Id:
 def sun_light(p:Point3d, v:Vector3d)->Id:
-def light(p:Point3d, type:str)->Id:
 def camera_from_view()->None:
 def set_view(camera:Point3d, target:Point3d, lens:float)->None:
 def get_view()->Tuple[Point3d, Point3d, float]:
+def set_view_top()->None:
+def frame_all()->None:
 def set_camera_view(camera:Point3d, target:Point3d, lens:float)->None:
 def set_render_size(width:int, height:int)->None:
 def set_render_path(filepath:str)->None:
@@ -190,10 +198,6 @@ const BLRId = Union{Int32,String} # Although shapes and materials are ints, laye
 const BLRIds = Vector{BLRId}
 const BLRRef = NativeRef{BLRKey, BLRId}
 const BLRRefs = Vector{BLRRef}
-const BLREmptyRef = EmptyRef{BLRKey, BLRId}
-const BLRUniversalRef = UniversalRef{BLRKey, BLRId}
-const BLRUnionRef = UnionRef{BLRKey, BLRId}
-const BLRSubtractionRef = SubtractionRef{BLRKey, BLRId}
 const BLR = SocketBackend{BLRKey, BLRId}
 
 const KhepriServerPath = Parameter(abspath(@__DIR__, "BlenderServer.py"))
@@ -242,15 +246,12 @@ KhepriBase.after_connecting(b::BLR) =
 
 const blender = BLR("Blender", blender_port, blender_api)
 
-KhepriBase.has_boolean_ops(::Type{BLR}) = HasBooleanOps{false}()
+KhepriBase.has_boolean_ops(::Type{BLR}) = HasBooleanOps{true}()
 
 KhepriBase.backend(::BLRRef) = blender
-KhepriBase.void_ref(b::BLR) = BLRRef(-1 % Int32)
+KhepriBase.void_ref(b::BLR) = -1 % Int32
 
 # Primitives
-
-KhepriBase.unite_ref(b::BLR, r0::BLRRef, r1::BLRRef) =
-    ensure_ref(b, [r0.value, r1.value])
 
 KhepriBase.b_line(b::BLR, ps, mat) =
   @remote(b, line(ps, false, mat))
@@ -291,19 +292,19 @@ KhepriBase.b_surface_circle(b::BLR, c, r, mat) =
 
 KhepriBase.b_surface_grid(b::BLR, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
   let (nu, nv) = size(ptss)
-	smooth_u && smooth_v ?
-	  @remote(b, quad_surface(vcat(ptss...), nu, nv, closed_u, closed_v, true, mat)) :
-	  smooth_u ?
-	  	(closed_u ?
-          vcat([b_quad_strip_closed(b, ptss[:,i], ptss[:,i+1], true, mat) for i in 1:nv-1],
-	           closed_v ? [b_quad_strip_closed(b, ptss[:,end], ptss[:,1], true, mat)] : []) :
-	      vcat([b_quad_strip(b, ptss[:,i], ptss[:,i+1], true, mat) for i in 1:nv-1],
-	           closed_v ? [b_quad_strip(b, ptss[:,end], ptss[:,1], true, mat)] : [])) :
- 	    (closed_v ?
-           vcat([b_quad_strip_closed(b, ptss[i,:], ptss[i+1,:], smooth_v, mat) for i in 1:nu-1],
-  	         	closed_u ? [b_quad_strip_closed(b, ptss[end,:], ptss[1,:], smooth_v, mat)] : []) :
-  	       vcat([b_quad_strip(b, ptss[i,:], ptss[i+1,:], smooth_v, mat) for i in 1:nu-1],
-  	          	closed_u ? [b_quad_strip(b, ptss[end,:], ptss[1,:], smooth_v, mat)] : []))
+	  smooth_u && smooth_v ?
+	    @remote(b, quad_surface(vcat(ptss...), nu, nv, closed_u, closed_v, true, mat)) :
+	    smooth_u ?
+	    	(closed_u ?
+          vcat([b_quad_strip_closed(b, ptss[:,i], ptss[:,i+1], true, mat) for i in 1:nv-1]...,
+	             closed_v ? [b_quad_strip_closed(b, ptss[:,end], ptss[:,1], true, mat)] : new_refs(b)) :
+	        vcat([b_quad_strip(b, ptss[:,i], ptss[:,i+1], true, mat) for i in 1:nv-1]...,
+	             closed_v ? [b_quad_strip(b, ptss[:,end], ptss[:,1], true, mat)] : new_refs(b))) :
+ 	      (closed_v ?
+             vcat([b_quad_strip_closed(b, ptss[i,:], ptss[i+1,:], smooth_v, mat) for i in 1:nu-1],
+    	         	closed_u ? [b_quad_strip_closed(b, ptss[end,:], ptss[1,:], smooth_v, mat)] : new_refs(b)) :
+    	       vcat([b_quad_strip(b, ptss[i,:], ptss[i+1,:], smooth_v, mat) for i in 1:nu-1],
+    	          	closed_u ? [b_quad_strip(b, ptss[end,:], ptss[1,:], smooth_v, mat)] : new_refs(b)))
   end
 
 KhepriBase.b_generic_pyramid_frustum(b::BLR, bs, ts, smooth, bmat, tmat, smat) =
@@ -321,8 +322,42 @@ KhepriBase.b_cylinder(b::BLR, cb, r, h, bmat, tmat, smat) =
 KhepriBase.b_cuboid(b::BLR, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat) =
   @remote(b, cuboid([pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3], mat))
 
+KhepriBase.b_box(b::BLR, c, dx, dy, dz, mat) =
+  let o = in_world(c),
+      vx = in_world(vx(1, c.cs)),
+      vy = in_world(vy(1, c.cs))
+    @remote(b, box(o, vx, vy, dx, dy, dz, mat))
+  end
+#=
+KhepriBase.b_box(b::BLR, c, dx, dy, dz, mat) =
+  let pb0 = c,
+      pb1 = add_x(c, dx),
+      pb2 = add_xy(c, dx, dy),
+      pb3 = add_y(c, dy),
+      pt0 = add_z(pb0, dz),
+      pt1 = add_z(pb1, dz),
+      pt2 = add_z(pb2, dz),
+      pt3 = add_z(pb3, dz)
+    b_cuboid(b, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat)
+  end
+=#
+
 KhepriBase.b_sphere(b::BLR, c, r, mat) =
   @remote(b, sphere(c, r, mat))
+
+# Boolean ops
+
+KhepriBase.b_unite_ref(b::BLR, r, s) =
+  @remote(b, union(r, s))
+
+KhepriBase.b_intersect_ref(b::BLR, r, s) =
+  @remote(b, intersect(r, s))
+
+KhepriBase.b_subtract_ref(b::BLR, r, s) =
+  @remote(b, difference(r, s))
+
+#KhepriBase.slice_ref(b::BLR, r, p, v) =
+#  @remote(b, slice(r.value, p, v))
 
 # Materials
 
@@ -381,6 +416,22 @@ KhepriBase.b_mirror_material(b::BLR, name, color) =
 #KhepriBase.b_substrate_material(name, diffuse, specular, roughness, bump_map)
 
 #=
+Lights
+=#
+
+KhepriBase.b_pointlight(b::BLR, loc, energy, color) =
+  @remote(b, pointlight(loc, energy, color))
+
+KhepriBase.b_arealight(b::BLR, loc, dir, size, energy, color) =
+  @remote(b, arealight(loc, dir, size, energy, color))
+
+KhepriBase.b_spotlight(b::BLR, loc, dir, hotspot, falloff, energy, color) =
+  @remote(b, spotlight(loc, dir, hotspot, falloff, energy, color))
+
+KhepriBase.b_ieslight(b::BLR, file, loc, dir, alpha, beta, gamma) =
+  @remote(b, IESLight(file, loc, dir, alpha))
+
+#=
 
 Default families
 
@@ -399,11 +450,6 @@ KhepriBase.b_all_shapes_in_layer(b::BLR, layer) =
 KhepriBase.b_delete_all_shapes_in_layer(b::BLR, layer) =
   @remote(b, delete_all_shapes_in_collection(layer))
 
-realize(b::BLR, s::EmptyShape) =
-  BLREmptyRef()
-realize(b::BLR, s::UniversalShape) =
-  BLRUniversalRef()
-
 KhepriBase.b_set_view(b::BLR, camera::Loc, target::Loc, lens::Real, aperture::Real) =
   begin
   	@remote(b, set_view(camera, target, lens))
@@ -413,9 +459,11 @@ KhepriBase.b_set_view(b::BLR, camera::Loc, target::Loc, lens::Real, aperture::Re
 KhepriBase.b_get_view(b::BLR) =
   @remote(b, get_view())
 
-KhepriBase.b_zoom_extents(b::BLR) = @remote(b, ZoomExtents())
+KhepriBase.b_zoom_extents(b::BLR) = 
+  @remote(b, frame_all())
 
-#KhepriBase.b_set_view_top(b::BLR) = @remote(b, ViewTop())
+KhepriBase.b_set_view_top(b::BLR) = 
+  @remote(b, set_view_top())
 
 KhepriBase.b_realistic_sky(b::BLR, altitude, azimuth, turbidity, sun) =
   @remote(b, set_sun_sky(deg2rad(altitude), deg2rad(azimuth), turbidity, sun))
@@ -464,40 +512,28 @@ KhepriBase.b_shape_from_ref(b::BLR, r) = begin
 end
 ##############
 
-# We have different renderers in Blender
-
-with_render_setup(f, b, path) =
+KhepriBase.b_render_and_save_view(b::BLR, path::String) =
   let (camera, target, lens) = @remote(b, get_view())
     @remote(b, set_camera_view(camera, target, lens))
     @remote(b, set_render_size(render_width(), render_height()))
     @remote(b, set_render_path(path))
-    f()
-  end
-
-KhepriBase.b_render_view(b::BLR, path::String) =
-  with_render_setup(b, path) do
-  	@remote(b, cycles_renderer(1200, true, false, false, render_exposure()))
+    if render_kind() == :black
+      @remote(b, set_hdri_background_with_rotation(
+        joinpath(@__DIR__, "studio_small_05_4k.exr"),
+        11π/6 - (camera - target).ϕ))
+      @remote(b, cycles_renderer(1200, true, false, true, render_exposure()))
+    elseif render_kind() == :white
+      error("Finish this")
+    else
+      error("Finish this")
+      @remote(b, cycles_renderer(1200, true, false, true, render_exposure()))
+    end
   end
 
 export render_svg
 render_svg(b::BLR, path) =
   with_render_setup(b, path) do
     @remote(b, freestylesvg_renderer(1.0, 0.0))
-  end
-
-#=
-with_clay_model(f, level::Real=0) =
-  begin
-  	with(f, default_material, material_clay)
-	area_light
-=#
-
-KhepriBase.b_render_clay_view(b::BLR, path) =
-  let (c, t, l) = get_view()
-    with_render_setup(b, path) do
-      @remote(b, set_hdri_background_with_rotation(joinpath(@__DIR__, "studio_small_05_4k.exr"), 2π - (c - t).ϕ))
-      @remote(b, cycles_renderer(1200, true, false, true, render_exposure()))
-    end
   end
 
 #=
