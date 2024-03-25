@@ -11,11 +11,12 @@ bl_info = {
 }
 
 # To easily test this, on a command prompt do:
-# "C:\Program Files\Blender Foundation\Blender 2.91\blender.exe" --python BlenderServer.py
+# "C:\Program Files\Blender Foundation\Blender 3.6\blender.exe" --python BlenderServer.py
 # To test this while still allowing redefinitions do:
-# "C:\Program Files\Blender Foundation\Blender 2.91\blender.exe"
+# "C:\Program Files\Blender Foundation\Blender 3.6\blender.exe"
 # and then, in Blender's Python console:
-# __file__=os.getcwd()+"/src"
+# import os
+# __file__=os.path.join(os.getcwd(), "src")
 # exec(open("BlenderServer.py").read())
 
 # This loads the shared part of the Khepri server
@@ -27,7 +28,8 @@ exec(open(os.path.join(os.path.dirname(__file__), "KhepriServer.py")).read())
 from bpy import ops, data as D, context as C
 import bpy
 import bmesh
-from mathutils import Vector, Matrix
+from math import pi
+from mathutils import Vector, Matrix, Quaternion
 import addon_utils
 # We will use BlenderKit to download materials.
 # After activating a BlenderKit account (from addon BlenderKit)
@@ -154,11 +156,11 @@ def download_blenderkit_material(asset_ref):
     return append_blend_material(file_names[-1])
 
 def append_blend_material(file_name):
-    materials = bpy.data.materials[:]
-    with bpy.data.libraries.load(file_name, link=False, relative=True) as (data_from, data_to):
+    materials = D.materials[:]
+    with D.libraries.load(file_name, link=False, relative=True) as (data_from, data_to):
         matname = data_from.materials[0]
         data_to.materials = [matname]
-    mat = bpy.data.materials.get(matname)
+    mat = D.materials.get(matname)
     mat.use_fake_user = True
     return mat
 
@@ -293,7 +295,7 @@ def set_hdri_background(hdri_path:str)->None:
     nodes = world.node_tree.nodes
     nodes.clear()
     env_texture = nodes.new(type='ShaderNodeTexEnvironment')
-    env_texture.image = bpy.data.images.load(hdri_path)
+    env_texture.image = D.images.load(hdri_path)
     env_texture.location = (-300,0)
     background = nodes.new(type='ShaderNodeBackground')
     world_output = nodes.new(type='ShaderNodeOutputWorld')
@@ -310,7 +312,7 @@ def set_hdri_background_with_rotation(hdri_path:str, rotation:float)->None:
     mapping = nodes.new(type='ShaderNodeMapping')
     mapping.inputs['Rotation'].default_value[2] = rotation
     env_texture = nodes.new(type='ShaderNodeTexEnvironment')
-    env_texture.image = bpy.data.images.load(hdri_path)
+    env_texture.image = D.images.load(hdri_path)
     background = nodes.new(type='ShaderNodeBackground')
     world_output = nodes.new(type='ShaderNodeOutputWorld')
     world.node_tree.links.new(tex_coord.outputs['Generated'], mapping.inputs[0])
@@ -411,6 +413,8 @@ def delete_all_shapes_in_collection(name:str)->None:
 def delete_all_shapes()->None:
     for collection in D.collections:
         D.batch_remove(collection.objects)
+    global shape_counter
+    shape_counter = 0
     #D.orphans_purge(do_linked_ids=False)
 
 def delete_shape(name:Id)->None:
@@ -442,18 +446,17 @@ def selected_shapes(prompt:str)->List[Id]:
 def new_bmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat_idx:int)->None:
     bm = bmesh.new()
     mverts = bm.verts
-    medges = bm.edges
-    mfaces = bm.faces
     for vert in verts:
         mverts.new(vert)
     mverts.ensure_lookup_table()
+    medges = bm.edges
     for edge in edges:
         medges.new((mverts[edge[0]], mverts[edge[1]]))
     if faces == []:
         bmesh.ops.triangle_fill(bm, edges=bm.edges, use_beauty=True)
-    else:
-        for face in faces:
-            mfaces.new([mverts[i] for i in face])
+    mfaces = bm.faces
+    for face in faces:
+        mfaces.new([mverts[i] for i in face])
     if smooth:
         for f in mfaces:
             f.smooth = True
@@ -631,7 +634,7 @@ def polygon_with_holes(pss:List[List[Point3d]], mat:MatId)->Id:
 def circle(c:Point3d, v:Vector3d, r:float, mat:MatId)->Id:
     rot = Vector((0, 0, 1)).rotation_difference(v)  # Rotation from Z axis.
     bm = bmesh.new()
-    bmesh.ops.create_circle(bm, cap_ends=True, radius=r, segments=32,
+    bmesh.ops.create_circle(bm, cap_ends=True, radius=r, segments=64,
                                 calc_uvs=True)
     id, name = new_id()
     obj = mesh_from_bmesh(name, bm)
@@ -664,12 +667,11 @@ def pyramid_frustum(bs:List[Point3d], ts:List[Point3d], smooth:bool, bmat:MatId,
 #     bpy.ops.mesh.primitive_uv_sphere_add(location=center, radius=radius)
 #     bpy.ops.object.shade_smooth()
 #     return C.object.name
-
-def sphere(center:Point3d, radius:float, mat:MatId)->Id:
+def oldsphere(center:Point3d, radius:float, mat:MatId)->Id:
     bm = bmesh.new()
-    bmesh.ops.create_uvsphere(bm, u_segments=32, v_segments=16, radius=radius, )
+    bmesh.ops.create_uvsphere(bm, u_segments=128, v_segments=64, radius=radius, )
     for f in bm.faces:
-        f.smooth = True
+       f.smooth = True
     if mat >= 0:
         for f in bm.faces:
             f.material_index = 0
@@ -677,6 +679,38 @@ def sphere(center:Point3d, radius:float, mat:MatId)->Id:
     id, name = new_id()
     obj = mesh_from_bmesh(name, bm)
     obj.location=center
+    obj.scale=(radius, radius, radius)
+    current_collection.objects.link(obj)
+    append_material(obj, mat)
+    return id
+
+sphere_bmesh = False
+def sphere(center:Point3d, radius:float, mat:MatId)->Id:
+    global sphere_bmesh
+    if sphere_bmesh:
+        bm = sphere_bmesh
+    else:
+        bm = bmesh.new()
+        bmesh.ops.create_uvsphere(bm, u_segments=64, v_segments=32, radius=1, )
+        for f in bm.faces:
+           f.smooth = True
+        sphere_bmesh = bm
+
+    #for f in bm.faces:
+    #   f.smooth = True
+    #if mat >= 0:
+    #    for f in bm.faces:
+    #        f.material_index = 0
+            #f.select = True
+    id, name = new_id()
+    mesh_data = D.meshes.new(name)
+    #add_bm_uvs(mesh_data, bm)
+    bm.to_mesh(mesh_data)
+    #bm.free() We are caching it!
+    #add_uvs(mesh_data)
+    obj = D.objects.new(name, mesh_data)
+    obj.location=center
+    obj.scale=(radius, radius, radius)
     current_collection.objects.link(obj)
     append_material(obj, mat)
     return id
@@ -688,12 +722,7 @@ def cone_frustum(b:Point3d, br:float, t:Point3d, tr:float, bmat:MatId, tmat:MatI
     trans = rot @ Vector((0, 0, depth / 2))  # Such that origin is at center of the base of the cylinder.
     bm = bmesh.new()
     mat_idx = 0
-    if br > 0:
-        bmesh.ops.create_circle(bm, cap_ends=True, radius=br, segments=32,
-                                matrix=Matrix.Translation(Vector((0, 0, -depth/2))),
-                                calc_uvs=True)
-        mat_idx += 0 if bmat < 0 else 1
-    bmesh.ops.create_cone(bm, cap_ends=False, segments=32,
+    bmesh.ops.create_cone(bm, cap_ends=False, segments=64,
                           radius1=br, radius2=tr, depth=depth,
                           calc_uvs=True)
     for f in bm.faces:
@@ -701,9 +730,15 @@ def cone_frustum(b:Point3d, br:float, t:Point3d, tr:float, bmat:MatId, tmat:MatI
     if smat >= 0:
         for f in  bm.faces:
             f.material_index = mat_idx
+        bm.normal_update()
         mat_idx += 1
+    if br > 0:
+        bmesh.ops.create_circle(bm, cap_ends=True, radius=br, segments=64,
+                                matrix=Matrix.Translation(Vector((0, 0, -depth/2))),
+                                calc_uvs=True)
+        mat_idx += 0 if bmat < 0 else 1
     if tr > 0:
-        bmesh.ops.create_circle(bm, cap_ends=True, radius=tr, segments=32,
+        bmesh.ops.create_circle(bm, cap_ends=True, radius=tr, segments=64,
                                 matrix=Matrix.Translation(Vector((0, 0, depth/2))),
                                 calc_uvs=True)
         mat_idx += 0 if tmat < 0 else 1
@@ -717,259 +752,32 @@ def cone_frustum(b:Point3d, br:float, t:Point3d, tr:float, bmat:MatId, tmat:MatI
     current_collection.objects.link(obj)
     return id
 
+def rotation_from_axes(vx, vy):
+    vz = vx.cross(vy)
+    rot_matrix = Matrix((vx, vy, vz)).transposed()
+    return rot_matrix
+
+box_bmesh = False
 def box(p:Point3d, vx:Vector3d, vy:Vector3d, dx:float, dy:float, dz:float, mat:MatId)->Id:
+    global box_bmesh
+    if box_bmesh:
+        bm = box_bmesh
+    else:
+        bm = bmesh.new()
+        bmesh.ops.create_cube(bm, size=1)
+        box_bmesh = bm
+    vz = vx.cross(vy)
+    rot_matrix = Matrix((vx, vy, vz)).transposed()
     id, name = new_id()
-    rot = quaternion_from_vx_vy(vx, vy)
-    print(rot)
-    bm = bmesh.new()
-    bmesh.ops.create_cube(bm, size=1, matrix=Matrix.Diagonal(Vector((dx, dy, dz, 1.0))),
-                          # AML Scale here? May influence UVs
-                          #matrix=Matrix.Translation(Vector((0, 0, -depth/2))),
-                          #calc_uvs=True
-                          )
-    obj = mesh_from_bmesh(name, bm)
-    obj.rotation_euler = rot.to_euler()
-    print(rot.to_euler())
-    print(p)
-    obj.location = p
+    mesh_data = D.meshes.new(name)
+    bm.to_mesh(mesh_data)
+    obj = D.objects.new(name, mesh_data)
+    obj.scale = (dx, dy, dz)
+    obj.rotation_euler = rot_matrix.to_euler()
+    obj.location = p + vx*dx/2 + vy*dy/2 + vz*dz/2
     current_collection.objects.link(obj)
     append_material(obj, mat)
     return id
-
-# def add_torus(major_rad, minor_rad, major_seg, minor_seg):
-#     from math import cos, sin, pi
-#     from mathutils import Vector, Matrix
-#
-#     pi_2 = pi * 2.0
-#
-#     verts = []
-#     faces = []
-#     i1 = 0
-#     tot_verts = major_seg * minor_seg
-#     for major_index in range(major_seg):
-#         matrix = Matrix.Rotation((major_index / major_seg) * pi_2, 3, 'Z')
-#
-#         for minor_index in range(minor_seg):
-#             angle = pi_2 * minor_index / minor_seg
-#
-#             vec = matrix @ Vector((
-#                 major_rad + (cos(angle) * minor_rad),
-#                 0.0,
-#                 sin(angle) * minor_rad,
-#             ))
-#
-#             verts.extend(vec[:])
-#
-#             if minor_index + 1 == minor_seg:
-#                 i2 = (major_index) * minor_seg
-#                 i3 = i1 + minor_seg
-#                 i4 = i2 + minor_seg
-#             else:
-#                 i2 = i1 + 1
-#                 i3 = i1 + minor_seg
-#                 i4 = i3 + 1
-#
-#             if i2 >= tot_verts:
-#                 i2 = i2 - tot_verts
-#             if i3 >= tot_verts:
-#                 i3 = i3 - tot_verts
-#             if i4 >= tot_verts:
-#                 i4 = i4 - tot_verts
-#
-#             faces.extend([i1, i3, i4, i2])
-#
-#             i1 += 1
-#
-#     return verts, faces
-#
-#
-# def add_uvs(mesh, minor_seg, major_seg):
-#     from math import fmod
-#
-#     mesh.uv_layers.new()
-#     uv_data = mesh.uv_layers.active.data
-#     polygons = mesh.polygons
-#     u_step = 1.0 / major_seg
-#     v_step = 1.0 / minor_seg
-#
-#     # Round UV's, needed when segments aren't divisible by 4.
-#     u_init = 0.5 + fmod(0.5, u_step)
-#     v_init = 0.5 + fmod(0.5, v_step)
-#
-#     # Calculate wrapping value under 1.0 to prevent
-#     # float precision errors wrapping at the wrong step.
-#     u_wrap = 1.0 - (u_step / 2.0)
-#     v_wrap = 1.0 - (v_step / 2.0)
-#
-#     vertex_index = 0
-#
-#     u_prev = u_init
-#     u_next = u_prev + u_step
-#     for _major_index in range(major_seg):
-#         v_prev = v_init
-#         v_next = v_prev + v_step
-#         for _minor_index in range(minor_seg):
-#             loops = polygons[vertex_index].loop_indices
-#             uv_data[loops[0]].uv = u_prev, v_prev
-#             uv_data[loops[1]].uv = u_next, v_prev
-#             uv_data[loops[3]].uv = u_prev, v_next
-#             uv_data[loops[2]].uv = u_next, v_next
-#
-#             if v_next > v_wrap:
-#                 v_prev = v_next - 1.0
-#             else:
-#                 v_prev = v_next
-#             v_next = v_prev + v_step
-#
-#             vertex_index += 1
-#
-#         if u_next > u_wrap:
-#             u_prev = u_next - 1.0
-#         else:
-#             u_prev = u_next
-#         u_next = u_prev + u_step
-#
-#
-# class AddTorus(Operator, object_utils.AddObjectHelper):
-#     """Construct a torus mesh"""
-#     bl_idname = "mesh.primitive_torus_add"
-#     bl_label = "Add Torus"
-#     bl_options = {'REGISTER', 'UNDO', 'PRESET'}
-#
-#     def mode_update_callback(self, _context):
-#         if self.mode == 'EXT_INT':
-#             self.abso_major_rad = self.major_radius + self.minor_radius
-#             self.abso_minor_rad = self.major_radius - self.minor_radius
-#
-#     major_segments: IntProperty(
-#         name="Major Segments",
-#         description="Number of segments for the main ring of the torus",
-#         min=3, max=256,
-#         default=48,
-#     )
-#     minor_segments: IntProperty(
-#         name="Minor Segments",
-#         description="Number of segments for the minor ring of the torus",
-#         min=3, max=256,
-#         default=12,
-#     )
-#     mode: EnumProperty(
-#         name="Dimensions Mode",
-#         items=(
-#             ('MAJOR_MINOR', "Major/Minor",
-#              "Use the major/minor radii for torus dimensions"),
-#             ('EXT_INT', "Exterior/Interior",
-#              "Use the exterior/interior radii for torus dimensions"),
-#         ),
-#         update=mode_update_callback,
-#     )
-#     major_radius: FloatProperty(
-#         name="Major Radius",
-#         description=("Radius from the origin to the "
-#                      "center of the cross sections"),
-#         soft_min=0.0, soft_max=100.0,
-#         min=0.0, max=10_000.0,
-#         default=1.0,
-#         subtype='DISTANCE',
-#         unit='LENGTH',
-#     )
-#     minor_radius: FloatProperty(
-#         name="Minor Radius",
-#         description="Radius of the torus' cross section",
-#         soft_min=0.0, soft_max=100.0,
-#         min=0.0, max=10_000.0,
-#         default=0.25,
-#         subtype='DISTANCE',
-#         unit='LENGTH',
-#     )
-#     abso_major_rad: FloatProperty(
-#         name="Exterior Radius",
-#         description="Total Exterior Radius of the torus",
-#         soft_min=0.0, soft_max=100.0,
-#         min=0.0, max=10_000.0,
-#         default=1.25,
-#         subtype='DISTANCE',
-#         unit='LENGTH',
-#     )
-#     abso_minor_rad: FloatProperty(
-#         name="Interior Radius",
-#         description="Total Interior Radius of the torus",
-#         soft_min=0.0, soft_max=100.0,
-#         min=0.0, max=10_000.0,
-#         default=0.75,
-#         subtype='DISTANCE',
-#         unit='LENGTH',
-#     )
-#     generate_uvs: BoolProperty(
-#         name="Generate UVs",
-#         description="Generate a default UV map",
-#         default=True,
-#     )
-#
-#     def draw(self, _context):
-#         layout = self.layout
-#
-#         layout.use_property_split = True
-#         layout.use_property_decorate = False
-#
-#         layout.separator()
-#
-#         layout.prop(self, "major_segments")
-#         layout.prop(self, "minor_segments")
-#
-#         layout.separator()
-#
-#         layout.prop(self, "mode")
-#         if self.mode == 'MAJOR_MINOR':
-#             layout.prop(self, "major_radius")
-#             layout.prop(self, "minor_radius")
-#         else:
-#             layout.prop(self, "abso_major_rad")
-#             layout.prop(self, "abso_minor_rad")
-#
-#         layout.separator()
-#
-#         layout.prop(self, "generate_uvs")
-#         layout.prop(self, "align")
-#         layout.prop(self, "location")
-#         layout.prop(self, "rotation")
-#
-#     def invoke(self, context, _event):
-#         object_utils.object_add_grid_scale_apply_operator(self, context)
-#         return self.execute(context)
-#
-#     def execute(self, context):
-#
-#         if self.mode == 'EXT_INT':
-#             extra_helper = (self.abso_major_rad - self.abso_minor_rad) * 0.5
-#             self.major_radius = self.abso_minor_rad + extra_helper
-#             self.minor_radius = extra_helper
-#
-#         verts_loc, faces = add_torus(
-#             self.major_radius,
-#             self.minor_radius,
-#             self.major_segments,
-#             self.minor_segments,
-#         )
-#
-#         mesh = D.meshes.new(data_("Torus"))
-#
-#         mesh.vertices.add(len(verts_loc) // 3)
-#
-#         nbr_loops = len(faces)
-#         nbr_polys = nbr_loops // 4
-#         mesh.loops.add(nbr_loops)
-#         mesh.polygons.add(nbr_polys)
-#
-#         mesh.vertices.foreach_set("co", verts_loc)
-#         mesh.polygons.foreach_set("loop_start", range(0, nbr_loops, 4))
-#         mesh.polygons.foreach_set("loop_total", (4,) * nbr_polys)
-#         mesh.loops.foreach_set("vertex_index", faces)
-#
-#         if self.generate_uvs:
-#             add_uvs(mesh, self.minor_segments, self.major_segments)
-#
-#         mesh.update()
 
 def text(txt:str, p:Point3d, vx:Vector3d, vy:Vector3d, size:float)->Id:
     id, name = new_id()
@@ -988,19 +796,50 @@ def text(txt:str, p:Point3d, vx:Vector3d, vy:Vector3d, size:float)->Id:
     current_collection.objects.link(obj)
     return id
 
-# Lights
-def area_light(p:Point3d, v:Vector3d, size:float, color:RGBA, energy:float)->Id:
-    id, name = new_id()
-    rot = Vector((0, 0, 1)).rotation_difference(v)  # Rotation from Z axis
-    light_data = D.lights.new(name, 'AREA')
-    light_data.energy = energy
-    light_data.size = size
-    light_data.use_nodes = True
-    light_data.node_tree.nodes["Emission"].inputs["Color"].default_value = color
-    light = D.objects.new(name, light_data)
-    light.location=location
-    light.rotation=rotation
+# Boolean operations
+
+def boolean_op(op:str, id1:Id, id2:Id)->Id:
+    obj1 = D.objects[str(id1)]
+    obj2 = D.objects[str(id2)]
+    bool_modifier = obj1.modifiers.new(name="Boolean", type='BOOLEAN')
+    bool_modifier.operation = op
+    bool_modifier.object = obj2
+    C.view_layer.objects.active = obj1
+    bpy.ops.object.modifier_apply(modifier=bool_modifier.name)
+    obj1.data.use_auto_smooth = True
+    obj1.data.auto_smooth_angle = pi/30
+    D.objects.remove(obj2,do_unlink = True)
+    return id1
+
+def union(id1:Id, id2:Id)->Id:
+    return boolean_op('UNION', id1, id2)
+
+def intersect(id1:Id, id2:Id)->Id:
+    return boolean_op('INTERSECT', id1, id2)
+
+def difference(id1:Id, id2:Id)->Id:
+    return boolean_op('DIFFERENCE', id1, id2)
+
+def slice(id:Id, p:Point3d, v:Vector3d)->Id:
+    obj = D.objects[str(id)]
+    dimensions = obj.dimensions
+    plane_size = max(dimensions) * 2
+    bpy.ops.mesh.primitive_plane_add(size=plane_size, enter_editmode=False, align='WORLD', location=(0, 0, 0))
+    plane = C.active_object
+    rot_quat = Vector((0, 0, 1)).rotation_difference(Vector(-v))
+    plane.rotation_euler = rot_quat.to_euler()
+    plane.location = p
+    bool_mod = obj.modifiers.new(name="Slice", type='BOOLEAN')
+    bool_mod.operation = 'DIFFERENCE'
+    bool_mod.object = plane
+    C.view_layer.objects.active = obj
+    bpy.ops.object.modifier_apply(modifier=bool_mod.name)
+    obj.data.use_auto_smooth = True
+    obj.data.auto_smooth_angle = pi/6
+    D.objects.remove(plane, do_unlink=True)
     return id
+
+# Lights
 
 def sun_light(p:Point3d, v:Vector3d)->Id:
     id, name = new_id()
@@ -1008,20 +847,51 @@ def sun_light(p:Point3d, v:Vector3d)->Id:
     bpy.ops.object.light_add(name=name, type='SUN', location=p, rotation=rot)
     return id
 
-def light(p:Point3d, type:str)->Id:
+def baselight(p:Point3d, type:str, energy:float, color:RGB):
     id, name = new_id()
     light_data = D.lights.new(name, type)
+    light_data.energy = energy
+    light_data.color = color
     light = D.objects.new(name, light_data)
     light.location = p
     current_collection.objects.link(light)
+    return id, light
 
-def light_probe(p:Point3d, type:str)->Id:
-    id, name = new_id()
-    light_data = D.lights.new(name, type)
-    light = D.objects.new(name, light_data)
-    light.location = p
-    current_collection.objects.link(light)
+def pointlight(p:Point3d, energy:float, color:RGB)->Id:
+    id, light = baselight(p, 'POINT', energy, color)
+    return id
 
+def rotation_euler_from_z_direction(v):
+    return Vector(v).to_track_quat('-Z', 'Y').to_euler()
+
+def arealight(p:Point3d, v:Vector3d, size:float, energy:float, color:RGB)->Id:
+    id, light = baselight(p, 'AREA', energy, color)
+    light.data.size = size
+    light.rotation_euler = rotation_euler_from_z_direction(v)
+    return id
+
+def spotlight(p:Point3d, v:Vector3d, size:float, blend:float, energy:float, color:RGB)->Id:
+    id, light = baselight(p, 'SPOT', energy, color)
+    light_data = light.data
+    light_data.energy = energy
+    light_data.color = color
+    light_data.spot_size = size
+    light_data.spot_blend = blend
+    light.rotation_euler = rotation_euler_from_z_direction(v)
+    return id
+
+def ieslight(p:Point3d, v:Vector3d, ies_file_path:str, energy:float)->Id:
+    id, light = baselight(p, 'POINT', energy, color)
+    light.data.use_nodes = True
+    nodes = light.data.node_tree.nodes
+    nodes.clear()
+    emission = nodes.new(type='ShaderNodeEmission')
+    ies_texture = nodes.new(type='ShaderNodeTexIES')
+    ies_texture.ies = D.texts.load(ies_file_path)
+    light_output = nodes.new(type='ShaderNodeOutputLight')
+    light.data.node_tree.links.new(ies_texture.outputs[0], emission.inputs[0])
+    light.data.node_tree.links.new(emission.outputs[0], light_output.inputs[0])
+    return id
 
 # HACK! This should not be used as we now resort to Nishita!!!!
 def khepri_sun():
@@ -1030,9 +900,9 @@ def khepri_sun():
     name = 'Sun'
     if D.objects.find(name) == -1:
         C.view_layer.active_layer_collection = C.view_layer.layer_collection
-        light_data = bpy.data.lights.new(name="Sun", type='SUN')
+        light_data = D.lights.new(name="Sun", type='SUN')
         light_data.energy = 30
-        light_object = bpy.data.objects.new(name="Sun", object_data=light_data)
+        light_object = D.objects.new(name="Sun", object_data=light_data)
         light_object.location = (5, 5, 5)
         C.collection.objects.link(light_object)
         C.view_layer.objects.active = light_object
@@ -1087,8 +957,8 @@ def set_sun_sky(sun_elevation:float, sun_rotation:float, turbidity:float, with_s
     sky.sun_disc = with_sun
 
 
-#bpy.context.scene.view_settings.view_transform = 'False Color'
-#bpy.context.scene.world.light_settings.use_ambient_occlusion = True
+#C.scene.view_settings.view_transform = 'False Color'
+#C.scene.world.light_settings.use_ambient_occlusion = True
 
 
 def set_sky(turbidity:float)->None:
@@ -1146,10 +1016,14 @@ def set_sky(turbidity:float)->None:
     #2 city like atmosphere
     world.node_tree.links.new(bg.inputs[0], sky.outputs[0])
 
-def current_space():
-    area = next(area for area in C.screen.areas if area.type == 'VIEW_3D')
-    space = next(space for space in area.spaces if space.type == 'VIEW_3D')
-    return space
+def current_area():
+    return next(area for area in C.screen.areas if area.type == 'VIEW_3D')
+
+def current_space(area = current_area()):
+    return next(space for space in area.spaces if space.type == 'VIEW_3D')
+
+def current_region(area = current_area()):
+    return next(region for region in area.regions if region.type == 'WINDOW')
 
 def set_view(camera:Point3d, target:Point3d, lens:float)->None:
     direction = target - camera
@@ -1161,10 +1035,20 @@ def set_view(camera:Point3d, target:Point3d, lens:float)->None:
     view.view_distance = direction.length
     space.lens = lens
 
+def set_view_top()->None:
+    area = current_area()
+    with C.temp_override(area=area, region=current_region(area)):
+       bpy.ops.view3d.view_axis(type='TOP')
+
+def frame_all()->None:
+    area = current_area()
+    with C.temp_override(area=area, region=current_region(area)):
+        bpy.ops.view3d.view_all()
+
 # import bpy
 # from mathutils import Vector
 #
-# cam = bpy.data.objects['Camera']
+# cam = D.objects['Camera']
 # location = cam.location
 # up = cam.matrix_world.to_quaternion() @ Vector((0.0, 1.0, 0.0))
 # direction = cam.matrix_world.to_quaternion() @ Vector((0.0, 0.0, -1.0))
@@ -1211,6 +1095,10 @@ def set_camera_view(camera:Point3d, target:Point3d, lens:float)->None:
     cam.location = camera
     cam.rotation_euler = rot_quat.to_euler()
     cam.data.lens = lens
+    d = direction.length 
+    # Architectural work suggests these distances:
+    cam.data.clip_start = 0.1
+    cam.data.clip_end = 100000
     C.scene.camera = cam
 
 def camera_from_view()->None:
@@ -1225,7 +1113,7 @@ def camera_from_view()->None:
 #     if area.type == 'VIEW_3D':
 #         for region in area.regions:
 #             if region.type == 'WINDOW':
-#                 override = {'area': area, 'region': region, 'edit_object': bpy.context.edit_object}
+#                 override = {'area': area, 'region': region, 'edit_object': C.edit_object}
 #                 bpy.ops.view3d.view_all(override)
 
 def set_render_size(width:int, height:int)->None:
