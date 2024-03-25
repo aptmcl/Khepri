@@ -1,7 +1,7 @@
 name = "KhepriBlender"
 uuid = "972dbe12-e583-40ed-b27f-1957d74bf95d"
 authors = ["António Menezes Leitão <antonio.menezes.leitao@gmail.com>"]
-version = "0.1.0"
+version = "0.1.1"
 
 [deps]
 ColorTypes = "3da002f7-5984-5a60-b8a6-cbb66c0b333f"
@@ -13,7 +13,7 @@ Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 
 [compat]
 ColorTypes = "0.11"
-KhepriBase = "0.4"
+KhepriBase = "0.4.5"
 OutputCollectors = "0.1"
 Reexport = "1.2"
 julia = "1.9"
