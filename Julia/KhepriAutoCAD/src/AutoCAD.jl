@@ -479,10 +479,13 @@ KhepriBase.b_arc(b::ACAD, c, r, α, Δα, mat) =
   	  end
     end
   end
-#=
-b_ellipse() =
-  @remote(b, Ellipse(center, vz(1, center.cs), radius_x, radius_y))
-=#
+
+KhepriBase.b_ellipse(b::ACAD, c, rx, ry, mat) =
+  if rx > ry
+    @remote(b, Ellipse(c, vz(1, c.cs), vxyz(rx, 0, 0, c.cs), ry/rx))
+  else
+    @remote(b, Ellipse(c, vz(1, c.cs), vxyz(0, ry, 0, c.cs), rx/ry))
+  end
 
 KhepriBase.b_trig(b::ACAD, p1, p2, p3, mat) =
   @remote(b, Mesh([p1, p2, p3], [[0, 1, 2, 2]], 0, mat))
@@ -753,44 +756,50 @@ KhepriBase.b_text(b::ACAD, str, p, size, mat) =
 backend_right_cuboid(b::ACAD, cb, width, height, h, material) =
   @remote(b, CenteredBox(cb, width, height, h))
 
-KhepriBase.b_extrusion(b::ACAD, s::Union{Shape1D,Shape2D}, v, cb, bmat, tmat, smat) =
+KhepriBase.b_extruded_curve(b::ACAD, s::Shape1D, v, cb, mat) =
+  acad_extrude(b, s, v, cb, mat)
+KhepriBase.b_extruded_surface(b::ACAD, s::Shape2D, v, cb, mat) =
+  acad_extrude(b, s, v, cb, mat)
+
+acad_extrude(b, s, v, cb, mat) = 
   and_mark_deleted(b,
     map_ref(b, s) do r
-      #@remote(b, Extrude(r, v))
-      @remote(b, ExtrudeWithMaterial(r, v, smat))
+      @remote(b, ExtrudeWithMaterial(r, v, mat))
     end,
     s)
 
-KhepriBase.b_sweep(b::ACAD, path, profile, rotation, scale, mat) =
+KhepriBase.b_swept_curve(b::ACAD, path::Path, profile::Path, rotation, scale, mat) =
   let curve_mat = material_ref(b, default_curve_material()),
       path_r = b_realize_path(b, path, curve_mat),
       profile_r = b_realize_path(b, profile, curve_mat)
-    #@remote(b, Sweep(path_r, profile_r, rotation, scale))
     @remote(b, SweepWithMaterial(path_r, profile_r, rotation, scale, mat))
   end
 
-KhepriBase.b_sweep(b::ACAD, path::Shape1D, profile::Shape, rotation, scale, mat) =
+KhepriBase.b_swept_curve(b::ACAD, path::Shape1D, profile::Shape1D, rotation, scale, mat) =
+  acad_sweep(b, path, profile, rotation, scale, mat)
+KhepriBase.b_swept_surface(b::ACAD, path::Shape1D, profile::Shape2D, rotation, scale, mat) =
+  acad_sweep(b, path, profile, rotation, scale, mat)
+
+acad_sweep(b, path, profile, rotation, scale, mat) =
   and_mark_deleted(b,
     map_ref(b, path) do path_r
       map_ref(b, profile) do profile_r
-        #@remote(b, Sweep(path_r, profile_r, rotation, scale))
         @remote(b, SweepWithMaterial(path_r, profile_r, rotation, scale, mat))
       end
     end,
     [path, profile])
 
 
-KhepriBase.b_revolve_point(b::ACAD, profile, p, n, start_angle, amplitude, mat) =
+KhepriBase.b_revolved_point(b::ACAD, profile, p, n, start_angle, amplitude, mat) =
   b_arc(b, loc_from_o_vz(p, n), distance(point_position(profile), p), start_angle, amplitude, mat)
-KhepriBase.b_revolve_curve(b::ACAD, profile, p, n, start_angle, amplitude, mat) =
-  acad_revolution(b, profile, p, n, start_angle, amplitude, mat)
-KhepriBase.b_revolve_surface(b::ACAD, profile, p, n, start_angle, amplitude, mat) =
-  acad_revolution(b, profile, p, n, start_angle, amplitude, mat)
+KhepriBase.b_revolved_curve(b::ACAD, profile, p, n, start_angle, amplitude, mat) =
+  acad_revolve(b, profile, p, n, start_angle, -amplitude, mat)
+KhepriBase.b_revolved_surface(b::ACAD, profile, p, n, start_angle, amplitude, mat) =
+  acad_revolve(b, profile, p, n, start_angle, -amplitude, mat)
 
-acad_revolution(b::ACAD, profile::Shape, p, n, start_angle, amplitude, mat) =
+acad_revolve(b::ACAD, profile::Shape, p, n, start_angle, amplitude, mat) =
   and_delete_shape(
     map_ref(b, profile) do r
-      #@remote(b, Revolve(r, p, n, start_angle, amplitude))
       @remote(b, RevolveWithMaterial(r, p, n, start_angle, amplitude, mat))
     end,
     profile)
@@ -864,13 +873,14 @@ realize(b::ACAD, s::Rotate) =
     r
   end
   
-#=
 realize(b::ACAD, s::Mirror) =
-  and_mark_deleted(b, map_ref(s.shape) do r
-                    @remote(b, Mirror(r, s.p, s.n, false))
-                   end,
-                   s.shape)
+  and_mark_deleted(b, 
+    map_ref(b, s.shape) do r
+      @remote(b, Mirror(r, s.p, s.n, false))
+    end,
+    s.shape)
 
+#=
 realize(b::ACAD, s::UnionMirror) =
   let r0 = ref(b, s.shape),
       r1 = map_ref(b, s.shape) do r
@@ -952,11 +962,11 @@ KhepriBase.b_set_view(b::ACAD, camera::Loc, target::Loc, lens::Real, aperture::R
 KhepriBase.b_get_view(b::ACAD) =
   @remote(b, ViewCamera()), @remote(b, ViewTarget()), @remote(b, ViewLens())
 
-# Only AutoCAD supports this
-# zoom_extents(b::ACAD) = @remote(b, ZoomExtents())
+KhepriBase.b_zoom_extents(b::ACAD) = 
+  @remote(b, ZoomExtents())
 
-# Only AutoCAD supports this
-KhepriBase.b_set_view_top(b::ACAD) = @remote(b, ViewTop())
+KhepriBase.b_set_view_top(b::ACAD) =
+  @remote(b, ViewTop())
 
 KhepriBase.b_realistic_sky(b::ACAD, date, latitude, longitude, elevation, meridian, turbidity, sun) =
   @remote(b, SetSkyFromDateLocation(date, latitude, longitude, meridian, elevation))
@@ -1140,8 +1150,8 @@ Khepri.create_block("Foo", [circle(radius=r) for r in 1:10])
 =#
 
 # Lights
-KhepriBase.b_pointlight(b::ACAD, loc, color, intensity, range) =
-  @remote(b, PointLight(loc, color, intensity))
+KhepriBase.b_pointlight(b::ACAD, loc, energy, color) =
+  @remote(b, PointLight(loc, color, energy))
 
 KhepriBase.b_spotlight(b::ACAD, loc, dir, hotspot, falloff) =
   @remote(b, SpotLight(loc, hotspot, falloff, loc + dir))
@@ -1386,7 +1396,6 @@ KhepriBase.b_render_and_save_view(b::ACAD, path::String) =
       let (camera, target) = (@remote(b, ViewCamera()), @remote(b, ViewTarget())),
           rot = (11π/6 - π/2 - (camera - target).ϕ)*180/π,
           hdrfile = joinpath(@__DIR__, "studio_small_05_4k.exr")
-        println(rot)
         if render_kind() == :white
           @remote(b, Render(w, h, path, 10, hdrfile, rot, 0))
         elseif render_kind() == :black
