@@ -1,0 +1,13 @@
+name = "KhepriThreejs"
+uuid = "ce4cf1d5-169f-4669-87f9-ceef84a82a97"
+authors = ["António Menezes Leitão <antonio.menezes.leitao@gmail.com>"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1.8"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
