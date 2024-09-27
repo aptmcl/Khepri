@@ -423,7 +423,7 @@ tikz_set_view_top(out::IO, options) =
 #
 
 abstract type TikZKey end
-const TikZId = Any
+const TikZId = Nothing
 const TikZIds = Vector{TikZId}
 const TikZRef = GenericRef{TikZKey, TikZId}
 const TikZRefs = Vector{TikZRef}
@@ -641,9 +641,8 @@ paint_trig(b::TikZ, (p1, p2, p3, mat)) =
   #end
 end
 
-KhepriBase.b_quad(b::TikZ, p1, p2, p3, p4, mat) =
+#KhepriBase.b_quad(b::TikZ, p1, p2, p3, p4, mat) =
   #tikz_closed_line(connection(b), [p1, p2, p3, p4])
-  invoke(b_quad, Tuple{Backend, Any, Any, Any, Any, Any}, b, p1, p2, p3, p4, mat)
   # let io = connection(b)
   #   print(io, raw"\addplot3[patch,shader=interp] coordinates {")
   #   tikz_3d_coord(io, p1)
@@ -793,7 +792,7 @@ visualize_tikz(name="Test") =
     @info "Tex file: $(render_pathname(name))"
   end
 
-KhepriBase.b_render_pathname(::TikZ, name::String) = 
+KhepriBase.b_render_pathname(::TikZ, name) = 
   with(render_ext, tikz_as_png() ? ".png" : ".pdf") do
     render_default_pathname(name)
   end
