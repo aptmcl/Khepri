@@ -256,7 +256,9 @@ with_recursive_illustration(f) = begin
       recursive_level = length(illustrations_stack),
       funcs = unique(illustrations_stack),
       func_idx = something(findfirst(==(last), funcs), 1),
-      opacity = 1.0/max(recursive_level, 1),
+      opacities = [1.0,0.7,0.55,0.4,0.2,0.05],
+      opacity = opacities[min(max(recursive_level, 1), length(opacities))],
+      #opacity = 1.0/max(recursive_level, 1),
       color = rgba(illustration_colors[(func_idx-1)%(length(illustration_colors))+1], opacity),
       #color = rgba(illustration_colors[1], opacity),
       opacity_material = material(layer("illustration_$(func_idx)_$(opacity)", true, color))
@@ -274,15 +276,9 @@ with_recursive_illustration(f) = begin
 end
 
 #
-illustrate_bindings(names, inits) =
-  if current_recursive_level() <= recursive_levels_limit()
-    with_recursive_illustration() do
-      for (name, init) in zip(names, inits)
-        if init isa Loc
-          label(init, textify(name))
-        end
-      end
-    end
+illustrate_binding(name, init) =
+  if init isa Loc
+    label(init, textify(name))
   end
 
 is_op_call(op, expr) =
