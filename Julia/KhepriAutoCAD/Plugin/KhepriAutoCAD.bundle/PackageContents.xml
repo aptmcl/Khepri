@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ApplicationPackage SchemaVersion="1.0" AppVersion="1.102" Author="António Menezes Leitão" ProductCode="DE79B4C0-9DE6-4DD8-807A-16E299716CFB" Name="Khepri">
+<ApplicationPackage SchemaVersion="1.0" AppVersion="1.106" Author="António Menezes Leitão" ProductCode="DE79B4C0-9DE6-4DD8-807A-16E299716CFB" Name="Khepri">
 
   <CompanyDetails Name="Instituto Superior Técnico" Email="antonio.menezes.leitao@tecnico.ulisboa.pt"/>
 
   <Components>
     <ComponentEntry AppName="Khepri" AppDescription="Khepri backend for AutoCAD" ModuleName="./Contents/KhepriAutoCAD.dll" LoadOnCommandInvocation="True">
+      <RuntimeRequirements OS="Win64" SeriesMin="R20.0" SeriesMax="R25.3"/>
       <Commands GroupName="Khepri_Main">
         <Command Local="_Khepri" Global="Khepri" Description="Startup khepri" StartupCommand="True"/>
       </Commands>
