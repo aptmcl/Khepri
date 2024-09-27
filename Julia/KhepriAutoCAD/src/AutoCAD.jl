@@ -22,19 +22,29 @@ trusted locations are specified by the TRUSTEDPATHS system variable.
 # This only needs to be done when the AutoCAD plugin is updated
 
 julia_khepri = dirname(dirname(abspath(@__FILE__)))
+bundle_name = "KhepriAutoCAD.bundle"
+dlls = ["KhepriBase.dll", "KhepriAutoCAD.dll"]
+bundle_dll_folder = joinpath(bundle_name, "Contents")
+package_xml = "PackageContents.xml"
+bundle_xml = joinpath(bundle_name, package_xml)
+local_plugins = joinpath(julia_khepri, "Plugin")
+local_khepri_plugin = joinpath(local_plugins, bundle_name)
+local_khepri_plugin_dll_folder = joinpath(local_plugins, bundle_dll_folder)
+autocad_user_plugins = joinpath(ENV["APPDATA"], "Autodesk", "ApplicationPlugins")
+autocad_khepri_plugin = joinpath(autocad_user_plugins, bundle_name)
+autocad_khepri_plugin_dll_folder = joinpath(autocad_user_plugins, bundle_dll_folder)
+local_path_xml = joinpath(local_khepri_plugin, package_xml)
+autocad_path_xml = joinpath(autocad_khepri_plugin, package_xml)
 
 upgrade_plugin(; advance_major_version=false, advance_minor_version=true, phase="Debug") =
   let # 1. The dlls are updated in VisualStudio after compilation of the plugin, and they are stored in the folder.
-      dlls = ["KhepriBase.dll", "KhepriAutoCAD.dll"]
       # 2. Depending on whether we are in Debug mode or Release mode,
       development_phase = phase # "Release"
       # 3. the dlls are located in a folder
       dlls_folder = joinpath("bin", "x64", development_phase)
       # 4. contained inside the Plugins folder, which has a specific location regarding this file itself
-      plugin_folder = joinpath(dirname(dirname(dirname(dirname(abspath(@__FILE__))))), "Plugins", "KhepriAutoCAD", "KhepriAutoCAD")
+      plugin_folder = joinpath(dirname(dirname(julia_khepri)), "Plugins", "KhepriAutoCAD", "KhepriAutoCAD")
       # 5. Besides the dlls, we also need the bundle folder
-      bundle_name = "Khepri.bundle"
-      bundle_dll_folder = joinpath(bundle_name, "Contents")
       # 6. which is contained in the Plugins folder
       bundle_path = joinpath(plugin_folder, bundle_name)
       # 11. Update major or minor version
@@ -51,14 +61,13 @@ upgrade_plugin(; advance_major_version=false, advance_minor_version=true, phase=
           write(bundle_xml, doc)
       end
       # 7. The bundle needs to be copied to the current folder
-      local_bundle_path = joinpath(julia_khepri, "Plugin", bundle_name)
       # 8. but, before, we remove any previously existing bundle
-      mkpath(dirname(local_bundle_path))
-      rm(local_bundle_path, force=true, recursive=true)
+      mkpath(dirname(local_khepri_plugin))
+      rm(local_khepri_plugin, force=true, recursive=true)
       # 9. Now we do the copy
-      cp(bundle_path, local_bundle_path)
+      cp(bundle_path, local_khepri_plugin)
       # 10. and we copy the dlls to the local bundle Contents folder
-      local_bundle_contents_path = joinpath(local_bundle_path, "Contents")
+      local_bundle_contents_path = joinpath(local_khepri_plugin, "Contents")
       for dll in dlls
           src = joinpath(plugin_folder, dlls_folder, dll)
           dst = joinpath(local_bundle_contents_path, dll)
@@ -72,14 +81,6 @@ Whenever the plugin is updated, run this function and commit the plugin files.
 upgrade_plugin()
 =#
 
-dlls = ["KhepriBase.dll", "KhepriAutoCAD.dll"]
-bundle_name = "Khepri.bundle"
-bundle_dll_folder = joinpath(bundle_name, "Contents")
-xml_name = "PackageContents.xml"
-bundle_xml = joinpath(bundle_name, xml_name)
-local_plugins = joinpath(dirname(dirname(abspath(@__FILE__))), "Plugin")
-local_khepri_plugin = joinpath(local_plugins, bundle_name)
-local_khepri_plugin_dll_folder = joinpath(local_plugins, bundle_dll_folder)
 
 autocad_version(path) =
   let doc = readxml(path),
@@ -90,11 +91,6 @@ autocad_version(path) =
 update_plugin() =
   let #autocad_general_plugins = joinpath(dirname(ENV["CommonProgramFiles"]), "Autodesk", "ApplicationPlugins")
       #autocad_allusers_plugins = joinpath(ENV["ALLUSERSPROFILE"], "Autodesk", "ApplicationPlugins")
-      autocad_user_plugins = joinpath(ENV["APPDATA"], "Autodesk", "ApplicationPlugins")
-      autocad_khepri_plugin = joinpath(autocad_user_plugins, bundle_name)
-      autocad_khepri_plugin_dll_folder = joinpath(autocad_user_plugins, bundle_dll_folder)
-      local_path_xml = joinpath(local_khepri_plugin, xml_name)
-      autocad_path_xml = joinpath(autocad_khepri_plugin, xml_name)
     # Do we have the bundle folder?
     isdir(autocad_khepri_plugin) || mkpath(autocad_khepri_plugin)
     isdir(autocad_khepri_plugin_dll_folder) || mkpath(autocad_khepri_plugin_dll_folder)
@@ -418,13 +414,13 @@ KhepriBase.retry_connecting(b::ACAD) =
 
 KhepriBase.after_connecting(b::ACAD) =
   begin
-    #set_material(autocad, material_metal, "Steel - Polished")
-    #set_material(autocad, material_glass, "Clear")
-    #set_material(autocad, material_wood, "Plywood - New")
-    #set_material(autocad, material_concrete, "Flat - Broom Gray")
-    #set_material(autocad, material_plaster, "Fine - White")
-    #set_material(autocad, material_clay, "Ceramic")
-    #set_material(autocad, material_grass, "Green")
+    set_material(autocad, material_metal, "Steel - Polished")
+    set_material(autocad, material_glass, "Clear")
+    set_material(autocad, material_wood, "Plywood - New")
+    set_material(autocad, material_concrete, "Flat - Broom Gray")
+    set_material(autocad, material_plaster, "Fine - White")
+    set_material(autocad, material_clay, "Ceramic")
+    set_material(autocad, material_grass, "Green")
   end
 
 const autocad = ACAD("AutoCAD", autocad_port, acad_api)
@@ -894,18 +890,18 @@ KhepriBase.b_surface_grid(b::ACAD, ptss, closed_u, closed_v, smooth_u, smooth_v,
   let (nu, nv) = size(ptss)
     smooth_u && smooth_v ?
       # Autocad does not allow us to distinguish smoothness along different dimensions
-      @remote(b, SurfaceFromGrid(nu, nv, reshape(permutedims(ptss),:), closed_u, closed_v, 2, mat)) :
+      @remote(b, SurfaceFromGrid(nu, nv, reshape(permutedims(ptss),:), closed_u, closed_v, 0, mat)) :
       (smooth_u ?
-        vcat([@remote(b, SurfaceFromGrid(nu, 2, reshape(permutedims(ptss[:,i:i+1]),:), closed_u, false, 2, mat))
+        vcat([@remote(b, SurfaceFromGrid(nu, 2, reshape(permutedims(ptss[:,i:i+1]),:), closed_u, false, 0, mat))
               for i in 1:nv-1],
              closed_v ?
-               [@remote(b, SurfaceFromGrid(nu, 2, reshape(permutedims(ptss[:,[end,1]]),:), closed_u, false, 2, mat))] :
+               [@remote(b, SurfaceFromGrid(nu, 2, reshape(permutedims(ptss[:,[end,1]]),:), closed_u, false, 0, mat))] :
                []) :
         (smooth_v ?
-          vcat([@remote(b, SurfaceFromGrid(2, nv, reshape(permutedims(ptss[i:i+1,:]),:), false, closed_v, 2, mat))
+          vcat([@remote(b, SurfaceFromGrid(2, nv, reshape(permutedims(ptss[i:i+1,:]),:), false, closed_v, 0, mat))
                 for i in 1:nu-1],
                closed_u ?
-                 [@remote(b, SurfaceFromGrid(2, nv, reshape(permutedims(ptss[[end,1],:]),:), false, closed_v, 2, mat))] :
+                 [@remote(b, SurfaceFromGrid(2, nv, reshape(permutedims(ptss[[end,1],:]),:), false, closed_v, 0, mat))] :
                  []) :
           @remote(b, SurfaceFromGrid(nu, nv, reshape(permutedims(ptss),:), closed_u, closed_v, 0, mat))))
   end
