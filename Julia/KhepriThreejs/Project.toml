@@ -3,8 +3,28 @@ uuid = "ce4cf1d5-169f-4669-87f9-ceef84a82a97"
 authors = ["António Menezes Leitão <antonio.menezes.leitao@gmail.com>"]
 version = "1.0.0-DEV"
 
+[deps]
+ColorTypes = "3da002f7-5984-5a60-b8a6-cbb66c0b333f"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+KhepriBase = "4cc0fe96-1163-46f3-ba32-de1e65d9548f"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+OrderedCollections = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
+Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
 [compat]
-julia = "1.8"
+ColorTypes = "0.11"
+Dates = "1.9"
+HTTP = "1.10"
+LinearAlgebra = "1.9"
+Reexport = "1.2"
+Sockets = "1.9"
+StaticArrays = "1.6"
+Test = "1.9"
+julia = "1.9"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

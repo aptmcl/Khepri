@@ -1,0 +1,27 @@
+Go inside folder Threejs and do 
+
+npm run build
+
+Then, go to a shell and do
+
+ipconfig
+
+Extract the IPv4 Address. E.g.
+
+C:\Users\aml>ipconfig
+
+Windows IP Configuration
+...
+Ethernet adapter Ethernet:
+
+   Connection-specific DNS Suffix  . :
+   Link-local IPv6 Address . . . . . : fe80::17c:9c63:8be6:2487%8
+   IPv4 Address. . . . . . . . . . . : 192.168.2.79
+   Subnet Mask . . . . . . . . . . . : 255.255.255.0
+   Default Gateway . . . . . . . . . : 192.168.2.1
+
+Start a browser and go to
+
+http://192.168.2.79:8900
+
+

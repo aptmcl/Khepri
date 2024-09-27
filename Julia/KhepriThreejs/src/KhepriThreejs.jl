@@ -1,5 +1,14 @@
 module KhepriThreejs
+using KhepriBase
+#using Colors
+import HTTP
+using Random
 
-# Write your package code here.
+# functions that need specialization
+include(khepribase_interface_file())
+include("Threejs.jl")
 
+function __init__()
+  add_current_backend(threejs)
+end
 end
