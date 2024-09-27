@@ -476,6 +476,16 @@ eval_let(expr, env) =
     end
   end
 
+#
+illustrate_bindings(names, inits) =
+  if current_recursive_level() <= recursive_levels_limit()
+    with_recursive_illustration() do
+      for (name, init) in zip(names, inits)
+        illustrate_binding(name, init)
+      end
+    end
+  end
+
 #=
 Julia's bindings appear in lots of places, so let's generalize it:
 =#
