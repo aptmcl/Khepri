@@ -520,12 +520,11 @@ def automap(tob, target_slot=0, tex_size=1):
 
 def line(ps:List[Point3d], closed:bool, mat:MatId)->Id:
     id, name = new_id()
-    kind = "POLY"
     curve = D.curves.new(name, "CURVE")
     curve.dimensions = "3D"
     obj = D.objects.new(name, curve)
     current_collection.objects.link(obj)
-    line = curve.splines.new(kind)
+    line = curve.splines.new("POLY")
     line.use_cyclic_u = closed
     line.points.add(len(ps) - 1)
     for (i, p) in enumerate(ps):
@@ -533,15 +532,46 @@ def line(ps:List[Point3d], closed:bool, mat:MatId)->Id:
     append_material(obj, mat)
     return id
 
-def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
-    #print(order, ps, closed)
+def bezier(order:int, ps:List[Point3d], closed:bool, tgs:List[Point3d], mat:MatId)->Id:
     id, name = new_id()
-    kind = "NURBS"
     curve = D.curves.new(name, "CURVE")
     curve.dimensions = "3D"
     obj = D.objects.new(name, curve)
     current_collection.objects.link(obj)
-    spline = curve.splines.new(kind)
+    spline = curve.splines.new("BEZIER")
+    spline.use_cyclic_u = closed
+    spline.use_endpoint_u = not closed
+    n = len(ps) - (1 if closed else 0)
+    spline.bezier_points.add(n - 1)
+    for i in range(0, n):
+        p = ps[i]
+        #pt = (p[0], p[1], p[2], 1.0)
+        spline.bezier_points[i].co = p
+        #spline.bezier_points[i].handle_left = p
+        #spline.bezier_points[i].handle_right = p
+        spline.bezier_points[i].handle_right_type = 'AUTO'
+        spline.bezier_points[i].handle_left_type = 'AUTO'
+    for (tg, i) in zip(tgs, [0, n-1]):
+        bp = spline.bezier_points[i]
+        x, y, z = ps[i]
+        tx, ty, tz = tg
+        bp.handle_left_type = 'FREE'
+        bp.handle_right_type = 'FREE'
+        bp.handle_left = (x - tx, y - ty, z - tz)
+        bp.handle_right = (x + tx, y + ty, z + tz)
+    spline.order_u = max(3, order)
+    spline.resolution_u = 4*len(ps)
+    append_material(obj, mat)
+    return id
+
+def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
+    #print(order, ps, closed)
+    id, name = new_id()
+    curve = D.curves.new(name, "CURVE")
+    curve.dimensions = "3D"
+    obj = D.objects.new(name, curve)
+    current_collection.objects.link(obj)
+    spline = curve.splines.new("NURBS")
     spline.use_cyclic_u = closed
     spline.use_endpoint_u = not closed
     n = len(ps) - (1 if closed else 0)
@@ -600,7 +630,7 @@ def quad_surface(ps:List[Point3d], nu:int, nv:int, closed_u:bool, closed_v:bool,
         for i in range(0, nv-1):
             faces.extend(quad_strip_faces(i*nu, nu))
         if closed_v:
-            faces.extend([[p, p+1, q+1, q] for (p, q) in zip(range((nv-1)*nu,nv*nu), range(0, nu))])
+            faces.extend([[p, p+1, q+1, q] for (p, q) in zip(range((nv-1)*nu,nv*nu), range(0, nu-1))])
     return objmesh(ps, [], faces, smooth, mat)
 
 def ngon(ps:List[Point3d], pivot:Point3d, smooth:bool, mat:MatId)->Id:
