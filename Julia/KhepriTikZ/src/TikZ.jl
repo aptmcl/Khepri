@@ -774,12 +774,16 @@ process_tikz(path) =
     #   occursin("Error:", output) && println(output)
     # end
     cd(dirname(path)) do
-      run(tikz_as_png() ?
-            `$(miktex_cmd("texify")) --pdf --engine=luatex $(path)` :
-            `$(miktex_cmd("texify")) --pdf --engine=luatex --run-viewer $(path)`,
-          wait=true)
+      try
+        run(tikz_as_png() ?
+              `$(miktex_cmd("texify")) --pdf --engine=luatex $(path)` :
+              `$(miktex_cmd("texify")) --pdf --engine=luatex --run-viewer $(path)`,
+            wait=true)
       #output = read(`$(miktex_cmd("texify")) --run-viewer $(path)`, String)
       #occursin("Error:", output) && println(output)
+      catch e
+        error("Could not process the generated .tex file. Do you have MikTeX installed?")
+      end
     end
     println(path)
   end
