@@ -82,7 +82,7 @@ public Guid Circle(Point3d c, Vector3d n, double r)
 public Point3d CircleCenter(RhinoObject obj)
 public Vector3d CircleNormal(RhinoObject obj)
 public double CircleRadius(RhinoObject obj)
-public Guid Ellipse(Point3d c, Vector3d n, double radiusX, double radiusY)
+public Guid Ellipse(Plane p, double radiusX, double radiusY)
 public Guid Arc(Plane p, double radius, double startAngle, double endAngle)
 public Guid Text(string str, Plane p, double height, string fontName, bool bold, bool italic)
 public Guid JoinCurves(Guid[] objs)
@@ -91,7 +91,7 @@ public Guid NGon(Point3d[] pts, Point3d pivot, bool smooth, MatId mat)
 public Guid SurfaceFrom(Guid[] ids, MatId mat)
 public Guid SurfaceFromCurvesPoints(Point3d[][] ptss, bool[] smooths, MatId mat)
 public Guid SurfaceCircle(Point3d c, Vector3d n, double r, MatId mat)
-public Guid SurfaceEllipse(Point3d c, Vector3d n, double radiusX, double radiusY)
+public Guid SurfaceEllipse(Plane p, double radiusX, double radiusY, MatId mat)
 public Guid SurfaceArc(Plane p, double radius, double startAngle, double endAngle, MatId mat)
 public Guid SurfaceClosedPolyLine(Point3d[] pts, MatId mat)
 public Guid Sphere(Point3d c, double r, MatId mat)
@@ -115,14 +115,14 @@ public Plane SurfaceFrameAt(RhinoObject obj, double u, double v)
 public Point3d[] BoundingBox(ObjectId[] ids)
 public Brep Extrusion(RhinoObject obj, Vector3d dir)
 public Brep[] SweepPathProfile(RhinoObject path, RhinoObject profile, double rotation, double scale)
+public Guid[] Unite(RhinoObject[]objs)
 public Guid[] Intersect(RhinoObject obj0, RhinoObject obj1)
 public Guid[] Subtract(RhinoObject obj0, RhinoObject obj1)
+public Guid[] Slice(RhinoObject obj, Point3d p, Vector3d n)
 public Guid Move(Guid id, Vector3d v)
 public Guid Scale(Guid id, Point3d p, double s)
 public Guid Rotate(Guid id, Point3d p, Vector3d n, double a)
 public Guid Mirror(Guid id, Point3d p, Vector3d n, bool copy)
-public void Render(int width, int height, string path)
-public void SaveView(int width, int height, string path)
 public bool IsPoint(RhinoObject e)
 public bool IsCircle(RhinoObject e)
 public bool IsPolyLine(RhinoObject e)
@@ -184,6 +184,13 @@ public Guid PointLight(Point3d p, Color c, double power)
 public void EnableGrasshopperSolver()
 public void DisableGrasshopperSolver()
 public void RunGrasshopperSolver()
+public void Render(int width, int height, int quality, string path)
+public void RenderLoadKhepriEnvironment(string name, string path)
+public void RenderUseHDRiEnvironment(string name, double rotation)
+public void ClayRenderBlack(string env, double rotation, int width, int height, int quality, string path)
+public void ClayRenderWhite(string env, double rotation, int width, int height, int quality, string path)
+public void SetBackgroundHDRi(string path, double angle)
+public void SaveView(int width, int height, string path)
 """
 #public Guid CreateAngularDimension(string text, Plane p, double radius, double startAngle, double endAngle, double scale, double offset, Options props)
 
@@ -200,7 +207,6 @@ public double[] SurfaceDomain(Entity ent)
 public Frame3d SurfaceFrameAt(Entity ent, double u, double v)
 public Guid Sweep(ObjectId pathId, ObjectId profileId, double rotation, double scale)
 public Guid Loft(ObjectId[] profilesIds, ObjectId[] guidesIds, bool ruled, bool closed)
-public void Unite(ObjectId objId0, ObjectId objId1)
 public Guid Revolve(ObjectId profileId, Point3d p, Vector3d n, double startAngle, double amplitude)
 public Point3d[] GetPoint(string prompt)
 public void ZoomExtents()
@@ -224,10 +230,8 @@ abstract type RHKey end
 const RHId = Guid
 const RHRef = GenericRef{RHKey, RHId}
 const RHRefs = Vector{RHRef}
-const RHEmptyRef = EmptyRef{RHKey, RHId}
 const RHNativeRef = NativeRef{RHKey, RHId}
-const RHUnionRef = UnionRef{RHKey, RHId}
-const RHSubtractionRef = SubtractionRef{RHKey, RHId}
+const RHNativeRefs = NativeRefs{RHKey, RHId}
 const RH = SocketBackend{RHKey, RHId}
 
 KhepriBase.void_ref(::RH) = 0 % UInt128
@@ -317,8 +321,18 @@ KhepriBase.b_arc(b::RH, c, r, α, Δα, mat) =
     end
   end
 
-b_ellipse() =
-  @remote(b, Ellipse(s.center, vz(1, s.center.cs), s.radius_x, s.radius_y))
+KhepriBase.b_ellipse(b::RH, c, rx, ry, mat) =
+  @remote(b, Ellipse(c, rx, ry))
+
+#=
+Rhino supports meshes and nurbs surfaces. Meshes are more efficient... but 
+many operations, such as boolean operations, sweep, extrusion, etc., need 
+surfaces (or polysurfaces).
+This means that although we might implement trigs and quads using meshes, 
+that is not what Rhino would give us if we were creating 3D objects by hand.
+Therefore, we will use meshes as a fallback but most of the surface and solids
+stuff needs Rhino's surfaces and polysurfaces.
+=#
 
 KhepriBase.b_trig(b::RH, p1, p2, p3, mat) =
   @remote(b, Mesh([p1, p2, p3], [[0, 1, 2, 2]], mat))
@@ -332,6 +346,12 @@ KhepriBase.b_ngon(b::RH, ps, pivot, smooth, mat) =
 ############################################################
 # Second tier: surfaces
 
+KhepriBase.b_surface_rectangle(b::RH, c, dx, dy, mat) =
+  @remote(b, SurfaceClosedPolyLine([c, add_x(c, dx), add_xy(c, dx, dy), add_y(c, dy), c], mat))
+
+KhepriBase.b_surface_regular_polygon(b::RH, edges, c, r, angle, inscribed, mat) =
+  b_surface_polygon(b, regular_polygon_vertices(edges, c, r, angle, inscribed), mat)
+
 KhepriBase.b_surface_polygon(b::RH, ps, mat) =
   @remote(b, SurfaceClosedPolyLine([ps...,ps[1]], mat))
 
@@ -344,32 +364,13 @@ KhepriBase.b_surface_circle(b::RH, c, r, mat) =
 KhepriBase.b_surface_arc(b::RH, c, r, α, Δα, mat) =
   @remote(b, SurfaceArc(c, r, α, α + Δα, mat))
 
-#=
-KhepriBase.b_quad(b::RH, p1, p2, p3, p4, mat) =
- [b_trig(b, p1, p2, p3, mat),
-  b_trig(b, p1, p3, p4, mat)]
+KhepriBase.b_surface_ellipse(b::RH, c, rx, ry, mat) =
+   @remote(b, SurfaceEllipse(c, rx, ry, mat))
 
-KhepriBase.b_quad_strip(b::RH, ps, qs, smooth, mat) =
- [b_quad(b, ps[i], ps[i+1], qs[i+1], qs[i], mat)
-  for i in 1:size(ps,1)-1]
+KhepriBase.b_surface(b::RH, frontier::Shapes, mat) =
+  and_mark_deleted(b, @remote(b, SurfaceFrom(collect_ref(b, frontier), mat)), frontier)
 
-KhepriBase.b_quad_strip_closed(b::RH, ps, qs, smooth, mat) =
- b_quad_strip(b, [ps..., ps[1]], [qs..., qs[1]], smooth, mat)
 
-KhepriBase.b_surface_grid(b::RH, ptss, closed_u, closed_v, smooth_u, smooth_v, interpolator, mat) =
-  let (nu, nv) = size(ptss)
- if smooth_u && smooth_v
-  	ptss = [location_at_grid_interpolator(interpolator, u, v)
-  			for u in division(0, 1, 2 #=4*nu-7=#), v in division(0, 1, 4*nv-7)] # 2->1, 3->5, 4->9, 5->13
-  	(nu, nv) = size(ptss)
- end
- closed_u ?
-  	vcat([b_quad_strip_closed(b, ptss[i,:], ptss[i+1,:], smooth_u, mat) for i in 1:nu-1],
-  		 closed_v ? [b_quad_strip_closed(b, ptss[end,:], ptss[1,:], smooth_u, mat)] : []) :
-  	vcat([b_quad_strip(b, ptss[i,:], ptss[i+1,:], smooth_u, mat) for i in 1:nu-1],
-  		 closed_v ? [b_quad_strip(b, ptss[end,:], ptss[1,:], smooth_u, mat)] : [])
-  end
-=#
 KhepriBase.b_surface_grid(b::RH, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
   let (nu, nv) = size(ptss),
       order(n) = min(2*ceil(Int,n/16) + 1, 5)
@@ -386,12 +387,11 @@ KhepriBase.b_surface_mesh(b::RH, vertices, faces, mat) =
     @remote(b, Mesh(vertices, map(face->ensure_4(face.-1), faces), mat))
   end
 
-# This is wrong, for sure!
-b_surface_ellipse(b::RH, c, rx, ry) =
-   @remote(b, SurfaceEllipse(c, vz(1, c.cs), rx, ry))
-
 ############################################################
 # Third tier: solids
+
+KhepriBase.b_solidify(b::RH, refs) =
+  
 
 KhepriBase.b_generic_prism(b::RH, bs, smooth, v, bmat, tmat, smat) =
 	@remote(b, PrismWithHoles([bs], [smooth], v, tmat))
@@ -407,6 +407,23 @@ KhepriBase.b_pyramid(b::RH, bs, t, bmat, smat) =
 
 KhepriBase.b_cylinder(b::RH, c, r, h, bmat, tmat, smat) =
   @remote(b, Cylinder(c, r, c + vz(h, c.cs), smat))
+
+#=
+See comment above regarding the use of Meshes vs Surfaces or Polysurfaces!
+
+KhepriBase.b_cuboid(b::RH, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat) =
+  @remote(b, Mesh([pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3], 
+                  [[0, 1, 2, 3],
+                   [0, 1, 5, 4],
+                   [1, 2, 6, 5],
+                   [2, 3, 7, 6],
+                   [3, 0, 4, 7],
+                   [4, 5, 6, 7]],
+                  mat))
+=# 
+
+KhepriBase.b_cuboid(b::RH, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat) =
+  b_pyramid_frustum(b, [pb0, pb1, pb2, pb3], [pt0, pt1, pt2, pt3], mat, mat, mat)
 
 KhepriBase.b_box(b::RH, c, dx, dy, dz, mat) =
   @remote(b, Box(c, vx(1, c.cs), vy(1, c.cs), dx, dy, dz, mat))
@@ -477,12 +494,6 @@ KhepriBase.b_mirror_material(b::RH, name, color) =
   @remote(b, new_mirror_material(name, convert(RGBA, color)))
 =#
 
-realize(b::RH, s::EmptyShape) =
-  RHEmptyRef()
-realize(b::RH, s::UniversalShape) =
-  RHUniversalRef()
-
-
 backend_map_division(b::RH, f::Function, s::Shape1D, n::Int) =
   let conn = connection(b),
       r = ref(b, s).value,
@@ -495,12 +506,6 @@ backend_map_division(b::RH, f::Function, s::Shape1D, n::Int) =
     map(f, frames)
   end
 
-
-realize(b::RH, s::Surface) =
-  let ids = @remote(b, SurfaceFrom(collect_ref(b, s.frontier)))
-    foreach(mark_deleted, s.frontier)
-    ids
-  end
 #=
 realize(b::RH, s::Text) =
   @remote(b, Text(s.str, s.c, vx(1, s.c.cs), vy(1, s.c.cs), s.h))
@@ -521,21 +526,50 @@ backend_map_division(b::RH, f::Function, s::Shape2D, nu::Int, nv::Int) =
     end
 
 KhepriBase.b_torus(b::RH, c, ra, rb, mat) =
-  @remote(b, Torus(c, vz(1, c.cs), ra, ra, mat))
+  @remote(b, Torus(c, vz(1, c.cs), ra, rb, mat))
 
-backend_extrusion(b::RH, s::Shape, v::Vec) =
-    and_mark_deleted(
-        map_ref(b, s) do r
-            @remote(b, Extrusion(r, v))
-        end,
-        s)
+KhepriBase.b_extruded_curve(b::RH, s::Shape1D, v, cb, mat) =
+  and_mark_deleted(b,
+      map_ref(b, s) do r
+          @remote(b, Extrusion(r, v))
+      end,
+      s)
 
-KhepriBase.b_sweep(b::RH, path, profile, rotation, scale, mat) =
-  map_ref(b, profile) do profile_r
-    map_ref(b, path) do path_r
-      @remote(b, SweepPathProfile(path_r, profile_r, rotation, scale))
-    end
-  end
+KhepriBase.b_extruded_surface(b::RH, s::Shape2D, v, cb, mat) =
+   and_mark_deleted(b,
+      map_ref(b, s) do r
+          @remote(b, Extrusion(r, v))
+      end,
+      s)
+
+#
+#KhepriBase.b_sweep_curve(b::RH, path::Path, profile::Path, rotation, scale, mat) =
+
+rhino_sweep(b, path, profile, rotation, scale, mat) =
+  and_mark_deleted(b,
+    map_ref(b, profile) do profile_r
+        map_ref(b, path) do path_r
+          @remote(b, SweepPathProfile(path_r, profile_r, rotation, scale))
+        end
+      end,
+    [path, profile])
+
+KhepriBase.b_swept_curve(b::RH, path::Shape1D, profile::Shape1D, rotation, scale, mat) =
+  rhino_sweep(b, path, profile, rotation, scale, mat)
+KhepriBase.b_swept_surface(b::RH, path::Shape1D, profile::Shape2D, rotation, scale, mat) =
+  rhino_sweep(b, path, profile, rotation, scale, mat)
+
+KhepriBase.b_subtract_ref(b::RH, s, r) =
+  @remote(b, Subtract(s, r))
+
+KhepriBase.b_intersect_ref(b::RH, s, r) =
+  @remote(b, Intersect(s, r))
+
+KhepriBase.b_unite_refs(b::RH, rs) =
+  @remote(b, Unite(rs))
+
+KhepriBase.b_slice_ref(b::RH, r, p, v) =
+  @remote(b, Slice(r, p, v))
 
 #=
 realize(b::RH, s::Revolve) =
@@ -571,117 +605,54 @@ backend_loft_curve_point(b::RH, profile::Shape, point::Shape) =
 backend_loft_surface_point(b::RH, profile::Shape, point::Shape) =
   backend_loft_curve_point(b, profile, point)
 =#
-unite_refs(b::RH, refs::Vector{<:RHRef}) =
-    RHUnionRef(tuple(refs...))
-
-unite_refs(b::RH, r::RHUnionRef) =
-  r
-
-unite_ref(b::RH, r0::RHNativeRef, r1::RHNativeRef) =
-  RHUnionRef((r0, r1))
-
-intersect_ref(b::RH, r0::RHNativeRef, r1::RHNativeRef) =
-    let refs = @remote(b, Intersect(r0.value, r1.value))
-        n = length(refs)
-        if n == 0
-            RHEmptyRef()
-        elseif n == 1
-            RHNativeRef(refs[1])
-        else
-            RHUnionRef(map(RHNativeRef, tuple(refs...)))
-        end
-    end
-
-subtract_ref(b::RH, r0::RHNativeRef, r1::RHNativeRef) =
-  let refs = try @remote(b, Subtract(r0.value, r1.value)); catch e; [nothing] end,
-      n = length(refs)
-    if n == 0
-        RHEmptyRef()
-    elseif n == 1
-        if isnothing(refs[1]) # failed
-            RHSubtractionRef(r0, tuple(r1))
-        else
-            RHNativeRef(refs[1])
-        end
-    else
-        RHUnionRef(map(RHNativeRef, tuple(refs...)))
-    end
-  end
-
-subtract_ref(b::RH, r0::SubtractionRef, r1::RHNativeRef) =
-  subtract_ref(b,
-    subtract_ref(b, r0.value, r1),
-    length(r0.values) == 1 ? r0.values[1] : RHUnionRef(r0.values))
-
-subtract_ref(b::RH, r0::RHRef, r1::RHUnionRef) =
-  foldl((r0,r1)->subtract_ref(b,r0,r1), r1.values, init=r0)
 
 #=
 slice_ref(b::RH, r::RHNativeRef, p::Loc, v::Vec) =
   (@remote(b, Slice(r.value, p, v); r))
 
-slice_ref(b::RH, r::RHUnionRef, p::Loc, v::Vec) =
-  map(r->slice_ref(b, r, p, v), r.values)
-
 =#
-
-#=
-realize(b::RH, s::IntersectionShape) =
-  foldl((r0,r1)->intersect_ref(b,r0,r1), UniversalRef{RHId}(), map(ref, s.shapes))
-  =#
-
-realize(b::RH, s::Slice) =
-  slice_ref(b, ref(b, s.shape), s.p, s.n)
-
 realize(b::RH, s::Move) =
   and_mark_deleted(b,
-	map_ref(b, s.shape) do r
+	  map_ref(b, s.shape) do r
       @remote(b, Move(r, s.v))
       r
-  end,
-  s.shape)
+    end,
+    s.shape)
 
 realize(b::RH, s::Scale) =
   and_mark_deleted(b,
-  	map_ref(b, s.shape) do r
+    map_ref(b, s.shape) do r
       @remote(b, Scale(r, s.p, s.s))
       r
     end,
-	s.shape)
+	  s.shape)
 
 realize(b::RH, s::Rotate) =
   and_mark_deleted(b,
   	map_ref(b, s.shape) do r
       @remote(b, Rotate(r, s.p, s.v, s.angle))
       r
-	end,
-	s.shape)
+	  end,
+	  s.shape)
 
 realize(b::RH, s::Mirror) =
-  and_delete_shape(map_ref(b, s.shape) do r
-                    @remote(b, Mirror(r, s.p, s.n, false))
-                   end,
-                   s.shape)
-
-realize(b::RH, s::UnionMirror) =
-  let r0 = ref(b, s.shape),
-      r1 = map_ref(b, r0) do r
-            @remote(b, Mirror(r, s.p, s.n, true))
-          end
-    UnionRef((r0,r1))
-  end
-
+  and_mark_deleted(b, 
+    map_ref(b, s.shape) do r
+      @remote(b, Mirror(r, s.p, s.n, false))
+    end,
+    s.shape)
+  
 realize(b::RH, s::Thicken) =
   and_mark_deleted(b,
     map_ref(b, s.shape) do r
       @remote(b, Thicken(r, s.thickness))
     end,
     s.shape)
-
+#=
 backend_frame_at(b::RH, s::Shape2D, u::Real, v::Real) =
   @remote(b, SurfaceFrameAt(ref(b, s).value, u, v))
 
-
+=#
 
 # BIM
 
@@ -741,7 +712,7 @@ KhepriBase.b_vectors_illustration(b::RH, p, a, rs, rs_txts, mat) =
       #tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", "outer sep=0,inner sep=0,label={[illustration]$(rad2deg(a-π/2)):$r_txt}")
 
 KhepriBase.b_angles_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, mat) =
-  let refs = [],
+  let refs = new_refs(b),
       maxr = maximum(rs),
       n = length(rs),
       ars = division(0.2maxr, 0.7maxr, n, false),
@@ -766,7 +737,7 @@ KhepriBase.b_angles_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, m
   end
 
 KhepriBase.b_arcs_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, mat) =
-  let refs = [],
+  let refs = new_refs(b),
       maxr = maximum(rs),
       n = length(rs),
       ars = division(0.2maxr, 0.7maxr, n, false),
@@ -799,7 +770,7 @@ KhepriBase.b_ieslight(b::ACAD, file::String, loc::Loc, dir::Vec, alpha::Real, be
 # KhepriBase.b_bounding_box(b::RH, shapes::Shapes) =
 #   @remote(b, BoundingBox(collect_ref(b, shapes)))
 
-KhepriBase.b_set_view(b::RH, camera::XYZ, target::XYZ, lens::Real, aperture::Real) =
+KhepriBase.b_set_view(b::RH, camera, target, lens, aperture) =
   @remote(b, View(camera, target, lens))
 
 KhepriBase.b_get_view(b::RH) =
@@ -947,12 +918,28 @@ backend_generate_captured_shapes(b::RH, ss::Shapes) =
 backend_all_shapes_in_layer(b::RH, layer) =
   Shape[backend_shape_from_ref(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
 
-KhepriBase.b_render_view(b::RH, path::String) =
-  @remote(b, Render(render_width(), render_height(), path))
-
-#KhepriBase.b_save_view(b::RH, path::String) =
-#  @remote(b, SaveView(render_width(), render_height(), path))
-
+# Khepri render quality ranges from -1 to 1
+# Rhino render quality ranges from 0 to 3
+KhepriBase.b_render_and_save_view(b::RH, path::String) =
+  let kind = render_kind()
+    if kind == :realistic
+      let quality = round(Int, (render_quality() + 1)*3/2)
+        @remote(b, Render(render_width(), render_height(), quality, path))
+      end
+    else
+      @remote(b, RenderLoadEnvironment("KhepriStudio", joinpath(@__DIR__, "KhepriStudio.renv")))
+      let (camera, target) = (@remote(b, ViewCamera()), @remote(b, ViewTarget())),
+          rot = 11π/6 + π/2 - (camera - target).ϕ
+        if render_kind() == :white
+          @remote(b, ClayRenderWhite("KhepriStudio", rot, render_width(), render_height(), 3, path))
+        elseif render_kind() == :black
+          @remote(b, ClayRenderBlack("KhepriStudio", rot, render_width(), render_height(), 3, path))
+        else
+          error("Unknown render kind $kind")
+        end
+      end
+    end
+  end
 
 #=
 BIM families for Rhino
