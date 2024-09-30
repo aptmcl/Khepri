@@ -134,13 +134,10 @@ abstract type UnityKey end
 const UnityId = Int32
 const UnityRef = GenericRef{UnityKey, UnityId}
 const UnityRefs = Vector{UnityRef}
-const UnityEmptyRef = EmptyRef{UnityKey, UnityId}
 const UnityNativeRef = NativeRef{UnityKey, UnityId}
-const UnityUnionRef = UnionRef{UnityKey, UnityId}
-const UnitySubtractionRef = SubtractionRef{UnityKey, UnityId}
 const Unity = SocketBackend{UnityKey, UnityId}
 
-KhepriBase.void_ref(b::Unity) = UnityNativeRef(-1)
+KhepriBase.void_ref(b::Unity) = -1 % Int32
 
 KhepriBase.before_connecting(b::Unity) = nothing #check_plugin()
 KhepriBase.after_connecting(b::Unity) =
@@ -158,9 +155,9 @@ const unity = Unity("Unity", unity_port, unity_api)
 
 # Traits
 #has_boolean_ops(::Type{Unity}) = HasBooleanOps{true}()
-KhepriBase.backend_name(b::Unity) = "Unity"
+#KhepriBase.backend_name(b::Unity) = "Unity"
 KhepriBase.has_boolean_ops(::Type{Unity}) = HasBooleanOps{false}()
-KhepriBase.backend(::UnityRef) = Unity
+#KhepriBase.backend(::UnityRef) = Unity
 
 (backend::Unity)(; apply_materials=true, apply_colliders=true) =
   begin
@@ -180,7 +177,7 @@ KhepriBase.b_line(b::Unity, ps, mat) =
 KhepriBase.b_polygon(b::Unity, ps, mat) =
   @remote(b, ClosedPolyLine(ps))
 
-KhepriBase.b_spline(b::Unity, ps, v0, v1, interpolator, mat) =
+KhepriBase.b_spline(b::Unity, ps, v0, v1, mat) =
   if (v0 == false) && (v1 == false)
     @remote(b, Spline(ps))
   elseif (v0 != false) && (v1 != false)
@@ -310,26 +307,16 @@ KhepriBase.b_cylinder(b::Unity, c, r, h, bmat, tmat, smat) =
   @remote(b, CylinderWithMaterial(c, r, c + vz(h, c.cs), smat))
 
 KhepriBase.b_box(b::Unity, c, dx, dy, dz, mat) =
-  @remote(b, BoxWithMaterial(c, vx(1, c.cs), vy(1, c.cs), dx, dy, dz, mat))
+  # X<->Z
+  @remote(b, BoxWithMaterial(c, vx(1, c.cs), vy(1, c.cs), dz, dy, dx, mat))
 
 KhepriBase.b_sphere(b::Unity, c, r, mat) =
 	@remote(b, SphereWithMaterial(c, r, mat))
 
 # Materials
 
-KhepriBase.b_get_material(b::Unity, ref) =
-  get_unity_material(b, ref)
-
-get_unity_material(b, n::Nothing) =
-  void_ref(b)
-get_unity_material(b, path::String) =
+KhepriBase.b_get_material(b::Unity, path::String) =
   @remote(b, LoadMaterial(path))
-
-
-realize(b::Unity, s::EmptyShape) =
-  UnityEmptyRef()
-realize(b::Unity, s::UniversalShape) =
-  UnityUniversalRef()
 
 fast_unity() =
   begin
@@ -342,87 +329,6 @@ slow_unity() =
     @remote(unity, SetApplyMaterials(true))
     @remote(unity, SetApplyColliders(true))
   end
-#=
-realize(b::Unity, s::SurfaceCircle) =
-  @remote(b, SurfacePolygon(regular_polygon_vertices(64, s.center, s.radius, 0, true)))
-realize(b::Unity, s::SurfaceArc) =
-    #@remote(b, SurfaceArc(s.center, vz(1, s.center.cs), s.radius, s.start_angle, s.start_angle + s.amplitude))
-    if s.radius == 0
-        @remote(b, Point(s.center))
-    elseif s.amplitude == 0
-        @remote(b, Point(s.center + vpol(s.radius, s.start_angle, s.center.cs)))
-    elseif abs(s.amplitude) >= 2*pi
-        @remote(b, SurfaceCircle(s.center, vz(1, s.center.cs), s.radius))
-    else
-        end_angle = s.start_angle + s.amplitude
-        if end_angle > s.start_angle
-            @remote(b, SurfaceFromCurves(connection(b),
-                [@remote(b, Arc(s.center, vz(1, s.center.cs), s.radius, s.start_angle, end_angle)),
-                 @remote(b, PolyLine([add_pol(s.center, s.radius, end_angle),
-                                              add_pol(s.center, s.radius, s.start_angle)]))])
-        else
-            @remote(b, SurfaceFromCurves(connection(b),
-                [@remote(b, Arc(s.center, vz(1, s.center.cs), s.radius, end_angle, s.start_angle),
-                 @remote(b, PolyLine([add_pol(s.center, s.radius, s.start_angle)),
-                                              add_pol(s.center, s.radius, end_angle)]))])
-        end
-    end
-
-#realize(b::Unity, s::SurfaceElliptic_Arc) = @remote(b, Circle(connection(b),
-#realize(b::Unity, s::SurfaceEllipse) = @remote(b, Circle(connection(b),
-realize(b::Unity, s::Surface) =
-  let #ids = map(r->@remote(b, NurbSurfaceFrom(connection(b),r), @remote(b, SurfaceFromCurves(collect_ref(s.frontier))))
-      ids = @remote(b, SurfaceFromCurves(collect_ref(s.frontier)))
-    foreach(mark_deleted, s.frontier)
-    ids
-  end
-backend_surface_boundary(b::Unity, s::Shape2D) =
-    map(shape_from_ref, @remote(b, CurvesFromSurface(ref(s).value)))
-# Iterating over curves and surfaces
-
-Unity"public double[] CurveDomain(Entity ent)"
-Unity"public double CurveLength(Entity ent)"
-Unity"public Frame3d CurveFrameAt(Entity ent, double t)"
-Unity"public Frame3d CurveFrameAtLength(Entity ent, double l)"
-
-backend_map_division(b::Unity, f::Function, s::Shape1D, n::Int) =
-  let (t1, t2) = curve_domain(s)
-    map_division(t1, t2, n) do t
-      f(frame_at(s, t))
-    end
-  end
-Unity"public Vector3d RegionNormal(Entity ent)"
-Unity"public Point3d RegionCentroid(Entity ent)"
-Unity"public double[] SurfaceDomain(Entity ent)"
-Unity"public Frame3d SurfaceFrameAt(Entity ent, double u, double v)"
-
-backend_surface_domain(b::Unity, s::Shape2D) =
-    tuple(@remote(b, SurfaceDomain(ref(s).value)...))
-
-backend_map_division(b::Unity, f::Function, s::Shape2D, nu::Int, nv::Int) =
-    let conn = connection(b)
-        r = ref(s).value
-        (u1, u2, v1, v2) = @remote(b, SurfaceDomain(r))
-        map_division(u1, u2, nu) do u
-            map_division(v1, v2, nv) do v
-                f(@remote(b, SurfaceFrameAt(r, u, v)))
-            end
-        end
-    end
-
-# The previous method cannot be applied to meshes in AutoCAD, which are created by surface_grid
-
-backend_map_division(b::Unity, f::Function, s::SurfaceGrid, nu::Int, nv::Int) =
-    let (u1, u2, v1, v2) = @remote(b, SurfaceDomain(r))
-        map_division(u1, u2, nu) do u
-            map_division(v1, v2, nv) do v
-                f(@remote(b, SurfaceFrameAt(r, u, v)))
-            end
-        end
-    end
-=#
-
-
 
 realize(b::Unity, s::Text) =
   @remote(b, Text(s.str, s.corner, vz(-1, s.corner.cs), vy(1, s.corner.cs), "Fonts/Inconsolata-Regular", s.height))
@@ -431,66 +337,6 @@ backend_right_cuboid(b::Unity, cb, width, height, h, angle, material) =
   isnothing(material) ?
     @remote(b, RightCuboid(cb, vz(1, cb.cs), vx(1, cb.cs), height, width, h, angle)) :
     @remote(b, RightCuboidWithMaterial(cb, vz(1, cb.cs), vx(1, cb.cs), height, width, h, angle, material))
-
-#=
-backend_extrusion(b::Unity, s::Shape, v::Vec) =
-    and_mark_deleted(
-        map_ref(s) do r
-            @remote(b, Extrude(r, v))
-        end,
-        s)
-
-backend_sweep(b::Unity, path::Shape, profile::Shape, rotation::Real, scale::Real) =
-  map_ref(profile) do profile_r
-    map_ref(path) do path_r
-      @remote(b, Sweep(path_r, profile_r, rotation, scale))
-    end
-  end
-
-realize(b::Unity, s::Revolve) =
-  and_delete_shape(
-    map_ref(s.profile) do r
-      @remote(b, Revolve(r, s.p, s.n, s.start_angle, s.amplitude))
-    end,
-    s.profile)
-
-backend_loft_curves(b::Unity, profiles::Shapes, rails::Shapes, ruled::Bool, closed::Bool) =
-  and_delete_shapes(UnityLoft(connection(b),
-                             collect_ref(profiles),
-                             collect_ref(rails),
-                             ruled, closed),
-                    vcat(profiles, rails))
-
-            MAYBE USE THIS
-            ruled_surface(s1, s2) =
-                let pts1 = map_division(in_world, s1, 20),
-                    pts2 = map_division(in_world, s2, 20)
-                  iterate_quads((p0, p1, p2, p3)->(surface_polygon([p0,p1,p3]), surface_polygon([p1,p2,p3])),
-                                [pts1, pts2])
-                end
-
-            ruled_surface(s1, s2)
-
-
-backend_loft_surfaces(b::Unity, profiles::Shapes, rails::Shapes, ruled::Bool, closed::Bool) =
-    backend_loft_curves(b, profiles, rails, ruled, closed)
-
-backend_loft_curve_point(b::Unity, profile::Shape, point::Shape) =
-    and_delete_shapes(UnityLoft(connection(b),
-                               vcat(collect_ref(profile), collect_ref(point)),
-                               [],
-                               true, false),
-                      [profile, point])
-
-backend_loft_surface_point(b::Unity, profile::Shape, point::Shape) =
-    backend_loft_curve_point(b, profile, point)
-
-=#
-
-
-
-
-
 
 ###
 unite_ref(b::Unity, r0::UnityNativeRef, r1::UnityNativeRef) =
@@ -505,26 +351,10 @@ subtract_ref(b::Unity, r0::UnityNativeRef, r1::UnityNativeRef) =
       r
     end
 
-#=
-subtract_ref(b::Unity, r0::UnityNativeRef, r1::UnityNativeRef) =
-    begin
-      @remote(b, SubtractFrom(r0.value, r1.value))
-      r0.value
-    end
-=#
-
-#=
-slice_ref(b::Unity, r::UnityNativeRef, p::Loc, v::Vec) =
-    (@remote(b, Slice(r.value, p, v); r))
-
-slice_ref(b::Unity, r::UnityUnionRef, p::Loc, v::Vec) =
-    map(r->slice_ref(b, r, p, v), r.values)
-
-=#
 unite_refs(b::Unity, refs::Vector{<:UnityRef}) =
     UnityUnionRef(tuple(refs...))
 
-#
+#=
 realize(b::Unity, s::UnionShape) =
   let r = foldl((r0,r1)->unite_ref(b,r0,r1), map(ref, s.shapes),
                 init=UnityEmptyRef())
@@ -539,13 +369,13 @@ realize(b::Unity, s::IntersectionShape) =
     delete_shapes(s.shapes)
     r
   end
-
+=#
 realize(b::Unity, s::Slice) =
-  slice_ref(b, ref(s.shape), s.p, s.n)
+  slice_ref(b, ref(b, s.shape), s.p, s.n)
 
 
 realize(b::Unity, s::Move) =
-  let r = map_ref(s.shape) do r
+  let r = map_ref(b, s.shape) do r
             @remote(b, Move(r, s.v))
             r
           end
@@ -554,7 +384,7 @@ realize(b::Unity, s::Move) =
   end
 #=
 realize(b::Unity, s::Transform) =
-  let r = map_ref(s.shape) do r
+  let r = map_ref(b, s.shape) do r
             @remote(b, Transform(r, s.xform))
             r
           end
@@ -563,7 +393,7 @@ realize(b::Unity, s::Transform) =
   end
 =#
 realize(b::Unity, s::Scale) =
-  let r = map_ref(s.shape) do r
+  let r = map_ref(b, s.shape) do r
             @remote(b, Scale(r, s.p, s.s))
             r
           end
@@ -572,7 +402,7 @@ realize(b::Unity, s::Scale) =
   end
 
 realize(b::Unity, s::Rotate) =
-  let r = map_ref(s.shape) do r
+  let r = map_ref(b, s.shape) do r
             @remote(b, Rotate(r, s.p, s.v, s.angle))
             r
           end
@@ -580,51 +410,7 @@ realize(b::Unity, s::Rotate) =
     r
   end
 
-#=
-realize(b::Unity, s::Mirror) =
-  and_delete_shape(map_ref(s.shape) do r
-                    @remote(b, Mirror(r, s.p, s.n, false))
-                   end,
-                   s.shape)
-
-realize(b::Unity, s::UnionMirror) =
-  let r0 = ref(s.shape),
-      r1 = map_ref(s.shape) do r
-            @remote(b, Mirror(r, s.p, s.n, true))
-          end
-    UnionRef((r0,r1))
-  end
-
-realize(b::Unity, s::Thicken) =
-  and_delete_shape(
-    map_ref(s.shape) do r
-      @remote(b, Thicken(r, s.thickness))
-    end,
-    s.shape)
-
-# backend_frame_at
-backend_frame_at(b::Unity, s::Circle, t::Real) = add_pol(s.center, s.radius, t)
-
-backend_frame_at(b::Unity, c::Shape1D, t::Real) = @remote(b, CurveFrameAt(ref(c).value, t))
-
-#backend_frame_at(b::Unity, s::Surface, u::Real, v::Real) =
-    #What should we do with v?
-#    backend_frame_at(b, s.frontier[1], u)
-
-#backend_frame_at(b::Unity, s::SurfacePolygon, u::Real, v::Real) =
-
-backend_frame_at(b::Unity, s::Shape2D, u::Real, v::Real) = @remote(b, SurfaceFrameAt(ref(s).value, u, v))
-
-=#
-
 # BIM
-
-
-
-
-
-
-
 
 # Families
 
@@ -774,11 +560,11 @@ current_material(b::Unity, material::UnityMaterial) =
 realize(b::Unity, s::Block) =
   s.shapes == [] ?
     @remote(b, LoadResource(s.name)) :
-    @remote(b, Canonicalize(@remote(b, CreateBlockFromShapes(s.name, collect_ref(s.shapes)))))
+    @remote(b, Canonicalize(@remote(b, CreateBlockFromShapes(s.name, collect_ref(b, s.shapes)))))
 
 realize(b::Unity, s::BlockInstance) =
     @remote(b, CreateBlockInstance(
-        ref(s.block).value,
+        ref(b, s.block).value,
         s.loc, vy(1, s.loc.cs), vz(1, s.loc.cs), s.scale))
 #=
 
@@ -795,7 +581,7 @@ Khepri.create_block("Foo", [circle(radius=r) for r in 1:10])
 
 # Lights
 
-KhepriBase.b_pointlight(b::Unity, loc::Loc, color::RGB, range::Real, intensity::Real) =
+KhepriBase.b_pointlight(b::Unity, loc::Loc, color::RGB, intensity::Real, range::Real) =
     @remote(b, PointLight(loc, color, range, intensity))
 #=
 backend_spotlight(b::Unity, loc::Loc, dir::Vec, hotspot::Real, falloff::Real) =
@@ -805,10 +591,9 @@ backend_ieslight(b::Unity, file::String, loc::Loc, dir::Vec, alpha::Real, beta::
     @remote(b, IESLight(file, loc, loc + dir, vxyz(alpha, beta, gamma)))
 
 # User Selection
-=#
 
 shape_from_ref(r, b::Unity) =
-  let idx = findfirst(s -> r in collect_ref(s), collected_shapes())
+  let idx = findfirst(s -> r in collect_ref(b, s), collected_shapes())
     if isnothing(idx)
       let kind = @remote(b, ShapeType(r))
         if kind == "Sphere"
@@ -826,124 +611,7 @@ shape_from_ref(r, b::Unity) =
       collected_shapes()[idx]
     end
   end
-#
-#=
-
-
-select_position(prompt::String, b::Unity) =
-  begin
-    @info "$(prompt) on the $(b) backend."
-    let ans = @remote(b, GetPosition(prompt))
-      length(ans) > 0 && ans[1]
-    end
-  end
-
-select_with_prompt(prompt::String, b::Backend, f::Function) =
-  begin
-    @info "$(prompt) on the $(b) backend."
-    let ans = f(connection(b), prompt)
-      length(ans) > 0 && shape_from_ref(ans[1], b)
-    end
-  end
-
-
-
-# HACK: The next operations should receive a set of shapes to avoid re-creating already existing shapes
-
-select_point(prompt::String, b::Unity) =
-  select_with_prompt(prompt, b, UnityGetPoint)
-
-
-
-select_curve(prompt::String, b::Unity) =
-  select_with_prompt(prompt, b, UnityGetCurve)
-
-
-
-select_surface(prompt::String, b::Unity) =
-  select_with_prompt(prompt, b, UnityGetSurface)
-
-
-
-select_solid(prompt::String, b::Unity) =
-  select_with_prompt(prompt, b, UnityGetSolid)
-
-
-
-select_shape(prompt::String, b::Unity) =
-  select_with_prompt(prompt, b, UnityGetShape)
-
-
-
-
-captured_shape(b::Unity, handle) =
-  shape_from_ref(@remote(b, GetShapeFromHandle(handle)),
-                 b)
-
-generate_captured_shape(s::Shape, b::Unity) =
-    println("captured_shape(autocad, $(@remote(b, GetHandleFromShape(ref(s).value)))"))
-
-# Register for notification
-
-
-
-
-
-
-
-
-register_for_changes(s::Shape, b::Unity) =
-    negin
-        @remote(b, RegisterForChanges(ref(s).value))
-        @remote(b, DetectCancel())
-        s
-    end
-
-unregister_for_changes(s::Shape, b::Unity) =
-    begin
-        @remote(b, UnregisterForChanges(ref(s).value))
-        @remote(b, UndetectCancel())
-        s
-    end
-
-waiting_for_changes(s::Shape, b::Unity) =
-    ! @remote(b, WasCanceled())
-
-changed_shape(ss::Shapes, b::Unity) =
-    let changed = []
-        while length(changed) == 0 && ! @remote(b, WasCanceled())
-            changed =  @remote(b, ChangedShape())
-            sleep(0.1)
-        end
-        if length(changed) > 0
-            shape_from_ref(changed[1], b)
-        else
-            nothing
-        end
-    end
-
-
-
-
-# HACK: This should be filtered on the plugin, not here.
-all_shapes(b::Unity) =
-  Shape[shape_from_ref(r, b)
-        for r in filter(r -> @remote(b, ShapeCode(r) != 0, @remote(b, GetAllShapes())))]
-
-all_shapes_in_layer(layer, b::Unity) =
-  Shape[shape_from_ref(r, b) for r in @remote(b, GetAllShapesInLayer(layer))]
-
-disable_update(b::Unity) =
-  @remote(b, DisableUpdate())
-
-enable_update(b::Unity) =
-  @remote(b, EnableUpdate())
-
-# Render
-
 =#
-
-
 
 #render exposure: [-3, +3] -> [-6, 21]
 convert_render_exposure(b::Unity, v::Real) = -4.05*v + 8.8
@@ -960,10 +628,10 @@ render_view(path::String, b::Unity) =
     end
 
 highlight_shape(s::Shape, b::Unity) =
-    @remote(b, SelectGameObjects(collect_ref(s)))
+    @remote(b, SelectGameObjects(collect_ref(b, s)))
 
 highlight_shapes(ss::Shapes, b::Unity) =
-    @remote(b, SelectGameObjects(collect_ref(ss)))
+    @remote(b, SelectGameObjects(collect_ref(b, ss)))
 
 
 KhepriBase.b_select_position(b::Unity, prompt) =
@@ -1001,5 +669,7 @@ KhepriBase.b_select_shapes(b::Unity, prompt::String) =
       selected_game_objects(b)
     end)
 
-KhepriBase.b_realistic_sky(b::Unity, altitude, azimuth, turbidity, withsun) =
+    #=
+KhepriBase.b_set_sun_orientation(b::Unity, altitude, azimuth) =
   @remote(b, SetSun(altitude, azimuth))
+=#
