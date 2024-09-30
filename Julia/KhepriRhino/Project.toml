@@ -12,9 +12,9 @@ Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 
 [compat]
 ColorTypes = "0.11"
-KhepriBase = "0.4"
+KhepriBase = "0.5"
 Reexport = "0.2, 1.0"
-julia = "1.6"
+julia = "1.9"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
