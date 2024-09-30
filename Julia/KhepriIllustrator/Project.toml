@@ -8,8 +8,8 @@ KhepriBase = "4cc0fe96-1163-46f3-ba32-de1e65d9548f"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
-KhepriBase = "0.4"
-julia = "1.5"
+KhepriBase = "0.5"
+julia = "1.9"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
