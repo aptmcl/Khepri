@@ -743,35 +743,33 @@ add_tikz(str) =
 =#
 
 process_tex(path) =
-  @static if Sys.islinux()
-    cd(dirname(path)) do
-      let texname = basename(path)
-        for i in 1:2
-          output = read(`lualatex -shell-escape -halt-on-error $texname`, String)
-          if occursin("Error:", output)
-            println(output)
-            break
+  cd(dirname(path)) do
+    let texname = basename(path)
+      @static if Sys.islinux()
+        try
+          for i in 1:2
+            run(`lualatex -shell-escape -halt-on-error $texname`, wait=true)
+          end
+        catch e
+          error("Could not process the generated .tex file. Do you have lualatex installed?")
+        end
+      elseif Sys.isapple()
+        error("Can't handle MacOS yet")
+      elseif Sys.iswindows()
+        let miktex_texify = normpath(joinpath(ENV["APPDATA"], "..", "Local", "Programs", "MiKTeX", "miktex", "bin", "x64", "texify"))
+          try
+            run(tikz_as_png() ?
+                  `$(miktex_texify) --pdf --engine=luatex $(texname)` :
+                  `$(miktex_texify) --pdf --engine=luatex --run-viewer $(texname)`,
+                wait=true)
+          catch e
+            error("Could not process the generated .tex file. Do you have MikTeX installed?")
           end
         end
+      else
+        error("Unknown operating system")
       end
     end
-  elseif Sys.isapple()
-    error("Can't handle MacOS yet")
-  elseif Sys.iswindows()
-    let miktex_texify = normpath(joinpath(ENV["APPDATA"], "..", "Local", "Programs", "MiKTeX", "miktex", "bin", "x64", "texify"))
-      cd(dirname(path)) do
-        try
-          run(tikz_as_png() ?
-                `$(miktex_texify) --pdf --engine=luatex $(path)` :
-                `$(miktex_texify) --pdf --engine=luatex --run-viewer $(path)`,
-              wait=true)
-        catch e
-          error("Could not process the generated .tex file. Do you have MikTeX installed?")
-        end
-      end
-    end
-  else
-    error("Unknown operating system")
   end
 
 
