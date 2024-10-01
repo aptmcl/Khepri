@@ -390,7 +390,7 @@ KhepriBase.b_surface_mesh(b::RH, vertices, faces, mat) =
 ############################################################
 # Third tier: solids
 
-KhepriBase.b_solidify(b::RH, refs) =
+KhepriBase.b_solidify(b::RH, refs) = refs
   
 
 KhepriBase.b_generic_prism(b::RH, bs, smooth, v, bmat, tmat, smat) =
