@@ -741,8 +741,39 @@ add_tikz(str) =
       pdfname
   end
 =#
-const miktex_folder = Parameter(normpath(joinpath(ENV["APPDATA"], "..", "Local", "Programs", "MiKTeX", "miktex", "bin", "x64")))
-miktex_cmd(cmd::AbstractString="pdflatex") = joinpath(miktex_folder(), cmd)
+
+process_tex(path) =
+  @static if Sys.islinux()
+    cd(dirname(path)) do
+      let texname = basename(path)
+        for i in 1:2
+          output = read(`lualatex -shell-escape -halt-on-error $texname`, String)
+          if occursin("Error:", output)
+            println(output)
+            break
+          end
+        end
+      end
+    end
+  elseif Sys.isapple()
+    error("Can't handle MacOS yet")
+  elseif Sys.iswindows()
+    let miktex_texify = normpath(joinpath(ENV["APPDATA"], "..", "Local", "Programs", "MiKTeX", "miktex", "bin", "x64", "texify"))
+      cd(dirname(path)) do
+        try
+          run(tikz_as_png() ?
+                `$(miktex_texify) --pdf --engine=luatex $(path)` :
+                `$(miktex_texify) --pdf --engine=luatex --run-viewer $(path)`,
+              wait=true)
+        catch e
+          error("Could not process the generated .tex file. Do you have MikTeX installed?")
+        end
+      end
+    end
+  else
+    error("Unknown operating system")
+  end
+
 
 export tikz_as_png
 const tikz_as_png = Parameter(false)
@@ -769,22 +800,7 @@ process_tikz(path) =
       println(out, contents)
       println(out, raw"\end{document}")
     end
-    # cd(dirname(path)) do
-    #   output = read(`$(miktex_cmd()) -shell-escape -halt-on-error $(path)`, String)
-    #   occursin("Error:", output) && println(output)
-    # end
-    cd(dirname(path)) do
-      try
-        run(tikz_as_png() ?
-              `$(miktex_cmd("texify")) --pdf --engine=luatex $(path)` :
-              `$(miktex_cmd("texify")) --pdf --engine=luatex --run-viewer $(path)`,
-            wait=true)
-      #output = read(`$(miktex_cmd("texify")) --run-viewer $(path)`, String)
-      #occursin("Error:", output) && println(output)
-      catch e
-        error("Could not process the generated .tex file. Do you have MikTeX installed?")
-      end
-    end
+    process_tex(path)
     println(path)
   end
 
