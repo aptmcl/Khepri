@@ -750,7 +750,7 @@ process_tex(path) =
           for i in 1:2
             run(`lualatex -shell-escape -halt-on-error $texname`, wait=true)
           end
-          run(`xdg-open $texname.pdf`)
+          run(`xdg-open $(path_replace_suffix(texname, ".pdf"))`)
         catch e
           error("Could not process the generated .tex file. Do you have lualatex installed?")
         end
