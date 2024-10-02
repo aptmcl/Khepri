@@ -27,11 +27,15 @@ upgrade_plugin() =
 update_plugin() =
   let grasshopper_user_plugins = joinpath(ENV["APPDATA"], "Grasshopper", "Libraries"),
       local_khepri_plugin = joinpath(julia_khepri, "Plugin")
-    for dll in khepri_grasshopper_dlls
-      let local_path = joinpath(local_khepri_plugin, dll),
-          grasshopper_path = joinpath(grasshopper_user_plugins, dll)
+    try
+      for dll in khepri_grasshopper_dlls
+        let local_path = joinpath(local_khepri_plugin, dll),
+            grasshopper_path = joinpath(grasshopper_user_plugins, dll)
           cp(local_path, grasshopper_path, force=true)
+        end
       end
+    catch e
+      @warn("Couldn't update the Grasshopper plugin. Close Rhino and recompile.")
     end
   end
 
