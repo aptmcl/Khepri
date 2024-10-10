@@ -279,6 +279,10 @@ end
 illustrate_binding(name, init) =
   if init isa Loc
     label(init, textify(name))
+  elseif init isa Locs
+    for (i, p) in enumerate(init)
+      illustrate_binding(:($name[$i]), p)
+    end
   end
 
 is_op_call(op, expr) =
@@ -306,8 +310,8 @@ illustrate(f::typeof(+), p::Union{X,XY,Pol}, v::Union{VXY}, p_expr, v_expr) =
                            (Symbol(v_expr, "_x"), Symbol(v_expr, "_y")) :
                            (:⊕, :⊗)
       label(p, textify(p_expr))
-      cx(v) ≈ 0.0 ? nothing : KhepriBase.vector_illustration(p, 0, cx(v), textify(x))
-      cy(v) ≈ 0.0 ? nothing : KhepriBase.vector_illustration(p+vx(cx(v)), π/2, cy(v), textify(y))
+      cx(v) ≈ 0.0 ? nothing : vector_illustration(p, 0, cx(v), textify(x))
+      cy(v) ≈ 0.0 ? nothing : vector_illustration(p+vx(cx(v)), π/2, cy(v), textify(y))
     end
   end
 #
@@ -318,11 +322,48 @@ illustrate(f::typeof(+), p::Union{X,XY,Pol}, v::Union{VX}, p_expr, v_expr) =
                    v_expr isa Symbol ? v_expr :
                    :⊗
       label(p, textify(p_expr))
-      KhepriBase.vector_illustration(p, 0, cx(v), textify(d))
+      vector_illustration(p, 0, cx(v), textify(d))
     end
   end
 
-#
+illustrate(f::typeof(-), p::Union{X,XY,Pol}, v::Union{VPol}, p_expr, v_expr) =
+  with_recursive_illustration() do
+    let (ρ, ϕ) = is_op_call(:vpol, v_expr) ? v_expr.args[2:3] :
+                   v_expr isa Symbol ? (Symbol(v_expr, "_ρ"), Symbol(v_expr, "_ϕ")) :
+                   (:⊕, :⊗)
+      label(p, textify(p_expr))
+      #dimension(p, p+v, textify(ρ), size=0.1, offset=0)
+      angle_illustration(p, pol_rho(v), 0, pol_phi(v), textify(ρ), textify(0), textify(ϕ))
+    end
+  end
+
+illustrate(f::typeof(-), p::Union{X,XY,Pol}, v::Union{VXY}, p_expr, v_expr) =
+  with_recursive_illustration() do
+    let (x, y) = is_op_call(:vxy, v_expr) ? v_expr.args[2:3] :
+                   is_op_call(:vy, v_expr) ? (:dummy, v_expr.args[2]) :
+                     v_expr isa Symbol ?
+                       (cx(v) ≈ 0.0 || cy(v) ≈ 0.0) ?
+                         (v_expr, v_expr) :
+                           (Symbol(v_expr, "_x"), Symbol(v_expr, "_y")) :
+                           (:⊕, :⊗)
+      label(p, textify(p_expr))
+      cx(v) ≈ 0.0 ? nothing : vector_illustration(p, π, cx(v), textify(x))
+      cy(v) ≈ 0.0 ? nothing : vector_illustration(p-vx(cx(v)), -π/2, cy(v), textify(y))
+    end
+  end
+
+illustrate(f::typeof(-), p::Union{X,XY,Pol}, v::Union{VX}, p_expr, v_expr) =
+  with_recursive_illustration() do
+    let d = v_expr isa Expr && v_expr.head == :call && v_expr.args[1] == :vx ?
+                   v_expr.args[2] :
+                   v_expr isa Symbol ? v_expr :
+                   :⊗
+      label(p, textify(p_expr))
+      vector_illustration(p, π, cx(v), textify(d))
+    end
+  end
+
+
 illustrate(f::typeof(pol), ρ, ϕ, ρ_expr, ϕ_expr) =
   illustrate(+, u0(), vpol(ρ, ϕ), :(u0()), :(vpol($ρ_expr, $ϕ_expr)))
 
