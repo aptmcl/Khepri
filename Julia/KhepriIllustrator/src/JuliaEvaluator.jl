@@ -113,12 +113,25 @@ eval_dot(expr, env) =
   end
 
 #
+is_for(expr) = expr isa Expr && expr.head === :for
+eval_for(expr, env) =
+  let var = expr.args[1].args[1],
+      init = eval_expr(expr.args[1].args[2], env),
+      body = expr.args[2]
+    for val in init
+      #eval_expr(:(let $(var) = $(Expr(:quote, val)); $(body) end), env)
+      eval_expr(:((($var) -> $(body))($(Expr(:quote, val)))), env)
+    end
+    nothing
+  end
+
 is_comprehension(expr) = expr isa Expr && expr.head === :comprehension
 eval_comprehension(expr, env) =
   let vals = eval_expr(expr.args[1].args[2].args[2], env),
       var = expr.args[1].args[2].args[1],
       body = expr.args[1].args[1]
-    [eval_expr(:(let $(var) = $(Expr(:quote, v)); $(body) end), env) for v in vals]
+    #[eval_expr(:(let $(var) = $(Expr(:quote, v)); $(body) end), env) for v in vals]
+    [eval_expr(:(($(var) -> $(body))($(Expr(:quote, v)))), env) for v in vals]
   end
 
 is_range(expr) = expr isa Expr && expr.head === :call && expr.args[1] == :(:)
@@ -159,6 +172,8 @@ eval_expr(expr, env) =
     eval_if(expr, env)
   elseif is_let(expr)
     eval_let(expr, env)
+  elseif is_for(expr)
+    eval_for(expr, env)
   elseif is_def(expr)
     eval_def(expr, env)
   elseif is_gdef(expr)
@@ -285,7 +300,8 @@ eval_call(expr, env) =
                   push!(illustrations_stack, call_operator(expr))
                   eval_expr(function_body(func), extended_env)
                 end
-              if current_recursive_level() <= recursive_levels_limit()
+              if (is_primitive(func) && current_recursive_level() == recursive_levels_limit() + 1) || # HACK Added to handle things like let q = p + vxy(...)
+                current_recursive_level() <= recursive_levels_limit()
                 if step_by_step()
                   if !ismissing(illustrate(func, args..., exprs...))
                     global render_n += 1
