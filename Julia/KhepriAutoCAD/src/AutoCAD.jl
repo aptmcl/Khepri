@@ -159,6 +159,7 @@ encode(::Val{:ACAD}, t::Val{T}, c::IO, v) where {T} = encode(Val(:CS), t, c, v)
 decode(::Val{:ACAD}, t::Val{T}, c::IO) where {T} = decode(Val(:CS), t, c)
 
 # We need some additional Encoders
+@encode_decode_as(:ACAD, Val{:Options}, Val{:Dict})
 @encode_decode_as(:ACAD, Val{:Entity}, Val{:address})
 @encode_decode_as(:ACAD, Val{:ObjectId}, Val{:address})
 @encode_decode_as(:ACAD, Val{:BIMLevel}, Val{:size})
@@ -1000,8 +1001,8 @@ export annotation_scale
 const annotation_scale = Parameter(1.0)
 no_props = Dict{String,Any}()
 #illustration_color = rgb(127/255,191/255,255/255)
-label_props = Dict() #"Dimclrd"=>illustration_color)
-base_props = Dict() #"Dimclrt"=>illustration_color, "Dimclrd"=>illustration_color)
+label_props = Dict{String,Any}() #"Dimclrd"=>illustration_color)
+base_props = Dict{String,Any}() #"Dimclrt"=>illustration_color, "Dimclrd"=>illustration_color)
 angular_props = merge(Dict("Dimatfit"=>Int32(1), "Dimtad"=>Int32(2), "Dimtix"=>true, "Dimsah"=>true#=, "Dimclre"=>illustration_color=#), base_props)
 
   #"Dimfxlon"=>true
