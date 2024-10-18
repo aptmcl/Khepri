@@ -423,7 +423,7 @@ tikz_set_view_top(out::IO, options) =
 #
 
 abstract type TikZKey end
-const TikZId = Nothing
+const TikZId = Any
 const TikZIds = Vector{TikZId}
 const TikZRef = GenericRef{TikZKey, TikZId}
 const TikZRefs = Vector{TikZRef}
@@ -820,23 +820,26 @@ KhepriBase.b_render_and_save_view(b::TikZ, path) =
   process_tikz(path)
 
 # Illustrations
-KhepriBase.b_textify(b::TikZ, expr) = latexify(expr)
+texify(expr::String) = expr
+texify(expr) = latexify(expr)
 
-KhepriBase.b_labels(b::TikZ, p, strs, mats, mat) =
+KhepriBase.b_labels(b::TikZ, p, txts, mats, mat) =
   withTikZXForm(b, p, mat) do out, c
     tikz_node(out, c, "",
       "fill,circle,outer sep=0,inner sep=0,minimum size=2pt,illustration,$(tikz_color(mats[1].layer.color)),"*
-      join(["label={[illustration,$(tikz_color(mat.layer.color))]$ϕ:$str}"
-            for (str,ϕ,mat) in zip(strs, division(-45, 315, length(strs), false), mats)], ","))
+      join(["label={[illustration,$(tikz_color(mat.layer.color))]$ϕ:$(texify(txt))}"
+            for (txt,ϕ,mat) in zip(txts, division(-45, 315, length(txts), false), mats)], ","))
   end
+
+node_spec(color, angle, txt) =
+  "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(angle)):$(texify(txt))}"
 
 KhepriBase.b_radii_illustration(b::TikZ, c, rs, rs_txts, mats, mat) =
   withTikZXForm(b, c, mat) do out, cc
     for (r,r_txt,ϕ,mat) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false), mats)
       color = tikz_color(mat.layer.color)
       tikz_polar_segment(out, c, vpol(r, ϕ), "latex-latex,illustration,$color")
-      tikz_node(out, intermediate_loc(c, c + vpol(r, ϕ)), "", 
-        "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(ϕ+π/2)):$r_txt}")
+      tikz_node(out, intermediate_loc(c, c + vpol(r, ϕ)), "", node_spec(color, ϕ+π/2, r_txt))
     end
   end
 
@@ -845,7 +848,7 @@ KhepriBase.b_vectors_illustration(b::TikZ, p, a, rs, rs_txts, mats, mat) =
     for (r, r_txt, mat) in zip(rs, rs_txts, mats)
       color = tikz_color(mat.layer.color)
       tikz_polar_segment(out, c, vpol(r, a), "latex-latex,illustration,$color")
-      tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", "outer sep=0,inner sep=0,label={[illustration,$color]$(tikz_deg_string(a-π/2)):$r_txt}")
+      tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", node_spec(color, a-π/2, r_txt))
     end
   end
 
@@ -862,7 +865,7 @@ KhepriBase.b_angles_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts,
           if !(s ≈ 0.0)
             tikz_polar_segment(out, c, vpol(ar, 0), "illustration,$color")
             tikz_maybe_arc(out, c, ar, 0, s, false, "-latex,illustration,$color")
-            tikz_node(out, c + vpol(ar, s/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(s/2)):$s_txt}")
+            tikz_node(out, c + vpol(ar, s/2), "", node_spec(color, s/2, s_txt))
           end
           if !(a ≈ 0.0)
             tikz_polar_segment(out, c, vpol(ar, s), "illustration,$color")
@@ -873,12 +876,12 @@ KhepriBase.b_angles_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts,
             (a > 0.0) ?
               tikz_maybe_arc(out, c, ar, s, a, false, "-latex,illustration,$color") :
               tikz_maybe_arc(out, c, ar, s, a, false, "latex-,illustration,$color")
-            tikz_node(out, c + vpol(ar, s + a/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(s + a/2)):$a_txt}")
+            tikz_node(out, c + vpol(ar, s + a/2), "", node_spec(color, s + a/2, a_txt))
           else
             tikz_polar_segment(out, c, vpol(maxr, a), "-latex,illustration,$color")
           end
         end
-        tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "", "label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(s + a - π/2)):$r_txt}")
+        tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "", node_spec(color, s + a - π/2, r_txt))
       end
     end
   end
@@ -896,17 +899,16 @@ KhepriBase.b_arcs_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, m
           if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
             tikz_line(out, [c, c+vpol(ar, 0)], "illustration,$color")
             tikz_maybe_arc(out, c, ar, 0, s, false, "-latex,illustration,$color")
-            tikz_node(out, c + vpol(ar, s/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(s/2)):$s_txt}")
+            tikz_node(out, c + vpol(ar, s/2), "", node_spec(color, s/2, s_txt))
           end
           if !(a ≈ 0.0)
             #let ar = ((i == 1) || !(s ≈ ss[i-1] + as[i-1])) ? ar : ars[i-1]
             tikz_line(out, [c, c+vpol(r, s)], "illustration,$color")
             tikz_line(out, [c, c+vpol(r, s + a)], "-latex,illustration,$color")
             tikz_maybe_arc(out, c, ar, s, a, false, "-latex,illustration,$color")
-            tikz_node(out, c + vpol(ar, s + a/2), "", "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(s + a/2)):$a_txt}")
+            tikz_node(out, c + vpol(ar, s + a/2), "", node_spec(color, s + a/2, a_txt))
           end
-          tikz_node(out, intermediate_loc(c, c + vpol(r, s + a)), "",           
-          "outer sep=0,inner sep=0,label={[outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(s + a - π/2)):$r_txt}")
+          tikz_node(out, intermediate_loc(c, c + vpol(r, s + a)), "", node_spec(color, s + a - π/2, r_txt))
         end
       end
     end
