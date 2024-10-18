@@ -1013,14 +1013,14 @@ diametric_props = merge(Dict("Dimcen"=> Float64(0.0), "Dimatfit"=>Int32(1), "Dim
 vector_props = merge(Dict("Dimatfit"=>Int32(1), "Dimsah"=>true, "Dimtad"=>Int32(2)), base_props)
 radii_props = merge(Dict("Dimatfit"=>Int32(1), "Dimsah"=>true, "Dimtad"=>Int32(2)), base_props)
 
-KhepriBase.b_labels(b::ACAD, p, strs, mats, mat) =
+KhepriBase.b_labels(b::ACAD, p, txts, mats, mat) =
   [with(current_layer, mat.layer) do
     #@remote(b, CreateLeaderDimension(str, p, p+vpol(annotation_scale(), ϕ), annotation_scale(), mark, label_props))
-    @remote(b, CreateNonLeaderDimension(str, p, p+vpol(0.1*annotation_scale(), ϕ), annotation_scale(), mark, label_props))
+    @remote(b, CreateNonLeaderDimension(txt, p, p+vpol(0.1*annotation_scale(), ϕ), annotation_scale(), mark, label_props))
    end
-   for (str, ϕ, mark, mat)
-     in zip(strs,
-            division(-π/4, 7π/4, length(strs), false),
+   for (txt, ϕ, mark, mat)
+     in zip(txts,
+            division(-π/4, 7π/4, length(txts), false),
             Iterators.flatten((Iterators.repeated("_DOTSMALL", 1), Iterators.repeated("_NONE"))),
             mats)]
 
