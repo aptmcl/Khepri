@@ -997,8 +997,6 @@ backend_dimension(b::ACAD, p0::Loc, p1::Loc, sep::Real, scale::Real, style::Symb
       dimension(p0, p1, add_pol(p0, sep, angle + pi/2), scale, style, b)
   end
 
-export annotation_scale
-const annotation_scale = Parameter(1.0)
 no_props = Dict{String,Any}()
 #illustration_color = rgb(127/255,191/255,255/255)
 label_props = Dict{String,Any}() #"Dimclrd"=>illustration_color)
@@ -1015,8 +1013,9 @@ radii_props = merge(Dict("Dimatfit"=>Int32(1), "Dimsah"=>true, "Dimtad"=>Int32(2
 
 KhepriBase.b_labels(b::ACAD, p, txts, mats, mat) =
   [with(current_layer, mat.layer) do
-    #@remote(b, CreateLeaderDimension(str, p, p+vpol(annotation_scale(), ϕ), annotation_scale(), mark, label_props))
-    @remote(b, CreateNonLeaderDimension(txt, p, p+vpol(0.1*annotation_scale(), ϕ), annotation_scale(), mark, label_props))
+    #Impossible to make this work!!!!
+    #@remote(b, CreateLeaderDimension(txt, p, p+vpol(annotation_scale(), ϕ), annotation_scale(), mark, label_props))
+    @remote(b, CreateNonLeaderDimension(txt, p, p+vpol(0.2*annotation_scale(), ϕ), annotation_scale(), mark, label_props))
    end
    for (txt, ϕ, mark, mat)
      in zip(txts,
