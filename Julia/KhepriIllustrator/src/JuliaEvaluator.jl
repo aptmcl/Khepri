@@ -113,14 +113,23 @@ eval_dot(expr, env) =
   end
 
 #
+export for_loop_steps_limit
+for_loop_steps_limit = Parameter(1)
+
 is_for(expr) = expr isa Expr && expr.head === :for
 eval_for(expr, env) =
   let var = expr.args[1].args[1],
       init = eval_expr(expr.args[1].args[2], env),
       body = expr.args[2]
-    for val in init
-      #eval_expr(:(let $(var) = $(Expr(:quote, val)); $(body) end), env)
-      eval_expr(:((($var) -> $(body))($(Expr(:quote, val)))), env)
+    for (step, val) in enumerate(init)
+      if step <= for_loop_steps_limit() && current_recursive_level() <= recursive_levels_limit()
+        eval_expr(:(let $(var) = $(Expr(:quote, val)); $(body) end), env)
+      else
+        with(recursive_levels_limit, -10) do #Just to be on the safe side
+          eval_expr(:(let $(var) = $(Expr(:quote, val)); $(body) end), env)
+          #eval_expr(:((($var) -> $(body))($(Expr(:quote, val)))), env)
+        end
+      end
     end
     nothing
   end
@@ -269,8 +278,6 @@ illustrate_and_maybe_pause(func, args...) =
     end
   end
 
-apply(func::Function, args_exprs...) = func(args_exprs[1:end/2]...)
-
 export recursive_levels_limit, current_recursive_level, illustrations_stack, step_by_step
 const illustrations_stack = []
 const recursive_levels_limit = Parameter{Real}(5)
@@ -294,7 +301,7 @@ eval_call(expr, env) =
           with(current_recursive_level, recursive_level) do
             let res = 
               is_primitive(func) ?
-                apply(func, args..., exprs...) :
+                func(args...) :
                 let params = function_parameters(func),
                     extended_env = augment_environment(params, args,  function_environment(func))
                   push!(illustrations_stack, call_operator(expr))
@@ -404,6 +411,7 @@ initial_environment =
     @predef(without_illustration)
     )
 
+export eval_expr
 eval_expr(expr) = eval_expr(expr, initial_environment)
 
 #=
