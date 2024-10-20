@@ -34,6 +34,7 @@ encode(::Val{:RH}, t::Val{T}, c::IO, v) where {T} = encode(Val(:CS), t, c, v)
 decode(::Val{:RH}, t::Val{T}, c::IO) where {T} = decode(Val(:CS), t, c)
 
 # We need some additional Encoders
+@encode_decode_as(:RH, Val{:Options}, Val{:Dict})
 @encode_decode_as(:RH, Val{:Brep}, Val{:Guid})
 @encode_decode_as(:RH, Val{:RhinoObject}, Val{:Guid})
 
@@ -177,6 +178,7 @@ public Guid[] GetShape(string prompt)
 public Guid[] GetShapes(string prompt)
 public Guid[] GetAllShapes()
 public Guid[] GetAllShapesInLayer(Guid id)
+public Guid CreateLeaderDimension(String text, Point3d p0, Point3d p1, double scale, String mark, Options props)
 public Guid CreateDiametricDimension(String text, Plane c, Point3d p, Point3d pdim, double scale, String mark, Options props)
 public Guid CreateAngularDimension(String text, Plane p, Point3d p0, Point3d p1, Point3d ptdim, double scale, String mark, Options props) {
 public void SunLight(DateTime dt, double latitude, double longitude, int meridian, float turbidity, bool hasSun)
@@ -686,72 +688,82 @@ KhepriBase.b_pointlight(b::RH, loc::Loc, color::RGB, intensity::Real, range::Rea
 
 # Dimensioning
 
-export annotation_scale
-const annotation_scale = Parameter(1.0)
 no_props = Dict()
-angular_props = Dict("Dimatfit"=>Int32(1), "Dimtad"=>Int32(2), "Dimtix"=>true)
-diametric_props = Dict("Dimcen"=> Float64(0.0), "Dimatfit"=>Int32(1), "Dimtofl"=>true)
+base_props = Dict("TextHeight"=>Float64(0.2))
+base_props = Dict("DimensionScale"=>Float64(0.2))
+label_props = merge(base_props)
+angular_props = merge(base_props)
+diametric_props = merge(base_props)
 
-KhepriBase.b_labels(b::RH, p, strs, mat) =
-  [@remote(b, CreateLeaderDimension(str, p, p+vpol(annotation_scale(), ϕ), annotation_scale(), mark, no_props))
-   for (str, ϕ, mark)
+KhepriBase.b_labels(b::RH, p, strs, mats, mat) =
+  [with(current_layer, mat.layer) do
+    @remote(b, CreateLeaderDimension(str, p, p+vpol(annotation_scale(), ϕ), annotation_scale(), mark, label_props))
+   end
+   for (str, ϕ, mark, mat)
      in zip(strs,
             division(-π/4, 7π/4, length(strs), false),
-            Iterators.flatten((Iterators.repeated("_DOT", 1), Iterators.repeated("_NONE"))))]
+            Iterators.flatten((Iterators.repeated("_DOT", 1), Iterators.repeated("_NONE"))),
+            mats)]
 
 #
-KhepriBase.b_radii_illustration(b::RH, c, rs, rs_txts, mat) =
-  [@remote(b, CreateDiametricDimension(r_txt, c, c+vpol(r, ϕ), 0.0, annotation_scale(), "", no_props))
-   for (r, r_txt, ϕ) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false))]
+KhepriBase.b_radii_illustration(b::RH, c, rs, rs_txts, mats, mat) =
+  [with(current_layer, mat.layer) do
+    @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(r, ϕ), c+vpol(0.1, ϕ+pi/2), annotation_scale(), "", diametric_props))
+   end
+   for (r, r_txt, ϕ, mat) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false), mats)]
 
 # Maybe merge the texts when the radii are the same.
-KhepriBase.b_vectors_illustration(b::RH, p, a, rs, rs_txts, mat) =
-  [@remote(b, CreateDiametricDimension(r_txt, p, p+vpol(r, a), p+vpol(0.1, a+pi/2), annotation_scale(), "", no_props))
-   for (r, r_txt) in zip(rs, rs_txts)]
-      #tikz_line(out, [c, ], "latex-latex,illustration")
-      #tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", "outer sep=0,inner sep=0,label={[illustration]$(rad2deg(a-π/2)):$r_txt}")
+KhepriBase.b_vectors_illustration(b::RH, p, a, rs, rs_txts, mats, mat) =
+  [with(current_layer, mat.layer) do
+    @remote(b, CreateDiametricDimension(r_txt, p, p+vpol(r, a), p+vpol(0.1, a+pi/2), annotation_scale(), "", diametric_props))
+   end
+   for (r, r_txt, mat) in zip(rs, rs_txts, mats)]
 
-KhepriBase.b_angles_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, mat) =
+KhepriBase.b_angles_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, mats, mat) =
   let refs = new_refs(b),
       maxr = maximum(rs),
       n = length(rs),
       ars = division(0.2maxr, 0.7maxr, n, false),
       idxs = sortperm(as),
       (rs, ss, as, r_txts, s_txts, a_txts) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs])
-    for (r, ar, s, a, r_txt, s_txt, a_txt) in zip(rs, ars, ss, as, r_txts, s_txts, a_txts)
-      if !(r ≈ 0.0)
-        if !(s ≈ 0.0)
-        #  push!(refs, @remote(b, CreateAngularDimension(s_txt, c, ar, 0, s, annotation_scale(), 5, no_props)))
-          push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.8*ar, 0), c+vpol(0.8*ar, s), c+vpol(ar, s/2), annotation_scale(), "", no_props)))
+    for (r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
+      with(current_layer, mat.layer) do
+        if !(r ≈ 0.0)
+          if !(s ≈ 0.0)
+          #  push!(refs, @remote(b, CreateAngularDimension(s_txt, c, ar, 0, s, annotation_scale(), 5, no_props)))
+            push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.8*ar, 0), c+vpol(0.8*ar, s), c+vpol(ar, s/2), annotation_scale(), "", angular_props)))
+          end
+          if !(a ≈ 0.0)
+          #  push!(refs, @remote(b, CreateAngularDimension(a_txt, c, ar, s, s + a, annotation_scale(), 5, no_props)))
+          push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.5*ar, s), c+vpol(0.5*ar, s + a), c+vpol(ar, s+a/2), annotation_scale(), "", angular_props)))
+          else
+            #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "")))
+          end
         end
-        if !(a ≈ 0.0)
-        #  push!(refs, @remote(b, CreateAngularDimension(a_txt, c, ar, s, s + a, annotation_scale(), 5, no_props)))
-        push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.5*ar, s), c+vpol(0.5*ar, s + a), c+vpol(ar, s+a/2), annotation_scale(), "", no_props)))
-        else
-          #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "")))
-        end
+        #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "", diametric_props)))
       end
-      #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "", diametric_props)))
     end
     refs
   end
 
-KhepriBase.b_arcs_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, mat) =
+KhepriBase.b_arcs_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, mats, mat) =
   let refs = new_refs(b),
       maxr = maximum(rs),
       n = length(rs),
       ars = division(0.2maxr, 0.7maxr, n, false),
       idxs = sortperm(ss),
       (rs, ss, as, r_txts, s_txts, a_txts) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs])
-    for (i, r, ar, s, a, r_txt, s_txt, a_txt) in zip(1:n, rs, ars, ss, as, r_txts, s_txts, a_txts)
-      if !(r ≈ 0.0)
-        if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
-          push!(refs, @remote(b, CreateAngularDimension(s_txt, c, 0.5*ar, 0, s, annotation_scale(), 0.3*ar, angular_props)))
+    for (i, r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(1:n, rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
+      with(current_layer, mat.layer) do
+        if !(r ≈ 0.0)
+          if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
+            push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.8*ar, 0), c+vpol(0.8*ar, s), c+vpol(ar, s/2), annotation_scale(), "", angular_props)))
+          end
+          if !(a ≈ 0.0)
+            push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.8*ar, s), c+vpol(0.8*ar, s + a), c+vpol(ar, s+a/2), annotation_scale(), "", angular_props)))
+          end
+          #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "", diametric_props)))
         end
-        if !(a ≈ 0.0)
-          push!(refs, @remote(b, CreateAngularDimension(a_txt, c, 0.5*ar, s, s + a, annotation_scale(), 0.3*ar, angular_props)))
-        end
-        #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "", diametric_props)))
       end
     end
     refs
