@@ -278,7 +278,7 @@ end
 #
 illustrate_binding(name, init) =
   if init isa Loc
-    label(init, textify(name))
+    label(init, name)
   elseif init isa Locs
     for (i, p) in enumerate(init)
       illustrate_binding(:($name[$i]), p)
@@ -293,9 +293,9 @@ illustrate(f::typeof(+), p::Union{X,XY,Pol}, v::Union{VPol}, p_expr, v_expr) =
     let (ρ, ϕ) = is_op_call(:vpol, v_expr) ? v_expr.args[2:3] :
                    v_expr isa Symbol ? (Symbol(v_expr, "_ρ"), Symbol(v_expr, "_ϕ")) :
                    (:⊕, :⊗)
-      label(p, textify(p_expr))
-      #dimension(p, p+v, textify(ρ), size=0.1, offset=0)
-      angle_illustration(p, pol_rho(v), 0, pol_phi(v), textify(ρ), textify(0), textify(ϕ))
+      label(p, p_expr)
+      #dimension(p, p+v, ρ, size=0.1, offset=0)
+      angle_illustration(p, pol_rho(v), 0, pol_phi(v), ρ, 0, ϕ)
     end
   end
 
@@ -309,9 +309,9 @@ illustrate(f::typeof(+), p::Union{X,XY,Pol}, v::Union{VXY}, p_expr, v_expr) =
                          (v_expr, v_expr) :
                            (Symbol(v_expr, "_x"), Symbol(v_expr, "_y")) :
                            (:⊕, :⊗)
-      label(p, textify(p_expr))
-      cx(v) ≈ 0.0 ? nothing : vector_illustration(p, 0, cx(v), textify(x))
-      cy(v) ≈ 0.0 ? nothing : vector_illustration(p+vx(cx(v)), π/2, cy(v), textify(y))
+      label(p, p_expr)
+      cx(v) ≈ 0.0 ? nothing : vector_illustration(p, 0, cx(v), x)
+      cy(v) ≈ 0.0 ? nothing : vector_illustration(p+vx(cx(v)), π/2, cy(v), y)
     end
   end
 #
@@ -321,8 +321,8 @@ illustrate(f::typeof(+), p::Union{X,XY,Pol}, v::Union{VX}, p_expr, v_expr) =
                    v_expr.args[2] :
                    v_expr isa Symbol ? v_expr :
                    :⊗
-      label(p, textify(p_expr))
-      vector_illustration(p, 0, cx(v), textify(d))
+      label(p, p_expr)
+      vector_illustration(p, 0, cx(v), d)
     end
   end
 
@@ -331,9 +331,9 @@ illustrate(f::typeof(-), p::Union{X,XY,Pol}, v::Union{VPol}, p_expr, v_expr) =
     let (ρ, ϕ) = is_op_call(:vpol, v_expr) ? v_expr.args[2:3] :
                    v_expr isa Symbol ? (Symbol(v_expr, "_ρ"), Symbol(v_expr, "_ϕ")) :
                    (:⊕, :⊗)
-      label(p, textify(p_expr))
-      #dimension(p, p+v, textify(ρ), size=0.1, offset=0)
-      angle_illustration(p, pol_rho(v), 0, pol_phi(v), textify(ρ), textify(0), textify(ϕ))
+      label(p, p_expr)
+      #dimension(p, p+v, ρ, size=0.1, offset=0)
+      angle_illustration(p, pol_rho(v), 0, pol_phi(v), ρ, 0, ϕ)
     end
   end
 
@@ -346,9 +346,9 @@ illustrate(f::typeof(-), p::Union{X,XY,Pol}, v::Union{VXY}, p_expr, v_expr) =
                          (v_expr, v_expr) :
                            (Symbol(v_expr, "_x"), Symbol(v_expr, "_y")) :
                            (:⊕, :⊗)
-      label(p, textify(p_expr))
-      cx(v) ≈ 0.0 ? nothing : vector_illustration(p, π, cx(v), textify(x))
-      cy(v) ≈ 0.0 ? nothing : vector_illustration(p-vx(cx(v)), -π/2, cy(v), textify(y))
+      label(p, p_expr)
+      cx(v) ≈ 0.0 ? nothing : vector_illustration(p, π, cx(v), x)
+      cy(v) ≈ 0.0 ? nothing : vector_illustration(p-vx(cx(v)), -π/2, cy(v), y)
     end
   end
 
@@ -358,8 +358,8 @@ illustrate(f::typeof(-), p::Union{X,XY,Pol}, v::Union{VX}, p_expr, v_expr) =
                    v_expr.args[2] :
                    v_expr isa Symbol ? v_expr :
                    :⊗
-      label(p, textify(p_expr))
-      vector_illustration(p, π, cx(v), textify(d))
+      label(p, p_expr)
+      vector_illustration(p, π, cx(v), d)
     end
   end
 
@@ -408,7 +408,7 @@ illustrate(f::typeof(line), args...) =
           ps = args[1:n],
           ps_exprs = args[n+1:end]
         for (p, p_expr) in zip(ps, ps_exprs)
-            label(p, textify(p_expr))
+            label(p, p_expr)
         end
       end
     end
@@ -417,8 +417,8 @@ illustrate(f::typeof(line), args...) =
 illustrate(f::typeof(circle), c, r, c_expr, r_expr) =
   if include_illustrate_circles()
     with_recursive_illustration() do
-      label(c, textify(c_expr))
-      radius_illustration(c, r, textify(r_expr))
+      label(c, c_expr)
+      radius_illustration(c, r, r_expr)
     end
   end
 
@@ -427,22 +427,22 @@ illustrate(f::typeof(regular_polygon), n, c, r, a, n_expr, c_expr, r_expr, a_exp
 
 illustrate(f::typeof(arc), c, ρ, α, Δα, c_e, ρ_e, α_e, Δα_e) =
   with_recursive_illustration() do
-    label(c, textify(c_e))
-    #dimension(c, c+vpol(ρ, α), textify(ρ_e), size=0.1, offset=0)
-    arc_illustration(c, ρ, α, Δα, textify(ρ_e), textify(α_e), textify(Δα_e))
+    label(c, c_e)
+    #dimension(c, c+vpol(ρ, α), ρ_e, size=0.1, offset=0)
+    arc_illustration(c, ρ, α, Δα, ρ_e, α_e, Δα_e)
   end
 
 illustrate(f::typeof(point), p, p_expr) =
   with_recursive_illustration() do
-    label(p, textify(p_expr))
+    label(p, p_expr)
   end
 
 
 illustrate(f::typeof(intermediate_loc), p, q, p_expr, q_expr) =
   let m = intermediate_loc(p, q)
     with_recursive_illustration() do
-      label(p, textify(p_expr))
-      label(q, textify(q_expr))
+      label(p, p_expr)
+      label(q, q_expr)
       vector_illustration(p, (m-p).ϕ, distance(p, m), " ")
       vector_illustration(q, (m-q).ϕ, distance(m, q), " ")
     end
@@ -451,11 +451,11 @@ illustrate(f::typeof(intermediate_loc), p, q, p_expr, q_expr) =
 illustrate(f::typeof(intermediate_loc), p, q, factor, p_expr, q_expr, factor_expr) =
   let m = intermediate_loc(p, q, factor)
     with_recursive_illustration() do
-      label(p, textify(p_expr))
-      label(q, textify(q_expr))
-      factor isa Number ?
-        vector_illustration(p, (m-p).ϕ, distance(p, m), "f=$(factor)") :
-          vector_illustration(p, (m-p).ϕ, distance(p, m), textify(factor_expr)*"=$(factor)")
+      label(p, p_expr)
+      label(q, q_expr)
+      factor_expr isa Number ?
+        vector_illustration(p, (m-p).ϕ, distance(p, m), :($factor*($q_expr - $p_expr))) :
+        vector_illustration(p, (m-p).ϕ, distance(p, m), :($factor_expr*($q_expr - $p_expr)))
       vector_illustration(q, (m-q).ϕ, distance(m, q), " ")
     end
   end
