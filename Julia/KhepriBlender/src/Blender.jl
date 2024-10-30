@@ -527,9 +527,9 @@ KhepriBase.b_render_and_save_view(b::BLR, path::String) =
     elseif render_kind() == :white
       error("Finish this")
     else
-      error("Finish this")
       @remote(b, cycles_renderer(1200, true, false, true, render_exposure()))
     end
+    PNGFile(path)
   end
 
 export render_svg
