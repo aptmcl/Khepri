@@ -472,7 +472,7 @@ vrotate(<0,0,1000000000>,<-Al,Az,0>)
 
 ####################################################
 # Clay models
-povray_clay_settings_string() =
+povray_clay_settings_string_old() =
 """
 #version 3.7;
 global_settings {
@@ -498,12 +498,37 @@ sky_sphere {
   }
 """
 
+povray_clay_settings_string(camera, target) =
+  let rot = (11π/6 - (camera - target).ϕ)*180/π
+    """#version 3.7;
+global_settings {
+  assumed_gamma 1.0
+  radiosity {
+    pretrace_start 64/image_width  //0.04
+    pretrace_end 1/image_width     //0.002
+    count 1000
+    error_bound 0.1
+    recursion_limit 1
+  }
+}
+#default{ finish { ambient 0 diffuse 1 conserve_energy }}
+sky_sphere{ 
+  pigment{ 
+    image_map{ hdr "studio_small_05_4k.hdr"
+               gamma 1.0
+               map_type 1 interpolate 2 }
+    }
+  rotate < 0,$rot,0>
+}
+"""
+  end
+
 ####################################################
 abstract type POVRayKey end
 const POVRayId = Any
 const POVRayRef = NativeRef{POVRayKey, POVRayId}
 
-const POVRay = IOBufferBackend{POVRayKey, POVRayId, Nothing}
+const POVRay = IOBackend{POVRayKey, POVRayId, Nothing}
 
 KhepriBase.backend_name(::POVRay) = "POVRay"
 
@@ -783,7 +808,7 @@ povray_environment_string(b::POVRay, env::RealisticSkyEnvironment) =
     b.render_env.sun)
 
 povray_environment_string(b::POVRay, env::ClayEnvironment) =
-  povray_clay_settings_string()
+  povray_clay_settings_string(b.view.camera, b.view.target)
 
 ####################################################
 
@@ -810,7 +835,10 @@ export_to_povray(b::POVRay, path::String) =
         println(buf, str)
         write(out, str)
       end
-      # write the view
+      let v = in_world(b.view.camera - b.view.target)
+        println(out, "plane {<$(v.x),$(v.y),$(v.z)>, -10000 texture { pigment { color rgb <0,0,0> }}}")
+      end
+    # write the view
       write_povray_camera(out, b.view.camera, b.view.target, b.view.lens)
     end
   end
@@ -829,7 +857,7 @@ const LightsysIV_lib = Parameter(realpath(normpath(@__DIR__, "..", "lib", "Light
 export rendered_image_area
 rendered_image_area = Parameter{Union{Missing,Tuple{Int,Int,Int,Int}}}(missing)
 
-KhepriBase.b_render_view(b::POVRay, path::String) =
+KhepriBase.b_render_and_save_view(b::POVRay, path::String) =
   let povpath = path_replace_suffix(path, ".pov"),
       inipath = path_replace_suffix(path, ".ini"),
       options = @static(Sys.iswindows() ? (film_active() ? ["-D", "/EXIT", "/RENDER"] : ["/RENDER"]) : []),
@@ -855,20 +883,21 @@ KhepriBase.b_render_view(b::POVRay, path::String) =
         end
       end
     end
-    run(cmd, wait=@static(Sys.iswindows() ? film_active() : true))
+    let wait = @static(Sys.iswindows() ? film_active() : true)
+      run(cmd, wait=wait)
+      wait ? PNGFile(path) : path
+    end
   end
 
-export clay_model, realistic_model
-clay_model(level::Real=0, b::POVRay=povray) =
-  begin
-    b.sky = povray_clay_settings_string()
-    b.ground_level = level
-    b.ground_material = povray_definition("Ground", "texture", "{ pigment { color rgb 3 } finish { reflection 0 ambient 0 }}")
-  end
-
-realistic_model(level::Real=0, b::POVRay=povray) =
-  begin
-    b.sky = povray_realistic_sky_string(DateTime(2020, 9, 21, 10, 0, 0), 39, 9, 0, 5, true)
-    b.ground_level = level
-    b.ground_material = povray_gray_ground
+KhepriBase.b_render_final_setup(b::POVRay, kind) =
+  if kind == :white
+    b.render_env = ClayEnvironment()
+    b.ground_level = 0
+    b.ground_material = material("Ground", povray=>povray_definition("Ground", "texture", "{ pigment { color rgb 3 } finish { reflection 0 ambient 0 }}"))
+  elseif kind == :black
+    error("Finish this")
+  elseif kind == :realistic
+    b.render_env = RealisticSkyEnvironment(5, true)
+    b.ground_level = 0
+    b.ground_material = material("Ground", povray=>povray_gray_ground)
   end
