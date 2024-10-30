@@ -365,36 +365,6 @@ tikz_transform(out::IO, f::Function, c::Loc) =
     tikz_e(out, "\\end{scope}")
   end
 
-# tikz_set_view(out::IO, view, options) =
-#   let v = view.camera - view.target,
-#       contents = String(take(out)),
-#       out = IOBuffer()
-#     print(out, "\\tdplotsetmaincoords{")
-#     tikz_number(out, rad2deg(sph_psi(v)))
-#     print(out, "}{")
-#     tikz_number(out, rad2deg(sph_phi(v))+90)
-#     println(out, "}")
-#     println(out, "\\begin{tikzpicture}[tdplot_main_coords$(use_wireframe() ? "" : ",fill=gray")$(options=="" ? "" : ",")$options]") #)opacity=0.2")]")
-#     print(out, contents)
-#     println(out, "\\end{tikzpicture}")
-#     String(take!(out))
-#   end
-
-#=
-tikz_set_view(out::IO, camera::Loc, target::Loc, lens::Real) =
-  let v = camera - target,
-      contents = String(take(out)),
-      out = IOBuffer()
-    println(out, raw"\begin{tikzpicture}")
-    #println(out, "\\begin{axis}[view={$(rad2deg(sph_phi(v))+90)}{$(rad2deg(sph_psi(v)))},axis equal image,hide axis,colormap/blackwhite]")
-    println(out, "\\begin{axis}[axis equal image,hide axis,colormap/blackwhite]")
-    print(out, contents)
-    println(out, raw"\end{axis}")
-    println(out, raw"\end{tikzpicture}")
-    String(take!(out))
-  end
-=#
-
 tikz_set_view(out::IO, view, options) =
   let v = view.target - view.camera,
       contents = String(take(out)),
@@ -428,7 +398,7 @@ const TikZIds = Vector{TikZId}
 const TikZRef = GenericRef{TikZKey, TikZId}
 const TikZRefs = Vector{TikZRef}
 const TikZNativeRef = NativeRef{TikZKey, TikZId}
-const TikZ = IOBufferBackend{TikZKey, TikZId, Vector}
+const TikZ = IOBackend{TikZKey, TikZId, Vector}
 
 KhepriBase.void_ref(b::TikZ) = nothing
 
@@ -471,36 +441,6 @@ KhepriBase.after_connecting(b::TikZ) =
     set_material()
 	#set_material(blender, material_grass, "asset_base_id:97b171b4-2085-4c25-8793-2bfe65650266 asset_type:material")
 	#set_material(blender, material_grass, "asset_base_id:7b05be22-6bed-4584-a063-d0e616ddea6a asset_type:material")
-  end
-
-
-
-tikz_output(options="") =
-  let b = tikz
-    b.cached = false
-    truncate(connection(b), 0)
-    empty!(b.extra)
-    sort_illustrations!(b)
-    realize_shapes(b)
-    painter_sorter!(b.extra, b.view.camera)
-    for tri in b.extra
-      paint_trig(b, tri)
-    end
-    b.view.is_top_view ?
-      tikz_set_view_top(connection(b), options) :
-      tikz_set_view(connection(b), b.view, options)
-  end
-
-painter_sorter!(trigs, camera) =
-  sort!(trigs, lt=(t2, t1)->distance(trig_center(t1[1:end-1]...), camera)<distance(trig_center(t2[1:end-1]...), camera))
-
-
-tikz_output_and_reset(options="") =
-  let b = tikz,
-      out = tikz_output(options)
-    b_delete_all_shapes(b)
-    b.view.lens = 0 # Reset the lens
-    out
   end
 
 withTikZXForm(f, b, c, mat) =
@@ -720,6 +660,121 @@ KhepriBase.b_arc_dimension(b::TikZ, c, r, α, Δα, rstr, Δstr, size, offset, m
   #   end
   # end
 
+# Illustrations
+texify(expr::String) = expr
+texify(expr) = latexify(expr)
+
+KhepriBase.b_labels(b::TikZ, p, data, mat) =
+  withTikZXForm(b, p, mat) do out, c
+    tikz_node(out, c, "",
+        "fill,circle,outer sep=0,inner sep=0,minimum size=2pt,illustration,$(tikz_color(data[1].mat.layer.color)),"*
+        join(["label={[scale=$scale,illustration,$(tikz_color(mat.layer.color))]$ϕ:$(texify(txt))}"
+              for ((; txt, mat, scale), ϕ) in zip(data, division(-45, 315, length(data), false))], ","))
+  end
+
+node_spec(color, scale, angle, txt) =
+  "outer sep=0,inner sep=0,label={[scale=$scale,outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(angle)):$(texify(txt))}"
+
+arrow_spec(color, scale, left, right) =
+  "illustration,"*(left ? "{Latex[scale=$scale]}" : "")*"-"*(right ? "{Latex[scale=$scale]}" : "")*","*color
+
+KhepriBase.b_radii_illustration(b::TikZ, c, rs, rs_txts, mats, mat) =
+  withTikZXForm(b, c, mat) do out, cc
+    for (r,r_txt,ϕ,mat) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false), mats)
+      color = tikz_color(mat.layer.color)
+      tikz_polar_segment(out, c, vpol(r, ϕ), arrow_spec(color, default_annotation_scale(), true, true))
+      tikz_node(out, intermediate_loc(c, c + vpol(r, ϕ)), "", node_spec(color, default_annotation_scale(), ϕ+π/2, r_txt))
+    end
+  end
+
+KhepriBase.b_vectors_illustration(b::TikZ, p, a, rs, rs_txts, mats, mat) =
+  withTikZXForm(b, p, mat) do out, c
+    for (r, r_txt, mat) in zip(rs, rs_txts, mats)
+      color = tikz_color(mat.layer.color)
+      tikz_polar_segment(out, c, vpol(r, a), arrow_spec(color, default_annotation_scale(), true, true))
+      tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", node_spec(color, default_annotation_scale(), a-π/2, r_txt))
+    end
+  end
+
+KhepriBase.b_angles_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, mats, mat) =
+  withTikZXForm(b, c, mat) do out, cc
+    let maxr = maximum(rs),
+        n = length(rs),
+        ars = division(0.2maxr, 0.7maxr, n, false),
+        idxs = sortperm(as),
+        (rs, ss, as, r_txts, s_txts, a_txts, mats) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs], mats[idxs])
+      for (r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
+        color = tikz_color(mat.layer.color)
+        tikz_params = "illustration,"*color
+        if !(r ≈ 0.0)
+          if !(s ≈ 0.0)
+            tikz_polar_segment(out, c, vpol(ar, 0), tikz_params)
+            tikz_maybe_arc(out, c, ar, 0, s, false, arrow_spec(color, default_annotation_scale(), false, true))
+            tikz_node(out, c + vpol(ar, s/2), "", node_spec(color, default_annotation_scale(), s/2, s_txt))
+          end
+          if !(a ≈ 0.0)
+            tikz_polar_segment(out, c, vpol(ar, s), tikz_params)
+            tikz_polar_segment(out, c, vpol(r, s + a), arrow_spec(color, default_annotation_scale(), false, true))
+            if (ar > r)
+              tikz_polar_segment(out, pol(r, s + a), vpol(ar-r, s + a), "dashed,$tikz_params")
+            end
+            (a > 0.0) ?
+              tikz_maybe_arc(out, c, ar, s, a, false, arrow_spec(color, default_annotation_scale(), false, true)) :
+              tikz_maybe_arc(out, c, ar, s, a, false, arrow_spec(color, default_annotation_scale(), true, false))
+            tikz_node(out, c + vpol(ar, s + a/2), "", node_spec(color, default_annotation_scale(), s + a/2, a_txt))
+          else
+            tikz_polar_segment(out, c, vpol(maxr, a), arrow_spec(color, default_annotation_scale(), false, true))
+          end
+        end
+        tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "", node_spec(color, default_annotation_scale(), s + a - π/2, r_txt))
+      end
+    end
+  end
+
+KhepriBase.b_arcs_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, mats, mat) =
+  withTikZXForm(b, c, mat) do out, cc
+    let maxr = maximum(rs),
+        n = length(rs),
+        ars = division(0.2maxr, 0.7maxr, n, false),
+        idxs = sortperm(ss),
+        (rs, ss, as, r_txts, s_txts, a_txts, mats) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs], mats[idxs])
+      for (i, r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(1:n, rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
+        color = tikz_color(mat.layer.color)
+        tikz_params = "illustration,"*color
+        if !(r ≈ 0.0)
+          if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
+            tikz_line(out, [c, c+vpol(ar, 0)], tikz_params)
+            tikz_maybe_arc(out, c, ar, 0, s, false, arrow_spec(color, default_annotation_scale(), false, true))
+            tikz_node(out, c + vpol(ar, s/2), "", node_spec(color, default_annotation_scale(), s/2, s_txt))
+          end
+          if !(a ≈ 0.0)
+            #let ar = ((i == 1) || !(s ≈ ss[i-1] + as[i-1])) ? ar : ars[i-1]
+            tikz_line(out, [c, c+vpol(r, s)], tikz_params)
+            tikz_line(out, [c, c+vpol(r, s + a)], arrow_spec(color, default_annotation_scale(), false, true))
+            tikz_maybe_arc(out, c, ar, s, a, false, arrow_spec(color, default_annotation_scale(), false, true))
+            tikz_node(out, c + vpol(ar, s + a/2), "", node_spec(color, default_annotation_scale(), s + a/2, a_txt))
+          end
+          tikz_node(out, intermediate_loc(c, c + vpol(r, s + a)), "", node_spec(color, default_annotation_scale(), s + a - π/2, r_txt))
+        end
+      end
+    end
+  end
+
+#
+is_illustration(s) =
+  is_labels(s) ||
+  is_vectors_illustration(s) ||
+  is_radii_illustration(s) ||
+  is_angles_illustration(s) ||
+  is_arcs_illustration(s)
+
+sort_illustrations!(b::TikZ) =
+  # WHERE IS PARTITION????
+  let illustrations = filter(is_illustration, b.shapes),
+      non_illustrations = filter(s->! is_illustration(s), b.shapes)
+    b.shapes = Shape[non_illustrations..., illustrations...]
+  end
+
 # For extra non-portable stuff
 export add_tikz
 add_tikz(str) =
@@ -742,68 +797,82 @@ add_tikz(str) =
   end
 =#
 
-process_tex(path) =
-  cd(dirname(path)) do
-    let texname = basename(path)
-      @static if Sys.islinux()
-        try
-          for i in 1:2
-            run(`lualatex -shell-escape -halt-on-error $texname`, wait=true)
-          end
-          run(`xdg-open $(path_replace_suffix(texname, ".pdf"))`)
-        catch e
-          error("Could not process the generated .tex file. Do you have lualatex installed?")
-        end
-      elseif Sys.isapple()
-        error("Can't handle MacOS yet")
-      elseif Sys.iswindows()
-        let miktex_texify = normpath(joinpath(ENV["APPDATA"], "..", "Local", "Programs", "MiKTeX", "miktex", "bin", "x64", "texify"))
-          try
-            run(tikz_as_png() ?
-                  `$(miktex_texify) --pdf --engine=luatex $(texname)` :
-                  `$(miktex_texify) --pdf --engine=luatex --run-viewer $(texname)`,
-                wait=true)
-          catch e
-            error("Could not process the generated .tex file. Do you have MikTeX installed?")
-          end
-        end
-      else
-        error("Unknown operating system")
-      end
+#=
+To generate the actual TikZ code, we need two different things:
+1. For existing LaTeX documents we want to "inject" just a tikzpicture.
+2. For imediate viewing, we want to generate a standalone document and maybe convert it to SVG.
+=#
+
+gen_tex_document(b) =
+  let out = connection(b)
+    println(out, raw"\documentclass{standalone}")
+    println(out, raw"\usepackage{tikz,tikz-3dplot}")
+    println(out, raw"\usetikzlibrary{perspective,patterns}")
+    println(out, raw"\usetikzlibrary{calc,fadings,decorations.pathreplacing}")
+    println(out, raw"\usetikzlibrary{shapes,fit}")
+    println(out, raw"\usetikzlibrary{hobby}")
+    println(out, raw"\usetikzlibrary{arrows.meta}")
+    #println(out, raw"\usepackage{pgfplots}")
+    #println(out, raw"\pgfplotsset{compat=1.17}")
+    #println(out, raw"\usepackage{tikz-3dplot}")
+    println(out, raw"\begin{document}")
+    #println(out, raw"\tikzset{illustration/.style={ultra thin,blue!50}}")
+    println(out, raw"\tikzset{illustration/.style={ultra thin}}")
+    println(out, raw"\tikzset{dimension/.style={very thin,lightgray}}")
+    gen_tikz_picture(b)
+    println(out, raw"\end{document}")
+  end
+
+gen_tikz_picture(b::TikZ) =
+  let out = connection(b), 
+      v = b.view.target - b.view.camera,
+      options = b.view.is_top_view ?
+        "" :
+        "3d view={$(rad2deg(sph_phi(v))-90)}{$(rad2deg(sph_psi(v))-90)}$(use_wireframe() ? "" : ",fill=gray")"
+    println(out, "\\begin{tikzpicture}[$options]")
+    gen_tikz_commands(b)
+    println(out, "\\end{tikzpicture}")
+  end
+
+gen_tikz_commands(b::TikZ) =
+  begin
+    empty!(b.extra)
+    sort_illustrations!(b)
+    realize_shapes(b)
+    painter_sorter!(b.extra, b.view.camera)
+    for tri in b.extra
+      paint_trig(b, tri)
     end
   end
 
+painter_sorter!(trigs, camera) =
+  sort!(trigs, lt=(t2, t1)->distance(trig_center(t1[1:end-1]...), camera)<distance(trig_center(t2[1:end-1]...), camera))
 
-export tikz_as_png
-const tikz_as_png = Parameter(false)
+# HACK THESE NEED TO BE FINISHED. They were used to help generate drawings for the book.
+#=
+tikz_output(options="", b=tikz) =
+  gen_tikz_picture(b)
 
-process_tikz(path) =
-  let contents = tikz_output(),
-      path = path_replace_suffix(path, ".tex")
-    open(path, "w") do out
-      println(out, tikz_as_png() ?
-                     raw"\documentclass[convert={density=300,outext=.png}]{standalone}" :
-                     raw"\documentclass{standalone}")
-      println(out, raw"\usepackage{tikz,tikz-3dplot}")
-      println(out, raw"\usetikzlibrary{perspective,patterns}")
-      println(out, raw"\usetikzlibrary{calc,fadings,decorations.pathreplacing}")
-      println(out, raw"\usetikzlibrary{shapes,fit}")
-      println(out, raw"\usetikzlibrary{hobby}")
-      println(out, raw"\usetikzlibrary{arrows.meta}")
-      #println(out, raw"\usepackage{pgfplots}")
-      #println(out, raw"\pgfplotsset{compat=1.17}")
-      #println(out, raw"\usepackage{tikz-3dplot}")
-      println(out, raw"\begin{document}")
-      #println(out, raw"\tikzset{illustration/.style={ultra thin,blue!50}}")
-      println(out, raw"\tikzset{illustration/.style={ultra thin}}")
-      println(out, raw"\tikzset{dimension/.style={very thin,lightgray}}")
-      println(out, contents)
-      println(out, raw"\end{document}")
-    end
-    process_tex(path)
-    println(path)
+
+tikz_output_and_reset(options="") =
+  let b = tikz,
+      out = tikz_output(options)
+    b_delete_all_shapes(b)
+    b.view.lens = 0 # Reset the lens
+    out
   end
 
+tikz_set_view_top(out::IO, options) =
+  let contents = String(take(out)),
+      out = IOBuffer()
+    println(out, "\\begin{tikzpicture}[$options]")
+    print(out, contents)
+    println(out, "\\end{tikzpicture}")
+    String(take!(out))
+  end
+=#
+
+#=
 export visualize_tikz
 visualize_tikz(name="Test") =
   with(render_kind_dir, "TikZ",
@@ -811,126 +880,77 @@ visualize_tikz(name="Test") =
     process_tikz(prepare_for_saving_file(render_pathname(name)))
     @info "Tex file: $(render_pathname(name))"
   end
+=#
 
-KhepriBase.b_render_pathname(::TikZ, name) = 
-  with(render_ext, tikz_as_png() ? ".png" : ".pdf") do
+KhepriBase.b_render_pathname(::TikZ, name) =
+  with(render_ext, ".pdf") do
     render_default_pathname(name)
   end
 
 KhepriBase.b_render_and_save_view(b::TikZ, path) =
-  process_tikz(path)
-
-# Illustrations
-texify(expr::String) = expr
-texify(expr) = latexify(expr)
-
-KhepriBase.b_labels(b::TikZ, p, txts, mats, mat) =
-  withTikZXForm(b, p, mat) do out, c
-    tikz_node(out, c, "",
-      "scale=$(annotation_scale()),fill,circle,outer sep=0,inner sep=0,minimum size=2pt,illustration,$(tikz_color(mats[1].layer.color)),"*
-      join(["label={[scale=$(annotation_scale()),illustration,$(tikz_color(mat.layer.color))]$ϕ:$(texify(txt))}"
-            for (txt,ϕ,mat) in zip(txts, division(-45, 315, length(txts), false), mats)], ","))
-  end
-
-node_spec(color, angle, txt) =
-  "scale=$(annotation_scale()),outer sep=0,inner sep=0,label={[scale=$(annotation_scale()),outer sep=0,inner sep=0,illustration,$color]$(tikz_deg_string(angle)):$(texify(txt))}"
-
-arrow_spec(color, left, right) =
-  "illustration,"*(left ? "{Latex[scale=$(annotation_scale())]}" : "")*"-"*(right ? "{Latex[scale=$(annotation_scale())]}" : "")*","*color
-
-KhepriBase.b_radii_illustration(b::TikZ, c, rs, rs_txts, mats, mat) =
-  withTikZXForm(b, c, mat) do out, cc
-    for (r,r_txt,ϕ,mat) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false), mats)
-      color = tikz_color(mat.layer.color)
-      tikz_polar_segment(out, c, vpol(r, ϕ), arrow_spec(color, true, true))
-      tikz_node(out, intermediate_loc(c, c + vpol(r, ϕ)), "", node_spec(color, ϕ+π/2, r_txt))
+  let texpath = path_replace_suffix(path, ".tex"),
+      prev_io = b.io
+    println(texpath)
+    open(texpath, "w") do out
+      b.io = out
+      try
+        gen_tex_document(b)
+      finally
+        b.io = prev_io
+      end
     end
+    to_pdf(texpath)
   end
-
-KhepriBase.b_vectors_illustration(b::TikZ, p, a, rs, rs_txts, mats, mat) =
-  withTikZXForm(b, p, mat) do out, c
-    for (r, r_txt, mat) in zip(rs, rs_txts, mats)
-      color = tikz_color(mat.layer.color)
-      tikz_polar_segment(out, c, vpol(r, a), arrow_spec(color, true, true))
-      tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", node_spec(color, a-π/2, r_txt))
-    end
-  end
-
-KhepriBase.b_angles_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, mats, mat) =
-  withTikZXForm(b, c, mat) do out, cc
-    let maxr = maximum(rs),
-        n = length(rs),
-        ars = division(0.2maxr, 0.7maxr, n, false),
-        idxs = sortperm(as),
-        (rs, ss, as, r_txts, s_txts, a_txts, mats) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs], mats[idxs])
-      for (r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
-        color = tikz_color(mat.layer.color)
-        tikz_params = "illustration,"*color
-        if !(r ≈ 0.0)
-          if !(s ≈ 0.0)
-            tikz_polar_segment(out, c, vpol(ar, 0), tikz_params)
-            tikz_maybe_arc(out, c, ar, 0, s, false, arrow_spec(color, false, true))
-            tikz_node(out, c + vpol(ar, s/2), "", node_spec(color, s/2, s_txt))
-          end
-          if !(a ≈ 0.0)
-            tikz_polar_segment(out, c, vpol(ar, s), tikz_params)
-            tikz_polar_segment(out, c, vpol(r, s + a), arrow_spec(color, false, true))
-            if (ar > r)
-              tikz_polar_segment(out, pol(r, s + a), vpol(ar-r, s + a), "dashed,$tikz_params")
+  
+to_pdf(texpath) =
+  ! isfile(texpath) ?
+    error("Inexisting file $texpath") :
+    let pdfpath = path_replace_suffix(texpath, ".pdf"),
+        needs_update = ! isfile(pdfpath) || mtime(texpath) > mtime(pdfpath)
+      if needs_update
+        cd(dirname(texpath)) do
+          let texname = basename(texpath),
+              pdfname = path_replace_suffix(texname, ".pdf")
+            @static if Sys.islinux()
+              try
+                for i in 1:2
+                  run(`lualatex -shell-escape -halt-on-error $texname`, wait=true)
+                end
+                run(`xdg-open $pdfname`)
+              catch e
+                error("Could not process the generated .tex file. Do you have lualatex installed?")
+              end
+            elseif Sys.isapple()
+              error("Can't handle MacOS yet")
+            elseif Sys.iswindows()
+              let texify = Sys.which("texify") #normpath(joinpath(ENV["APPDATA"], "..", "Local", "Programs", "MiKTeX", "miktex", "bin", "x64", "texify"))
+                if isnothing(texify)
+                  error("Could not find texify. Do you have MikTeX installed?")
+                else
+                  try
+                    run(`$(texify) --pdf --engine=luatex --run-viewer $(texname)`, wait=true)
+                    PDFFile(pdfpath)
+                  catch e
+                    error("Could not process $texname to generate $pdfname.")
+                  end
+                end
+              end
+            else
+              error("Unknown operating system")
             end
-            (a > 0.0) ?
-              tikz_maybe_arc(out, c, ar, s, a, false, arrow_spec(color, false, true)) :
-              tikz_maybe_arc(out, c, ar, s, a, false, arrow_spec(color, true, false))
-            tikz_node(out, c + vpol(ar, s + a/2), "", node_spec(color, s + a/2, a_txt))
-          else
-            tikz_polar_segment(out, c, vpol(maxr, a), arrow_spec(color, false, true))
           end
         end
-        tikz_node(out, intermediate_loc(c, c + vpol(maxr, s + a)), "", node_spec(color, s + a - π/2, r_txt))
+      else
+        PDFFile(pdfpath)
       end
     end
+
+
+#=
+  let pathname = abspath(repr(b)*"-"*Dates.format(now(), dateformat"Y-m-d-H-M-S-s")*".svg")
+    write(io, read(b_save_view(b, mime, pathname)))
   end
 
-KhepriBase.b_arcs_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, mats, mat) =
-  withTikZXForm(b, c, mat) do out, cc
-    let maxr = maximum(rs),
-        n = length(rs),
-        ars = division(0.2maxr, 0.7maxr, n, false),
-        idxs = sortperm(ss),
-        (rs, ss, as, r_txts, s_txts, a_txts, mats) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs], mats[idxs])
-      for (i, r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(1:n, rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
-        color = tikz_color(mat.layer.color)
-        tikz_params = "illustration,"*color
-        if !(r ≈ 0.0)
-          if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
-            tikz_line(out, [c, c+vpol(ar, 0)], tikz_params)
-            tikz_maybe_arc(out, c, ar, 0, s, false, arrow_spec(color, false, true))
-            tikz_node(out, c + vpol(ar, s/2), "", node_spec(color, s/2, s_txt))
-          end
-          if !(a ≈ 0.0)
-            #let ar = ((i == 1) || !(s ≈ ss[i-1] + as[i-1])) ? ar : ars[i-1]
-            tikz_line(out, [c, c+vpol(r, s)], tikz_params)
-            tikz_line(out, [c, c+vpol(r, s + a)], arrow_spec(color, false, true))
-            tikz_maybe_arc(out, c, ar, s, a, false, arrow_spec(color, false, true))
-            tikz_node(out, c + vpol(ar, s + a/2), "", node_spec(color, s + a/2, a_txt))
-          end
-          tikz_node(out, intermediate_loc(c, c + vpol(r, s + a)), "", node_spec(color, s + a - π/2, r_txt))
-        end
-      end
-    end
-  end
+b_save_view(b::Backend, mime::MIME"image/svg+xml", name) =
 
-#
-is_illustration(s) =
-  is_labels(s) ||
-  is_vectors_illustration(s) ||
-  is_radii_illustration(s) ||
-  is_angles_illustration(s) ||
-  is_arcs_illustration(s)
-
-sort_illustrations!(b::TikZ) =
-  # WHERE IS PARTITION????
-  let illustrations = filter(is_illustration, b.shapes),
-      non_illustrations = filter(s->! is_illustration(s), b.shapes)
-    b.shapes = Shape[non_illustrations..., illustrations...]
-  end
+=#
