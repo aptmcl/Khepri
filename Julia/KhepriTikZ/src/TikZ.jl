@@ -890,7 +890,6 @@ KhepriBase.b_render_pathname(::TikZ, name) =
 KhepriBase.b_render_and_save_view(b::TikZ, path) =
   let texpath = path_replace_suffix(path, ".tex"),
       prev_io = b.io
-    println(texpath)
     open(texpath, "w") do out
       b.io = out
       try
@@ -903,47 +902,45 @@ KhepriBase.b_render_and_save_view(b::TikZ, path) =
   end
   
 to_pdf(texpath) =
-  ! isfile(texpath) ?
-    error("Inexisting file $texpath") :
-    let pdfpath = path_replace_suffix(texpath, ".pdf"),
-        needs_update = ! isfile(pdfpath) || mtime(texpath) > mtime(pdfpath)
-      if needs_update
-        cd(dirname(texpath)) do
-          let texname = basename(texpath),
-              pdfname = path_replace_suffix(texname, ".pdf")
-            @static if Sys.islinux()
-              try
-                for i in 1:2
-                  run(`lualatex -shell-escape -halt-on-error $texname`, wait=true)
-                end
-                run(`xdg-open $pdfname`)
-              catch e
-                error("Could not process the generated .tex file. Do you have lualatex installed?")
+  let pdfpath = path_replace_suffix(texpath, ".pdf"),
+      needs_update = ! isfile(pdfpath) || mtime(texpath) > mtime(pdfpath)
+    if needs_update
+      cd(dirname(texpath)) do
+        let texname = basename(texpath),
+            pdfname = path_replace_suffix(texname, ".pdf")
+          @static if Sys.islinux()
+            try
+              for i in 1:2
+                run(`lualatex -shell-escape -halt-on-error $texname`, wait=true)
               end
-            elseif Sys.isapple()
-              error("Can't handle MacOS yet")
-            elseif Sys.iswindows()
-              let texify = Sys.which("texify") #normpath(joinpath(ENV["APPDATA"], "..", "Local", "Programs", "MiKTeX", "miktex", "bin", "x64", "texify"))
-                if isnothing(texify)
-                  error("Could not find texify. Do you have MikTeX installed?")
-                else
-                  try
-                    run(`$(texify) --pdf --engine=luatex --run-viewer $(texname)`, wait=true)
-                    PDFFile(pdfpath)
-                  catch e
-                    error("Could not process $texname to generate $pdfname.")
-                  end
-                end
-              end
-            else
-              error("Unknown operating system")
+              run(`xdg-open $pdfname`)
+            catch e
+              error("Could not process the generated .tex file. Do you have lualatex installed?")
             end
+          elseif Sys.isapple()
+            error("Can't handle MacOS yet")
+          elseif Sys.iswindows()
+            let texify = Sys.which("texify") #normpath(joinpath(ENV["APPDATA"], "..", "Local", "Programs", "MiKTeX", "miktex", "bin", "x64", "texify"))
+              if isnothing(texify)
+                error("Could not find texify. Do you have MikTeX installed?")
+              else
+                try
+                  run(`$(texify) --pdf --engine=luatex --run-viewer $(texname)`, wait=true)
+                  PDFFile(pdfpath)
+                catch e
+                  error("Could not process $texname to generate $pdfname.")
+                end
+              end
+            end
+          else
+            error("Unknown operating system")
           end
         end
-      else
-        PDFFile(pdfpath)
       end
+    else
+      PDFFile(pdfpath)
     end
+  end
 
 
 #=
