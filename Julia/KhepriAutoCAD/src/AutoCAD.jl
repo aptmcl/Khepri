@@ -335,6 +335,7 @@ public ObjectId CreateAlignedDimension(String text, Point3d p0, Point3d p1, Poin
 public ObjectId CreateRadialDimension(String text, Point3d c, Point3d chord, double leader, double scale, String mark, Options props)
 public ObjectId CreateDiametricDimension(String text, Point3d p0, Point3d p1, double leader, double scale, String mark1, String mark2, Options props)
 public ObjectId CreateAngularDimension(String text, Point3d p0, Point3d p1, Point3d q0, Point3d q1, Point3d c, double scale, String mark1, String mark2, Options props)
+public ObjectId CreateAngularDimension3Pt(String text, Point3d v, Point3d p0, Point3d p1, Point3d c, double scale, String mark1, String mark2, Options props) {
 public String TextString(Entity ent)
 public Point3d TextPosition(Entity ent)
 public double TextHeight(Entity ent)
@@ -1011,29 +1012,28 @@ diametric_props = merge(Dict("Dimcen"=> Float64(0.0), "Dimatfit"=>Int32(1), "Dim
 vector_props = merge(Dict("Dimatfit"=>Int32(1), "Dimsah"=>true, "Dimtad"=>Int32(2)), base_props)
 radii_props = merge(Dict("Dimatfit"=>Int32(1), "Dimsah"=>true, "Dimtad"=>Int32(2)), base_props)
 
-KhepriBase.b_labels(b::ACAD, p, txts, mats, mat) =
+KhepriBase.b_labels(b::ACAD, p, data, mat) =
   [with(current_layer, mat.layer) do
     #Impossible to make this work!!!!
-    #@remote(b, CreateLeaderDimension(txt, p, p+vpol(annotation_scale(), ϕ), annotation_scale(), mark, label_props))
-    @remote(b, CreateNonLeaderDimension(txt, p, p+vpol(0.2*annotation_scale(), ϕ), annotation_scale(), mark, label_props))
+    #@remote(b, CreateLeaderDimension(txt, p, p+vpol(default_annotation_scale(), ϕ), default_annotation_scale(), mark, label_props))
+    @remote(b, CreateNonLeaderDimension(txt, p, p+vpol(0.2*scale, ϕ), scale, mark, label_props))
    end
-   for (txt, ϕ, mark, mat)
-     in zip(txts,
-            division(-π/4, 7π/4, length(txts), false),
-            Iterators.flatten((Iterators.repeated("_DOTSMALL", 1), Iterators.repeated("_NONE"))),
-            mats)]
+   for ((; txt, mat, scale), ϕ, mark)
+     in zip(data,
+            division(-π/4, 7π/4, length(data), false),
+            Iterators.flatten((Iterators.repeated("_DOTSMALL", 1), Iterators.repeated("_NONE"))))]
 
 #
 KhepriBase.b_radii_illustration(b::ACAD, c, rs, rs_txts, mats, mat) =
   [with(current_layer, mat.layer) do
-    @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(r, ϕ), 0.0, annotation_scale(), "", "_NONE", radii_props))
+    @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(r, ϕ), 0.0, default_annotation_scale(), "", "_NONE", radii_props))
    end
    for (r, r_txt, ϕ, mat) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false), mats)]
 
 # Maybe merge the texts when the radii are the same.
 KhepriBase.b_vectors_illustration(b::ACAD, p, a, rs, rs_txts, mats, mat) =
   [with(current_layer, mat.layer) do
-    @remote(b, CreateDiametricDimension(r_txt, p, p+vpol(r, a), 0.0, annotation_scale(), "", "_NONE", vector_props))
+    @remote(b, CreateDiametricDimension(r_txt, p, p+vpol(r, a), 0.0, default_annotation_scale(), "", "_NONE", vector_props))
    end
    for (r, r_txt, mat) in zip(rs, rs_txts, mats)]
       #tikz_line(out, [c, ], "latex-latex,illustration")
@@ -1051,20 +1051,23 @@ KhepriBase.b_angles_illustration(b::ACAD, c, rs, ss, as, r_txts, s_txts, a_txts,
         if !(r ≈ 0.0)
           if !(s ≈ 0.0)
             let arrows = s > 0 ? ("_NONE", "",) : ("", "_NONE")
-              push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.8*ar, 0), c, c+vpol(0.8*ar, s), c+vpol(ar, s/2), annotation_scale(), 
+              push!(refs, @remote(b, CreateAngularDimension3Pt(s_txt, c, c+vpol(0.8*ar, 0), c+vpol(0.8*ar, s), c+vpol(ar, s/2), 
+                                                            default_annotation_scale(), 
                                                             arrows..., angular_start_props)))
             end
           end
           if !(a ≈ 0.0)
             let arrows = a > 0 ? ("_NONE", "",) : ("", "_NONE")
-              push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.8*ar, s), c, c+vpol(0.8*ar, s + a), c+vpol(ar, s+a/2), annotation_scale(),
+              push!(refs, @remote(b, CreateAngularDimension3Pt(a_txt, c, c+vpol(0.8*ar, s), c+vpol(0.8*ar, s + a), c+vpol(ar, s+a/2),
+                                                            default_annotation_scale(),
                                                             arrows..., angular_ampli_props)))
             end
           else
-            #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "")))
+            #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, default_annotation_scale(), "")))
           end
         end
-        push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), 
+        push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, 
+                                                        default_annotation_scale(), 
                                                         "", "_NONE", diametric_props)))
       end
     end
@@ -1083,17 +1086,17 @@ KhepriBase.b_arcs_illustration(b::ACAD, c, rs, ss, as, r_txts, s_txts, a_txts, m
         if !(r ≈ 0.0)
           if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
             let arrows = s > 0 ? ("_NONE", "",) : ("", "_NONE")
-              push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.8*ar, 0), c, c+vpol(0.8*ar, s), c+vpol(ar, s/2), annotation_scale(), 
+              push!(refs, @remote(b, CreateAngularDimension3Pt(s_txt, c, c+vpol(0.8*ar, 0), c+vpol(0.8*ar, s), c+vpol(ar, s/2), default_annotation_scale(), 
                                                             arrows..., angular_props)))
             end
           end
           if !(a ≈ 0.0)
             let arrows = a > 0 ? ("_NONE", "",) : ("", "_NONE")
-              push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.8*ar, s), c, c+vpol(0.8*ar, s + a), c+vpol(ar, s+a/2), annotation_scale(),
+              push!(refs, @remote(b, CreateAngularDimension3Pt(a_txt, c, c+vpol(0.8*ar, s), c+vpol(0.8*ar, s + a), c+vpol(ar, s+a/2), default_annotation_scale(),
                                                             arrows..., angular_props)))
             end
           end
-          push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "", "_NONE", diametric_props)))
+          push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, default_annotation_scale(), "", "_NONE", diametric_props)))
         end
       end
     end
