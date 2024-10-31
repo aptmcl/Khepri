@@ -925,7 +925,7 @@ to_pdf(texpath) =
                 error("Could not find texify. Do you have MikTeX installed?")
               else
                 try
-                  run(`$(texify) --pdf --engine=luatex --run-viewer $(texname)`, wait=true)
+                  run(pipeline(`$(texify) --pdf --engine=luatex --run-viewer $(texname)`, devnull), wait=true)
                   PDFFile(pdfpath)
                 catch e
                   error("Could not process $texname to generate $pdfname.")
