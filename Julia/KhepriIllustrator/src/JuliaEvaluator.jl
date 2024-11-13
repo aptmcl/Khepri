@@ -134,14 +134,23 @@ eval_for(expr, env) =
     nothing
   end
 
+is_generator(expr) = expr isa Expr && expr.head === :generator
+eval_generator(expr, env) =
+  let var = expr.args[2].args[1],
+      vals = eval_expr(expr.args[2].args[2], env),
+      body = expr.args[1]
+    var = var isa Expr && var.head === :tuple ?
+      var.args :
+      [var]
+  #[eval_expr(:(let $(var) = $(Expr(:quote, v)); $(body) end), env) for v in vals]
+    [eval_expr(body, augment_environment(var, val, env)) for val in vals]
+  end
+
 is_comprehension(expr) = expr isa Expr && expr.head === :comprehension
 eval_comprehension(expr, env) =
-  let vals = eval_expr(expr.args[1].args[2].args[2], env),
-      var = expr.args[1].args[2].args[1],
-      body = expr.args[1].args[1]
-    #[eval_expr(:(let $(var) = $(Expr(:quote, v)); $(body) end), env) for v in vals]
-    [eval_expr(:(($(var) -> $(body))($(Expr(:quote, v)))), env) for v in vals]
-  end
+  expr.args[1].head === :flatten ?
+    reduce(vcat, eval_expr(expr.args[1].args[1], env)) :
+    eval_expr(expr.args[1], env)
 
 is_range(expr) = expr isa Expr && expr.head === :call && expr.args[1] == :(:)
 eval_range(expr, env) =
@@ -171,6 +180,8 @@ eval_expr(expr, env) =
     eval_ref(expr, env)
   elseif is_dot(expr)
     eval_dot(expr, env)
+  elseif is_generator(expr)
+    eval_generator(expr, env)
   elseif is_comprehension(expr)
     eval_comprehension(expr, env)
   elseif is_range(expr)
@@ -471,6 +482,17 @@ let_scope_name(scope) =
     let_binding_name(scope)
 let_scope_init(scope) =
     let_binding_init(scope)
+
+scope_names_values(scope, env) =
+  let name = let_scope_name(scope),
+      init = eval_expr(let_scope_init(scope), env)
+    if name isa Vector
+      @assert(length(name)==length(init))
+      name, init
+    else
+      [name], [init]
+    end
+  end
 eval_let(expr, env) =
   let scopes = let_scopes(expr),
       body = let_body(expr)
@@ -479,14 +501,8 @@ eval_let(expr, env) =
       eval_expr(body, augment_environment([], [], env))
     else
       let scope = scopes[1],
-          name = let_scope_name(scope),
-          init = eval_expr(let_scope_init(scope), env)
-        if !(name isa Vector)
-          name = [name]
-          init = [init]
-        end
-        @assert(length(name)==length(init))
-        extended_env = augment_environment(name, init, env)
+          (name, init) = scope_names_values(scope, env),
+          extended_env = augment_environment(name, init, env)
       #println((current_recursive_level(), recursive_levels_limit()))
         if current_recursive_level() <= recursive_levels_limit()
           let res = eval_let(:(let $(scopes[2:end]...); $body end), extended_env)
@@ -783,5 +799,4 @@ end
 
 export @illustrator,
        illustrate,
-       apply,
        without_illustration
