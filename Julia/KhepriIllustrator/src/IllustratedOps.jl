@@ -295,7 +295,7 @@ illustrate(f::typeof(+), p::Union{X,XY,Pol}, v::Union{VPol}, p_expr, v_expr) =
                    (:⊕, :⊗)
       label(p, p_expr)
       #dimension(p, p+v, ρ, size=0.1, offset=0)
-      angle_illustration(p, pol_rho(v), 0, pol_phi(v), ρ, 0, ϕ)
+      angle_illustration(p, pol_rho(v), 0, pol_phi(v), ρ, :0, ϕ)
     end
   end
 
@@ -333,7 +333,7 @@ illustrate(f::typeof(-), p::Union{X,XY,Pol}, v::Union{VPol}, p_expr, v_expr) =
                    (:⊕, :⊗)
       label(p, p_expr)
       #dimension(p, p+v, ρ, size=0.1, offset=0)
-      angle_illustration(p, pol_rho(v), 0, pol_phi(v), ρ, 0, ϕ)
+      angle_illustration(p, pol_rho(v), 0, pol_phi(v), ρ, :0, ϕ)
     end
   end
 
@@ -365,7 +365,7 @@ illustrate(f::typeof(-), p::Union{X,XY,Pol}, v::Union{VX}, p_expr, v_expr) =
 
 
 illustrate(f::typeof(pol), ρ, ϕ, ρ_expr, ϕ_expr) =
-  illustrate(+, u0(), vpol(ρ, ϕ), :(u0()), :(vpol($ρ_expr, $ϕ_expr)))
+  illustrate(+, u0(), vpol(ρ, ϕ), :(x(0)), :(vpol($ρ_expr, $ϕ_expr)))
 
 
 #=
@@ -378,27 +378,30 @@ line([ps..., qs...]) -> illustrate(line, [ps...,qs...], :[ps...,qs...][1], :[ps.
 =#
 
 illustrate(f::typeof(line), args...) =
+  illustrate_vertices(args...)
+
+illustrate_vertices(args...) =
   # if the first arg is an array, the second is the corresponding expression, and let's try to be clever
   if length(args) > 0 && args[1] isa Vector
     let (pts, expr) = (args[1], args[2])
       if expr isa Expr && expr.head === :vect # OK, we have the vector of expressions
         let nsplats = count(is_splat, expr.args)
           if nsplats == 0 # no splats
-            illustrate(f, pts..., expr.args...)
+            illustrate_vertices(pts..., expr.args...)
           elseif nsplats == 1 # just one splat
             let splat_length = length(pts) - length(expr.args) + 1
-              illustrate(f, pts..., vcat([(is_splat(e) ? [:($(e.args[1])[$i]) for i in 1:splat_length] : [e]) for e in expr.args]...)...)
+              illustrate_vertices(pts..., vcat([(is_splat(e) ? [:($(e.args[1])[$i]) for i in 1:splat_length] : [e]) for e in expr.args]...)...)
             end
           else 
             error("Can't handle more than one splat")
           end
         end
       elseif expr isa Symbol # only one expression, is it just a symbol?
-        illustrate(f, pts..., [:($expr[$i]) for i in 1:length(pts)]...)
+        illustrate_vertices(pts..., [:($expr[$i]) for i in 1:length(pts)]...)
       else # something else
         #HACK: what should we do?
         #error("Can't handle line($(args...)")
-        illustrate(f, pts..., [:(λ[$i]) for i in 1:length(pts)]...)
+        illustrate_vertices(pts..., [:(λ[$i]) for i in 1:length(pts)]...)
       end
     end
   else
@@ -414,6 +417,15 @@ illustrate(f::typeof(line), args...) =
     end
   end
 
+illustrate(f::typeof(closed_line), args...) =
+  illustrate_vertices(args...)
+
+illustrate(f::typeof(spline), args...) =
+  illustrate_vertices(args...)
+
+illustrate(f::typeof(closed_spline), args...) =
+  illustrate_vertices(args...)
+
 illustrate(f::typeof(circle), c, r, c_expr, r_expr) =
   if include_illustrate_circles()
     with_recursive_illustration() do
@@ -422,8 +434,34 @@ illustrate(f::typeof(circle), c, r, c_expr, r_expr) =
     end
   end
 
+illustrate(f::typeof(circle), c, c_expr) =
+  illustrate(f, c, 1, c_expr, :(1))
+
+illustrate(f::typeof(circle)) =
+  illustrate(f, x(0), :(x(0)))
+
+  # @defshape(Shape1D, regular_polygon, edges::Integer=3, center::Loc=u0(), radius::Real=1, angle::Real=0, inscribed::Bool=true)
+illustrate(f::typeof(regular_polygon)) =
+  illustrate(f, 3, :(3))
+
+illustrate(f::typeof(regular_polygon), n, n_expr) =
+  illustrate(f, n, x(0), n_expr, :(x(0)))
+
+illustrate(f::typeof(regular_polygon), n, c, n_expr, c_expr) =
+  illustrate(f, n, c, 1, n_expr, c_expr, :(1))
+
+illustrate(f::typeof(regular_polygon), n, c, r, n_expr, c_expr, r_expr) =
+  illustrate(f, n, c, r, 0, n_expr, c_expr, r_expr, :(0))
+
 illustrate(f::typeof(regular_polygon), n, c, r, a, n_expr, c_expr, r_expr, a_expr) =
-  illustrate(+, c, vpol(r, a), c_expr, :(vpol($r_expr, $a_expr)))
+  illustrate(f, n, c, r, a, true, n_expr, c_expr, r_expr, a_expr, :(true))
+
+illustrate(f::typeof(regular_polygon), n, c, r, a, inscribed, n_expr, c_expr, r_expr, a_expr, inscribed_expr) =
+  inscribed ? 
+    illustrate(+, c, vpol(r, a), c_expr, :(vpol($r_expr, $a_expr))) :
+    illustrate(+, c, vpol(r, a + π/n), c_expr, :(vpol($r_expr, $(a == 0 ? :(π/($n)) : :($a_expr + π/($n))))))
+
+
 
 illustrate(f::typeof(arc), c, ρ, α, Δα, c_e, ρ_e, α_e, Δα_e) =
   with_recursive_illustration() do
