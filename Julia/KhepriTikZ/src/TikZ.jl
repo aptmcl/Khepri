@@ -900,7 +900,10 @@ KhepriBase.b_render_and_save_view(b::TikZ, path) =
     end
     to_pdf(texpath)
   end
-  
+
+export use_external_viewer
+const use_external_viewer = Parameter(false)
+
 to_pdf(texpath) =
   let pdfpath = path_replace_suffix(texpath, ".pdf"),
       needs_update = ! isfile(pdfpath) || mtime(texpath) > mtime(pdfpath)
@@ -925,7 +928,11 @@ to_pdf(texpath) =
                 error("Could not find texify. Do you have MikTeX installed?")
               else
                 try
-                  run(pipeline(`$(texify) --pdf --engine=luatex --run-viewer $(texname)`, devnull), wait=true)
+                  run(pipeline(use_external_viewer() ?
+                                `$(texify) --pdf --engine=luatex --run-viewer $(texname)` :
+                                `$(texify) --pdf --engine=luatex $(texname)`,
+                               devnull),
+                      wait=true)
                   PDFFile(pdfpath)
                 catch e
                   error("Could not process $texname to generate $pdfname.")
