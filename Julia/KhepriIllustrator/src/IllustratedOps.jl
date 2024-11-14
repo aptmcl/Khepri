@@ -426,6 +426,9 @@ illustrate(f::typeof(spline), args...) =
 illustrate(f::typeof(closed_spline), args...) =
   illustrate_vertices(args...)
 
+illustrate(f::typeof(polygon), args...) =
+  illustrate_vertices(args...)
+
 illustrate(f::typeof(circle), c, r, c_expr, r_expr) =
   if include_illustrate_circles()
     with_recursive_illustration() do
