@@ -53,9 +53,26 @@ get_environment_binding(name, env) =
 Regarding the syntax:
 =#
 
-is_set(expr) = false # FINISH THIS!!!
-assignment_name(expr) = error("FINISH THIS")
-assignment_expression(expr) = error("FINISH THIS")
+#=
+Assignments, in Julia, are easily confused with definitions, because
+they use the same operator =. Therefore, we process assignments in the
+clause for definitions.
+
+Here, however, we can process guaranteed assignments involving the
+combination assignment/operation, such as +=.
+=#
+
+is_set(expr) = expr isa Expr && expr.head in [:(+=), :(-=), :(*=), :(/=)]
+assignment_name(expr) = expr.args[1]
+assignment_expression(expr) = expr.args[2]
+
+eval_set(expr, env) =
+  let op = Dict(:(+=)=>:(+), :(-=)=>:(-), :(*=)=>:(*), :(/=)=>:(/))[expr.head],
+      name = assignment_name(expr),
+      expression = assignment_expression(expr)
+    eval_expr(:($(name) = $op($name, $expression)), env)
+  end
+
 
 define_name!(name, value, env) =
   env.bindings = [make_binding(name, value), env.bindings...]
@@ -65,12 +82,13 @@ update_name!(name, value, env) =
     set_binding_value!(binding, value)
   end
 
+#=
 eval_set(expr, env) =
   let value = eval_expr(assignment_expression(expr), env)
     update_name!(assignment_name(expr), value, env)
     value
   end
-
+=#
 is_name(expr) = expr isa Symbol
 eval_name(name, env) =
   binding_value(get_environment_binding(name, env))
