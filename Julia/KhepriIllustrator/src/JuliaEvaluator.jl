@@ -107,7 +107,29 @@ eval_args(exprs, env) =
     end
     r
   end
-  #[eval_expr(expri, env) for expri in expr.args]
+# The illustrations benefit from a strict separation between exprs and args 
+eval_args_dont_splat(exprs, env) = 
+  let r = []
+    for expri in exprs
+      if is_splat(expri)
+        push!(r, eval_expr(expri.args[1], env))
+      else
+        push!(r, eval_expr(expri, env))
+      end
+    end
+    r
+  end
+maybe_splat(exprs, args) =
+  let r = []
+    for (expri, argi) in zip(exprs, args)
+      if is_splat(expri)
+        append!(r, argi)
+      else
+        push!(r, argi)
+      end
+    end
+    r
+  end
 
 is_tuple(expr) = expr isa Expr && expr.head === :tuple
 eval_tuple(expr, env) = eval_args(expr.args, env)
@@ -157,11 +179,10 @@ eval_generator(expr, env) =
   let var = expr.args[2].args[1],
       vals = eval_expr(expr.args[2].args[2], env),
       body = expr.args[1]
-    var = var isa Expr && var.head === :tuple ?
-      var.args :
-      [var]
+    var isa Expr && var.head === :tuple ?
+      [eval_expr(body, augment_environment(var.args, val, env)) for val in vals] :
+      [eval_expr(body, augment_environment([var], [val], env)) for val in vals]
   #[eval_expr(:(let $(var) = $(Expr(:quote, v)); $(body) end), env) for v in vals]
-    [eval_expr(body, augment_environment(var, val, env)) for val in vals]
   end
 
 is_comprehension(expr) = expr isa Expr && expr.head === :comprehension
@@ -293,14 +314,29 @@ eval_mdef(expr, env) =
     value
   end
 
-illustrate(func::Any, args...) = missing
+illustrate(func::Any, exprs, args...) =
+  any(is_splat, exprs) ?
+    let exs = [],
+        ars = []
+      for (expr, arg) in zip(exprs, args)
+        if is_splat(expr)
+          append!(exs, [:($(expr.args[1])[$i]) for i in 1:length(arg)])
+          append!(ars, arg)
+        else
+          push!(exs, expr)
+          push!(ars, arg)
+        end
+      end
+      illustrate(func, exs, ars...)
+    end :
+    missing
 
 const pause_illustration = Parameter(false)
 export pause_illustration
 
-illustrate_and_maybe_pause(func, args...) =
+illustrate_and_maybe_pause(func, exprs, args...) =
   begin
-    illustrate(func, args...)
+    illustrate(func, exprs, args...)
     if pause_illustration() && length(tikz.shapes) > 0
       render_view()
       readline()
@@ -322,7 +358,8 @@ eval_call(expr, env) =
         replace(expr, expansion)
         eval_expr(expansion, env)
       end :
-      let args = eval_args(exprs, env),
+      let unsplatted_args = eval_args_dont_splat(exprs, env),
+          args = maybe_splat(exprs, unsplatted_args),
           #prev = isempty(illustrations_stack) ? nothing : illustrations_stack[end], 
           recursive_level = length(illustrations_stack) #count(==(prev), illustrations_stack)
         #println(recursive_level, " ", illustrations_stack)
@@ -332,19 +369,19 @@ eval_call(expr, env) =
               is_primitive(func) ?
                 func(args...) :
                 let params = function_parameters(func),
-                    extended_env = augment_environment(params, args,  function_environment(func))
+                    extended_env = augment_environment(params, args, function_environment(func))
                   push!(illustrations_stack, call_operator(expr))
                   eval_expr(function_body(func), extended_env)
                 end
               if (is_primitive(func) && current_recursive_level() == recursive_levels_limit() + 1) || # HACK Added to handle things like let q = p + vxy(...)
                 current_recursive_level() <= recursive_levels_limit()
                 if step_by_step()
-                  if !ismissing(illustrate(func, args..., exprs...))
+                  if !ismissing(illustrate(func, exprs, unsplatted_args...))
                     global render_n += 1
                     render_view("IllustrationStep$render_n")
                   end
                 else
-                  illustrate(func, args..., exprs...)
+                  illustrate(func, exprs, unsplatted_args...)
                 end
               end
               res

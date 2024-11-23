@@ -23,25 +23,6 @@ illustrate_ang(a::Real, p::XYZ, ai::Real, key::String) =
         end
     end
 
-illustrate_xyz(p, key) =
-    let p1 = p+vpol(0.4,-pi/3) # point for text
-        with(current_layer, annotations) do
-            point(p)
-            text(key, p1, 0.2)
-        end
-    end
-
-
-illustrate_length(p::XYZ, q::XYZ, key::String) =
-    let ap = pol_phi(q-p)-pi/2 # angle perpendicular
-        dp = pol_rho(q-p)*0.1 # distance for text
-        pm = intermediate_loc(p,q) # middle point between p and q
-        with(current_layer, annotations) do
-            line(p, p+vpol(dp,ap), q+vpol(dp,ap), q)
-            text(key, pm+vpol(2dp, ap), 0.2)
-        end
-    end # dimention away from line
-
 arrow_head_pts(p,q) =
     let d = abs(distance(p, q))
         ap = pol_phi(q-p)-pi/2 # angle perpendicular
@@ -62,146 +43,12 @@ illustrate_dist(p, q, key) =
     end # illustration coincident (arrow)
 
 illustrate_vxy_point = KhepriBase.Parameter(false) # TO DO CHANGE FUNCTION SIGNATUREs TO INCLUDE P_STR, and if statent for point
-
-illustrate_vxy(p, x, y, key_x, key_y) =
-    let q = p+vxy(x,y)
-        dp = pol_rho(q-p)*0.1 # distance for text
-        with(current_layer, annotations) do
-            line(p, p+vx(x), q)
-            line(arrow_head_pts(p+vx(x), q)...)
-            text(key_x, p+vxy(x/2, -dp), 0.2) # x coordinate
-            text(key_y, p+vxy(x+dp, y/2), 0.2) # y coordinate
-        end
-    end # (Arrow)
-
-illustrate_vx(p, x, key) =
-    let q = p+vx(x)
-        dp = pol_rho(q-p)*0.1 # distance for text
-        pm = intermediate_loc(p,q) # middle point between p and q
-        with(current_layer, annotations) do
-            line(p, q)
-            line(arrow_head_pts(p, q)...)
-            text(key, pm+vy(dp), 0.2)
-        end
-    end # (Arrow)
-
-illustrate_vy(p, y, key) =
-    let q = p+vy(y)
-        dp = pol_rho(q-p)*0.1 # distance for text
-        pm = intermediate_loc(p,q) # middle point between p and q
-        with(current_layer, annotations) do
-            line(p, q)
-            line(arrow_head_pts(p, q)...)
-            text(key, pm+vx(dp), 0.2)
-        end
-    end # (Arrow)
-
-curved_arrow_head_pts(p, rho, alpha) =
-    let q = p+vpol(rho, alpha) # end of arc
-        a_op(ang) = alpha>=0 ? -ang : +ang # where to turn the arrow head?
-        q1 = q + vpol(.1rho, alpha + a_op(pi/4)) # arrow head point 1
-        q2 = q + vpol(.1rho, alpha + a_op(3pi/4)) # arrow head point 2
-        [q1, q, q2]
-    end
-
 illustrate_vpol_point = KhepriBase.Parameter(false) # TO DO CHANGE FUNCTION SIGNATURE TO INCLUDE P_STR
-
-illustrate_vpol(p, rho, alpha, rho_str, alpha_str) =
-    let r = random_range(0.2, 0.6)*rho # random value for arc placement (avoid colisions)
-        p1 = p+vpol(r, 0) # point at the begining of the arc
-        p2 = p+vpol(r, alpha) # point at the end of the arc
-        pm = p+vpol(1.1*r, alpha/2) # middle arc point for text
-        if alpha ≈ 0.0
-            println("angle = 0")
-        else
-            with(current_layer, annotations) do
-                line(p1, p) # first segment on vx()
-                line(curved_arrow_head_pts(p, r, alpha)...) # arrow head
-                text(alpha_str, pm, 0.2)
-                arc(p, r, 0, alpha)
-            end
-        end
-
-        q = p+vpol(rho, alpha) # end of segment
-        ap = pol_phi(q-p)-pi/2 # angle perpendicular
-        dp = pol_rho(q-p)*0.1 # distance for text
-        pm = intermediate_loc(p,q)  # middle point between p and q
-        with(current_layer, annotations) do
-            line(p, q)
-            line(arrow_head_pts(p, q)...)
-            text(rho_str, pm+vpol(-dp, ap), 0.2)
-        end
-    end # (Arrow with angle)
-
-illustrate_radius(p, r, r_str) =
-    illustrate_dist(p, p+vx(r), r_str)
-
-illustrate_radius(p, r, ang, r_str) =
-    #illustrate_dist(p, p+vpol(r, ang), r_str)
-    dimension(p, p+vpol(r, ang), r_str, offset=0)
-
 illustrate_arc_center = KhepriBase.Parameter(false)
-
-illustrate_arc(p, r, ai, amp, p_str, r_str, ai_str, amp_str) =
-    begin
-        illustrate_ang(ai, p, 0, ai_str)
-        illustrate_ang(amp, p, ai, amp_str)
-        illustrate_radius(p, r, ai+amp/2, r_str)
-        illustrate_arc_center() ? illustrate_xyz(p, p_str) : nothing
-    end
-
 illustrate_circ_center = KhepriBase.Parameter(true)
 illustrate_circ_circ = KhepriBase.Parameter(false)
-
-illustrate_circle(p, r, p_str, r_str) =
-    begin
-        illustrate_radius(p, r, pi/8, r_str)
-        illustrate_circ_center() ? illustrate_xyz(p, p_str) : nothing
-        illustrate_circ_circ() ?
-            with(current_layer, annotations) do; circle(p, r); end :
-                nothing
-    end
-
 illustrate_reg_poly_center = KhepriBase.Parameter(false)
-
-illustrate_reg_poly(n, p, r, ai, p_str, r_str, ai_str) =
-    begin
-        with(current_layer, annotations) do; circle(p, r); end
-        illustrate_vpol(p, r, ai, r_str, ai_str)
-        illustrate_reg_poly_center() ? illustrate_xyz(p, p_str) : nothing
-    end
-
 illustrate_rect_corner = KhepriBase.Parameter(false)
-
-illustrate_rectangle(p, dx, dy, p_str, dx_str, dy_str) =
-    begin
-        illustrate_length(p, p+vx(dx), dx_str)
-        illustrate_length(p+vy(dy), p, dy_str)
-        illustrate_rect_corner() ? illustrate_xyz(p, p_str) : nothing
-
-    end
-
-
-# ---------------------- multiple dispatch/overload illustrate
-# not sure if we're gonna need this
-
-illustrate(a::Any) = nothing
-#illustrate(a::ang, p::XYZ, ai::Real, key::String) = illustrate_ang(float(a), p, ai, key)
-illustrate(p::XYZ, key::String) = illustrate_xyz(p, key)
-#illustrate(d::dist, p::XYZ, a::Real, key::String) = illustrate_dist(d, p, a, key)
-illustrate(p::XYZ, q::XYZ, key::String) = illustrate_dist(p, q, key)
-illustrate(v::VXYZ, key::String) = nothing
-#=
-illustrate(p::XYZH, key::String) =
-    begin
-       illustrate(p.p, key)
-       p.h == [] ? nothing :
-        let q = p.p - p.h[end]
-            illustrate(p.p, q, "$(p.h[end])")
-            illustrate(XYZH(q, p.h[1:end-1]), key)
-        end
-    end
-=#
 
 include_illustrate_points = KhepriBase.Parameter(true)
 include_illustrate_vectors = KhepriBase.Parameter(true)
@@ -288,7 +135,7 @@ illustrate_binding(name, init) =
 is_op_call(op, expr) =
   expr isa Expr && expr.head == :call && expr.args[1] == op
 
-illustrate(f::typeof(+), p::Union{X,XY,Pol}, v::Union{VPol}, p_expr, v_expr) =
+illustrate(f::typeof(+), (p_expr, v_expr), p::Union{X,XY,Pol}, v::Union{VPol}) =
   with_recursive_illustration() do
     let (ρ, ϕ) = is_op_call(:vpol, v_expr) ? v_expr.args[2:3] :
                    v_expr isa Symbol ? (Symbol(v_expr, "_ρ"), Symbol(v_expr, "_ϕ")) :
@@ -299,8 +146,7 @@ illustrate(f::typeof(+), p::Union{X,XY,Pol}, v::Union{VPol}, p_expr, v_expr) =
     end
   end
 
-#
-illustrate(f::typeof(+), p::Union{X,XY,Pol}, v::Union{VXY}, p_expr, v_expr) =
+illustrate(f::typeof(+), (p_expr, v_expr), p::Union{X,XY,Pol}, v::Union{VXY}) =
   with_recursive_illustration() do
     let (x, y) = is_op_call(:vxy, v_expr) ? v_expr.args[2:3] :
                    is_op_call(:vy, v_expr) ? (:dummy, v_expr.args[2]) :
@@ -314,8 +160,8 @@ illustrate(f::typeof(+), p::Union{X,XY,Pol}, v::Union{VXY}, p_expr, v_expr) =
       cy(v) ≈ 0.0 ? nothing : vector_illustration(p+vx(cx(v)), π/2, cy(v), y)
     end
   end
-#
-illustrate(f::typeof(+), p::Union{X,XY,Pol}, v::Union{VX}, p_expr, v_expr) =
+
+illustrate(f::typeof(+), (p_expr, v_expr), p::Union{X,XY,Pol}, v::Union{VX}) =
   with_recursive_illustration() do
     let d = v_expr isa Expr && v_expr.head == :call && v_expr.args[1] == :vx ?
                    v_expr.args[2] :
@@ -326,7 +172,7 @@ illustrate(f::typeof(+), p::Union{X,XY,Pol}, v::Union{VX}, p_expr, v_expr) =
     end
   end
 
-illustrate(f::typeof(-), p::Union{X,XY,Pol}, v::Union{VPol}, p_expr, v_expr) =
+illustrate(f::typeof(-), (p_expr, v_expr), p::Union{X,XY,Pol}, v::Union{VPol}) =
   with_recursive_illustration() do
     let (ρ, ϕ) = is_op_call(:vpol, v_expr) ? v_expr.args[2:3] :
                    v_expr isa Symbol ? (Symbol(v_expr, "_ρ"), Symbol(v_expr, "_ϕ")) :
@@ -337,7 +183,7 @@ illustrate(f::typeof(-), p::Union{X,XY,Pol}, v::Union{VPol}, p_expr, v_expr) =
     end
   end
 
-illustrate(f::typeof(-), p::Union{X,XY,Pol}, v::Union{VXY}, p_expr, v_expr) =
+illustrate(f::typeof(-), (p_expr, v_expr), p::Union{X,XY,Pol}, v::Union{VXY}) =
   with_recursive_illustration() do
     let (x, y) = is_op_call(:vxy, v_expr) ? v_expr.args[2:3] :
                    is_op_call(:vy, v_expr) ? (:dummy, v_expr.args[2]) :
@@ -352,7 +198,7 @@ illustrate(f::typeof(-), p::Union{X,XY,Pol}, v::Union{VXY}, p_expr, v_expr) =
     end
   end
 
-illustrate(f::typeof(-), p::Union{X,XY,Pol}, v::Union{VX}, p_expr, v_expr) =
+illustrate(f::typeof(-), (p_expr, v_expr), p::Union{X,XY,Pol}, v::Union{VX}) =
   with_recursive_illustration() do
     let d = v_expr isa Expr && v_expr.head == :call && v_expr.args[1] == :vx ?
                    v_expr.args[2] :
@@ -364,25 +210,16 @@ illustrate(f::typeof(-), p::Union{X,XY,Pol}, v::Union{VX}, p_expr, v_expr) =
   end
 
 
-illustrate(f::typeof(pol), ρ, ϕ, ρ_expr, ϕ_expr) =
-  illustrate(+, u0(), vpol(ρ, ϕ), :(x(0)), :(vpol($ρ_expr, $ϕ_expr)))
+illustrate(f::typeof(pol), (ρ_expr, ϕ_expr), ρ::Real, ϕ::Real) =
+  illustrate(+, (:(x(0)), :(vpol($ρ_expr, $ϕ_expr))), u0(), vpol(ρ, ϕ))
 
+illustrate(f::typeof(line), exprs, args...) =
+  illustrate_vertices(exprs, args...)
 
-#=
-line(p1, p2, p3) -> illustrate(line, p1, p2, p3, :p1, :p2, :p3)
-line([p1, p2, p3]) -> illustrate(line, p1, p2, p3, :p1, :p2, :p3)
-line(ps) -> illustrate(line, ps, :ps[1], :ps[2], :ps[3])
-line([ps..., p]) -> illustrate(line, [ps...,p], :ps[1], :ps[2], :ps[3], :p)
-line([ps..., qs...]) -> illustrate(line, [ps...,qs...], :ps[1], :ps[2], :ps[??], :qs[])
-line([ps..., qs...]) -> illustrate(line, [ps...,qs...], :[ps...,qs...][1], :[ps...,qs...][2], :[ps...,qs...][3])
-=#
-
-illustrate(f::typeof(line), args...) =
-  illustrate_vertices(args...)
-
-illustrate_vertices(args...) =
+  #=
+illustrate_vertices(args...) = begin println(args)
   # if the first arg is an array, the second is the corresponding expression, and let's try to be clever
-  if length(args) > 0 && args[1] isa Vector
+  if length(args) == 2 && args[1] isa Vector
     let (pts, expr) = (args[1], args[2])
       if expr isa Expr && expr.head === :vect # OK, we have the vector of expressions
         let nsplats = count(is_splat, expr.args)
@@ -406,30 +243,99 @@ illustrate_vertices(args...) =
     end
   else
     with_recursive_illustration() do
-      # half of ps are locations, the other half are expressions
+      # half of ps are locations (or vectors of locations) and the other half are expressions (possibly using splat)
       let n = length(args)÷2,
           ps = args[1:n],
           ps_exprs = args[n+1:end]
         for (p, p_expr) in zip(ps, ps_exprs)
+          if p isa Vector
+            @assert(is_splat(p_expr))
+            for (pi, i) in zip(p, 1:length(p))
+              label(pi, :($(p_expr.args[1])[$i]))
+            end
+          else
             label(p, p_expr)
+          end
+        end
+      end
+    end
+  end
+end
+=#
+
+illustrate_vertices_labels(expr, pts) =
+  expr isa Symbol ?
+    for (p, i) in zip(pts, 1:length(pts))
+      label(p, :($expr[$i]))
+    end :
+    for (p, i) in zip(pts, 1:length(pts))
+      label(p, :(λ[$i]))
+    end
+
+#=
+line(p1, p2, p3) -> illustrate(line, p1, p2, p3, :p1, :p2, :p3)
+line([p1, p2, p3]) -> illustrate(line, p1, p2, p3, :p1, :p2, :p3)
+line(ps) -> illustrate(line, ps, :ps[1], :ps[2], :ps[3])
+line([ps..., p]) -> illustrate(line, [ps...,p], :ps[1], :ps[2], :ps[3], :p)
+line([ps..., qs...]) -> illustrate(line, [ps..., qs...], :ps[1], :ps[2], :ps[??], :qs[])
+line([ps..., qs...]) -> illustrate(line, [ps..., qs...], :[ps...,qs...][1], :[ps...,qs...][2], :[ps...,qs...][3])
+=#
+
+illustrate_vertices(exprs, pts...) =
+  # if there is just one pt, it must be an array of pts 
+  if length(pts) == 1
+    @assert pts[1] isa Vector # Otherwise, it must be just one location, which does not make sense.
+    @assert length(exprs) == 1 # and it was produced by a single expression (e.g., a variable, a vector, an array comprehension)
+    let (pts, expr) = (pts[1], exprs[1])
+      if is_vect(expr) # We have the vector of expressions
+        let nsplats = count(is_splat, expr.args)
+          if nsplats == 0 # no splats
+            illustrate_vertices(expr.args, pts...)
+          elseif nsplats == 1 # just one splat
+            let splat_length = length(pts) - length(expr.args) + 1
+              illustrate_vertices(vcat([(is_splat(e) ? [:($(e.args[1])[$i]) for i in 1:splat_length] : [e]) for e in expr.args]...), 
+                                  pts...)
+            end
+          else 
+            error("Can't illustrate vector with more than one splat")
+          end
+        end
+      elseif is_comprehension(expr)
+        with_recursive_illustration() do
+          illustrate_vertices_labels(expr.args[1].args[1], pts)
+        end
+      else
+        with_recursive_illustration() do
+          illustrate_vertices_labels(expr, pts)
+        end
+      end
+    end
+  else
+    with_recursive_illustration() do
+      for (pt, expr) in zip(pts, exprs)
+        if is_splat(expr)
+          @assert pt isa Vector
+          illustrate_vertices_labels(expr.args[1], pt)
+        else
+          label(pt, expr)
         end
       end
     end
   end
 
-illustrate(f::typeof(closed_line), args...) =
-  illustrate_vertices(args...)
+illustrate(f::typeof(closed_line), exprs, args...) =
+  illustrate_vertices(exprs, args...)
 
-illustrate(f::typeof(spline), args...) =
-  illustrate_vertices(args...)
+illustrate(f::typeof(spline), exprs, args...) =
+  illustrate_vertices(exprs, args...)
 
-illustrate(f::typeof(closed_spline), args...) =
-  illustrate_vertices(args...)
+illustrate(f::typeof(closed_spline), exprs, args...) =
+  illustrate_vertices(exprs, args...)
 
-illustrate(f::typeof(polygon), args...) =
-  illustrate_vertices(args...)
+illustrate(f::typeof(polygon), exprs, args...) =
+  illustrate_vertices(exprs, args...)
 
-illustrate(f::typeof(circle), c, r, c_expr, r_expr) =
+illustrate(f::typeof(circle), (c_expr, r_expr), c::Loc, r::Real) =
   if include_illustrate_circles()
     with_recursive_illustration() do
       label(c, c_expr)
@@ -437,49 +343,48 @@ illustrate(f::typeof(circle), c, r, c_expr, r_expr) =
     end
   end
 
-illustrate(f::typeof(circle), c, c_expr) =
-  illustrate(f, c, 1, c_expr, :(1))
+illustrate(f::typeof(circle), (c_expr,), c::Loc) =
+  illustrate(f, (c_expr, :(1)), c, 1)
 
-illustrate(f::typeof(circle)) =
-  illustrate(f, x(0), :(x(0)))
+illustrate(f::typeof(circle), ()) =
+  illustrate(f, (:(x(0)),), x(0))
 
-  # @defshape(Shape1D, regular_polygon, edges::Integer=3, center::Loc=u0(), radius::Real=1, angle::Real=0, inscribed::Bool=true)
-illustrate(f::typeof(regular_polygon)) =
-  illustrate(f, 3, :(3))
+illustrate(f::typeof(regular_polygon), ()) =
+  illustrate(f, (:(3),), 3)
 
-illustrate(f::typeof(regular_polygon), n, n_expr) =
-  illustrate(f, n, x(0), n_expr, :(x(0)))
+illustrate(f::typeof(regular_polygon), (n_expr,), n::Int) =
+  illustrate(f, (n_expr, :(x(0))), n, x(0))
 
-illustrate(f::typeof(regular_polygon), n, c, n_expr, c_expr) =
-  illustrate(f, n, c, 1, n_expr, c_expr, :(1))
+illustrate(f::typeof(regular_polygon), (n_expr, c_expr), n::Int, c::Loc) =
+  illustrate(f, (n_expr, c_expr, :(1)), n, c, 1)
 
-illustrate(f::typeof(regular_polygon), n, c, r, n_expr, c_expr, r_expr) =
-  illustrate(f, n, c, r, 0, n_expr, c_expr, r_expr, :(0))
+illustrate(f::typeof(regular_polygon), (n_expr, c_expr, r_expr), n::Int, c::Loc, r::Real) =
+  illustrate(f, (n_expr, c_expr, r_expr, :(0)), n, c, r, 0)
 
-illustrate(f::typeof(regular_polygon), n, c, r, a, n_expr, c_expr, r_expr, a_expr) =
-  illustrate(f, n, c, r, a, true, n_expr, c_expr, r_expr, a_expr, :(true))
+illustrate(f::typeof(regular_polygon), (n_expr, c_expr, r_expr, a_expr), n::Int, c::Loc, r::Real, a::Real) =
+  illustrate(f, (n_expr, c_expr, r_expr, a_expr, :(true)), n, c, r, a, true)
 
-illustrate(f::typeof(regular_polygon), n, c, r, a, inscribed, n_expr, c_expr, r_expr, a_expr, inscribed_expr) =
+illustrate(f::typeof(regular_polygon), (n_expr, c_expr, r_expr, a_expr, inscribed_expr), n::Int, c::Loc, r::Real, a::Real, inscribed::Bool) =
   inscribed ? 
-    illustrate(+, c, vpol(r, a), c_expr, :(vpol($r_expr, $a_expr))) :
-    illustrate(+, c, vpol(r, a + π/n), c_expr, :(vpol($r_expr, $(a == 0 ? :(π/($n)) : :($a_expr + π/($n))))))
+    illustrate(+, (c_expr, :(vpol($r_expr, $a_expr))), c, vpol(r, a)) :
+    illustrate(+, (c_expr, :(vpol($r_expr, $(a == 0 ? :(π/($n)) : :($a_expr + π/($n)))))), c::Loc, vpol(r, a + π/n))
 
 
 
-illustrate(f::typeof(arc), c, ρ, α, Δα, c_e, ρ_e, α_e, Δα_e) =
+illustrate(f::typeof(arc), (c_e, ρ_e, α_e, Δα_e), c::Loc, ρ::Real, α::Real, Δα::Real) =
   with_recursive_illustration() do
     label(c, c_e)
     #dimension(c, c+vpol(ρ, α), ρ_e, size=0.1, offset=0)
     arc_illustration(c, ρ, α, Δα, ρ_e, α_e, Δα_e)
   end
 
-illustrate(f::typeof(point), p, p_expr) =
+illustrate(f::typeof(point), (p_expr,), p::Loc) =
   with_recursive_illustration() do
     label(p, p_expr)
   end
 
 
-illustrate(f::typeof(intermediate_loc), p, q, p_expr, q_expr) =
+illustrate(f::typeof(intermediate_loc), (p_expr, q_expr), p::Loc, q::Loc) =
   let m = intermediate_loc(p, q)
     with_recursive_illustration() do
       label(p, p_expr)
@@ -489,7 +394,7 @@ illustrate(f::typeof(intermediate_loc), p, q, p_expr, q_expr) =
     end
   end
   
-illustrate(f::typeof(intermediate_loc), p, q, factor, p_expr, q_expr, factor_expr) =
+illustrate(f::typeof(intermediate_loc), (p_expr, q_expr, factor_expr), p::Loc, q::Loc, factor::Real) =
   let m = intermediate_loc(p, q, factor)
     with_recursive_illustration() do
       label(p, p_expr)
