@@ -899,56 +899,65 @@ KhepriBase.b_render_and_save_view(b::TikZ, path) =
       end
     end
     to_pdf(texpath)
+    #to_dvi(texpath)
   end
 
 export use_external_viewer
 const use_external_viewer = Parameter(false)
 
 to_pdf(texpath) =
-  let pdfpath = path_replace_suffix(texpath, ".pdf"),
-      needs_update = ! isfile(pdfpath) || mtime(texpath) > mtime(pdfpath)
-    if needs_update
-      cd(dirname(texpath)) do
-        let texname = basename(texpath),
-            pdfname = path_replace_suffix(texname, ".pdf")
-          @static if Sys.islinux()
-            try
-              for i in 1:2
-                run(`lualatex -shell-escape -halt-on-error $texname`, wait=true)
-              end
-              run(`xdg-open $pdfname`)
-            catch e
-              error("Could not process the generated .tex file. Do you have lualatex installed?")
-            end
-          elseif Sys.isapple()
-            error("Can't handle MacOS yet")
-          elseif Sys.iswindows()
-            let texify = Sys.which("texify") #normpath(joinpath(ENV["APPDATA"], "..", "Local", "Programs", "MiKTeX", "miktex", "bin", "x64", "texify"))
-              if isnothing(texify)
-                error("Could not find texify. Do you have MikTeX installed?")
-              else
-                try
-                  run(pipeline(use_external_viewer() ?
-                                `$(texify) --pdf --engine=luatex --run-viewer $(texname)` :
-                                `$(texify) --pdf --engine=luatex $(texname)`,
-                               devnull),
-                      wait=true)
-                  PDFFile(pdfpath)
-                catch e
-                  error("Could not process $texname to generate $pdfname.")
-                end
-              end
-            end
-          else
-            error("Unknown operating system")
+  PDFFile(to_from(".pdf", texpath, "lualatex") do lualatex, path, pdfpath
+    cd(dirname(path)) do
+      let texname = basename(path),
+          pdfname = path_replace_suffix(texname, ".pdf")
+        @static if Sys.islinux()
+          for i in 1:2
+            run(`$lualatex -shell-escape -halt-on-error $texname`, wait=true)
           end
+          run(`xdg-open $pdfname`)
+        elseif Sys.isapple()
+          error("Can't handle MacOS yet")
+        elseif Sys.iswindows()
+          let texify = Sys.which("texify")
+            if isnothing(texify)
+              error("Could not find texify. Do you have MikTeX installed?")
+            else
+              try
+                run(pipeline(use_external_viewer() ?
+                              `$(texify) --pdf --engine=luatex --run-viewer $(texname)` :
+                              `$(texify) --pdf --engine=luatex $(texname)`,
+                             devnull),
+                    wait=true)
+              catch e
+                error("Could not process $texname to generate $pdfname.")
+              end
+            end
+          end
+        else
+          error("Unknown operating system")
         end
       end
-    else
-      PDFFile(pdfpath)
     end
-  end
+  end)
 
+to_dvi(texpath) =
+  DVIFile(to_from(".dvi", texpath, "lualatex") do lualatex, path, dvipath
+    cd(dirname(path)) do
+      let texname = basename(path)
+        @static if Sys.islinux()
+          for i in 1:2
+            run(`$lualatex -shell-escape -halt-on-error --output-format=dvi $texname`, wait=true)
+          end
+        elseif Sys.isapple()
+          error("Can't handle MacOS yet")
+        elseif Sys.iswindows()
+          run(pipeline(`$(lualatex) --output-format=dvi $(texname)`, devnull), wait=true)
+        else
+          error("Unknown operating system")
+        end
+      end
+    end
+  end)
 
 #=
   let pathname = abspath(repr(b)*"-"*Dates.format(now(), dateformat"Y-m-d-H-M-S-s")*".svg")
