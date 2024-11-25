@@ -160,15 +160,15 @@ is_for(expr) = expr isa Expr && expr.head === :for
 eval_for(expr, env) =
   let var = expr.args[1].args[1],
       init = eval_expr(expr.args[1].args[2], env),
-      body = expr.args[2]
+      body = expr.args[2],
+      recursive_level_limit_for(step) =
+        step <= for_loop_steps_limit() && current_recursive_level() <= recursive_levels_limit() ?
+          recursive_levels_limit() :
+          -10 #Just to be on the safe side
     for (step, val) in enumerate(init)
-      if step <= for_loop_steps_limit() && current_recursive_level() <= recursive_levels_limit()
+      with(recursive_levels_limit, recursive_level_limit_for(step)) do 
         eval_expr(:(let $(var) = $(Expr(:quote, val)); $(body) end), env)
-      else
-        with(recursive_levels_limit, -10) do #Just to be on the safe side
-          eval_expr(:(let $(var) = $(Expr(:quote, val)); $(body) end), env)
-          #eval_expr(:((($var) -> $(body))($(Expr(:quote, val)))), env)
-        end
+        #eval_expr(:((($var) -> $(body))($(Expr(:quote, val)))), env)
       end
     end
     nothing
@@ -178,10 +178,18 @@ is_generator(expr) = expr isa Expr && expr.head === :generator
 eval_generator(expr, env) =
   let var = expr.args[2].args[1],
       vals = eval_expr(expr.args[2].args[2], env),
-      body = expr.args[1]
+      body = expr.args[1],
+      recursive_level_limit_for(step) =
+        step <= for_loop_steps_limit()+1 && current_recursive_level() <= recursive_levels_limit() ?
+          recursive_levels_limit() :
+          -10 #Just to be on the safe side
     var isa Expr && var.head === :tuple ?
-      [eval_expr(body, augment_environment(var.args, val, env)) for val in vals] :
-      [eval_expr(body, augment_environment([var], [val], env)) for val in vals]
+      [with(recursive_levels_limit, recursive_level_limit_for(step)) do 
+        eval_expr(body, augment_environment(var.args, val, env))
+       end for (step, val) in enumerate(vals)] :
+      [with(recursive_levels_limit, recursive_level_limit_for(step)) do
+        eval_expr(body, augment_environment([var], [val], env))
+      end for (step, val) in enumerate(vals)]
   #[eval_expr(:(let $(var) = $(Expr(:quote, v)); $(body) end), env) for v in vals]
   end
 
