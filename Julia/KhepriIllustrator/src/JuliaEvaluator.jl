@@ -153,8 +153,8 @@ eval_dot(expr, env) =
   end
 
 #
-export for_loop_steps_limit
-for_loop_steps_limit = Parameter(1)
+export for_steps_limit
+for_steps_limit = Parameter(1)
 
 is_for(expr) = expr isa Expr && expr.head === :for
 eval_for(expr, env) =
@@ -162,7 +162,7 @@ eval_for(expr, env) =
       init = eval_expr(expr.args[1].args[2], env),
       body = expr.args[2],
       recursive_level_limit_for(step) =
-        step <= for_loop_steps_limit() && current_recursive_level() <= recursive_levels_limit() ?
+        step <= for_steps_limit() && current_recursive_level() <= recursive_levels_limit() ?
           recursive_levels_limit() :
           -10 #Just to be on the safe side
     for (step, val) in enumerate(init)
@@ -180,7 +180,7 @@ eval_generator(expr, env) =
       vals = eval_expr(expr.args[2].args[2], env),
       body = expr.args[1],
       recursive_level_limit_for(step) =
-        step <= for_loop_steps_limit()+1 && current_recursive_level() <= recursive_levels_limit() ?
+        step <= for_steps_limit()+1 && current_recursive_level() <= recursive_levels_limit() ?
           recursive_levels_limit() :
           -10 #Just to be on the safe side
     var isa Expr && var.head === :tuple ?
