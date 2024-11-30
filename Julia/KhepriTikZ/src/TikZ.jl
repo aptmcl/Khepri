@@ -817,7 +817,7 @@ gen_tex_document(b) =
     #println(out, raw"\usepackage{tikz-3dplot}")
     println(out, raw"\begin{document}")
     #println(out, raw"\tikzset{illustration/.style={ultra thin,blue!50}}")
-    println(out, raw"\tikzset{illustration/.style={ultra thin}}")
+    println(out, raw"\tikzset{illustration/.style={very thin}}")
     println(out, raw"\tikzset{dimension/.style={very thin,lightgray}}")
     gen_tikz_picture(b)
     println(out, raw"\end{document}")
@@ -831,6 +831,8 @@ gen_tikz_picture(b::TikZ) =
         "3d view={$(rad2deg(sph_phi(v))-90)}{$(rad2deg(sph_psi(v))-90)}$(use_wireframe() ? "" : ",fill=gray")"
     println(out, "\\begin{tikzpicture}[$options]")
     gen_tikz_commands(b)
+    # Outline
+    # println(out, "\\draw (current bounding box.north east)--(current bounding box.north west)--(current bounding box.south west)--(current bounding box.south east)--cycle;")
     println(out, "\\end{tikzpicture}")
   end
 
