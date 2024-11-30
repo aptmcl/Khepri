@@ -1,7 +1,7 @@
 name = "KhepriIllustrator"
 uuid = "7159cd1a-befd-4126-8a94-9819cf26f52f"
 authors = ["António Menezes Leitão <antonio.menezes.leitao@gmail.com>"]
-version = "0.1.0"
+version = "0.1.1"
 
 [deps]
 KhepriBase = "4cc0fe96-1163-46f3-ba32-de1e65d9548f"
