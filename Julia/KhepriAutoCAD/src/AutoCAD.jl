@@ -558,7 +558,11 @@ KhepriBase.b_pyramid(b::ACAD, bs, t, bmat, smat) =
   @remote(b, IrregularPyramid(bs, t, smat))
 
 KhepriBase.b_cylinder(b::ACAD, cb, r, h, bmat, tmat, smat) =
-  @remote(b, Cylinder(cb, r, add_z(cb, h), smat))
+  isnothing(bmat) || isnothing(tmat) ?
+    vcat(@remote(b, ExtrudeWithMaterial(b_circle(b, cb, r, smat), vz(h, cb.cs), smat)),
+         isnothing(bmat) ? [] : b_surface_circle(b, cb, r, bmat),
+         isnothing(tmat) ? [] : b_surface_circle(b, add_z(cb, h), r, tmat)) :
+    @remote(b, Cylinder(cb, r, add_z(cb, h), smat))
 
 KhepriBase.b_box(b::ACAD, c, dx, dy, dz, mat) =
   @remote(b, Box(c, dx, dy, dz, mat))
