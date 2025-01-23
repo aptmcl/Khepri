@@ -114,8 +114,8 @@ update_plugin() =
     end
   end
 
-const autocad_template = Parameter(abspath(@__DIR__, "../Plugin/KhepriTemplate.dwt"))
-#const autocad_template = Parameter(abspath(@__DIR__, "../Plugin/Khepri.dwt"))
+#const autocad_template = Parameter(abspath(@__DIR__, "../Plugin/KhepriTemplate.dwt"))
+const autocad_template = Parameter(abspath(@__DIR__, "../Plugin/Khepri.dwt"))
 
 checked_plugin = false
 
