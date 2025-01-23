@@ -30,11 +30,7 @@ bundle_xml = joinpath(bundle_name, package_xml)
 local_plugins = joinpath(julia_khepri, "Plugin")
 local_khepri_plugin = joinpath(local_plugins, bundle_name)
 local_khepri_plugin_dll_folder = joinpath(local_plugins, bundle_dll_folder)
-autocad_user_plugins = joinpath(ENV["APPDATA"], "Autodesk", "ApplicationPlugins")
-autocad_khepri_plugin = joinpath(autocad_user_plugins, bundle_name)
-autocad_khepri_plugin_dll_folder = joinpath(autocad_user_plugins, bundle_dll_folder)
 local_path_xml = joinpath(local_khepri_plugin, package_xml)
-autocad_path_xml = joinpath(autocad_khepri_plugin, package_xml)
 
 upgrade_plugin(; advance_major_version=false, advance_minor_version=true, phase="Debug") =
   let # 1. The dlls are updated in VisualStudio after compilation of the plugin, and they are stored in the folder.
@@ -88,9 +84,15 @@ autocad_version(path) =
     VersionNumber(map(s -> parse(Int, s), split(app_pkg["AppVersion"], '.'))...)
   end
 
+#=autocad_general_plugins = joinpath(dirname(ENV["CommonProgramFiles"]), "Autodesk", "ApplicationPlugins"),
+autocad_allusers_plugins = joinpath(ENV["ALLUSERSPROFILE"], "Autodesk", "ApplicationPlugins"), =#
+      
 update_plugin() =
-  let #autocad_general_plugins = joinpath(dirname(ENV["CommonProgramFiles"]), "Autodesk", "ApplicationPlugins")
-      #autocad_allusers_plugins = joinpath(ENV["ALLUSERSPROFILE"], "Autodesk", "ApplicationPlugins")
+  let autocad_user_plugins = joinpath(ENV["APPDATA"], "Autodesk", "ApplicationPlugins"),
+      autocad_khepri_plugin = joinpath(autocad_user_plugins, bundle_name),
+      autocad_khepri_plugin_dll_folder = joinpath(autocad_user_plugins, bundle_dll_folder),
+      autocad_path_xml = joinpath(autocad_khepri_plugin, package_xml)
+
     # Do we have the bundle folder?
     isdir(autocad_khepri_plugin) || mkpath(autocad_khepri_plugin)
     isdir(autocad_khepri_plugin_dll_folder) || mkpath(autocad_khepri_plugin_dll_folder)
@@ -113,6 +115,7 @@ update_plugin() =
   end
 
 const autocad_template = Parameter(abspath(@__DIR__, "../Plugin/KhepriTemplate.dwt"))
+#const autocad_template = Parameter(abspath(@__DIR__, "../Plugin/Khepri.dwt"))
 
 checked_plugin = false
 
@@ -151,7 +154,10 @@ check_plugin() =
 #start_autocad() =
 #  run(`cmd /c $(autocad_template())`, wait=false)
 
-start_autocad() = println("Please, start AutoCAD!")
+# start_autocad() = println("Please, start AutoCAD!")
+
+start_autocad() =
+  run(`C:\\Program\ Files\\Common\ Files\\Autodesk\ Shared\\AcShellEx\\AcLauncher.exe $(autocad_template())`, wait=false)
 
 # ACAD is a subtype of CS
 parse_signature(::Val{:ACAD}, sig::T) where {T} = parse_signature(Val(:CS), sig)
@@ -410,8 +416,8 @@ KhepriBase.before_connecting(b::ACAD) =
 
 KhepriBase.retry_connecting(b::ACAD) =
   begin
-    @info("Please, select tab KhepriTemplate in AutoCAD.")
-    sleep(10)
+    #@info("Please, select tab KhepriTemplate in AutoCAD.")
+    sleep(5)
   end
 
 KhepriBase.after_connecting(b::ACAD) =
@@ -559,9 +565,12 @@ KhepriBase.b_pyramid(b::ACAD, bs, t, bmat, smat) =
 
 KhepriBase.b_cylinder(b::ACAD, cb, r, h, bmat, tmat, smat) =
   isnothing(bmat) || isnothing(tmat) ?
-    vcat(@remote(b, ExtrudeWithMaterial(b_circle(b, cb, r, smat), vz(h, cb.cs), smat)),
-         isnothing(bmat) ? [] : b_surface_circle(b, cb, r, bmat),
-         isnothing(tmat) ? [] : b_surface_circle(b, add_z(cb, h), r, tmat)) :
+    let refs = new_refs(b)
+      push!(refs, @remote(b, ExtrudeWithMaterial(b_circle(b, cb, r, smat), vz(h, cb.cs), smat)))
+      isnothing(bmat) || push!(refs, b_surface_circle(b, cb, r, bmat))
+      isnothing(tmat) || push!(refs, b_surface_circle(b, add_z(cb, h), r, tmat))
+      refs
+    end :
     @remote(b, Cylinder(cb, r, add_z(cb, h), smat))
 
 KhepriBase.b_box(b::ACAD, c, dx, dy, dz, mat) =
@@ -582,7 +591,12 @@ KhepriBase.b_torus(b::ACAD, c, ra, rb, mat) =
 # Materials
 
 KhepriBase.b_get_material(b::ACAD, spec::AbstractString) =
-  @remote(b, GetMaterialNamed(spec))
+  try
+    @remote(b, GetMaterialNamed(spec))
+  catch e
+    @warn("Couldn't find material $spec. Replacing it with Global.")
+    @remote(b, GetMaterialNamed("Global"))
+  end
 
 KhepriBase.b_new_material(b::ACAD, path, color, specularity, roughness, transmissivity, transmitted_specular) =
   @remote(b, CreateColoredMaterialNamed(path, color, specularity, transmissivity))
