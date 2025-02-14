@@ -21,7 +21,7 @@ trusted locations are specified by the TRUSTEDPATHS system variable.
 
 # This only needs to be done when the AutoCAD plugin is updated
 
-julia_khepri = dirname(dirname(abspath(@__FILE__)))
+julia_khepri = dirname(@__DIR__)
 bundle_name = "KhepriAutoCAD.bundle"
 dlls = ["KhepriBase.dll", "KhepriAutoCAD.dll"]
 bundle_dll_folder = joinpath(bundle_name, "Contents")
@@ -115,7 +115,7 @@ update_plugin() =
   end
 
 #const autocad_template = Parameter(abspath(@__DIR__, "../Plugin/KhepriTemplate.dwt"))
-const autocad_template = Parameter(abspath(@__DIR__, "../Plugin/Khepri.dwt"))
+const autocad_template = Parameter(normpath(@__DIR__, "../Plugin/Khepri.dwt"))
 
 checked_plugin = false
 
@@ -162,8 +162,8 @@ start_autocad() =
   run(`C:\\Program\ Files\\Common\ Files\\Autodesk\ Shared\\AcShellEx\\AcLauncher.exe $(autocad_template())`, wait=false)
 
 
-start_autocad() =
-  run(`cmd /c cd "$(dirname(autocad_template()))" \&\& $ac_launcher $(basename(autocad_template()))`, wait=true)
+#start_autocad() =
+#  run(`cmd /c cd "$(dirname(autocad_template()))" \&\& $ac_launcher $(basename(autocad_template()))`, wait=true)
 
 # ACAD is a subtype of CS
 parse_signature(::Val{:ACAD}, sig::T) where {T} = parse_signature(Val(:CS), sig)
