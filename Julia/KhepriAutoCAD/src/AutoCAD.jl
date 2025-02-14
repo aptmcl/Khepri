@@ -156,8 +156,14 @@ check_plugin() =
 
 # start_autocad() = println("Please, start AutoCAD!")
 
+ac_launcher = raw"C:\Program Files\Common Files\Autodesk Shared\AcShellEx\AcLauncher.exe"
+
 start_autocad() =
   run(`C:\\Program\ Files\\Common\ Files\\Autodesk\ Shared\\AcShellEx\\AcLauncher.exe $(autocad_template())`, wait=false)
+
+
+start_autocad() =
+  run(`cmd /c cd "$(dirname(autocad_template()))" \&\& $ac_launcher $(basename(autocad_template()))`, wait=true)
 
 # ACAD is a subtype of CS
 parse_signature(::Val{:ACAD}, sig::T) where {T} = parse_signature(Val(:CS), sig)
