@@ -156,10 +156,10 @@ check_plugin() =
 
 # start_autocad() = println("Please, start AutoCAD!")
 
-ac_launcher = raw"C:\Program Files\Common Files\Autodesk Shared\AcShellEx\AcLauncher.exe"
+const ac_launcher = Parameter(raw"C:\Program Files\Common Files\Autodesk Shared\AcShellEx\AcLauncher.exe")
 
 start_autocad() =
-  run(`C:\\Program\ Files\\Common\ Files\\Autodesk\ Shared\\AcShellEx\\AcLauncher.exe $(autocad_template())`, wait=false)
+  run(`$([ac_launcher()]) $([autocad_template()])`, wait=false)
 
 
 #start_autocad() =
