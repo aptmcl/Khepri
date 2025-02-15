@@ -86,6 +86,8 @@ autocad_version(path) =
 
 #=autocad_general_plugins = joinpath(dirname(ENV["CommonProgramFiles"]), "Autodesk", "ApplicationPlugins"),
 autocad_allusers_plugins = joinpath(ENV["ALLUSERSPROFILE"], "Autodesk", "ApplicationPlugins"), =#
+
+const autocad_template = Parameter(normpath(@__DIR__, "../Plugin/Khepri.dwt"))
       
 update_plugin() =
   let autocad_user_plugins = joinpath(ENV["APPDATA"], "Autodesk", "ApplicationPlugins"),
@@ -116,12 +118,9 @@ update_plugin() =
       read&execute bit, making it impossible to start autocad automatically.
       We fix that here:
       =#
-      #chmod(autocad_template(), 0o555) # Read and Execute
+      chmod(autocad_template(), 0o755) # Read, write, and Execute
     end
   end
-
-#const autocad_template = Parameter(abspath(@__DIR__, "../Plugin/KhepriTemplate.dwt"))
-const autocad_template = Parameter(normpath(@__DIR__, "../Plugin/Khepri.dwt"))
 
 checked_plugin = false
 
@@ -161,8 +160,11 @@ const ac_launcher = Parameter(raw"C:\Program Files\Common Files\Autodesk Shared\
 # start_autocad() =
 #  run(`$([ac_launcher()]) $([autocad_template()])`, wait=false)
 
+#start_autocad() =
+# run(`cmd /c start "" "$([autocad_template()])"`, wait=false)
+
 start_autocad() =
-  run(`cmd /c start "" "$([autocad_template()])"`, wait=false)
+  run(`cmd /c explorer "$([autocad_template()])"`, wait=false)
 
 #start_autocad() =
 #  run(`cmd /c cd "$(dirname(autocad_template()))" \&\& $ac_launcher $(basename(autocad_template()))`, wait=true)
