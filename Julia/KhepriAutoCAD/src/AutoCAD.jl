@@ -158,9 +158,11 @@ check_plugin() =
 
 const ac_launcher = Parameter(raw"C:\Program Files\Common Files\Autodesk Shared\AcShellEx\AcLauncher.exe")
 
-start_autocad() =
-  run(`$([ac_launcher()]) $([autocad_template()])`, wait=false)
+# start_autocad() =
+#  run(`$([ac_launcher()]) $([autocad_template()])`, wait=false)
 
+start_autocad() =
+  run(`cmd /c start "" "$([autocad_template()])"`, wait=false)
 
 #start_autocad() =
 #  run(`cmd /c cd "$(dirname(autocad_template()))" \&\& $ac_launcher $(basename(autocad_template()))`, wait=true)
