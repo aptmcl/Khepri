@@ -116,7 +116,7 @@ update_plugin() =
       read&execute bit, making it impossible to start autocad automatically.
       We fix that here:
       =#
-      chmod(autocad_template(), 0o555) # Read and Execute
+      #chmod(autocad_template(), 0o555) # Read and Execute
     end
   end
 
