@@ -170,8 +170,6 @@ the template file.
 This means we need to locate AutoCAD's executable.
 =#
 
-
-
 start_autocad() =
   let autocad_folder = raw"C:\Program Files\Autodesk",
       candidates = String[]
@@ -190,7 +188,7 @@ start_autocad() =
       length(candidates) == 0 ?
         error("Couldn't find AutoCAD. Please, start it manually.") :
         let most_recent = sort!(candidates)[end]
-          run(`$(most_recent) /nologo /t $(autocad_template())`)
+          run(`$(most_recent) /nologo /t $(autocad_template())`, wait=false)
         end
     else
       error("Couldn't find AutoCAD. Please, start it manually.")
