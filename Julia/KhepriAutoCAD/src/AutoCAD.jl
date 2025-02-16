@@ -155,7 +155,7 @@ check_plugin() =
 
 # start_autocad() = println("Please, start AutoCAD!")
 
-const ac_launcher = Parameter(raw"C:\Program Files\Common Files\Autodesk Shared\AcShellEx\AcLauncher.exe")
+# const ac_launcher = Parameter(raw"C:\Program Files\Common Files\Autodesk Shared\AcShellEx\AcLauncher.exe")
 
 # start_autocad() =
 #  run(`$([ac_launcher()]) $([autocad_template()])`, wait=false)
@@ -163,8 +163,39 @@ const ac_launcher = Parameter(raw"C:\Program Files\Common Files\Autodesk Shared\
 #start_autocad() =
 # run(`cmd /c start "" "$([autocad_template()])"`, wait=false)
 
+#=
+There are numerous problems in the way AutoCAD starts. The
+current scheme involves starting AutoCAD and then launching
+the template file.
+This means we need to locate AutoCAD's executable.
+=#
+
+
+
 start_autocad() =
-  run(`cmd /c explorer "$([autocad_template()])"`, wait=false)
+  let autocad_folder = raw"C:\Program Files\Autodesk",
+      candidates = String[]
+    if isdir(autocad_folder)
+      for entry in readdir(autocad_folder)
+        let dirpath = joinpath(autocad_folder, entry)
+          if isdir(dirpath) && occursin(r"^AutoCAD\s\d{4}$", entry)
+            let exe_path = joinpath(dirpath, "acad.exe")
+              if isfile(exe_path)
+                push!(candidates, exe_path)
+              end
+            end
+          end
+        end
+      end
+      length(candidates) == 0 ?
+        error("Couldn't find AutoCAD. Please, start it manually.") :
+        let most_recent = sort!(candidates)[end]
+          run(`$(most_recent) /nologo /t $(autocad_template())`)
+        end
+    else
+      error("Couldn't find AutoCAD. Please, start it manually.")
+    end
+  end
 
 #start_autocad() =
 #  run(`cmd /c cd "$(dirname(autocad_template()))" \&\& $ac_launcher $(basename(autocad_template()))`, wait=true)
