@@ -9,6 +9,7 @@ include(khepribase_interface_file())
 include("Threejs.jl")
 
 function __init__()
+  set_default_materials()
   add_current_backend(threejs)
 end
 end

@@ -1,27 +1,68 @@
-Go inside folder Threejs and do 
+# KhepriThreejs Setup Instructions
 
+## Building the JavaScript Components
+
+Go inside folder Threejs and do:
+
+```bash
 npm run build
+```
 
-Then, go to a shell and do
+## Accessing the Visualization
 
-ipconfig
+The server binds to `127.0.0.1` (localhost) for security. Open your browser and go to:
 
-Extract the IPv4 Address. E.g.
+```
+http://127.0.0.1:8900
+```
 
-C:\Users\aml>ipconfig
+## Security Note
 
-Windows IP Configuration
-...
-Ethernet adapter Ethernet:
+⚠️ **Important**: This package is configured to bind to localhost only for security reasons. Do not change this binding unless you understand the security implications.
 
-   Connection-specific DNS Suffix  . :
-   Link-local IPv6 Address . . . . . : fe80::17c:9c63:8be6:2487%8
-   IPv4 Address. . . . . . . . . . . : 192.168.2.79
-   Subnet Mask . . . . . . . . . . . : 255.255.255.0
-   Default Gateway . . . . . . . . . : 192.168.2.1
+## Alternative Access (Development Only)
+
+If you need to access from other machines on your network (development only):
+
+1. Check your IP address:
+   ```bash
+   ipconfig  # Windows
+   ifconfig  # Linux/Mac
+   ```
+
+2. Extract the IPv4 Address. E.g.:
+   ```
+   C:\Users\aml>ipconfig
+   
+   Windows IP Configuration
+   ...
+   Ethernet adapter Ethernet:
+   
+      Connection-specific DNS Suffix  . :
+      Link-local IPv6 Address . . . . . : fe80::17c:9c63:8be6:2487%8
+      IPv4 Address. . . . . . . . . . . : 192.168.2.79
+      Subnet Mask . . . . . . . . . . . : 255.255.255.0
+      Default Gateway . . . . . . . . . : 192.168.2.1
+   ```
 
 Start a browser and go to
-
+```
 http://192.168.2.79:8900
+```
+
+3. **WARNING**: If you change the binding to allow external access, you must:
+   - Understand the security risks
+   - Implement proper authentication
+   - Use firewall rules
+   - Only do this in controlled environments
+
+## Development Mode
+
+For development with automatic rebuilding:
+
+```bash
+cd Threejs
+npm run build:watch
+```
 
 

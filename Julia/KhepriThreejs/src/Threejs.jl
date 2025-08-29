@@ -77,7 +77,7 @@ encode(ns::Val{:THR}, t::Val{:ArrayInt32}, c::IO, v) =
     encode(ns, Val{:int}[], c, a)
   end
 
-threejs_api = @remote_functions :THR """
+threejs_api = @remote_api :THR """
 typedFunction("points", [[Point3d], MatId], Id, (vs, mat) => {
 typedFunction("line", [[Point3d], MatId], Id, (vs, mat) => {
 typedFunction("spline", [[Point3d], Bool, MatId], Id, (vs, closed, mat) => {
@@ -119,7 +119,7 @@ const THRIds = Vector{THRId}
 const THRRef = NativeRef{THRKey, THRId}
 const THRRefs = Vector{THRRef}
 const THR = WebSocketBackend{THRKey, THRId}
-  
+
 
 backend_name(b::THR) = b.name
 
@@ -152,19 +152,21 @@ KhepriBase.start_connection(b::THR) =
     end
   end
 
-KhepriBase.after_connecting(b::THR) =
+set_default_materials() =
   begin
-    set_material(b, material_point, threejs_line_material(b, RGB(1.0,1.0,1.0)))
-    set_material(b, material_curve, threejs_line_material(b, RGB(1.0,1.0,1.0)))
-    set_material(b, material_surface, threejs_material(b, RGB(0.9,0.1,0.1)))
-    set_material(b, material_basic, threejs_material(b, RGB(0.8,0.8,0.8)))
-    set_material(b, material_glass, threejs_glass_material(b))
-	  set_material(b, material_metal, threejs_metal_material(b))
-	  set_material(b, material_wood, threejs_material(b, RGB(169/255,122/255,87/255)))
-	  set_material(b, material_concrete, threejs_material(b, RGB(140/255,140/255,140/255)))
-	  set_material(b, material_plaster, threejs_material(b, RGB(0.7,0.7,0.7)))
-	  set_material(b, material_grass, threejs_material(b, RGB(0.1,0.7,0.1)))
+    set_material(THR, material_point, b->threejs_line_material(b, RGB(1.0,1.0,1.0)))
+    set_material(THR, material_curve, b->threejs_line_material(b, RGB(1.0,1.0,1.0)))
+    set_material(THR, material_surface, b->threejs_material(b, RGB(0.9,0.1,0.1)))
+    set_material(THR, material_basic, b->threejs_material(b, RGB(0.8,0.8,0.8)))
+    set_material(THR, material_glass, b->threejs_glass_material(b))
+	  set_material(THR, material_metal, b->threejs_metal_material(b))
+	  set_material(THR, material_wood, b->threejs_material(b, RGB(169/255,122/255,87/255)))
+	  set_material(THR, material_concrete, b->threejs_material(b, RGB(140/255,140/255,140/255)))
+	  set_material(THR, material_plaster, b->threejs_material(b, RGB(0.7,0.7,0.7)))
+	  set_material(THR, material_grass, b->threejs_material(b, RGB(0.1,0.7,0.1)))
   end
+
+KhepriBase.b_get_material(b::THR, f::Function) = f(b)
 
 const threejs = THR("Threejs", "0.0.0.0" #="127.0.0.1"=#, threejs_port, threejs_api)
 
@@ -240,7 +242,8 @@ KhepriBase.b_polygon(b::THR, ps, mat) =
 	@remote(b, line(ps, true, mat))
 =#
 KhepriBase.b_spline(b::THR, ps, v1, v2, mat) =
-  # HACK: What about v1, v2?
+  # TODO: Implement proper spline with tangent vectors v1, v2
+  # For now, using Catmull-Rom spline without tangent constraints
   @remote(b, spline(ps, false, mat))
 
 KhepriBase.b_closed_spline(b::THR, ps, mat) =
@@ -999,11 +1002,9 @@ create_ground_plane(shapes, material=default_THR_ground_material()) =
 =#
 =#
 ####################################################
-KhepriBase.b_labels(b::THR, p, strs, mats, mat) =
-  [@remote(b, addAnnotation(p, str))
-   for (str, ϕ, mat)
-     in zip(strs, division(-π/4, 7π/4, length(strs), false), mats)]
-
+KhepriBase.b_labels(b::THR, p, data, mat) =
+  [@remote(b, addAnnotation(p+vpol(0.2*scale, ϕ), txt))
+   for ((; txt, mat, scale), ϕ) in zip(data, division(-π/4, 7π/4, length(data), false))]
 
 KhepriBase.b_start_batch_processing(b::THR) = @remote(b, stopUpdate())
 

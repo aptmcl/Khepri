@@ -6,11 +6,14 @@ import { OutlineEffect } from 'three/addons/effects/OutlineEffect.js';
 
 // Types
 class PrimitiveType {
-    constructor(name, size, read, write=(io, v) => console.error("No writer defined for ", name, this)) {
+    constructor(name, size, read, write) {
         this.name = name;
         this.size = size;
         this.read = read;
-        this.write = write;
+        this.write = write || ((io, v) => {
+            console.error(`No writer defined for ${name}`);
+            throw new Error(`No writer defined for ${name}`);
+        });
     }
 }
 
@@ -38,7 +41,7 @@ class CompositeType {
         this.name = name;
         this.subtypes = subtypes;
         this.read = (io) => combiner(subtypes.map(st=>io.readType(st)));
-        this.write = (io, v) => console.error("Finish this!");
+        this.write = (io, v) => combiner(subtypes.map(st=>io.writeType(st, v)));
     }
 }
 const Float3 = new CompositeType("FLoat3", [Float32, Float32, Float32], args => args);
