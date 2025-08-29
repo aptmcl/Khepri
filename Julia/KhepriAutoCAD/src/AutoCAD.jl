@@ -250,7 +250,7 @@ decode(ns::Val{:ACAD}, ::Val{:Color}, c::IO) =
 #
 convert(RGB{ColorTypes.N0f8}, rgba(0.7, 0, 0, 0.5))
 
-acad_api = @remote_functions :ACAD """
+acad_api = @remote_api :ACAD """
 public Entity QuadStrip(Point3d[] bpts, Point3d[] tpts, int smoothLevel, ObjectId matId)
 public Entity ClosedQuadStrip(Point3d[] bpts, Point3d[] tpts, int smoothLevel, ObjectId matId)
 public Entity Mesh(Point3d[] pts, int[][] faces, int smoothLevel, ObjectId matId)
@@ -461,13 +461,6 @@ KhepriBase.retry_connecting(b::ACAD) =
 
 KhepriBase.after_connecting(b::ACAD) =
   begin
-    set_material(autocad, material_metal, "Steel - Polished")
-    set_material(autocad, material_glass, "Clear")
-    set_material(autocad, material_wood, "Plywood - New")
-    set_material(autocad, material_concrete, "Flat - Broom Gray")
-    set_material(autocad, material_plaster, "Fine - White")
-    set_material(autocad, material_clay, "Ceramic")
-    set_material(autocad, material_grass, "Green")
   end
 
 const autocad = ACAD("AutoCAD", autocad_port, acad_api)
@@ -628,6 +621,17 @@ KhepriBase.b_torus(b::ACAD, c, ra, rb, mat) =
   @remote(b, Torus(c, vz(1, c.cs), ra, rb, mat))
 
 # Materials
+
+set_default_materials() =
+  begin
+    set_material(ACAD, material_metal, "Steel - Polished")
+    set_material(ACAD, material_glass, "Clear")
+    set_material(ACAD, material_wood, "Plywood - New")
+    set_material(ACAD, material_concrete, "Flat - Broom Gray")
+    set_material(ACAD, material_plaster, "Fine - White")
+    set_material(ACAD, material_clay, "Ceramic")
+    set_material(ACAD, material_grass, "Green")
+  end  
 
 KhepriBase.b_get_material(b::ACAD, spec::AbstractString) =
   try
