@@ -28,7 +28,8 @@ encode_Quaternion(c::IO, pv::Union{XYZ, VXYZ}) =
   end
 =#
 
-unity_api = @remote_functions :Unity """
+unity_api = @remote_api :Unity """
+public GameObject Line(Vector3[] ps, Material material)
 public GameObject Trig(Vector3 p0, Vector3 p1, Vector3 p2, Material material)
 public GameObject Quad(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, Material material)
 public GameObject NGon(Vector3[] ps, Vector3 q, bool smooth, Material material)
@@ -121,34 +122,31 @@ public void StartSelectingGameObjects()
 public bool EndedSelectingGameObjects()
 public int[] SelectedGameObjectsIds(bool existing)
 public void SetSun(float altitude, float azimuth)
-public string GetRenderResolution()
-public float GetCurrentFPS()
-public int GetViewTriangleCount()
-public int GetViewVertexCount()
 public String ShapeType(GameObject s)
 public Vector3 SphereCenter(GameObject s)
 public float SphereRadius(GameObject s)
 """
 
+#= These depend on the editor
+public string GetRenderResolution()
+public float GetCurrentFPS()
+public int GetViewTriangleCount()
+public int GetViewVertexCount()
+=#
 abstract type UnityKey end
 const UnityId = Int32
 const UnityRef = GenericRef{UnityKey, UnityId}
 const UnityRefs = Vector{UnityRef}
 const UnityNativeRef = NativeRef{UnityKey, UnityId}
 const Unity = SocketBackend{UnityKey, UnityId}
+# For users to be able to initialize each of the connections
+export Unity
 
 KhepriBase.void_ref(b::Unity) = -1 % Int32
 
 KhepriBase.before_connecting(b::Unity) = nothing #check_plugin()
 KhepriBase.after_connecting(b::Unity) =
   begin
-    set_material(unity, material_basic, "Default/Materials/White")
-    set_material(unity, material_metal, "Default/Materials/Steel")
-    set_material(unity, material_glass, "Default/Materials/Glass")
-    set_material(unity, material_wood, "Default/Materials/Wood")
-    set_material(unity, material_concrete, "Default/Materials/Concrete")
-    set_material(unity, material_plaster, "Default/Materials/Plaster")
-    set_material(unity, material_grass, "Default/Materials/Grass")
   end
 
 const unity = Unity("Unity", unity_port, unity_api)
@@ -167,13 +165,14 @@ KhepriBase.has_boolean_ops(::Type{Unity}) = HasBooleanOps{false}()
   end
 #
 # Primitives
-#=
-KhepriBase.b_point(b::Unity, p) =
-  @remote(b, Point(p))
+
+KhepriBase.b_point(b::Unity, p, mat) = (println("Creating point $p with material $mat");
+  b_sphere(b, p, 0.01, mat))
 
 KhepriBase.b_line(b::Unity, ps, mat) =
-  @remote(b, PolyLine(ps))
+  @remote(b, Line(ps, mat))
 
+#=
 KhepriBase.b_polygon(b::Unity, ps, mat) =
   @remote(b, ClosedPolyLine(ps))
 
@@ -315,8 +314,20 @@ KhepriBase.b_sphere(b::Unity, c, r, mat) =
 
 # Materials
 
-KhepriBase.b_get_material(b::Unity, path::String) =
-  @remote(b, LoadMaterial(path))
+set_default_materials() =
+  begin
+    set_material(Unity, material_curve, "Default/Materials/White")
+    set_material(Unity, material_basic, "Default/Materials/White")
+    set_material(Unity, material_metal, "Default/Materials/Steel")
+    set_material(Unity, material_glass, "Default/Materials/Glass")
+    set_material(Unity, material_wood, "Default/Materials/Wood")
+    set_material(Unity, material_concrete, "Default/Materials/Concrete")
+    set_material(Unity, material_plaster, "Default/Materials/Plaster")
+    set_material(Unity, material_grass, "Default/Materials/Grass")
+  end
+
+KhepriBase.b_get_material(b::Unity, path::AbstractString) = (println("Loading material $path");
+  @remote(b, LoadMaterial(path)))
 
 fast_unity() =
   begin
@@ -379,7 +390,7 @@ realize(b::Unity, s::Move) =
             @remote(b, Move(r, s.v))
             r
           end
-    mark_deleted(s.shape)
+    mark_deleted(b, s.shape)
     r
   end
 #=
@@ -388,7 +399,7 @@ realize(b::Unity, s::Transform) =
             @remote(b, Transform(r, s.xform))
             r
           end
-    mark_deleted(s.shape)
+    mark_deleted(b, s.shape)
     r
   end
 =#
@@ -397,7 +408,7 @@ realize(b::Unity, s::Scale) =
             @remote(b, Scale(r, s.p, s.s))
             r
           end
-    mark_deleted(s.shape)
+    mark_deleted(b, s.shape)
     r
   end
 
@@ -406,7 +417,7 @@ realize(b::Unity, s::Rotate) =
             @remote(b, Rotate(r, s.p, s.v, s.angle))
             r
           end
-    mark_deleted(s.shape)
+    mark_deleted(b, s.shape)
     r
   end
 
@@ -539,6 +550,14 @@ preserving_interactiveness(f, b::Unity=current_backend()) =
     f()
     @remote(b, SetMaxNonInteractiveRequests(prev))
   end
+
+with_delayed_update(f, b::Unity) =
+  let prev = @remote(b, SetMaxNonInteractiveRequests(1000000))
+    f()
+    @remote(b, SetMaxNonInteractiveRequests(prev))
+  end
+
+
 
 # Experiment to speed up things
 
