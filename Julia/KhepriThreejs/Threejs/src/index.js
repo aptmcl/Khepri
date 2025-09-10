@@ -266,39 +266,61 @@ function withTransform(m, obj) {
 }
 
 /*
-Using a array does not seem like the best option, particularly, 
-because when we delete shapes we leave undefined 'holes' in the array, 
-which cause errors, e.g., in raycasting.
-Another option is to use a dictionary and a reverse property on each shape
-to know its id.
+SOLUTION: Using a Map instead of an array to avoid undefined 'holes' when deleting shapes.
+This prevents errors in operations like raycasting and provides better mesh management.
+Each mesh stores its ID in userData.meshId for reverse lookup.
 */
-const meshes = [];
+// Map-based mesh storage for better management
+const meshes = new Map();
+let nextMeshId = 0;
+
 function addMesh(obj) {
     obj.castShadow = true;
     obj.receiveShadow = true;
     obj.geometry.computeVertexNormals();
     wireframeCheck(obj);
     scene.add(obj);
-    return meshes.push(obj) - 1;
+    
+    const meshId = nextMeshId++;
+    meshes.set(meshId, obj);
+    // Store the ID on the object for reverse lookup
+    obj.userData.meshId = meshId;
+    
+    return meshId;
 }
+
 function getMesh(idx) {
-    return meshes[idx];
+    return meshes.get(idx);
 }
+
 function delMesh(idx) {
-    if (meshes[idx]) {
-        meshes[idx].removeFromParent();
-        meshes[idx].geometry.dispose();
-        delete meshes[idx];
+    const obj = meshes.get(idx);
+    if (obj) {
+        obj.removeFromParent();
+        obj.geometry.dispose();
+        meshes.delete(idx);
+        delete obj.userData.meshId;
         return idx;
     } else {
         console.error(`Requested non-existent mesh with id '${idx}'.`);
     }
 }
+
 function delAllMeshes() {
-    let length = meshes.length;
-    meshes.forEach(m => { m.removeFromParent(); m.geometry.dispose(); });
-    meshes.length = 0;
-    return length;
+    const count = meshes.size;
+    meshes.forEach((obj, id) => {
+        obj.removeFromParent();
+        obj.geometry.dispose();
+        delete obj.userData.meshId;
+    });
+    meshes.clear();
+    nextMeshId = 0; // Reset the ID counter
+    return count;
+}
+
+// Utility function to get all meshes as an array (for compatibility if needed)
+function getAllMeshes() {
+    return Array.from(meshes.values());
 }
 
 let spriteMaterial;
@@ -530,14 +552,15 @@ typedFunction("guiAddButton", [GUIId, Str, Str], None, (gui, name, request) => {
     gui.add(param, 'field').name(name);
 });
 
-onChangeMakeRequest(prev, request) = 
-    (value) => {
+function onChangeMakeRequest(prev, request) {
+    return (value) => {
         // HACK Stop accepting changes when update is false!!!!!
         if (value != prev) {
             prev = value;
             send(request + "?p0=" + value)
         }
-    } 
+    };
+}
 
 typedFunction("guiAddCheckbox", [GUIId, Str, Str, Bool], None, (gui, name, request, curr) => {
     const param = { field: curr };
