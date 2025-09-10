@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset=utf-8>
+		<title>Khepri</title>
+    <link rel="stylesheet" href="style.css"></link>
+    <style>
+      body {
+        margin : 0;
+        padding: 0;
+      }
+    </style>
+	</head>
+	<body>
+    <canvas id="number" width="64" height="64"></canvas>
+    <script type="text/javascript" src="main.min.js"></script>
+    <script>
+        viewer = new Khepri.Viewer(document.getElementById("canvas"));
+        try {
+            viewer.connect();
+        } catch (e) {
+            console.info("Not connected to Khepri websocket server: ", e);
+        }
+    </script>
+    <script id="embedded-json"></script>
+  </body>
+</html>
