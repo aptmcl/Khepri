@@ -713,31 +713,20 @@ realize(b::ACAD, s::EllipticArc) =
 =#
 
 KhepriBase.b_surface(b::ACAD, frontier::Shapes, mat) =
-  let #ids = map(r->@remote(b, NurbSurfaceFrom(r)), @remote(b, SurfaceFromCurves(collect_ref(s.frontier))))
-      ids = @remote(b, SurfaceFromCurves(collect_ref(b, frontier), mat))
+  let #ids = map(r->@remote(b, NurbSurfaceFrom(r)), @remote(b, SurfaceFromCurves(ref_values(s.frontier))))
+      ids = @remote(b, SurfaceFromCurves(ref_values(b, frontier), mat))
     for s in frontier
       mark_deleted(b, s)
     end
     ids
   end
 backend_surface_boundary(b::ACAD, s::Shape2D) =
-    map(c -> b_shape_from_ref(b, r), @remote(b, CurvesFromSurface(ref(s).value)))
+    map(c -> b_shape_from_ref(b, r), @remote(b, CurvesFromSurface(ref_value(b, s))))
 
 # Iterating over curves and surfaces
 
-
-old_backend_map_division(b::ACAD, f::Function, s::Shape1D, n::Int) =
-  let r = ref(s).value,
-      (t1, t2) = @remote(b, CurveDomain(r))
-    map_division(t1, t2, n) do t
-      f(@remote(b, CurveFrameAt(r, t)))
-    end
-  end
-
-# For low level access:
-
 backend_map_division(b::ACAD, f::Function, s::Shape1D, n::Int) =
-  let r = ref(s).value,
+  let r = ref_value(b, s),
       (t1, t2) = @remote(b, CurveDomain(r)),
       ti = division(t1, t2, n),
       ps = @remote(b, CurvePointsAt(r, ti)),
@@ -777,11 +766,11 @@ rotation_minimizing_frames(u0, xs, ts) =
 
 
 backend_surface_domain(b::ACAD, s::Shape2D) =
-    tuple(@remote(b, SurfaceDomain(ref(s).value))...)
+    tuple(@remote(b, SurfaceDomain(ref_value(b, s)))...)
 
 backend_map_division(b::ACAD, f::Function, s::Shape2D, nu::Int, nv::Int) =
   let conn = connection(b)
-      r = ref(s).value
+      r = ref_value(b, s)
       (u1, u2, v1, v2) = @remote(b, SurfaceDomain(r))
     map_division(u1, u2, nu) do u
       map_division(v1, v2, nv) do v
@@ -794,7 +783,7 @@ backend_map_division(b::ACAD, f::Function, s::Shape2D, nu::Int, nv::Int) =
 
 backend_map_division(b::ACAD, f::Function, s::SurfaceGrid, nu::Int, nv::Int) =
   let conn = connection(b)
-      r = ref(s).value
+      r = ref_value(b, s)
       (u1, u2, v1, v2) = @remote(b, SurfaceDomain(r))
     map_division(u1, u2, nu) do u
       map_division(v1, v2, nv) do v
@@ -865,8 +854,8 @@ acad_revolve(b::ACAD, profile::Shape, p, n, start_angle, amplitude, mat) =
 
 KhepriBase.b_loft_curves(b::ACAD, profiles, rails, ruled, closed, mat) =
   and_delete_shapes(@remote(b, LoftWithMaterial(
-                             collect_ref(b, profiles),
-                             collect_ref(b, rails),
+                             ref_values(b, profiles),
+                             ref_values(b, rails),
                              ruled, closed, mat)),
                     vcat(profiles, rails))
 
@@ -875,7 +864,7 @@ KhepriBase.b_loft_surfaces(b::ACAD, profiles, rails, ruled, closed, mat) =
 
 KhepriBase.b_loft_curve_point(b::ACAD, profile, point, mat) =
     and_delete_shapes(@remote(b, LoftWithMaterial(
-                               vcat(collect_ref(b, profile), collect_ref(b, point)),
+                               vcat(ref_values(b, profile), ref_values(b, point)),
                                [],
                                true, false, mat)),
                       [profile, point])
@@ -979,7 +968,7 @@ realize(b::ACAD, s::Thicken) =
 # backend_frame_at
 backend_frame_at(b::ACAD, s::Circle, t::Real) = add_pol(s.center, s.radius, t)
 
-backend_frame_at(b::ACAD, c::Shape1D, t::Real) = @remote(b, CurveFrameAt(ref(c).value, t))
+backend_frame_at(b::ACAD, c::Shape1D, t::Real) = @remote(b, CurveFrameAt(ref_value(b, c), t))
 
 #backend_frame_at(b::ACAD, s::Surface, u::Real, v::Real) =
     #What should we do with v?
@@ -987,7 +976,7 @@ backend_frame_at(b::ACAD, c::Shape1D, t::Real) = @remote(b, CurveFrameAt(ref(c).
 
 #backend_frame_at(b::ACAD, s::SurfacePolygon, u::Real, v::Real) =
 
-backend_frame_at(b::ACAD, s::Shape2D, u::Real, v::Real) = @remote(b, SurfaceFrameAt(ref(s).value, u, v))
+backend_frame_at(b::ACAD, s::Shape2D, u::Real, v::Real) = @remote(b, SurfaceFrameAt(ref_value(b, s), u, v))
 
 # BIM
 realize(b::ACAD, f::TableFamily) =
@@ -1013,7 +1002,7 @@ KhepriBase.b_table_and_chairs(b::ACAD, c, angle, family) =
 ############################################
 
 # KhepriBase.b_bounding_box(b::ACAD, shapes::Shapes) =
-#   @remote(b, BoundingBox(collect_ref(shapes)))
+#   @remote(b, BoundingBox(ref_values(shapes)))
 
 KhepriBase.b_set_view(b::ACAD, camera::Loc, target::Loc, lens::Real, aperture::Real) =
   @remote(b, View(camera, target, lens))
@@ -1030,8 +1019,9 @@ KhepriBase.b_set_view_top(b::ACAD) =
 KhepriBase.b_realistic_sky(b::ACAD, date, latitude, longitude, elevation, meridian, turbidity, sun) =
   @remote(b, SetSkyFromDateLocation(date, latitude, longitude, meridian, elevation))
 
-KhepriBase.b_all_refs(b::ACAD) =
-  @remote(b, GetAllShapes())
+# HACK: This should be filtered in the backend
+KhepriBase.b_all_shape_refs(b::ACAD) =
+  filter(r -> @remote(b, ShapeCode(r)) != 0, @remote(b, GetAllShapes()))
 
 KhepriBase.b_delete_refs(b::ACAD, rs::Vector{ACADId}) =
   @remote(b, DeleteMany(rs))
@@ -1039,8 +1029,12 @@ KhepriBase.b_delete_refs(b::ACAD, rs::Vector{ACADId}) =
 KhepriBase.b_delete_ref(b::ACAD, r::ACADId) =
   @remote(b, Delete(r))
 
-KhepriBase.b_delete_all_refs(b::ACAD) =
-  @remote(b, DeleteAll())
+KhepriBase.b_delete_all_shape_refs(b::ACAD) =
+  begin
+    @remote(b, DeleteAll())
+    empty!(shape_refs_storage(b))
+    nothing
+  end
 
 backend_set_length_unit(b::ACAD, unit::String) = @remote(b, SetLengthUnit(unit))
 
@@ -1167,10 +1161,10 @@ end
 
 # Layers
 
-KhepriBase.b_current_layer(b::ACAD) =
+KhepriBase.b_current_layer_ref(b::ACAD) =
   @remote(b, CurrentLayer())
 
-KhepriBase.b_current_layer(b::ACAD, layer) =
+KhepriBase.b_current_layer_ref(b::ACAD, layer) =
   @remote(b, SetCurrentLayer(layer))
 
 KhepriBase.b_layer(b::ACAD, name, active, color) =
@@ -1189,11 +1183,11 @@ switch_to_layer(to, b::ACAD) =
 # Blocks
 
 realize(b::ACAD, s::Block) =
-    @remote(b, CreateBlockFromShapes(s.name, collect_ref(b, s.shapes)))
+    @remote(b, CreateBlockFromShapes(s.name, ref_values(b, s.shapes)))
 
 realize(b::ACAD, s::BlockInstance) =
     @remote(b, CreateBlockInstance(
-        collect_ref(b, s.block)[1],
+        ref_values(b, s.block)[1],
         center_scaled_cs(s.loc, s.scale, s.scale, s.scale)))
 
 #=
@@ -1221,76 +1215,77 @@ KhepriBase.b_ieslight(b::ACAD, file, loc, dir, alpha, beta, gamma) =
 
 # User Selection
 
-KhepriBase.b_shape_from_ref(b::ACAD, r) =
-  let code = @remote(b, ShapeCode(r)),
-      ref = DynRefs(b=>ACADNativeRef(r))
+KhepriBase.b_create_shape_from_ref_value(b::ACAD, r) = 
+  let code = @remote(b, ShapeCode(r))
     if code == 1 # Point
-        point(@remote(b, PointPosition(r)),
-              ref=ref)
+        point(@remote(b, PointPosition(r)))
     elseif code == 2
         circle(loc_from_o_vz(@remote(b, CircleCenter(r)), @remote(b, CircleNormal(r))),
-               @remote(b, CircleRadius(r)),
-               ref=ref)
+               @remote(b, CircleRadius(r)))
     elseif 3 <= code <= 6
-        line(@remote(b, LineVertices(r)),
-             ref=ref)
+        line(@remote(b, LineVertices(r)))
     elseif code == 7
         let tans = @remote(b, SplineTangents(r))
             if length(tans[1]) < 1e-20 && length(tans[2]) < 1e-20
-                closed_spline(@remote(b, SplineInterpPoints(r))[1:end-1],
-                              ref=ref)
+                closed_spline(@remote(b, SplineInterpPoints(r))[1:end-1])
             else
-                spline(@remote(b, SplineInterpPoints(r)), tans[1], tans[2],
-                       ref=ref)
+                spline(@remote(b, SplineInterpPoints(r)), tans[1], tans[2])
             end
         end
     elseif code == 9
         let start_angle = mod(@remote(b, ArcStartAngle(r)), 2pi),
             end_angle = mod(@remote(b, ArcEndAngle(r)), 2pi)
             arc(loc_from_o_vz(@remote(b, ArcCenter(r)), @remote(b, ArcNormal(r))),
-                @remote(b, ArcRadius(r)), start_angle, mod(end_angle - start_angle, 2pi),
-                ref=ref)
+                @remote(b, ArcRadius(r)), start_angle, mod(end_angle - start_angle, 2pi))
         #=    if end_angle > start_angle
                 arc(maybe_loc_from_o_vz(@remote(b, ArcCenter(r)), @remote(b, ArcNormal(r))),
-                    @remote(b, ArcRadius(r)), start_angle, end_angle - start_angle,
-                    ref=ref)
+                    @remote(b, ArcRadius(r)), start_angle, end_angle - start_angle)
             else
                 arc(maybe_loc_from_o_vz(@remote(b, ArcCenter(r)), @remote(b, ArcNormal(r))),
-                    @remote(b, ArcRadius(r)), end_angle, start_angle - end_angle,
-                    ref=ref)
+                    @remote(b, ArcRadius(r)), end_angle, start_angle - end_angle)
             end=#
         end
     elseif code == 10
         let str = @remote(b, TextString(r)),
             height = @remote(b, TextHeight(r)),
             loc = @remote(b, TextPosition(r))
-            text(str, loc, height, ref=ref)
+            text(str, loc, height)
         end
     elseif code == 11
         let str = @remote(b, MTextString(r)),
             height = @remote(b, MTextHeight(r)),
             loc = @remote(b, MTextPosition(r))
-            text(str, loc, height, ref=ref)
+            text(str, loc, height)
         end
     elseif code == 16
         let pts = @remote(b, MeshVertices(r)),
             (type, n, m, n_closed, m_closed) = @remote(b, PolygonMeshData(r))
-            surface_grid(reshape(pts, (n, m)), n_closed == 1, m_closed == 1, ref=ref)
+            surface_grid(reshape(pts, (n, m)), n_closed == 1, m_closed == 1)
         end
     elseif 12 <= code <= 14
-        surface(Shape1D[], ref=ref)
+        surface(Shape1D[])
     elseif 103 <= code <= 106
-        polygon(@remote(b, LineVertices(r)),
-                ref=ref)
+        polygon(@remote(b, LineVertices(r)))
     elseif code == 107
-        closed_spline(@remote(b, SplineInterpPoints(r))[1:end-1],
-                      ref=ref)
+        closed_spline(@remote(b, SplineInterpPoints(r))[1:end-1])
     else
         #unknown(ref=ref)
-        unknown(r, ref=ref) # To force copy
+        unknown(r) # To force copy
         #error("Unknown shape with code $(code)")
     end
   end
+
+#= Should be more or less like this:
+KhepriBase.b_create_layer_from_ref_value(b::ACAD, r) =
+  let name = @remote(b, LayerName(r)),
+      color = rgb(@remote(b, LayerColor(r))[1:3]...),
+      alpha = round(UInt8, @remote(b, LayerAlpha(r))*255),
+      active = @remote(b, LayerActive(r))
+    layer(name, active, color, alpha)
+  end
+=#
+KhepriBase.b_create_layer_from_ref_value(b::ACAD, r) =
+  layer("Unknown", true, rgb(0, 0, 0))
 
 #=
 In case we need to realize an Unknown shape, we just copy it
@@ -1356,12 +1351,12 @@ backend_captured_shapes(b::ACAD, handles) =
   end
 
 backend_generate_captured_shape(b::ACAD, s::Shape) =
-    println("captured_shape(autocad, $(@remote(b, GetHandleFromShape(ref(s).value))))")
+    println("captured_shape(autocad, $(@remote(b, GetHandleFromShape(ref_value(b, s)))))")
 backend_generate_captured_shapes(b::ACAD, ss::Shapes) =
   begin
     print("captured_shapes(autocad, [")
     for s in ss
-      print(@remote(b, GetHandleFromShape(ref(s).value)))
+      print(@remote(b, GetHandleFromShape(ref_value(b, s))))
       print(", ")
     end
     println("])")
@@ -1371,14 +1366,14 @@ backend_generate_captured_shapes(b::ACAD, ss::Shapes) =
 
 backend_register_shape_for_changes(b::ACAD, s::Shape) =
     let conn = connection(b)
-        @remote(b, RegisterForChanges(ref(s).value))
+        @remote(b, RegisterForChanges(ref_value(b, s)))
         @remote(b, DetectCancel())
         s
     end
 
 backend_unregister_shape_for_changes(b::ACAD, s::Shape) =
     let conn = connection(b)
-        @remote(b, UnregisterForChanges(ref(s).value))
+        @remote(b, UnregisterForChanges(ref_value(b, s)))
         @remote(b, UndetectCancel())
         s
     end
@@ -1403,11 +1398,11 @@ backend_changed_shape(b::ACAD, ss::Shapes) =
 
 # HACK: This should be filtered on the plugin, not here.
 KhepriBase.b_all_shapes(b::ACAD) =
-  Shape[b_shape_from_ref(b, r)
+  Shape[get_or_create_shape_from_ref_value(b, r)
         for r in filter(r -> @remote(b, ShapeCode(r)) != 0, @remote(b, GetAllShapes()))]
 
 KhepriBase.b_all_shapes_in_layer(b::ACAD, layer) =
-  Shape[b_shape_from_ref(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
+  Shape[get_or_create_shape_from_ref_value(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
 
 KhepriBase.b_highlight_refs(b::ACAD, rs::Vector{ACADId}) =
   @remote(b, SelectShapes(rs))
@@ -1427,7 +1422,7 @@ backend_pre_selected_shapes_from_set(ss::Shapes, b::Backend) = []
 
 backend_pre_selected_shapes_from_set(b::ACAD, ss::Shapes) =
   let refs = map(id -> @remote(b, GetHandleFromShape(id)), @remote(b, GetPreSelectedShapes()))
-    filter(s -> @remote(b, GetHandleFromShape(ref(s).value)) in refs, ss)
+    filter(s -> @remote(b, GetHandleFromShape(ref_value(b, s))) in refs, ss)
   end
 backend_disable_update(b::ACAD) =
   @remote(b, DisableUpdate())
