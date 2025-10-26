@@ -17,7 +17,7 @@ Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [sources]
-KhepriBase = {path = "..\\KhepriBase"}
+KhepriBase = {rev = "master", url = "https://github.com/aptmcl/KhepriBase.jl"}
 
 [compat]
 ColorTypes = "0.11"
