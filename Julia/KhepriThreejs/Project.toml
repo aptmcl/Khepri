@@ -16,15 +16,12 @@ Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
 Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
-[sources]
-KhepriBase = {rev = "master", url = "https://github.com/aptmcl/KhepriBase.jl"}
-
 [compat]
 ColorTypes = "0.11"
 Colors = "0.13.1"
 Dates = "1.9"
 HTTP = "1.10"
-KhepriBase = "0.6"
+KhepriBase = "0.6.3"
 LinearAlgebra = "1.9"
 Reexport = "1.2"
 Sockets = "1.9"

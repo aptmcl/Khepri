@@ -15,6 +15,8 @@ include("Threejs.jl")
 
 function __init__()
   set_default_materials()
-  add_current_backend(threejs)
+  register_handlers!()
+  add_websocket_backend_init_function("threejs", conn -> THR("Threejs", conn, threejs_api))
+  #add_current_backend(threejs)
 end
 end

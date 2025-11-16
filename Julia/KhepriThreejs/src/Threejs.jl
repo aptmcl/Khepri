@@ -87,7 +87,7 @@ typedFunction("deleteAll", [], None, () => {
 typedFunction("addAnnotation", [Point3d, Str], Int32, (p: THREE.Vector3, txt: string) =>
 typedFunction("deleteAnnotation", [Int32], None, (i: number) => 
 typedFunction("guiCreate", [Str, Int32], GUIId, (title: string, kind: number) => {
-typedFunction("guiAddFolder", [GUIId, Str], GUIId, (gui: GUI, title: string) =>
+typedFunction("guiAddFolder", [GUIId, Str, Bool], GUIId, (gui: GUI, title: string, closed: boolean) => {
 typedFunction("guiVisible", [GUIId, Bool], None, (gui: GUI, visible: boolean) => {
 typedFunction("guiAddButton", [GUIId, Str, Int32], GUIId, (gui: GUI, name: string, request: number) => {
 typedFunction("guiAddCheckbox", [GUIId, Str, Int32, Bool], GUIId, (gui: GUI, name: string, request: number, curr: boolean) => {
@@ -137,90 +137,29 @@ const THR = WebSocketBackend{THRKey, THRId}
 
 backend_name(b::THR) = b.name
 
-const content_type_header = Dict(
-  "html"=>"text/html",
-  "js"  =>"application/javascript",
-  "css" =>"text/css",
-  "png" =>"image/png",
-  "jpg" =>"image/jpeg",
-  "jpeg"=>"image/jpeg",
-  "obj" =>"text/plain",
-  "mtl" =>"text/plain",
-  "hdr" =>"image/hdr",
-  "gltf"=>"model/gltf+json",
-  "glb" =>"model/gltf-binary",
-  "bin" =>"application/octet-stream",
-  )
-
-get_file_content_type(path) =
-  ["Content-Type" => content_type_header[splitext(path)[2][2:end]]] # splitext gives (root, .ext)
-
-function KhepriBase.start_connection(b::THR)
-    let files = ["index.html", "assets/index.js", "assets/index.css"],
+register_handlers!(server=khepri_websocket_server()) =
+  let files = ["index.html", "assets/index.js", "assets/index.css"],
       root = joinpath(@__DIR__, "..", "KhepriThree.js", "dist"),
-      #files = ["index.html", "style.css", "main.min.js", "main.js"],
-      #root = joinpath(@__DIR__, "..", "Threejs", "dist"),
-      read_file(file) = open(s -> read(s, String), joinpath(root, file))
-    global router = HTTP.Router()
-    # Handler for resources
+      root_read_file(file) = http_response_with_file(joinpath(root, file)),
+      router = server.router
     HTTP.register!(router, "GET", "/resources/**", request -> 
       let subpath = split(request.target, "/", keepempty=false)[2:end], # drop first 'resources'
-          path = joinpath(resources_pathname, subpath...)
-        println("Request for resource file: $path")
-        HTTP.Response(200, 
-                      get_file_content_type(path),
-                      open(s -> read(s, String), path))
+          path = joinpath(subpath...)
+        http_response_with_resource_file(path)
       end)
-    #=
-    HTTP.register!(router, "GET", "/resources/models/{fmt}/{path}/{name}", req -> 
-      let params = HTTP.getparams(req),
-          fmt = params["fmt"],
-          path = params["path"],
-          name = params["name"],
-          filename = joinpath(models_pathname, fmt, path, name)
-        println("Request for model file: $filename")
-        HTTP.Response(200, get_file_content_type(name), open(s -> read(s, String), filename))
-      end)
-    HTTP.register!(router, "GET", "/resources/environments/{name}", req -> 
-      let params = HTTP.getparams(req),
-          name = params["name"],
-          filename = joinpath(environments_pathname, name)
-        println("Request for environment file: $filename")
-        HTTP.Response(200, get_file_content_type(name), open(s -> read(s, String), filename))
-      end)
-    =#
     for file in files
-      HTTP.register!(router, "GET", "/$(file)", req -> HTTP.Response(200, get_file_content_type(file), read_file(file)))
+      HTTP.register!(router, "GET", "/$(file)", req -> root_read_file(file))
     end
     let idx = files[1]
-      HTTP.register!(router, "GET", "/", req -> HTTP.Response(200, get_file_content_type(idx), read_file(idx)))
+      HTTP.register!(router, "GET", "/", req -> root_read_file(idx))
     end
     # Fallback
     HTTP.register!(router, "GET", "/{rest}", req -> 
       let rest = HTTP.getparams(req)["rest"]
-        error("Requested unregistered '$rest'")
+        @warn "Unknown request for $rest"
+        HTTP.Response(404, "File not found: $rest")
       end)
-    let connection = nothing
-      global server = HTTP.listen!(b.host, b.port) do http
-                   if HTTP.WebSockets.isupgrade(http.message)
-                       HTTP.WebSockets.upgrade(http) do websocket
-                           connection = websocket
-                           wait()
-                       end
-                   else
-                      println("HTTP request for $(http.message.target)")
-                      HTTP.streamhandler(router)(http)
-                   end
-                 end
-      # Let's wait for the first connection
-      while isnothing(connection)
-        @info "Khepri started on URL:http://$(b.host):$(b.port)"
-        sleep(5)
-      end
-      WebSocketConnection(server, router, connection)
-    end
   end
-end
 
 #=
 To speedup material selection, we will download and install automatically glTF files from Poly Haven
@@ -252,15 +191,13 @@ set_default_materials() =
     #set_material(THR, default_annotation_material(), b->threejs_metal_material(b))
   end
 
-
-
 KhepriBase.b_get_material(b::THR, f::Function) = f(b)
 
-const threejs = THR("Threejs", "0.0.0.0" #="127.0.0.1"=#, threejs_port, threejs_api)
+#const threejs = THR("Threejs", "0.0.0.0" #="127.0.0.1"=#, threejs_port, threejs_api)
 
 KhepriBase.has_boolean_ops(::Type{THR}) = HasBooleanOps{false}()
 
-KhepriBase.backend(::THRRef) = threejs
+#KhepriBase.backend(::THRRef) = threejs
 KhepriBase.void_ref(b::THR) = -1 % Int32
 
 threejs_material(b, color) =
@@ -564,9 +501,8 @@ KhepriBase.b_delete_ref(b::THR, r::THRId) =
 
 KhepriBase.b_delete_all_shape_refs(b::THR) =
   @remote(b, deleteAll())
-#=
-#=
 
+#=
 backend_stroke(b::THR, path::OpenSplinePath) =
   if (path.v0 == false) && (path.v1 == false)
     add_object(b, threejs_line(path_frames(path), line_material(b)))
@@ -627,14 +563,10 @@ create_ground_plane(shapes, material=default_THR_ground_material()) =
 =#
 
 =#
-=#
 ####################################################
-# HACK!!! FIX THIS!
-KhepriBase.b_labels(b::THR, p, data, mat) = []
-  #=
-  [@remote(b, addAnnotation(p+vpol(0.2*scale, ϕ), txt))
+KhepriBase.b_labels(b::THR, p, data, mat) =
+  [@remote(b, addAnnotation(p, txt)) #p+vpol(0.2*scale, ϕ), txt))
    for ((; txt, mat, scale), ϕ) in zip(data, division(-π/4, 7π/4, length(data), false))]
-   =#
 
 KhepriBase.b_start_batch_processing(b::THR) = @remote(b, stopUpdate())
 
@@ -652,8 +584,8 @@ export gui_create,
 KhepriBase.b_gui_create(b::THR, name) = 
   @remote(b, guiCreate(name, 1))
 
-KhepriBase.b_gui_add_folder(b::THR, gui, name) = 
-  @remote(b, guiAddFolder(gui, name))
+KhepriBase.b_gui_add_folder(b::THR, gui, name, closed) = 
+  @remote(b, guiAddFolder(gui, name, closed))
 
 KhepriBase.b_gui_visible(b::THR, gui, isvisible) =
   @remote(b, guiVisible(gui, isvisible))
