@@ -1,6 +1,7 @@
 using KhepriThreejs
+using KhepriBase
 using Test
 
 @testset "KhepriThreejs.jl" begin
-    # Write your tests here.
+    include("test_encoding.jl")
 end
