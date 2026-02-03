@@ -101,6 +101,8 @@ decode(ns::Val{:BLR}, t::Tuple{T1,T2,T3}, c::IO) where {T1,T2,T3} =
 
 @encode_decode_as(:BLR, Val{:Id}, Val{:size})
 @encode_decode_as(:BLR, Val{:MatId}, Val{:size})
+encode(ns::Val{:BLR}, t::Val{:MatId}, c::IO, val::Nothing) =
+  encode(ns, t, c, -1)
 
 encode(::Val{:BLR}, t::Union{Val{:Point3d},Val{:Vector3d}}, c::IO, p) =
   encode(Val(:PY), Val(:float3), c, raw_point(p))
@@ -124,7 +126,7 @@ decode(ns::Val{:BLR}, t::Val{:Frame3d}, c::IO) =
       decode(ns, Val(:Vector3d), c),
       decode(ns, Val(:Vector3d), c)))
 
-blender_api = @remote_functions :BLR """
+blender_api = @remote_api :BLR """
 def find_or_create_collection(name:str, active:bool, color:RGBA)->str:
 def get_current_collection()->str:
 def set_current_collection(name:str)->None:
@@ -205,6 +207,7 @@ export headless_blender
 const headless_blender = Parameter(false)
 const starting_blender = Parameter(false)
 
+export start_blender
 start_blender() =
   starting_blender() ?
     sleep(1) : # Just wait a little longer
@@ -214,7 +217,7 @@ start_blender() =
   		    Sys.isapple() ?
 		  	  "/Applications/Blender.app/Contents/MacOS/Blender" :
     	      "blender"
-	  starting_blender(true)
+	    starting_blender(true)
       run(detach(headless_blender() ?
             `$(blender_cmd) -noaudio --background --python $(KhepriServerPath())` :
       	    `$(blender_cmd) --python $(KhepriServerPath())`),
@@ -229,27 +232,27 @@ KhepriBase.retry_connecting(b::BLR) =
 KhepriBase.after_connecting(b::BLR) =
   begin
 	starting_blender(false)
-	#set_material(blender, material_basic, )
-	set_material(blender, material_metal, "asset_base_id:f1774cb0-b679-46b4-879e-e7223e2b4b5f asset_type:material")
-	#set_material(blender, material_glass, "asset_base_id:ee2c0812-17f5-40d4-992c-68c5a66261d7 asset_type:material")
-	set_material(blender, material_glass, "asset_base_id:ffa3c281-6184-49d8-b05e-8c6e9fe93e68 asset_type:material")
-	set_material(blender, material_wood, "asset_base_id:d5097824-d5a1-4b45-ab5b-7b16bdc5a627 asset_type:material")
-	#set_material(blender, material_concrete, "asset_base_id:0662b3bf-a762-435d-9407-e723afd5eafc asset_type:material")
-	set_material(blender, material_concrete, "asset_base_id:df1161da-050c-4638-b376-38ced992ec18 asset_type:material")
-	set_material(blender, material_plaster, "asset_base_id:c674137d-cfae-45f1-824f-e85dc214a3af asset_type:material")
+	#set_material(b, material_basic, )
+	set_material(b, material_metal, "asset_base_id:f1774cb0-b679-46b4-879e-e7223e2b4b5f asset_type:material")
+	#set_material(b, material_glass, "asset_base_id:ee2c0812-17f5-40d4-992c-68c5a66261d7 asset_type:material")
+	set_material(b, material_glass, "asset_base_id:ffa3c281-6184-49d8-b05e-8c6e9fe93e68 asset_type:material")
+	set_material(b, material_wood, "asset_base_id:d5097824-d5a1-4b45-ab5b-7b16bdc5a627 asset_type:material")
+	#set_material(b, material_concrete, "asset_base_id:0662b3bf-a762-435d-9407-e723afd5eafc asset_type:material")
+	set_material(b, material_concrete, "asset_base_id:df1161da-050c-4638-b376-38ced992ec18 asset_type:material")
+	set_material(b, material_plaster, "asset_base_id:c674137d-cfae-45f1-824f-e85dc214a3af asset_type:material")
 
-	#set_material(blender, material_grass, "asset_base_id:97b171b4-2085-4c25-8793-2bfe65650266 asset_type:material")
-	#set_material(blender, material_grass, "asset_base_id:7b05be22-6bed-4584-a063-d0e616ddea6a asset_type:material")
-	set_material(blender, material_grass, "asset_base_id:b4be2338-d838-433b-9f0d-2aa9b97a0a8a asset_type:material")
-	set_material(blender, material_clay, b -> b_plastic_material(b, "Clay", rgb(0.9, 0.9, 0.9),	1.0))
+	#set_material(b, material_grass, "asset_base_id:97b171b4-2085-4c25-8793-2bfe65650266 asset_type:material")
+	#set_material(b, material_grass, "asset_base_id:7b05be22-6bed-4584-a063-d0e616ddea6a asset_type:material")
+	set_material(b, material_grass, "asset_base_id:b4be2338-d838-433b-9f0d-2aa9b97a0a8a asset_type:material")
+	set_material(b, material_clay, b -> b_plastic_material(b, "Clay", rgb(0.9, 0.9, 0.9),	1.0))
   end
 
-const blender = BLR("Blender", blender_port, blender_api)
+const blender = BLR("Blender", blender_port, remote_functions(blender_api))
 
 KhepriBase.has_boolean_ops(::Type{BLR}) = HasBooleanOps{true}()
 
 KhepriBase.backend(::BLRRef) = blender
-KhepriBase.void_ref(b::BLR) = -1 % Int32
+KhepriBase.void_ref(b::BLR) = BLRRef(-1 % Int32)
 
 # Primitives
 KhepriBase.b_point(b::BLR, p, mat) =
@@ -443,9 +446,9 @@ blender_family_materials(m1, m2=m1, m3=m2, m4=m3) = (materials=(m1, m2, m3, m4),
 
 KhepriBase.b_layer(b::BLR, name, active, color) =
   @remote(b, find_or_create_collection(name, active, color))
-KhepriBase.b_current_layer(b::BLR) =
+KhepriBase.b_current_layer_ref(b::BLR) =
   @remote(b, get_current_collection())
-KhepriBase.b_current_layer(b::BLR, layer) =
+KhepriBase.b_current_layer_ref(b::BLR, layer) =
   @remote(b, set_current_collection(layer))
 KhepriBase.b_all_shapes_in_layer(b::BLR, layer) =
   @remote(b, all_shapes_in_collection(layer))
@@ -474,7 +477,7 @@ KhepriBase.b_realistic_sky(b::BLR, altitude, azimuth, turbidity, sun) =
 KhepriBase.b_delete_ref(b::BLR, r::BLRId) =
   @remote(b, delete_shape(r))
 
-KhepriBase.b_delete_all_refs(b::BLR) =
+KhepriBase.b_delete_all_shape_refs(b::BLR) =
   @remote(b, delete_all_shapes())
 
 ##############
