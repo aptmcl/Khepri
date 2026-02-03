@@ -400,7 +400,7 @@ const TikZRefs = Vector{TikZRef}
 const TikZNativeRef = NativeRef{TikZKey, TikZId}
 const TikZ = IOBackend{TikZKey, TikZId, Vector}
 
-KhepriBase.void_ref(b::TikZ) = nothing
+KhepriBase.void_ref(b::TikZ) = TikZNativeRef(nothing)
 
 const tikz = TikZ(view=top_view(), extra=[])
 
