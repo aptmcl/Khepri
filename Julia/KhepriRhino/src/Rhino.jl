@@ -59,7 +59,7 @@ decode(ns::Val{:RH}, t::Val{:Plane}, c::IO) =
     decode(ns, Val(:Vector3d), c),
     decode(ns, Val(:Vector3d), c))
 
-rhino_api = @remote_functions :RH """
+rhino_api = @remote_api :RH """
 public void RunScript(string script)
 public void SetView(Point3d position, Point3d target, double lens, bool perspective, string style)
 public void View(Point3d position, Point3d target, double lens)
@@ -236,7 +236,7 @@ const RHNativeRef = NativeRef{RHKey, RHId}
 const RHNativeRefs = NativeRefs{RHKey, RHId}
 const RH = SocketBackend{RHKey, RHId}
 
-KhepriBase.void_ref(::RH) = 0 % UInt128
+KhepriBase.void_ref(::RH) = RHNativeRef(0 % UInt128)
 
 KhepriBase.failed_connecting(b::RH) =
   begin
@@ -249,24 +249,24 @@ KhepriBase.after_connecting(b::RH) =
   let mat_folder = @remote(b, DefaultMaterialsFolder()),
   	  m = match(r".+?Rhinoceros\\(.+?)\\Localization", mat_folder)
   	if m === nothing
-	  error("Unrecognized Rhino materials folder: $(mat_folder)")
+	    error("Unrecognized Rhino materials folder: $(mat_folder)")
   	else
 	  let v = VersionNumber(m[1])
 	    if v >= v"6.0"
 			# Apparently, materials are not yet working in Rhino 6!!!!
-	      set_material(rhino, material_metal, rhino_default_material(raw"Metal\Matte\Matte Silver"))
-	      set_material(rhino, material_glass, rhino_default_material(raw"Glass\Clear Glass"))
-	      set_material(rhino, material_wood, rhino_default_material(raw"Wood\Pear polished"))
-	      set_material(rhino, material_concrete, rhino_default_material(raw"Ceramics\Stoneware"))
-	      set_material(rhino, material_plaster, rhino_default_material(raw"White Matte"))
-	      set_material(rhino, material_grass, rhino_default_material(raw"Textures\Grass"))
+	      set_material(RH, material_metal, rhino_default_material(raw"Metal\Matte\Matte Silver"))
+	      set_material(RH, material_glass, rhino_default_material(raw"Glass\Clear Glass"))
+	      set_material(RH, material_wood, rhino_default_material(raw"Wood\Pear polished"))
+	      set_material(RH, material_concrete, rhino_default_material(raw"Ceramics\Stoneware"))
+	      set_material(RH, material_plaster, rhino_default_material(raw"White Matte"))
+	      set_material(RH, material_grass, rhino_default_material(raw"Textures\Grass"))
 	    elseif v >= v"5.0"
-          set_material(rhino, material_metal, rhino_default_material(raw"Metal\Silver"))
-          set_material(rhino, material_glass, rhino_default_material(raw"Transparent\Glass"))
-          set_material(rhino, material_wood, rhino_default_material(raw"Wood\Scots Pine"))
-          set_material(rhino, material_concrete, rhino_default_material(raw"Stone\Granite"))
-          set_material(rhino, material_plaster, rhino_default_material(raw"White Matte"))
-          set_material(rhino, material_grass, rhino_default_material(raw"Special\Grass"))
+          set_material(RH, material_metal, rhino_default_material(raw"Metal\Silver"))
+          set_material(RH, material_glass, rhino_default_material(raw"Transparent\Glass"))
+          set_material(RH, material_wood, rhino_default_material(raw"Wood\Scots Pine"))
+          set_material(RH, material_concrete, rhino_default_material(raw"Stone\Granite"))
+          set_material(RH, material_plaster, rhino_default_material(raw"White Matte"))
+          set_material(RH, material_grass, rhino_default_material(raw"Special\Grass"))
 	    else
 	      error("Unrecognized Rhino version: ")
 	    end
@@ -370,7 +370,7 @@ KhepriBase.b_surface_ellipse(b::RH, c, rx, ry, mat) =
    @remote(b, SurfaceEllipse(c, rx, ry, mat))
 
 KhepriBase.b_surface(b::RH, frontier::Shapes, mat) =
-  and_mark_deleted(b, @remote(b, SurfaceFrom(collect_ref(b, frontier), mat)), frontier)
+  and_mark_deleted(b, @remote(b, SurfaceFrom(ref_values(b, frontier), mat)), frontier)
 
 
 KhepriBase.b_surface_grid(b::RH, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
@@ -408,7 +408,11 @@ KhepriBase.b_pyramid(b::RH, bs, t, bmat, smat) =
   @remote(b, IrregularPyramid(bs, t, smat))
 
 KhepriBase.b_cylinder(b::RH, c, r, h, bmat, tmat, smat) =
-  @remote(b, Cylinder(c, r, c + vz(h, c.cs), smat))
+  isnothing(bmat) || isnothing(tmat) ?
+    vcat(@remote(b, Extrusion(b_circle(b, c, r, smat), vz(h, c.cs))),
+         isnothing(bmat) ? [] : b_surface_circle(b, c, r, bmat),
+         isnothing(tmat) ? [] : b_surface_circle(b, add_z(c, h), r, tmat)) :
+  @remote(b, Cylinder(c, r, add_z(c, h), smat))
 
 #=
 See comment above regarding the use of Meshes vs Surfaces or Polysurfaces!
@@ -498,7 +502,7 @@ KhepriBase.b_mirror_material(b::RH, name, color) =
 
 backend_map_division(b::RH, f::Function, s::Shape1D, n::Int) =
   let conn = connection(b),
-      r = ref(b, s).value,
+      r = ref_value(b, s),
       (t1, t2) = @remote(b, CurveDomain(r)),
       ti = division(t1, t2, n),
       ps = @remote(b, CurvePointsAt(r, ti)),
@@ -518,7 +522,7 @@ backend_surface_domain(b::RH, s::Shape2D) =
 
 backend_map_division(b::RH, f::Function, s::Shape2D, nu::Int, nv::Int) =
     let conn = connection(b)
-        r = ref(b, s).value
+        r = ref_value(b, s)
         (u1, u2, v1, v2) = @remote(b, SurfaceDomain(r))
         map_division(u1, u2, nu) do u
             map_division(v1, v2, nv) do v
@@ -589,8 +593,8 @@ backend_loft_points(b::Backend, profiles::Shapes, rails::Shapes, ruled::Bool, cl
 
 backend_loft_curves(b::RH, profiles::Shapes, rails::Shapes, ruled::Bool, closed::Bool) =
   and_delete_shapes(RHLoft(connection(b),
-                             collect_ref(b, profiles),
-                             collect_ref(b, rails),
+                             ref_values(b, profiles),
+                             ref_values(b, rails),
                              ruled, closed),
                     vcat(profiles, rails))
 
@@ -599,7 +603,7 @@ backend_loft_surfaces(b::RH, profiles::Shapes, rails::Shapes, ruled::Bool, close
 
 backend_loft_curve_point(b::RH, profile::Shape, point::Shape) =
   and_delete_shapes(RHLoft(connection(b),
-                             vcat(collect_ref(b, profile), collect_ref(b, point)),
+                             vcat(ref_values(b, profile), ref_values(b, point)),
                              [],
                              true, false),
                     [profile, point])
@@ -695,27 +699,26 @@ label_props = merge(base_props)
 angular_props = merge(base_props)
 diametric_props = merge(base_props)
 
-KhepriBase.b_labels(b::RH, p, strs, mats, mat) =
+KhepriBase.b_labels(b::RH, p, data, mat) =
   [with(current_layer, mat.layer) do
-    @remote(b, CreateLeaderDimension(str, p, p+vpol(annotation_scale(), ϕ), annotation_scale(), mark, label_props))
+    @remote(b, CreateLeaderDimension(txt, p, p+vpol(scale, ϕ), scale, mark, label_props))
    end
-   for (str, ϕ, mark, mat)
-     in zip(strs,
-            division(-π/4, 7π/4, length(strs), false),
-            Iterators.flatten((Iterators.repeated("_DOT", 1), Iterators.repeated("_NONE"))),
-            mats)]
+   for ((; txt, mat, scale), ϕ, mark)
+     in zip(data,
+            division(-π/4, 7π/4, length(data), false),
+            Iterators.flatten((Iterators.repeated("_DOT", 1), Iterators.repeated("_NONE"))))]
 
 #
 KhepriBase.b_radii_illustration(b::RH, c, rs, rs_txts, mats, mat) =
   [with(current_layer, mat.layer) do
-    @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(r, ϕ), c+vpol(0.1, ϕ+pi/2), annotation_scale(), "", diametric_props))
+    @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(r, ϕ), c+vpol(0.1, ϕ+pi/2), default_annotation_scale(), "", diametric_props))
    end
    for (r, r_txt, ϕ, mat) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false), mats)]
 
 # Maybe merge the texts when the radii are the same.
 KhepriBase.b_vectors_illustration(b::RH, p, a, rs, rs_txts, mats, mat) =
   [with(current_layer, mat.layer) do
-    @remote(b, CreateDiametricDimension(r_txt, p, p+vpol(r, a), p+vpol(0.1, a+pi/2), annotation_scale(), "", diametric_props))
+    @remote(b, CreateDiametricDimension(r_txt, p, p+vpol(r, a), p+vpol(0.1, a+pi/2), default_annotation_scale(), "", diametric_props))
    end
    for (r, r_txt, mat) in zip(rs, rs_txts, mats)]
 
@@ -730,17 +733,17 @@ KhepriBase.b_angles_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, m
       with(current_layer, mat.layer) do
         if !(r ≈ 0.0)
           if !(s ≈ 0.0)
-          #  push!(refs, @remote(b, CreateAngularDimension(s_txt, c, ar, 0, s, annotation_scale(), 5, no_props)))
-            push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.8*ar, 0), c+vpol(0.8*ar, s), c+vpol(ar, s/2), annotation_scale(), "", angular_props)))
+          #  push!(refs, @remote(b, CreateAngularDimension(s_txt, c, ar, 0, s, default_annotation_scale(), 5, no_props)))
+            push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.8*ar, 0), c+vpol(0.8*ar, s), c+vpol(ar, s/2), default_annotation_scale(), "", angular_props)))
           end
           if !(a ≈ 0.0)
-          #  push!(refs, @remote(b, CreateAngularDimension(a_txt, c, ar, s, s + a, annotation_scale(), 5, no_props)))
-          push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.5*ar, s), c+vpol(0.5*ar, s + a), c+vpol(ar, s+a/2), annotation_scale(), "", angular_props)))
+          #  push!(refs, @remote(b, CreateAngularDimension(a_txt, c, ar, s, s + a, default_annotation_scale(), 5, no_props)))
+          push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.5*ar, s), c+vpol(0.5*ar, s + a), c+vpol(ar, s+a/2), default_annotation_scale(), "", angular_props)))
           else
-            #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "")))
+            #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, default_annotation_scale(), "")))
           end
         end
-        #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "", diametric_props)))
+        #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, default_annotation_scale(), "", diametric_props)))
       end
     end
     refs
@@ -757,12 +760,12 @@ KhepriBase.b_arcs_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, mat
       with(current_layer, mat.layer) do
         if !(r ≈ 0.0)
           if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
-            push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.8*ar, 0), c+vpol(0.8*ar, s), c+vpol(ar, s/2), annotation_scale(), "", angular_props)))
+            push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.8*ar, 0), c+vpol(0.8*ar, s), c+vpol(ar, s/2), default_annotation_scale(), "", angular_props)))
           end
           if !(a ≈ 0.0)
-            push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.8*ar, s), c+vpol(0.8*ar, s + a), c+vpol(ar, s+a/2), annotation_scale(), "", angular_props)))
+            push!(refs, @remote(b, CreateAngularDimension(a_txt, c, c+vpol(0.8*ar, s), c+vpol(0.8*ar, s + a), c+vpol(ar, s+a/2), default_annotation_scale(), "", angular_props)))
           end
-          #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, annotation_scale(), "", diametric_props)))
+          #push!(refs, @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(maxr, s + a), 0.0, default_annotation_scale(), "", diametric_props)))
         end
       end
     end
@@ -780,7 +783,7 @@ KhepriBase.b_ieslight(b::ACAD, file::String, loc::Loc, dir::Vec, alpha::Real, be
 ############################################
 
 # KhepriBase.b_bounding_box(b::RH, shapes::Shapes) =
-#   @remote(b, BoundingBox(collect_ref(b, shapes)))
+#   @remote(b, BoundingBox(ref_values(b, shapes)))
 
 KhepriBase.b_set_view(b::RH, camera, target, lens, aperture) =
   @remote(b, View(camera, target, lens))
@@ -797,10 +800,10 @@ KhepriBase.b_set_view_top(b::RH) =
 KhepriBase.b_delete_refs(b::RH, refs::Vector{RHId}) =
   @remote(b, DeleteMany(refs))
 
-KhepriBase.b_all_refs(b::RH) =
+KhepriBase.b_all_shape_refs(b::RH) =
   @remote(b, GetAllShapes())
 
-KhepriBase.b_delete_all_refs(b::RH) =
+KhepriBase.b_delete_all_shape_refs(b::RH) =
   @remote(b, DeleteAll())
 
 KhepriBase.b_highlight_ref(b::RH, r::RHId) =
@@ -813,10 +816,10 @@ KhepriBase.b_unhighlight_all_refs(b::RH) =
   @remote(b, UnhighlightAll())
 
 # Layers
-KhepriBase.b_current_layer(b::RH) =
+KhepriBase.b_current_layer_ref(b::RH) =
   @remote(b, CurrentLayer())
 
-KhepriBase.b_current_layer(b::RH, layer) =
+KhepriBase.b_current_layer_ref(b::RH, layer) =
   @remote(b, SetCurrentLayer(layer))
 
 KhepriBase.b_layer(b::RH, name, active, color) =
@@ -825,35 +828,33 @@ KhepriBase.b_layer(b::RH, name, active, color) =
 KhepriBase.b_delete_all_shapes_in_layer(b::RH, layer) =
   @remote(b, DeleteAllInLayer(layer))
 
-KhepriBase.b_shape_from_ref(b::RH, r) =
-  let code = @remote(b, ShapeCode(r)),
-      ref = DynRefs(b=>RHNativeRef(r))
+KhepriBase.b_create_shape_from_ref_value(b::RH, r) =
+  let code = @remote(b, ShapeCode(r))
     if code == 1
-      point(@remote(b, PointPosition(r)), ref=ref)
+      point(@remote(b, PointPosition(r)))
     elseif code == 2
       circle(loc_from_o_vz(@remote(b, CircleCenter(r)), @remote(b, CircleNormal(r))),
-             @remote(b, CircleRadius(r)),
-             ref=ref)
+             @remote(b, CircleRadius(r)))
     elseif 3 <= code <= 6
-      line(@remote(b, LineVertices(r)), ref=ref)
+      line(@remote(b, LineVertices(r)))
     elseif code == 7
       spline([xy(0,0)], false, false, #HACK obtain interpolation points
              ref=ref)
     elseif 103 <= code <= 106
-      polygon(@remote(b, LineVertices(r)), ref=ref)
+      polygon(@remote(b, LineVertices(r)))
     elseif code == 40
       # FIXME: frontier is missing
-      surface(frontier=[], ref=ref)
+      surface(frontier=[])
     elseif code == 41
-      surface(frontier=[], ref=ref)
+      surface(frontier=[])
     elseif code == 81
-      sphere(ref=ref)
+      sphere()
     elseif code == 82
-      cylinder(ref=ref)
+      cylinder()
     elseif code == 83
-      cone(ref=ref)
+      cone()
     elseif code == 84
-      torus(ref=ref)
+      torus()
     else
       error("Unknown shape")
     end
@@ -926,9 +927,8 @@ backend_generate_captured_shapes(b::RH, ss::Shapes) =
     println("])")
   end
 
-
-backend_all_shapes_in_layer(b::RH, layer) =
-  Shape[backend_shape_from_ref(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
+KhepriBase.b_all_shapes_in_layer(b::RH, layer) =
+  Shape[get_or_create_shape_from_ref_value(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
 
 # Khepri render quality ranges from -1 to 1
 # Rhino render quality ranges from 0 to 3
