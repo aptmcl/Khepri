@@ -142,7 +142,7 @@ const Unity = SocketBackend{UnityKey, UnityId}
 # For users to be able to initialize each of the connections
 export Unity
 
-KhepriBase.void_ref(b::Unity) = -1 % Int32
+KhepriBase.void_ref(b::Unity) = UnityNativeRef(-1 % Int32)
 
 KhepriBase.before_connecting(b::Unity) = nothing #check_plugin()
 KhepriBase.after_connecting(b::Unity) =
@@ -490,7 +490,7 @@ view_top(b::Unity) = @remote(b, ViewTop())
 KhepriBase.b_delete_refs(b::Unity, refs::Vector{UnityId}) =
   @remote(b, DeleteMany(refs))
 
-KhepriBase.b_delete_all_refs(b::Unity) =
+KhepriBase.b_delete_all_shape_refs(b::Unity) =
   @remote(b, DeleteAll())
 
 set_length_unit(unit::String, b::Unity) = nothing # Unused, for now
@@ -517,10 +517,10 @@ dimension(p0::Loc, p1::Loc, sep::Real, scale::Real, style::Symbol, b::Unity=curr
 # Experiment for multiple, simultaneous, alternative layers
 # Layers
 
-KhepriBase.b_current_layer(b::Unity) =
+KhepriBase.b_current_layer_ref(b::Unity) =
   @remote(b, CurrentParent())
 
-KhepriBase.b_current_layer(b::Unity, layer) =
+KhepriBase.b_current_layer_ref(b::Unity, layer) =
   @remote(b, SetCurrentParent(layer))
 
 KhepriBase.b_layer(b::Unity, name, active, color) =
@@ -579,11 +579,11 @@ current_material(b::Unity, material::UnityMaterial) =
 realize(b::Unity, s::Block) =
   s.shapes == [] ?
     @remote(b, LoadResource(s.name)) :
-    @remote(b, Canonicalize(@remote(b, CreateBlockFromShapes(s.name, collect_ref(b, s.shapes)))))
+    @remote(b, Canonicalize(@remote(b, CreateBlockFromShapes(s.name, ref_values(b, s.shapes)))))
 
 realize(b::Unity, s::BlockInstance) =
     @remote(b, CreateBlockInstance(
-        ref(b, s.block).value,
+        ref_value(b, s.block),
         s.loc, vy(1, s.loc.cs), vz(1, s.loc.cs), s.scale))
 #=
 
@@ -612,7 +612,7 @@ backend_ieslight(b::Unity, file::String, loc::Loc, dir::Vec, alpha::Real, beta::
 # User Selection
 
 shape_from_ref(r, b::Unity) =
-  let idx = findfirst(s -> r in collect_ref(b, s), collected_shapes())
+  let idx = findfirst(s -> r in ref_values(b, s), collected_shapes())
     if isnothing(idx)
       let kind = @remote(b, ShapeType(r))
         if kind == "Sphere"
@@ -647,10 +647,10 @@ render_view(path::String, b::Unity) =
     end
 
 highlight_shape(s::Shape, b::Unity) =
-    @remote(b, SelectGameObjects(collect_ref(b, s)))
+    @remote(b, SelectGameObjects(ref_values(b, s)))
 
 highlight_shapes(ss::Shapes, b::Unity) =
-    @remote(b, SelectGameObjects(collect_ref(b, ss)))
+    @remote(b, SelectGameObjects(ref_values(b, ss)))
 
 
 KhepriBase.b_select_position(b::Unity, prompt) =
