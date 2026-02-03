@@ -465,7 +465,7 @@ KhepriBase.after_connecting(b::ACAD) =
 
 const autocad = ACAD("AutoCAD", autocad_port, acad_api)
 
-KhepriBase.void_ref(b::ACAD) = -1
+KhepriBase.void_ref(b::ACAD) = ACADNativeRef(-1)
 
 # Primitives
 KhepriBase.b_point(b::ACAD, p, mat) =
