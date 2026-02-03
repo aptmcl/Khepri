@@ -198,7 +198,7 @@ KhepriBase.b_get_material(b::THR, f::Function) = f(b)
 KhepriBase.has_boolean_ops(::Type{THR}) = HasBooleanOps{false}()
 
 #KhepriBase.backend(::THRRef) = threejs
-KhepriBase.void_ref(b::THR) = -1 % Int32
+KhepriBase.void_ref(b::THR) = THRRef(-1 % Int32)
 
 threejs_material(b, color) =
   @remote(b, MeshLambertMaterial(
