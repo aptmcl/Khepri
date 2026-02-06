@@ -11,8 +11,6 @@ using System.Threading;
 
 namespace KhepriAutoCAD {
 
-    using AutoCADProcessor = Processor<Channel, Primitives>;
-
     public class PlugIn : IExtensionApplication {
         //public delegate void Action();
         public delegate Entity ShapeCreator(Channel c);
@@ -44,8 +42,8 @@ namespace KhepriAutoCAD {
                 server.Start();
                 WriteMessage("Waiting for connections\n");
                 while (true) {
-                    AutoCADProcessor processor =
-                        new AutoCADProcessor(
+                    Processor processor =
+                        new Processor(
                             syncCtrl,
                             new Channel(server.AcceptTcpClient().GetStream()),
                             new Primitives());
@@ -59,12 +57,10 @@ namespace KhepriAutoCAD {
             }
 
         }
-        void HandleClient(AutoCADProcessor processor) {
-            Editor ed = Application.DocumentManager.MdiActiveDocument.Editor;
+        void HandleClient(Processor processor) {
             try {
                 while (true) {
-                    while (!ed.IsQuiescent) { Thread.Sleep(10); }
-                    if (! processor.ReadAndExecute()) break;
+                    if (! processor.ReadAndExecuteAndRepeat()) break;
                 }
                 WriteMessage("Client disconnected\n");
             }

@@ -29,6 +29,8 @@ using System.Drawing;
 using System.Reflection;
 using Mapper = Autodesk.AutoCAD.GraphicsInterface.Mapper;
 using GI = Autodesk.AutoCAD.GraphicsInterface;
+using System.Net;
+using System.IO;
 
 namespace KhepriAutoCAD {
     public class Frame3d {
@@ -54,131 +56,118 @@ namespace KhepriAutoCAD {
     }
 
     public class Primitives : KhepriBase.Primitives {
+        public Processor processor;
+        public Transaction tr {
+            get => processor.tr;
+        }
+        public Document doc {
+            get => processor.doc; 
+        }
+        public void CommitAndStartTransaction() => processor.CommitAndStartTransaction();
+        public void CommitAndStartOpenCloseTransaction() => processor.CommitAndStartOpenCloseTransaction();
+
         public void DeleteAll() {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (var tr = doc.Database.TransactionManager.StartTransaction()) {
-                BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
-                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
-                foreach (var entId in btr) {
-                    var ent = tr.GetObject(entId, OpenMode.ForRead) as Entity;
-                    if (ent != null) {
+            CommitAndStartTransaction();
+            BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
+            BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+            foreach (var entId in btr) {
+                var ent = tr.GetObject(entId, OpenMode.ForRead) as Entity;
+                if (ent != null) {
+                    ent.UpgradeOpen();
+                    ent.Erase();
+                    ent.DowngradeOpen();
+                }
+            }
+            CommitAndStartOpenCloseTransaction();
+        }
+        public void DeleteAllInLayer(ObjectId layerId) {
+            CommitAndStartTransaction();
+            BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
+            BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+            foreach (var entId in btr) {
+                var ent = tr.GetObject(entId, OpenMode.ForRead) as Entity;
+                if (ent != null) {
+                    if (ent.LayerId == layerId) {
                         ent.UpgradeOpen();
                         ent.Erase();
                         ent.DowngradeOpen();
                     }
                 }
-                tr.Commit();
             }
-        }
-        public void DeleteAllInLayer(ObjectId layerId) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (var tr = doc.Database.TransactionManager.StartTransaction()) {
-                BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
-                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
-                foreach (var entId in btr) {
-                    var ent = tr.GetObject(entId, OpenMode.ForRead) as Entity;
-                    if (ent != null) {
-                        if (ent.LayerId == layerId) {
-                            ent.UpgradeOpen();
-                            ent.Erase();
-                            ent.DowngradeOpen();
-                        }
-                    }
-                }
-                tr.Commit();
-            }
+            CommitAndStartOpenCloseTransaction();
         }
 
         public void SelectShapes(ObjectId[] ids) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument()) {
-                PromptSelectionResult selectionResult = doc.Editor.SelectImplied();
+            CommitAndStartTransaction();
+            PromptSelectionResult selectionResult = doc.Editor.SelectImplied();
                 if (selectionResult.Status == PromptStatus.OK) {
                     doc.Editor.SetImpliedSelection(selectionResult.Value.GetObjectIds().Union(ids).ToArray());
                 } else {
                     doc.Editor.SetImpliedSelection(ids);
                 }
-            }
+            CommitAndStartOpenCloseTransaction();
         }
         public void DeselectShapes(ObjectId[] ids) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument()) {
-                PromptSelectionResult selectionResult = doc.Editor.SelectImplied();
+            CommitAndStartOpenCloseTransaction();
+            PromptSelectionResult selectionResult = doc.Editor.SelectImplied();
                 if (selectionResult.Status == PromptStatus.OK) {
                     doc.Editor.SetImpliedSelection(selectionResult.Value.GetObjectIds().Except(ids).ToArray());
                 }
-            }
         }
         public void DeselectAllShapes() {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument()) {
-                 doc.Editor.SetImpliedSelection(new ObjectId[] { });
-            }
+            CommitAndStartOpenCloseTransaction();
+            doc.Editor.SetImpliedSelection(new ObjectId[] { });
+
         }
 
         public void SetView(Point3d position, Point3d target, double lens, bool perspective, string style) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument()) {
-                Database db = doc.Database;
-                Editor ed = doc.Editor;
-                using (Transaction tr = db.TransactionManager.StartTransaction()) {
-                    const double DIAG35MM = 42.0;
-                    double projectionPlaneDistance = (target - position).Length;
-                    double aspectRatio = 1.0;
-                    ViewTable viewTable = tr.GetObject(db.ViewTableId, OpenMode.ForWrite) as ViewTable;
-                    ViewportTable vpTbl = tr.GetObject(db.ViewportTableId, OpenMode.ForRead) as ViewportTable;
-                    ViewportTableRecord viewportTableRec = tr.GetObject(vpTbl["*Active"], OpenMode.ForRead) as ViewportTableRecord;
-                    DBDictionary styleDict = tr.GetObject(db.VisualStyleDictionaryId, OpenMode.ForRead) as DBDictionary;
-                    aspectRatio = (viewportTableRec.Width / viewportTableRec.Height);
-                    double fieldHeight =
-                            (projectionPlaneDistance * DIAG35MM) /
-                            (lens * Math.Sqrt(1.0 + aspectRatio * aspectRatio));
-                    double fieldWidth = aspectRatio * fieldHeight;
-                    using (ViewTableRecord vtr = new ViewTableRecord()) {
-                        vtr.BackClipEnabled = false;
-                        vtr.BackClipDistance = 0.0;
-                        vtr.CenterPoint = Point2d.Origin;
-                        vtr.FrontClipAtEye = false;
-                        vtr.FrontClipEnabled = false;
-                        vtr.FrontClipDistance = projectionPlaneDistance;
-                        vtr.LensLength = lens;
-                        vtr.PerspectiveEnabled = perspective;
-                        vtr.VisualStyleId = styleDict.GetAt(style);
-                        vtr.Target = target;
-                        vtr.ViewTwist = 0.0;
-                        vtr.ViewDirection = position - target;
-                        vtr.Width = fieldWidth;
-                        vtr.Height = fieldHeight;
-                        ed.SetCurrentView(vtr);
-                        ed.Regen();
-                    }
-                    tr.Commit();
+            CommitAndStartTransaction();
+            Database db = doc.Database;
+            Editor ed = doc.Editor;
+            const double DIAG35MM = 42.0;
+            double projectionPlaneDistance = (target - position).Length;
+            double aspectRatio = 1.0;
+                ViewTable viewTable = tr.GetObject(db.ViewTableId, OpenMode.ForWrite) as ViewTable;
+                ViewportTable vpTbl = tr.GetObject(db.ViewportTableId, OpenMode.ForRead) as ViewportTable;
+                ViewportTableRecord viewportTableRec = tr.GetObject(vpTbl["*Active"], OpenMode.ForRead) as ViewportTableRecord;
+                DBDictionary styleDict = tr.GetObject(db.VisualStyleDictionaryId, OpenMode.ForRead) as DBDictionary;
+                aspectRatio = (viewportTableRec.Width / viewportTableRec.Height);
+                double fieldHeight =
+                        (projectionPlaneDistance * DIAG35MM) /
+                        (lens * Math.Sqrt(1.0 + aspectRatio * aspectRatio));
+                double fieldWidth = aspectRatio * fieldHeight;
+                using (ViewTableRecord vtr = new ViewTableRecord()) {
+                    vtr.BackClipEnabled = false;
+                    vtr.BackClipDistance = 0.0;
+                    vtr.CenterPoint = Point2d.Origin;
+                    vtr.FrontClipAtEye = false;
+                    vtr.FrontClipEnabled = false;
+                    vtr.FrontClipDistance = projectionPlaneDistance;
+                    vtr.LensLength = lens;
+                    vtr.PerspectiveEnabled = perspective;
+                    vtr.VisualStyleId = styleDict.GetAt(style);
+                    vtr.Target = target;
+                    vtr.ViewTwist = 0.0;
+                    vtr.ViewDirection = position - target;
+                    vtr.Width = fieldWidth;
+                    vtr.Height = fieldHeight;
+                    ed.SetCurrentView(vtr);
+                    ed.Regen();
                 }
-            }
+            CommitAndStartOpenCloseTransaction();
         }
 
         public void View(Point3d position, Point3d target, double lens) => SetView(position, target, lens, true, "Conceptual");
         public void ViewTop() => SetView(new Point3d(0.0, 0.0, 1.0), Point3d.Origin, 50.0, false, "2dWireframe");
         public Point3d ViewCamera() {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument()) {
                 ViewTableRecord view = doc.Editor.GetCurrentView();
                 return view.Target + view.ViewDirection;
-            }
         }
         public Point3d ViewTarget() {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument()) {
                 return doc.Editor.GetCurrentView().Target;
-            }
         }
         public double ViewLens() {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument()) {
                 return doc.Editor.GetCurrentView().LensLength;
-            }
         }
         GeoLocationData FindOrCreateGeoLocationData(ObjectId msId, Transaction tr, Database db) {
             try {
@@ -192,12 +181,9 @@ namespace KhepriAutoCAD {
             }
         }
         public void SetSkyFromDateLocation(DateTime date, double latitude, double longitude, double meridian, double elevation) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument()) {
                 Database db = doc.Database;
                 Editor ed = doc.Editor;
                 var msId = SymbolUtilityServices.GetBlockModelSpaceId(db);
-                using (Transaction tr = db.TransactionManager.StartTransaction()) {
                     GeoLocationData geoLocdata = FindOrCreateGeoLocationData(msId, tr, db);
                     Point3d geoPt = new Point3d(longitude, latitude, elevation);
                     var wcsPt = geoLocdata.TransformFromLonLatAlt(geoPt);
@@ -217,14 +203,8 @@ namespace KhepriAutoCAD {
                         sun.IsOn = true;
                         sun.DateTime = date;
                     }
-                    tr.Commit();
-                }
-            }
         }
         public void ForEachEntity(Database db, Action<Entity> f) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (var tr = db.TransactionManager.StartTransaction()) {
                 var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
                 foreach (ObjectId btrId in bt) {
                     var btr = (BlockTableRecord)tr.GetObject(btrId, OpenMode.ForRead);
@@ -235,8 +215,6 @@ namespace KhepriAutoCAD {
                         }
                     }
                 }
-                tr.Commit();
-            }
         }
         static ObjectId Add(Entity e, Document doc, Transaction tr) {
             BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
@@ -247,13 +225,11 @@ namespace KhepriAutoCAD {
         }
         static ObjectId AddAndCommit(Entity e, Document doc, Transaction tr) {
             ObjectId id = Add(e, doc, tr);
-            tr.Commit();
             return id;
         }
         static ObjectId AddAndDeleteAndCommit(Entity e, Entity del, Document doc, Transaction tr) {
             ObjectId id = Add(e, doc, tr);
             del.Erase();
-            tr.Commit();
             return id;
         }
         static T SingletonElement<T>(T[] elements) {
@@ -277,41 +253,28 @@ namespace KhepriAutoCAD {
         public byte Sync() => 1;
         public byte Disconnect() => 2;
         public void Delete(ObjectId id) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Entity ent = tr.GetObject(id, OpenMode.ForWrite) as Entity;
-                ent.Erase();
-                tr.Commit();
-            }
+            CommitAndStartTransaction();
+            Entity ent = tr.GetObject(id, OpenMode.ForWrite) as Entity;
+            ent.Erase();
+            CommitAndStartOpenCloseTransaction();
         }
         public void DeleteMany(ObjectId[] ids) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                foreach (var id in ids) {
-                    Entity ent = tr.GetObject(id, OpenMode.ForWrite) as Entity;
-                    ent.Erase();
-                }
-                tr.Commit();
+            CommitAndStartTransaction();
+            foreach (var id in ids) {
+                Entity ent = tr.GetObject(id, OpenMode.ForWrite) as Entity;
+                ent.Erase();
             }
+            CommitAndStartOpenCloseTransaction();
         }
         public ObjectId Copy(ObjectId id) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Entity obj = tr.GetObject(id, OpenMode.ForWrite) as Entity;
-                return AddAndCommit(obj.Clone() as Entity, doc, tr);
-            }
+            Entity obj = tr.GetObject(id, OpenMode.ForWrite) as Entity;
+            return AddAndCommit(obj.Clone() as Entity, doc, tr);
         }
 
         public Entity Point(Point3d p) => new DBPoint(p);
         public Point3d PointPosition(Entity ent) => ((DBPoint)ent).Position;
         public Entity PolyLine(Point3d[] pts) => new Polyline3d(Poly3dType.SimplePoly, new Point3dCollection(pts), false);
         public Point3d[] LineVertices(ObjectId id) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction()) {
                 Entity ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
                 List<Point3d> verts = new List<Point3d>();
                 switch (ent.ObjectId.ObjectClass.Name) {
@@ -344,9 +307,7 @@ namespace KhepriAutoCAD {
                         }
                         break;
                 }
-                tr.Commit();
                 return verts.ToArray();
-            }
         }
 
         public Entity Spline(Point3d[] pts) => new Polyline3d(Poly3dType.CubicSplinePoly, new Point3dCollection(pts), false);
@@ -476,12 +437,8 @@ namespace KhepriAutoCAD {
         public Point3d MTextPosition(Entity ent) => ((MText)ent).Location;
         public double MTextHeight(Entity ent) => ((MText)ent).Height;
         public ObjectId GetMaterialNamed(String Name) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction()) {
                 DBDictionary matLib = tr.GetObject(doc.Database.MaterialDictionaryId, OpenMode.ForRead) as DBDictionary;
                 return matLib.GetAt(Name);
-            }
         }
         public ObjectId CreateMaterialNamed(String name, 
             double uScale, double vScale, double uOffset, double vOffset, 
@@ -489,9 +446,6 @@ namespace KhepriAutoCAD {
             Color diffuseColor, String diffuseMapPath, 
             String bumpMapPath, 
             double refractionIndex, double opacity, double reflectivity, double translucence, int illuminationModel) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction()) {
                 DBDictionary matLib = tr.GetObject(doc.Database.MaterialDictionaryId, OpenMode.ForRead) as DBDictionary;
                 Matrix3d mx = new Matrix3d(new double[] {
                           uScale, 0, 0, uScale * uOffset,
@@ -524,14 +478,9 @@ namespace KhepriAutoCAD {
                 matLib.UpgradeOpen();
                 ObjectId materialId = matLib.SetAt(name, mat);
                 tr.AddNewlyCreatedDBObject(mat, true);
-                tr.Commit();
                 return materialId;
-            }
         }
         public ObjectId CreateColoredMaterialNamed(String name, Color color, double reflectivity, double translucence) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction()) {
                 DBDictionary matLib = tr.GetObject(doc.Database.MaterialDictionaryId, OpenMode.ForRead) as DBDictionary;
                 Mapper mapper = new Mapper(GI.Projection.Box,
                                             GI.Tiling.Tile, GI.Tiling.Tile,
@@ -548,9 +497,7 @@ namespace KhepriAutoCAD {
                 matLib.UpgradeOpen();
                 ObjectId materialId = matLib.SetAt(name, mat);
                 tr.AddNewlyCreatedDBObject(mat, true);
-                tr.Commit();
                 return materialId;
-            }
         }
         Entity WithMaterial(Entity ent, ObjectId matId) {
             if (matId != ObjectId.Null) {
@@ -594,9 +541,6 @@ namespace KhepriAutoCAD {
             SurfaceFromCurve(new Polyline3d(Poly3dType.SimplePoly, new Point3dCollection(pts), true), matId);
 
         public ObjectId[] SurfaceFromCurves(ObjectId[] ids, ObjectId matId) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
             using (DBObjectCollection coll = new DBObjectCollection()) {
                 foreach (var id in ids) {
                     coll.Add(tr.GetObject(id, OpenMode.ForWrite));
@@ -613,16 +557,12 @@ namespace KhepriAutoCAD {
                     foreach (DBObject obj in coll) {
                         obj.Erase();
                     }
-                    tr.Commit();
                     return regionsIds.ToArray();
                 }
             }
         }
 
         public ObjectId[] CurvesFromSurface(ObjectId id) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 Entity e = tr.GetObject(id, OpenMode.ForWrite) as Entity;
                 DBObjectCollection objs = new DBObjectCollection();
                 e.Explode(objs);
@@ -634,9 +574,7 @@ namespace KhepriAutoCAD {
                     curveIds.Add(btr.AppendEntity(ent));
                     tr.AddNewlyCreatedDBObject(ent, true);
                 }
-                tr.Commit();
                 return curveIds.ToArray();
-            }
         }
 
         public Entity Sphere(Point3d c, double r, ObjectId mat) {
@@ -791,9 +729,6 @@ namespace KhepriAutoCAD {
         }
 
         public ObjectId IrregularPyramid(Point3d[] pts, Point3d apex, ObjectId matId) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
                 BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
                 Point3dCollection vertarray = new Point3dCollection(pts);
@@ -811,15 +746,10 @@ namespace KhepriAutoCAD {
                 ObjectId id = btr.AppendEntity(sol);
                 tr.AddNewlyCreatedDBObject(sol, true);
                 sdm.Erase();
-                tr.Commit();
                 return id;
-            }
         }
 
         public ObjectId IrregularPyramidFrustum(Point3d[] bpts, Point3d[] tpts, ObjectId matId) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
                 BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
                 Point3dCollection vertarray = new Point3dCollection(bpts);
@@ -839,9 +769,7 @@ namespace KhepriAutoCAD {
                 ObjectId id = btr.AppendEntity(sol);
                 tr.AddNewlyCreatedDBObject(sol, true);
                 sdm.Erase();
-                tr.Commit();
                 return id;
-            }
         }
 
         public Entity MeshFromGrid(int m, int n, Point3d[] pts, bool closedM, bool closedN) =>
@@ -857,9 +785,6 @@ namespace KhepriAutoCAD {
             };
         }
         public Point3dCollection MeshVertices(ObjectId id) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 PolygonMesh pgm = tr.GetObject(id, OpenMode.ForWrite) as PolygonMesh;
                 Point3dCollection vertices = new Point3dCollection();
                 foreach (ObjectId vid in pgm) {
@@ -867,7 +792,6 @@ namespace KhepriAutoCAD {
                     vertices.Add(v.Position);
                 }
                 return vertices;
-            }
         }
 
         public SubDMesh SubDFromGrid(int m, int n, Point3d[] pts, bool closedM, bool closedN, int level) {
@@ -906,12 +830,8 @@ namespace KhepriAutoCAD {
             SingletonElement(obj.ConvertToRegion()) as Region;
 
         public ObjectId Thicken(ObjectId obj, double thickness) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 Entity e = tr.GetObject(obj, OpenMode.ForWrite) as Entity;
                 return AddAndDeleteAndCommit(AsSurface(e).Thicken(thickness, true), e, doc, tr);
-            }
         }
 
         static double sphPhi(Vector3d v) => (v.X == 0.0 && v.Y == 0.0) ? 0.0 : Math.Atan2(v.Y, v.X);
@@ -987,9 +907,6 @@ namespace KhepriAutoCAD {
             return c;
         }
         public ObjectId JoinCurves(ObjectId[] ids) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 Curve c0 = tr.GetObject(ids[0], OpenMode.ForWrite) as Curve;
                 //AutoCAD does not like to join starting from an Arc
                 if (c0 is Arc) { c0 = PolyFrom(c0 as Arc, doc, tr); }
@@ -999,20 +916,14 @@ namespace KhepriAutoCAD {
                     c0.JoinEntity(c1);
                     c1.Erase();
                 }
-                tr.Commit();
                 return c0.Id;
-            }
         }
 
         public DBNurbSurface AsNurbSurface(Entity ent) =>
             SingletonElement(AsSurface(ent).ConvertToNurbSurface());
         public ObjectId NurbSurfaceFrom(ObjectId id) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 Entity ent = tr.GetObject(id, OpenMode.ForWrite) as Entity;
                 return AddAndDeleteAndCommit(AsNurbSurface(ent), ent, doc, tr);
-            }
         }
         public double[] SurfaceDomain(Entity ent) {
             if (ent is DBNurbSurface) {
@@ -1054,9 +965,6 @@ namespace KhepriAutoCAD {
             }
         }
         public ObjectId Extrude(ObjectId profileId, Vector3d dir) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 Entity profile = tr.GetObject(profileId, OpenMode.ForWrite) as Entity;
                 if (profile is Region) {
                     using (Solid3d s = new Solid3d()) {
@@ -1069,12 +977,8 @@ namespace KhepriAutoCAD {
                         return AddAndDeleteAndCommit(s, profile, doc, tr);
                     }
                 }
-            }
         }
         public ObjectId ExtrudeWithMaterial(ObjectId profileId, Vector3d dir, ObjectId matId) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 Entity profile = tr.GetObject(profileId, OpenMode.ForWrite) as Entity;
                 if (profile is Region) {
                     using (Solid3d s = new Solid3d()) {
@@ -1088,13 +992,9 @@ namespace KhepriAutoCAD {
                         return AddAndDeleteAndCommit(WithMaterial(s, matId), profile, doc, tr);
                     }
                 }
-            }
         }
 
         public ObjectId Sweep(ObjectId pathId, ObjectId profileId, double rotation, double scale) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 Curve path = tr.GetObject(pathId, OpenMode.ForWrite) as Curve;
                 Frame3d frame = CurveFrameAt(path, CurveDomain(path)[0]);
                 Entity profile = Transform(tr.GetObject(profileId, OpenMode.ForWrite) as Entity, frame);
@@ -1119,12 +1019,8 @@ namespace KhepriAutoCAD {
                         return AddAndCommit(s, doc, tr);
                     }
                 }
-            }
         }
         public ObjectId SweepWithMaterial(ObjectId pathId, ObjectId profileId, double rotation, double scale, ObjectId matId) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 Curve path = tr.GetObject(pathId, OpenMode.ForWrite) as Curve;
                 Frame3d frame = CurveFrameAt(path, CurveDomain(path)[0]);
                 Entity profile = Transform(tr.GetObject(profileId, OpenMode.ForWrite) as Entity, frame);
@@ -1150,83 +1046,69 @@ namespace KhepriAutoCAD {
                         return AddAndCommit(WithMaterial(s, matId), doc, tr);
                     }
                 }
-            }
         }
 
         public ObjectId Loft(ObjectId[] profilesIds, ObjectId[] guidesIds, bool ruled, bool closed) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Entity[] profiles = profilesIds.Select(i => tr.GetObject(i, OpenMode.ForRead) as Entity).ToArray();
-                Entity[] guides = guidesIds.Select(i => tr.GetObject(i, OpenMode.ForRead) as Entity).ToArray();
-                LoftOptionsBuilder lob = new LoftOptionsBuilder();
-                lob.NormalOption = LoftOptionsNormalOption.NoNormal;
-                lob.Ruled = ruled;
-                lob.Closed = closed;
-                if (profiles[0] is Region) {
-                    using (Solid3d s = new Solid3d()) {
-                        s.CreateLoftedSolid(profiles, guides, null, lob.ToLoftOptions());
-                        return AddAndCommit(s, doc, tr);
-                    }
+            Entity[] profiles = profilesIds.Select(i => tr.GetObject(i, OpenMode.ForRead) as Entity).ToArray();
+            Entity[] guides = guidesIds.Select(i => tr.GetObject(i, OpenMode.ForRead) as Entity).ToArray();
+            LoftOptionsBuilder lob = new LoftOptionsBuilder();
+            lob.NormalOption = LoftOptionsNormalOption.NoNormal;
+            lob.Ruled = ruled;
+            lob.Closed = closed;
+            if (profiles[0] is Region) {
+                using (Solid3d s = new Solid3d()) {
+                    s.CreateLoftedSolid(profiles, guides, null, lob.ToLoftOptions());
+                    return AddAndCommit(s, doc, tr);
                 }
-                else {
-                    using (LoftedSurface s = new LoftedSurface()) {
-                        s.CreateLoftedSurface(profiles, guides, null, lob.ToLoftOptions());
-                        return AddAndCommit(s, doc, tr);
-                    }
+            } else {
+                using (LoftedSurface s = new LoftedSurface()) {
+                    s.CreateLoftedSurface(profiles, guides, null, lob.ToLoftOptions());
+                    return AddAndCommit(s, doc, tr);
                 }
             }
         }
         public ObjectId LoftWithMaterial(ObjectId[] profilesIds, ObjectId[] guidesIds, bool ruled, bool closed, ObjectId matId) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Entity[] profiles = profilesIds.Select(i => tr.GetObject(i, OpenMode.ForRead) as Entity).ToArray();
-                Entity[] guides = guidesIds.Select(i => tr.GetObject(i, OpenMode.ForRead) as Entity).ToArray();
-                LoftOptionsBuilder lob = new LoftOptionsBuilder();
-                lob.NormalOption = LoftOptionsNormalOption.NoNormal;
-                lob.Ruled = ruled;
-                lob.Closed = closed;
-                if (profiles[0] is Region) {
-                    using (Solid3d s = new Solid3d()) {
-                        s.CreateLoftedSolid(profiles, guides, null, lob.ToLoftOptions());
-                        return AddAndCommit(WithMaterial(s, matId), doc, tr);
-                    }
+            Entity[] profiles = profilesIds.Select(i => tr.GetObject(i, OpenMode.ForRead) as Entity).ToArray();
+            Entity[] guides = guidesIds.Select(i => tr.GetObject(i, OpenMode.ForRead) as Entity).ToArray();
+            LoftOptionsBuilder lob = new LoftOptionsBuilder();
+            lob.NormalOption = LoftOptionsNormalOption.NoNormal;
+            lob.Ruled = ruled;
+            lob.Closed = closed;
+            if (profiles[0] is Region) {
+                using (Solid3d s = new Solid3d()) {
+                    s.CreateLoftedSolid(profiles, guides, null, lob.ToLoftOptions());
+                    return AddAndCommit(WithMaterial(s, matId), doc, tr);
                 }
-                else {
-                    using (LoftedSurface s = new LoftedSurface()) {
-                        s.CreateLoftedSurface(profiles, guides, null, lob.ToLoftOptions());
-                        return AddAndCommit(WithMaterial(s, matId), doc, tr);
-                    }
+            } else {
+                using (LoftedSurface s = new LoftedSurface()) {
+                    s.CreateLoftedSurface(profiles, guides, null, lob.ToLoftOptions());
+                    return AddAndCommit(WithMaterial(s, matId), doc, tr);
                 }
             }
         }
         ObjectId BooleanOperation(ObjectId objId0, ObjectId objId1, BooleanOperationType op) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Entity ent0 = tr.GetObject(objId0, OpenMode.ForWrite) as Entity;
-                Entity ent1 = tr.GetObject(objId1, OpenMode.ForWrite) as Entity;
-                if (ent0 is DBSurface) {
-                    Region r0 = SurfaceAsRegion(ent0 as DBSurface);
-                    Add(r0, doc, tr);
-                    ent0.Erase();
-                    ent0 = r0;
-                }
-                if (ent1 is DBSurface) {
-                    Region r1 = SurfaceAsRegion(ent1 as DBSurface);
-                    Add(r1, doc, tr);
-                    ent1.Erase();
-                    ent1 = r1;
-                }
-                if (ent0 is Region) {
-                    ((Region)ent0).BooleanOperation(op, (Region)ent1);
-                } else {
-                    ((Solid3d)ent0).BooleanOperation(op, (Solid3d)ent1);
-                }
-                tr.Commit();
-                return ent0.Id;
+            CommitAndStartTransaction();
+            Entity ent0 = tr.GetObject(objId0, OpenMode.ForWrite) as Entity;
+            Entity ent1 = tr.GetObject(objId1, OpenMode.ForWrite) as Entity;
+            if (ent0 is DBSurface) {
+                Region r0 = SurfaceAsRegion(ent0 as DBSurface);
+                Add(r0, doc, tr);
+                ent0.Erase();
+                ent0 = r0;
             }
+            if (ent1 is DBSurface) {
+                Region r1 = SurfaceAsRegion(ent1 as DBSurface);
+                Add(r1, doc, tr);
+                ent1.Erase();
+                ent1 = r1;
+            }
+            if (ent0 is Region) {
+                ((Region)ent0).BooleanOperation(op, (Region)ent1);
+            } else {
+                ((Solid3d)ent0).BooleanOperation(op, (Solid3d)ent1);
+            }
+            CommitAndStartOpenCloseTransaction();
+            return ent0.Id;
         }
         public ObjectId Unite(ObjectId objId0, ObjectId objId1) =>
             BooleanOperation(objId0, objId1, BooleanOperationType.BoolUnite);
@@ -1235,157 +1117,105 @@ namespace KhepriAutoCAD {
         public ObjectId Subtract(ObjectId objId0, ObjectId objId1) =>
             BooleanOperation(objId0, objId1, BooleanOperationType.BoolSubtract);
         public void Slice(ObjectId id, Point3d p, Vector3d n) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Solid3d obj = tr.GetObject(id, OpenMode.ForWrite) as Solid3d;
-                obj.Slice(new Plane(p, n.Negate()));
-                tr.Commit();
-            }
+            Solid3d obj = tr.GetObject(id, OpenMode.ForWrite) as Solid3d;
+            obj.Slice(new Plane(p, n.Negate()));
         }
         public ObjectId Revolve(ObjectId profileId, Point3d p, Vector3d n, double startAngle, double amplitude) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Entity profile = tr.GetObject(profileId, OpenMode.ForWrite) as Entity;
-                RevolveOptionsBuilder rob = new RevolveOptionsBuilder();
-                rob.CloseToAxis = false;
-                rob.DraftAngle = 0;
-                rob.TwistAngle = 0;
-                if (profile is Region) {
-                    using (Solid3d sol = new Solid3d()) {
-                        sol.CreateRevolvedSolid(profile, p, n, amplitude, startAngle, rob.ToRevolveOptions());
-                        return AddAndCommit(sol, doc, tr);
-                    }
+            Entity profile = tr.GetObject(profileId, OpenMode.ForWrite) as Entity;
+            RevolveOptionsBuilder rob = new RevolveOptionsBuilder();
+            rob.CloseToAxis = false;
+            rob.DraftAngle = 0;
+            rob.TwistAngle = 0;
+            if (profile is Region) {
+                using (Solid3d sol = new Solid3d()) {
+                    sol.CreateRevolvedSolid(profile, p, n, amplitude, startAngle, rob.ToRevolveOptions());
+                    return AddAndCommit(sol, doc, tr);
                 }
-                else {
-                    using (RevolvedSurface ss = new RevolvedSurface()) {
-                        ss.CreateRevolvedSurface(profile, p, n, amplitude, startAngle, rob.ToRevolveOptions());
-                        return AddAndCommit(ss, doc, tr);
-                    }
+            } else {
+                using (RevolvedSurface ss = new RevolvedSurface()) {
+                    ss.CreateRevolvedSurface(profile, p, n, amplitude, startAngle, rob.ToRevolveOptions());
+                    return AddAndCommit(ss, doc, tr);
                 }
             }
         }
         public ObjectId RevolveWithMaterial(ObjectId profileId, Point3d p, Vector3d n, double startAngle, double amplitude, ObjectId matId) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Entity profile = tr.GetObject(profileId, OpenMode.ForWrite) as Entity;
-                RevolveOptionsBuilder rob = new RevolveOptionsBuilder();
-                rob.CloseToAxis = false;
-                rob.DraftAngle = 0;
-                rob.TwistAngle = 0;
-                if (profile is Region) {
-                    using (Solid3d s = new Solid3d()) {
-                        s.CreateRevolvedSolid(profile, p, n, amplitude, startAngle, rob.ToRevolveOptions());
-                        return AddAndCommit(WithMaterial(s, matId), doc, tr);
-                    }
+            Entity profile = tr.GetObject(profileId, OpenMode.ForWrite) as Entity;
+            RevolveOptionsBuilder rob = new RevolveOptionsBuilder();
+            rob.CloseToAxis = false;
+            rob.DraftAngle = 0;
+            rob.TwistAngle = 0;
+            if (profile is Region) {
+                using (Solid3d s = new Solid3d()) {
+                    s.CreateRevolvedSolid(profile, p, n, amplitude, startAngle, rob.ToRevolveOptions());
+                    return AddAndCommit(WithMaterial(s, matId), doc, tr);
                 }
-                else {
-                    using (RevolvedSurface s = new RevolvedSurface()) {
-                        s.CreateRevolvedSurface(profile, p, n, amplitude, startAngle, rob.ToRevolveOptions());
-                        return AddAndCommit(WithMaterial(s, matId), doc, tr);
-                    }
+            } else {
+                using (RevolvedSurface s = new RevolvedSurface()) {
+                    s.CreateRevolvedSurface(profile, p, n, amplitude, startAngle, rob.ToRevolveOptions());
+                    return AddAndCommit(WithMaterial(s, matId), doc, tr);
                 }
             }
         }
 
         public void Transform(ObjectId id, Frame3d frame) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Entity sh = tr.GetObject(id, OpenMode.ForWrite) as Entity;
-                Transform(sh, frame);
-                tr.Commit();
-            }
+            Entity sh = tr.GetObject(id, OpenMode.ForWrite) as Entity;
+            Transform(sh, frame);
         }
         public void Move(ObjectId id, Vector3d v) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Entity sh = tr.GetObject(id, OpenMode.ForWrite) as Entity;
-                sh.TransformBy(Matrix3d.Displacement(v));
-                tr.Commit();
-            }
+            Entity sh = tr.GetObject(id, OpenMode.ForWrite) as Entity;
+            sh.TransformBy(Matrix3d.Displacement(v));
         }
         public void Scale(ObjectId id, Point3d p, double s) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Entity sh = tr.GetObject(id, OpenMode.ForWrite) as Entity;
-                sh.TransformBy(Matrix3d.Scaling(s, p));
-                tr.Commit();
-            }
+            Entity sh = tr.GetObject(id, OpenMode.ForWrite) as Entity;
+            sh.TransformBy(Matrix3d.Scaling(s, p));
         }
         public void Rotate(ObjectId id, Point3d p, Vector3d n, double a) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Entity sh = tr.GetObject(id, OpenMode.ForWrite) as Entity;
-                sh.TransformBy(Matrix3d.Rotation(a, n, p));
-                tr.Commit();
-            }
+            Entity sh = tr.GetObject(id, OpenMode.ForWrite) as Entity;
+            sh.TransformBy(Matrix3d.Rotation(a, n, p));
         }
         public ObjectId Mirror(ObjectId id, Point3d p, Vector3d n, bool copy) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Entity sh = tr.GetObject(id, OpenMode.ForWrite) as Entity;
-                if (copy) {
-                    sh = sh.Clone() as Entity;
-                    BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
-                    BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
-                    id = btr.AppendEntity(sh);
-                    tr.AddNewlyCreatedDBObject(sh, true);
-                }
-                sh.TransformBy(Matrix3d.Mirroring(new Plane(p, n)));
-                tr.Commit();
-                return id;
+            Entity sh = tr.GetObject(id, OpenMode.ForWrite) as Entity;
+            if (copy) {
+                sh = sh.Clone() as Entity;
+                BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
+                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+                id = btr.AppendEntity(sh);
+                tr.AddNewlyCreatedDBObject(sh, true);
             }
+            sh.TransformBy(Matrix3d.Mirroring(new Plane(p, n)));
+            return id;
         }
         public Point3d[] GetPosition(string prompt) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument()) {
-                PromptPointOptions opts = new PromptPointOptions(prompt);
-                opts.AllowArbitraryInput = true;
-                PromptPointResult result = doc.Editor.GetPoint(opts);
-                return result.Status == PromptStatus.Cancel ? new Point3d[] { } : new Point3d[] { result.Value };
-            }
+            PromptPointOptions opts = new PromptPointOptions(prompt);
+            opts.AllowArbitraryInput = true;
+            PromptPointResult result = doc.Editor.GetPoint(opts);
+            return result.Status == PromptStatus.Cancel ? new Point3d[] { } : new Point3d[] { result.Value };
         }
         public ObjectId[] GetShapeOfType(string prompt, Type type, String typename) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument()) {
-                PromptEntityOptions opts = new PromptEntityOptions(prompt);
-                opts.SetRejectMessage("Entity must be a " + typename + "\n");
-                opts.AddAllowedClass(type, false);
-                PromptEntityResult result = doc.Editor.GetEntity(opts);
-                return result.Status == PromptStatus.Cancel ? new ObjectId[] { } : new ObjectId[] { result.ObjectId };
-            }
+            PromptEntityOptions opts = new PromptEntityOptions(prompt);
+            opts.SetRejectMessage("Entity must be a " + typename + "\n");
+            opts.AddAllowedClass(type, false);
+            PromptEntityResult result = doc.Editor.GetEntity(opts);
+            return result.Status == PromptStatus.Cancel ? new ObjectId[] { } : new ObjectId[] { result.ObjectId };
         }
         public ObjectId[] GetShapesOfType(string prompt, Type type, String typename) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument()) {
-                PromptSelectionResult selPrompt = doc.Editor.GetSelection();
-                if (selPrompt.Status == PromptStatus.OK) {
-                    SelectionSet selSet = selPrompt.Value;
-                    RXClass rxClass = RXClass.GetClass(type);
-                    return selSet.GetObjectIds().Where(id => id.ObjectClass.IsDerivedFrom(rxClass)).ToArray();
-                } else {
-                    return new ObjectId[] { };
-                }
+            PromptSelectionResult selPrompt = doc.Editor.GetSelection();
+            if (selPrompt.Status == PromptStatus.OK) {
+                SelectionSet selSet = selPrompt.Value;
+                RXClass rxClass = RXClass.GetClass(type);
+                return selSet.GetObjectIds().Where(id => id.ObjectClass.IsDerivedFrom(rxClass)).ToArray();
+            } else {
+                return new ObjectId[] { };
             }
         }
         //For this to work, PICKFIRST must be 1
         public ObjectId[] GetPreSelectedShapes() {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument()) {
-                PromptSelectionResult selectionResult = doc.Editor.SelectImplied();
-                if (selectionResult.Status == PromptStatus.OK) {
-                    SelectionSet selSet = selectionResult.Value;
-                    return selSet.GetObjectIds().ToArray();
-                } else {
-                    return new ObjectId[] { };
-                }
+            PromptSelectionResult selectionResult = doc.Editor.SelectImplied();
+            if (selectionResult.Status == PromptStatus.OK) {
+                SelectionSet selSet = selectionResult.Value;
+                return selSet.GetObjectIds().ToArray();
+            } else {
+                return new ObjectId[] { };
             }
         }
 
@@ -1403,31 +1233,18 @@ namespace KhepriAutoCAD {
 
         public long GetHandleFromShape(Entity e) => e.Handle.Value;
         public ObjectId GetShapeFromHandle(long h) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 Database db = doc.Database;
                 ObjectId res = db.GetObjectId(false, new Handle(h), 0);
-                tr.Commit();
                 return res;
-            }
         }
 
         public ObjectId[] GetAllShapes() {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 Database db = doc.Database;
                 BlockTableRecord btRecord = (BlockTableRecord)tr.GetObject(SymbolUtilityServices.GetBlockModelSpaceId(db), OpenMode.ForRead);
                 var res = (from ObjectId id in btRecord select id).ToArray();
-                tr.Commit();
                 return res;
-            }
         }
         public ObjectId[] GetAllShapesInLayer(ObjectId layerId) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction()) {
                 Database db = doc.Database;
                 BlockTableRecord btRecord = (BlockTableRecord)tr.GetObject(SymbolUtilityServices.GetBlockModelSpaceId(db), OpenMode.ForRead);
                 var res = new List<ObjectId>();
@@ -1438,7 +1255,6 @@ namespace KhepriAutoCAD {
                     }
                 }
                 return res.ToArray();
-            }
         }
 /*
         public int GetExistingShapes(string prompt) {
@@ -1482,12 +1298,8 @@ namespace KhepriAutoCAD {
             (e is Polyline2d && (e as Polyline2d).Closed) ||
             (e is Polyline3d && (e as Polyline3d).Closed);
         public bool IsClosed(ObjectId id) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction()) {
                 //This doesn't seem very safe, but it is working
                 return IsClosed(tr.GetObject(id, OpenMode.ForRead) as Entity);
-            }
         }
 
         //To speedup type identification, we will use an old approach
@@ -1547,17 +1359,12 @@ namespace KhepriAutoCAD {
             if (ids.Length == 0) {
                 ids = GetAllShapes();
             }
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                var ext = new Extents3d();
-                foreach (var id in ids) {
-                    var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
-                    ext.AddExtents(ent.GeometricExtents);
-                }
-                tr.Commit();
-                return new Point3d[] { ext.MinPoint, ext.MaxPoint };
+            var ext = new Extents3d();
+            foreach (var id in ids) {
+                var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
+                ext.AddExtents(ent.GeometricExtents);
             }
+            return new Point3d[] { ext.MinPoint, ext.MaxPoint };
         }
         public void ZoomExtents() {
             dynamic acad = Application.AcadApplication;
@@ -1565,90 +1372,71 @@ namespace KhepriAutoCAD {
         }
 
         public ObjectId CreateLayer(string name, bool active, Color color, byte transparency) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                LayerTable lt = (LayerTable)tr.GetObject(doc.Database.LayerTableId, OpenMode.ForRead);
-                ObjectId id;
-                if (lt.Has(name)) {
-                    id = lt[name];
-                } else {
-                    LayerTableRecord layer = new LayerTableRecord();
-                    layer.Name = name;
-                    layer.Color = color;
-                    lt.UpgradeOpen();
-                    id = lt.Add(layer);
-                    tr.AddNewlyCreatedDBObject(layer, true);
-                    layer.IsOff = ! active;
-                    layer.Transparency = new Transparency(transparency);
-                }
-                tr.Commit();
-                return id;
+            CommitAndStartTransaction();
+            LayerTable lt = (LayerTable)tr.GetObject(doc.Database.LayerTableId, OpenMode.ForRead);
+            ObjectId id;
+            if (lt.Has(name)) {
+                id = lt[name];
+            } else {
+                LayerTableRecord layer = new LayerTableRecord();
+                layer.Name = name;
+                layer.Color = color;
+                lt.UpgradeOpen();
+                id = lt.Add(layer);
+                tr.AddNewlyCreatedDBObject(layer, true);
+                layer.IsOff = !active;
+                layer.Transparency = new Transparency(transparency);
             }
+            CommitAndStartOpenCloseTransaction();
+            return id;
         }
         public void SetLayerColor(ObjectId id, Color color, byte transparency) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                LayerTable lt = (LayerTable)tr.GetObject(doc.Database.LayerTableId, OpenMode.ForRead);
-                LayerTableRecord layer = tr.GetObject(id, OpenMode.ForWrite) as LayerTableRecord;
-                layer.Color = color;
-                layer.Transparency = new Transparency(transparency);
-                tr.Commit();
-            }
+            CommitAndStartTransaction();
+            LayerTable lt = (LayerTable)tr.GetObject(doc.Database.LayerTableId, OpenMode.ForRead);
+            LayerTableRecord layer = tr.GetObject(id, OpenMode.ForWrite) as LayerTableRecord;
+            layer.Color = color;
+            layer.Transparency = new Transparency(transparency);
+            CommitAndStartOpenCloseTransaction();
         }
         public void SetShapeColor(ObjectId id, Color c) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 Entity sh = tr.GetObject(id, OpenMode.ForWrite) as Entity;
                 sh.Color = c;
-                tr.Commit();
-            }
         }
 
         public ObjectId CurrentLayer() {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction()) {
-                return doc.Database.Clayer;
-            }
+            return doc.Database.Clayer;
         }
         public void SetCurrentLayer(ObjectId id) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                doc.Database.Clayer = id;
-                tr.Commit();
-            }
+            CommitAndStartTransaction();
+            doc.Database.Clayer = id;
+            CommitAndStartOpenCloseTransaction();
         }
         public void SetLayerActive(ObjectId id, bool active) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                LayerTable lt = (LayerTable)tr.GetObject(doc.Database.LayerTableId, OpenMode.ForRead);
-                LayerTableRecord layer = tr.GetObject(id, OpenMode.ForWrite) as LayerTableRecord;
-                layer.IsOff = ! active;
-                tr.Commit();
-            }
+            CommitAndStartTransaction();
+            LayerTable lt = (LayerTable)tr.GetObject(doc.Database.LayerTableId, OpenMode.ForRead);
+            LayerTableRecord layer = tr.GetObject(id, OpenMode.ForWrite) as LayerTableRecord;
+            layer.IsOff = !active;
+            CommitAndStartOpenCloseTransaction();
+        }
+        public string LayerName(ObjectId id) {
+            LayerTableRecord layer = tr.GetObject(id, OpenMode.ForRead) as LayerTableRecord;
+            return layer.Name;
+        }
+        public Color LayerColor(ObjectId id) {
+            LayerTableRecord layer = tr.GetObject(id, OpenMode.ForRead) as LayerTableRecord;
+            return layer.Color;
+        }
+        public bool LayerActive(ObjectId id) {
+            LayerTableRecord layer = tr.GetObject(id, OpenMode.ForRead) as LayerTableRecord;
+            return !layer.IsOff;
         }
         public ObjectId ShapeLayer(ObjectId objId) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Entity sh = tr.GetObject(objId, OpenMode.ForWrite) as Entity;
-                tr.Commit();
-                return sh.LayerId;
-            }
+            Entity sh = tr.GetObject(objId, OpenMode.ForWrite) as Entity;
+            return sh.LayerId;
         }
         public void SetShapeLayer(ObjectId objId, ObjectId layerId) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Entity sh = tr.GetObject(objId, OpenMode.ForWrite) as Entity;
-                sh.LayerId = layerId;
-                tr.Commit();
-            }
+            Entity sh = tr.GetObject(objId, OpenMode.ForWrite) as Entity;
+            sh.LayerId = layerId;
         }
         public void SetSystemVariableInt(string name, int value) {
             Application.SetSystemVariable(name, value);
@@ -1660,14 +1448,9 @@ namespace KhepriAutoCAD {
             light.AttenuationType = GI.AttenuationType.InverseSquare;
             light.LightColor = color;
             light.Intensity = 1.0;
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Add(light, doc, tr);
-                light.PhysicalIntensityMethod = PhysicalIntensityMethod.PeakIntensity;
-                light.PhysicalIntensity = intensity;
-                tr.Commit();
-            }
+            Add(light, doc, tr);
+            light.PhysicalIntensityMethod = PhysicalIntensityMethod.PeakIntensity;
+            light.PhysicalIntensity = intensity;
             return light.Id;
         }
         public Entity SpotLight(Point3d position, double hotspot, double falloff, Point3d target) {
@@ -1684,14 +1467,9 @@ namespace KhepriAutoCAD {
             light.LightType = GI.DrawableType.WebLight;
             light.Position = position;
             light.TargetLocation = target;
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Add(light, doc, tr);
-                light.WebFile = webFile;
-                light.WebRotation = rotation;
-                tr.Commit();
-            }
+            Add(light, doc, tr);
+            light.WebFile = webFile;
+            light.WebRotation = rotation;
             return light.Id;
         }
 
@@ -1708,42 +1486,39 @@ namespace KhepriAutoCAD {
         }
 
         public void Render(int width, int height, string path, int renderLevel, string iblEnv, double rotation, double exposure) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                DBDictionary namedObjs = tr.GetObject(doc.Database.NamedObjectsDictionaryId, OpenMode.ForRead) as DBDictionary;
-                RenderGlobal renderGlobal = GetOrCreateNamedDBObject(tr, namedObjs, "ACAD_RENDER_GLOBAL", typeof(RenderGlobal)) as RenderGlobal;
-                renderGlobal.ProcedureAndDestination = new RenderGlobal.ProcedureAndDestinationParameter(RenderGlobal.Procedure.View, RenderGlobal.Destination.Window);
-                renderGlobal.Dimensions = new RenderGlobal.DimensionsParameter(width, height);
-                renderGlobal.SaveEnabled = true;
-                renderGlobal.SaveFileName = path;
-                DBDictionary settings = GetOrCreateNamedDBObject(tr, namedObjs, "ACAD_RENDER_RAPIDRT_SETTINGS", typeof(DBDictionary)) as DBDictionary;
-                RapidRTRenderSettings renderSettings = GetOrCreateNamedDBObject(tr, settings, "Khepri", typeof(RapidRTRenderSettings)) as RapidRTRenderSettings;
-                renderSettings.Name = "Khepri";
-                renderSettings.Description = "Custom render preset for Khepri";
-                renderSettings.RenderTarget = RapidRTRenderTarget.Level;
-                renderSettings.RenderLevel = renderLevel;
-                renderSettings.LightingModel = RapidRTLightingMode.Advanced;
+            CommitAndStartTransaction();
+            DBDictionary namedObjs = tr.GetObject(doc.Database.NamedObjectsDictionaryId, OpenMode.ForRead) as DBDictionary;
+            RenderGlobal renderGlobal = GetOrCreateNamedDBObject(tr, namedObjs, "ACAD_RENDER_GLOBAL", typeof(RenderGlobal)) as RenderGlobal;
+            renderGlobal.ProcedureAndDestination = new RenderGlobal.ProcedureAndDestinationParameter(RenderGlobal.Procedure.View, RenderGlobal.Destination.Window);
+            renderGlobal.Dimensions = new RenderGlobal.DimensionsParameter(width, height);
+            renderGlobal.SaveEnabled = true;
+            renderGlobal.SaveFileName = path;
+            DBDictionary settings = GetOrCreateNamedDBObject(tr, namedObjs, "ACAD_RENDER_RAPIDRT_SETTINGS", typeof(DBDictionary)) as DBDictionary;
+            RapidRTRenderSettings renderSettings = GetOrCreateNamedDBObject(tr, settings, "Khepri", typeof(RapidRTRenderSettings)) as RapidRTRenderSettings;
+            renderSettings.Name = "Khepri";
+            renderSettings.Description = "Custom render preset for Khepri";
+            renderSettings.RenderTarget = RapidRTRenderTarget.Level;
+            renderSettings.RenderLevel = renderLevel;
+            renderSettings.LightingModel = RapidRTLightingMode.Advanced;
 
-                DBDictionary bkDict = GetOrCreateNamedDBObject(tr, namedObjs, "ACAD_BACKGROUND", typeof(DBDictionary)) as DBDictionary;
-                Background background = GetOrCreateNamedDBObject(tr, bkDict, "RAPIDRTRENDERENVIRONMENT", typeof(IBLBackground)) as Background;
-                IBLBackground ibl;
-                if (background is IBLBackground) {
-                    ibl = background as IBLBackground;
-                } else {
-                    ibl = new IBLBackground();
-                    bkDict.SetAt("RAPIDRTRENDERENVIRONMENT", ibl);
-                    tr.AddNewlyCreatedDBObject(ibl, true);
-                }
-                ibl.IBLImageName = iblEnv;
-                ibl.Enable = true;
-                ibl.DisplayImage = false;
-                ibl.Rotation = rotation;
-                Editor ed = doc.Editor;
-                ViewportTableRecord vport = tr.GetObject(ed.ActiveViewportId, OpenMode.ForWrite) as ViewportTableRecord;
-                vport.Background = ibl.Id;
-                tr.Commit();
+            DBDictionary bkDict = GetOrCreateNamedDBObject(tr, namedObjs, "ACAD_BACKGROUND", typeof(DBDictionary)) as DBDictionary;
+            Background background = GetOrCreateNamedDBObject(tr, bkDict, "RAPIDRTRENDERENVIRONMENT", typeof(IBLBackground)) as Background;
+            IBLBackground ibl;
+            if (background is IBLBackground) {
+                ibl = background as IBLBackground;
+            } else {
+                ibl = new IBLBackground();
+                bkDict.SetAt("RAPIDRTRENDERENVIRONMENT", ibl);
+                tr.AddNewlyCreatedDBObject(ibl, true);
             }
+            ibl.IBLImageName = iblEnv;
+            ibl.Enable = true;
+            ibl.DisplayImage = false;
+            ibl.Rotation = rotation;
+            Editor ed = doc.Editor;
+            ViewportTableRecord vport = tr.GetObject(ed.ActiveViewportId, OpenMode.ForWrite) as ViewportTableRecord;
+            vport.Background = ibl.Id;
+            CommitAndStartOpenCloseTransaction();
             object prevEXPVALUE = Application.GetSystemVariable("EXPVALUE");
             Application.SetSystemVariable("EXPVALUE", exposure);
             dynamic ddoc = doc.GetAcadDocument();
@@ -2019,15 +1794,10 @@ namespace KhepriAutoCAD {
 
         //Recognizers
         public bool IsSolid3dAndSatisfies(ObjectId objId, Predicate<Solid3d> p) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 Solid3d sh = tr.GetObject(objId, OpenMode.ForWrite) as Solid3d;
                 bool result = sh != null;
                 result &= p(sh);
-                tr.Commit();
                 return result;
-            }
         }
         //       public bool IsCylinderP(Solid3d solid)
         //       {
@@ -2041,28 +1811,20 @@ namespace KhepriAutoCAD {
         public ObjectId CreatePathFloor(Point2d[] pts, double[] angles, BIMLevel level, FloorFamily family) {
             double elevation = level.elevation - family.totalThickness + family.coatingThickness;
             Vector3d dir = new Vector3d(0, 0, family.totalThickness);
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
                 using (Solid3d s = new Solid3d()) {
                     s.CreateExtrudedSolid(SurfaceLightweightPolyLine(pts, angles, elevation, ObjectId.Null), dir, new SweepOptions());
                     return AddAndCommit(s, doc, tr);
                 }
-            }
         }
 
         //Blocks
         //Creating instances
         public ObjectId CreateInstanceFromBlockNamed(String name, Frame3d frame) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
-            using (doc.LockDocument())
-            using (Transaction tr = db.TransactionManager.StartTransaction()) {
                 BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
                 using (BlockReference r = new BlockReference(new Point3d(0, 0, 0), bt[name])) {
                     return AddAndCommit(Transform(r, frame), doc, tr);
                 }
-            }
         }
         public ObjectId CreateInstanceFromBlockNamedAtRotated(String name, Point3d c, double angle) =>
             CreateInstanceFromBlockNamed(name, new Frame3d(c, vpol(1, angle), vpol(1, angle + Math.PI / 2)));
@@ -2071,14 +1833,10 @@ namespace KhepriAutoCAD {
         //        Matrix3d.Displacement(c - Point3d.Origin) * Matrix3d.Rotation(angle, Vector3d.ZAxis, Point3d.Origin));
 
         public ObjectId CreateBlockInstance(ObjectId id, Frame3d frame) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
-            using (doc.LockDocument())
-            using (Transaction tr = db.TransactionManager.StartTransaction()) {
                 using (BlockReference r = new BlockReference(new Point3d(0, 0, 0), id)) {
                     return AddAndCommit(Transform(r, frame), doc, tr);
                 }
-            }
         }
         public ObjectId CreateBlockInstanceAtRotated(ObjectId family, Point3d c, double angle) =>
             CreateBlockInstance(family, new Frame3d(c, vpol(1, angle), vpol(1, angle + Math.PI / 2)));
@@ -2098,10 +1856,7 @@ namespace KhepriAutoCAD {
         }
 
         public ObjectId CreateBlockFromFunc(String baseName, Func<List<Entity>> f) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
-            using (doc.LockDocument())
-            using (Transaction tr = db.TransactionManager.StartTransaction()) {
                 BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
                 String name = GenerateBlockName(bt, baseName);
                 using (BlockTableRecord block = new BlockTableRecord()) {
@@ -2113,17 +1868,12 @@ namespace KhepriAutoCAD {
                     bt.UpgradeOpen();
                     ObjectId id = bt.Add(block);
                     tr.AddNewlyCreatedDBObject(block, true);
-                    tr.Commit();
                     return id;
                 }
-            }
         }
 
         public ObjectId CreateBlockFromShapes(String baseName, ObjectId[] ids) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
-            using (doc.LockDocument())
-            using (Transaction tr = db.TransactionManager.StartTransaction()) {
                 BlockTable bt = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
                 String name = GenerateBlockName(bt, baseName);
                 using (BlockTableRecord block = new BlockTableRecord()) {
@@ -2136,7 +1886,6 @@ namespace KhepriAutoCAD {
                     tr.Commit();
                     return id;
                 }
-            }
         }
 
         // Rows of blocks
@@ -2291,171 +2040,141 @@ namespace KhepriAutoCAD {
             DIMUPT: Controls options for user-positioned text.
         */
 
-
-        /*
-         * For extra flexibility, we will accept a dictionary of property/value pairs and use reflection
-         */
-        public void Set(object obj, string prop, object val) => obj.GetType().GetProperty(prop).SetValue(obj, val, null);
-        public void Set(object obj, Options propValues) {
-            foreach (var kv in propValues) {
-                Set(obj, kv.Key, kv.Value);
-            }
-        }
-
         public ObjectId GetDimensionBlock(String name) {
             if (name == "") {
                 return ObjectId.Null;
             }
             else {
-                Document doc = Application.DocumentManager.MdiActiveDocument;
                 Database db = doc.Database;
-                using (doc.LockDocument())
-                using (Transaction tr = db.TransactionManager.StartTransaction()) {
-                    BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-                    if (!bt.Has(name)) {
-                        // We need to load it
-                        String var = "DIMBLK";
-                        String prevName = Application.GetSystemVariable(var) as String;
-                        Application.SetSystemVariable(var, name);
-                        Application.SetSystemVariable(var, prevName == "" ? "." : prevName);
-                    }
-                    ObjectId id = bt[name];
-                    tr.Commit();
-                    return id;
+                BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+                if (!bt.Has(name)) {
+                    // We need to load it
+                    String var = "DIMBLK";
+                    String prevName = Application.GetSystemVariable(var) as String;
+                    CommitAndStartOpenCloseTransaction();
+                    Application.SetSystemVariable(var, name);
+                    Application.SetSystemVariable(var, prevName == "" ? "." : prevName);
                 }
+                ObjectId id = bt[name];
+                return id;
             }
         }
 
+        // THIS DOES NOT WORK!!!
         public ObjectId[] CreateLeaderDimension(String text, Point3d p0, Point3d p1, double scale, String mark, Options props) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
             ObjectId markId = GetDimensionBlock(mark);
-            using (doc.LockDocument())
-            using (Transaction tr = db.TransactionManager.StartTransaction()) {
-                BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
-                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
-                MText mt = new MText();
+            BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
+            BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+            ObjectId mtId, ldId;
+            using (MText mt = new MText()) {
                 mt.SetDatabaseDefaults();
                 mt.Contents = text;
                 mt.Location = p1;
                 mt.TextHeight = mt.TextHeight * scale;
-                // mt.Color = (Color)props["Dimclrd"]; //Using the same color as the leader
-                ObjectId mtId = btr.AppendEntity(mt);
+                mtId = btr.AppendEntity(mt);
                 tr.AddNewlyCreatedDBObject(mt, true);
-                Leader ld = new Leader();
-                ld.SetDatabaseDefaults();
-                ld.AppendVertex(p0);
-                ld.AppendVertex(p1);
-                ObjectId ldId = btr.AppendEntity(ld);
-                tr.AddNewlyCreatedDBObject(ld, true);
-                ld.Annotation = mtId;
-                ld.Dimldrblk = markId;
-                Set(ld, props);
-                tr.Commit();
-                return new ObjectId[] { ldId, mtId };
+                // mt.Color = (Color)props["Dimclrd"]; //Using the same color as the leader
+                using (Leader ld = new Leader()) {
+                    ld.AppendVertex(p0);
+                    ld.AppendVertex(p1);
+                    ld.SetDatabaseDefaults();
+                    ld.Dimldrblk = markId;
+                    Set(ld, props);
+                    ldId = btr.AppendEntity(ld);
+                    tr.AddNewlyCreatedDBObject(ld, true);
+                    ld.Annotation = mtId;
+                    ld.EvaluateLeader();
+                    return new ObjectId[] { ldId, mtId };
+                }
             }
         }
 
         public ObjectId CreateNonLeaderDimension(String text, Point3d p0, Point3d p1, double scale, String mark, Options props) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
             ObjectId markId = GetDimensionBlock(mark);
-            using (doc.LockDocument())
-            using (Transaction tr = db.TransactionManager.StartTransaction()) {
-                BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
-                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
-                MText mt = new MText();
-                mt.SetDatabaseDefaults();
-                mt.Contents = text;
-                mt.Location = p1;
-                mt.TextHeight = mt.TextHeight * scale;
-                // mt.Color = (Color)props["Dimclrd"]; //Using the same color as the leader
-                ObjectId mtId = btr.AppendEntity(mt);
-                tr.AddNewlyCreatedDBObject(mt, true);
-                tr.Commit();
-                return mtId;
-            }
+            BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
+            BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+            MText mt = new MText();
+            mt.SetDatabaseDefaults();
+            mt.Contents = text;
+            mt.Location = p1;
+            mt.TextHeight = mt.TextHeight * scale;
+            // mt.Color = (Color)props["Dimclrd"]; //Using the same color as the leader
+            ObjectId mtId = btr.AppendEntity(mt);
+            tr.AddNewlyCreatedDBObject(mt, true);
+            return mtId;
         }
 
         public ObjectId CreateAlignedDimension(String text, Point3d p0, Point3d p1, Point3d p, double scale, String mark, Options props) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
             ObjectId markId = GetDimensionBlock(mark);
-            using (doc.LockDocument())
-            using (Transaction tr = db.TransactionManager.StartTransaction()) {
-                using (AlignedDimension dim = new AlignedDimension(p0, p1, p, text, db.Dimstyle)) {
-                    dim.Dimscale = scale;
-                    dim.Dimblk = markId;
-                    return AddAndCommit(dim, doc, tr);
-                }
+            using (AlignedDimension dim = new AlignedDimension(p0, p1, p, text, db.Dimstyle)) {
+                dim.Dimscale = scale;
+                dim.Dimblk = markId;
+                return AddAndCommit(dim, doc, tr);
             }
         }
         public ObjectId CreateRadialDimension(String text, Point3d c, Point3d chord, double leader, double scale, String mark, Options props) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
             ObjectId markId = GetDimensionBlock(mark);
             //DIMTOFL:Controls whether a dimension line is drawn between the extension lines even when the text is placed outside.
-            using (doc.LockDocument())
-            using (Transaction tr = db.TransactionManager.StartTransaction()) {
-                using (RadialDimension dim = new RadialDimension(c, chord, leader, text, db.Dimstyle)) {
-                    dim.Dimscale = scale;
-                    dim.Dimblk = markId;
-                    return AddAndCommit(dim, doc, tr);
-                }
+            using (RadialDimension dim = new RadialDimension(c, chord, leader, text, db.Dimstyle)) {
+                dim.Dimscale = scale;
+                dim.Dimblk = markId;
+                return AddAndCommit(dim, doc, tr);
             }
         }
         public ObjectId CreateDiametricDimension(String text, Point3d p0, Point3d p1, double leader, double scale, String mark1, String mark2, Options props) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
             ObjectId mark1Id = GetDimensionBlock(mark1);
             ObjectId mark2Id = GetDimensionBlock(mark2);
-            using (doc.LockDocument())
-            using (Transaction tr = db.TransactionManager.StartTransaction()) {
-                using (DiametricDimension dim = new DiametricDimension(p0, p1, leader, text, db.Dimstyle)) {
-                    dim.Dimscale = scale;
-                    dim.Dimblk1 = mark1Id;
-                    dim.Dimblk2 = mark2Id;
-                    Set(dim, props);
-                    return AddAndCommit(dim, doc, tr);
-                }
+            using (DiametricDimension dim = new DiametricDimension(p0, p1, leader, text, db.Dimstyle)) {
+                dim.Dimscale = scale;
+                dim.Dimblk1 = mark1Id;
+                dim.Dimblk2 = mark2Id;
+                Set(dim, props);
+                return AddAndCommit(dim, doc, tr);
             }
         }
+        //This one does not work correctly when the angle is greater than pi. Use the next one.
         public ObjectId CreateAngularDimension(String text, Point3d p0, Point3d p1, Point3d q0, Point3d q1, Point3d c, double scale, String mark1, String mark2, Options props) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
             ObjectId mark1Id = GetDimensionBlock(mark1);
             ObjectId mark2Id = GetDimensionBlock(mark2);
             //DIMARCSYM: Controls display of the arc symbol in an arc length dimension.
-            using (doc.LockDocument())
-            using (Transaction tr = db.TransactionManager.StartTransaction()) {
-                using (LineAngularDimension2 dim = new LineAngularDimension2(p0, p1, q0, q1, c, text, db.Dimstyle)) {
-                //using (Point3AngularDimension dim = new Point3AngularDimension(p0, p1, q1, c, text, db.Dimstyle)) {
-                    dim.Dimscale = scale;
-                    dim.Dimblk1 = mark1Id;
-                    dim.Dimblk2 = mark2Id;
-                    Set(dim, props);
-                    return AddAndCommit(dim, doc, tr);
-                }
+            using (LineAngularDimension2 dim = new LineAngularDimension2(p0, p1, q0, q1, c, text, db.Dimstyle)) {
+                dim.Dimscale = scale;
+                dim.Dimblk1 = mark1Id;
+                dim.Dimblk2 = mark2Id;
+                Set(dim, props);
+                return AddAndCommit(dim, doc, tr);
+            }
+        }
+        public ObjectId CreateAngularDimension3Pt(String text, Point3d v, Point3d p0, Point3d p1, Point3d c, double scale, String mark1, String mark2, Options props) {
+            Database db = doc.Database;
+            ObjectId mark1Id = GetDimensionBlock(mark1);
+            ObjectId mark2Id = GetDimensionBlock(mark2);
+            //DIMARCSYM: Controls display of the arc symbol in an arc length dimension.
+            using (Point3AngularDimension dim = new Point3AngularDimension(v, p0, p1, c, text, db.Dimstyle)) {
+                dim.Dimscale = scale;
+                dim.Dimblk1 = mark1Id;
+                dim.Dimblk2 = mark2Id;
+                Set(dim, props);
+                return AddAndCommit(dim, doc, tr);
             }
         }
 
         static Dictionary<string, int> unit_code = new Dictionary<string, int>() { { "in", 1 }, { "ft", 2 }, { "mm", 3 }, { "cm", 4 }, { "dm", 5 }, { "m", 6 } };
         public void SetLengthUnit(String unit) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
-            using (doc.LockDocument())
-            using (Transaction tr = db.TransactionManager.StartTransaction()) {
                 db.Unitmode = unit_code[unit];
-                tr.Commit();
-            }
         }
 
         //Save
 
         public void SaveAs(string pathname, string format) {
             if ("DWG".Equals(format)) {
-                Document doc = Application.DocumentManager.MdiActiveDocument;
-                using (doc.LockDocument())
                     doc.Database.SaveAs(pathname, true, DwgVersion.Current, doc.Database.SecurityParameters);
             }
             else {
@@ -2482,36 +2201,24 @@ namespace KhepriAutoCAD {
 
         bool wasCanceled = false;
         public void DetectCancel() {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
             wasCanceled = false;
             doc.CommandCancelled += new CommandEventHandler(UserCancelled);
         }
         public void UndetectCancel() {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
             doc.CommandCancelled -= new CommandEventHandler(UserCancelled);
         }
         public void UserCancelled(object senderObj, EventArgs evtArgs) => wasCanceled = true;
         public bool WasCanceled() => wasCanceled;
 
         public void RegisterForChanges(ObjectId id) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
-            using (doc.LockDocument())
-            using (Transaction tr = db.TransactionManager.StartTransaction()) {
                 Entity ent = tr.GetObject(id, OpenMode.ForWrite) as Entity;
                 ent.Modified += new EventHandler(AddChangedShape);
-                tr.Commit();
-            }
         }
         public void UnregisterForChanges(ObjectId id) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
             Database db = doc.Database;
-            using (doc.LockDocument())
-            using (Transaction tr = db.TransactionManager.StartTransaction()) {
                 Entity ent = tr.GetObject(id, OpenMode.ForWrite) as Entity;
                 ent.Modified -= new EventHandler(AddChangedShape);
-                tr.Commit();
-            }
         }
     }
 }

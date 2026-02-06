@@ -10,6 +10,7 @@ using System.IO;
 
 namespace KhepriAutoCAD {
     public class Channel : KhepriBase.Channel {
+        public Processor processor;
         public List<ObjectId> shapes;
         public List<Material> materials;
 
@@ -71,7 +72,7 @@ namespace KhepriAutoCAD {
         */
         public ObjectId rObjectId() {
             long value = rInt64();
-            return value < 0 ? 
+            return value < 0 ?
                 ObjectId.Null :
                 getDoc().Database.GetObjectId(false, new Handle(value), 0);
         }
@@ -193,40 +194,31 @@ namespace KhepriAutoCAD {
         public void wColor(Color c) { wByte(c.Red); wByte(c.Green); wByte(c.Blue); }
         public new void eColor(Exception e) => eByte(e);
 
+        public Transaction tr {
+            get => processor.tr;
+        }
+        public Document doc {
+            get => processor.doc;
+        }
         public Document getDoc() => Application.DocumentManager.MdiActiveDocument;
         public Transaction getTrans(Document doc) => doc.Database.TransactionManager.StartTransaction();
         public ObjectId addShape(Entity shape) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
-                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
-                ObjectId id;
-                using (shape) {
-                    id = btr.AppendEntity(shape);
-                    tr.AddNewlyCreatedDBObject(shape, true);
-                }
-                tr.Commit();
-                //doc.Editor.UpdateScreen();
-                return id;
+            BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
+            BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+            ObjectId id;
+            using (shape) {
+                id = btr.AppendEntity(shape);
+                tr.AddNewlyCreatedDBObject(shape, true);
             }
+            return id;
         }
  
         public Entity getShape(ObjectId id) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction()) {
-                //This doesn't seem very safe, but it is working
-                return (Entity)tr.GetObject(id, OpenMode.ForRead);
-            }
+            return (Entity)tr.GetObject(id, OpenMode.ForRead);
         }
 
         public void shapeGetter(ObjectId id, Action<Entity> f) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartOpenCloseTransaction()) {
-                f((Entity)tr.GetObject(id, OpenMode.ForRead));
-            }
+            f((Entity)tr.GetObject(id, OpenMode.ForRead));
         }
 
         override public void Terminate() {
