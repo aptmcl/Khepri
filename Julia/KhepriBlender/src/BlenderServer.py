@@ -1,8 +1,8 @@
 bl_info = {
     "name": "Khepri",
     "author": "António Leitão",
-    "version": (1, 0),
-    "blender": (2, 80, 0),
+    "version": (1, 1),
+    "blender": (5, 0, 0),
     "location": "Scripting > Khepri",
     "description": "Khepri connection to Blender",
     "warning": "",
@@ -11,9 +11,9 @@ bl_info = {
 }
 
 # To easily test this, on a command prompt do:
-# "C:\Program Files\Blender Foundation\Blender 3.6\blender.exe" --python BlenderServer.py
+# "C:\Program Files\Blender Foundation\Blender 5.0\blender.exe" --python BlenderServer.py
 # To test this while still allowing redefinitions do:
-# "C:\Program Files\Blender Foundation\Blender 3.6\blender.exe"
+# "C:\Program Files\Blender Foundation\Blender 5.0\blender.exe"
 # and then, in Blender's Python console:
 # import os
 # __file__=os.path.join(os.getcwd(), "src")
@@ -235,29 +235,16 @@ def new_metal_material(name:str, color:RGBA, roughness:float, ior:float)->MatId:
     node.inputs['Roughness'].default_value = roughness
     return add_node_material(mat, node)
 
-# For Principled BSDF, the inputs are as follows:
-# 0, 'Base Color'
-# 1, 'Subsurface'
-# 2, 'Subsurface Radius'
-# 3, 'Subsurface Color'
-# 4, 'Metallic'
-# 5, 'Specular'
-# 6, 'Specular Tint'
-# 7, 'Roughness'
-# 8, 'Anisotropic'
-# 9, 'Anisotropic Rotation'
-# 10, 'Sheen'
-# 11, 'Sheen Tint'
-# 12, 'Clearcoat'
-# 13, 'Clearcoat Roughness'
-# 14, 'IOR'
-# 15, 'Transmission'
-# 16, 'Transmission Roughness'
-# 17, 'Emission'
-# 18, 'Alpha'
-# 19, 'Normal'
-# 20, 'Clearcoat Normal'
-# 21, 'Tangent'
+# For Principled BSDF in Blender 4.0+/5.0, the inputs are:
+# 'Base Color', 'Metallic', 'Roughness', 'IOR', 'Alpha', 'Normal', 'Weight'
+# 'Subsurface Weight', 'Subsurface Radius', 'Subsurface Scale', 'Subsurface Anisotropy'
+# 'IOR Level' (formerly 'Specular'), 'Specular Tint'
+# 'Anisotropic', 'Anisotropic Rotation', 'Tangent'
+# 'Transmission Weight' (formerly 'Transmission'), no more 'Transmission Roughness'
+# 'Coat Weight' (formerly 'Clearcoat'), 'Coat Roughness' (formerly 'Clearcoat Roughness')
+# 'Coat IOR', 'Coat Tint', 'Coat Normal'
+# 'Sheen Weight' (formerly 'Sheen'), 'Sheen Roughness', 'Sheen Tint'
+# 'Emission Color' (formerly 'Emission'), 'Emission Strength'
 
 def new_material(name:str, base_color:RGBA, metallic:float, specular:float, roughness:float,
                  clearcoat:float, clearcoat_roughness:float, ior:float,
@@ -265,27 +252,21 @@ def new_material(name:str, base_color:RGBA, metallic:float, specular:float, roug
                  emission:RGBA, emission_strength:float)->MatId:
     mat, node = new_node_material(name, 'ShaderNodeBsdfPrincipled')
     node.inputs['Base Color'].default_value = base_color
-    #node.inputs['Subsurface'].default_value =
-    #node.inputs['Subsurface Radius'].default_value =
-    #node.inputs['Subsurface Color'].default_value =
     node.inputs['Metallic'].default_value = metallic
-    node.inputs['Specular'].default_value = specular
-    #node.inputs['Specular Tint'].default_value =
+    # 'Specular' was renamed to 'IOR Level' in Blender 4.0
+    node.inputs['IOR Level'].default_value = specular
     node.inputs['Roughness'].default_value = roughness
-    #node.inputs['Anisotropic'].default_value =
-    #node.inputs['Anisotropic Rotation'].default_value =
-    #node.inputs['Sheen'].default_value =
-    #node.inputs['Sheen Tint'].default_value =
-    node.inputs['Clearcoat'].default_value = clearcoat
-    node.inputs['Clearcoat Roughness'].default_value = clearcoat_roughness
+    # 'Clearcoat' was renamed to 'Coat Weight' in Blender 4.0
+    node.inputs['Coat Weight'].default_value = clearcoat
+    # 'Clearcoat Roughness' was renamed to 'Coat Roughness' in Blender 4.0
+    node.inputs['Coat Roughness'].default_value = clearcoat_roughness
     node.inputs['IOR'].default_value = ior
-    node.inputs['Transmission'].default_value = transmission
-    node.inputs['Transmission Roughness'].default_value = transmission_roughness
-    node.inputs['Emission'].default_value = emission
-    #node.inputs['Alpha'].default_value =
-    #node.inputs['Normal'].default_value =
-    #node.inputs['Clearcoat Normal'].default_value =
-    #node.inputs['Tangent'].default_value =
+    # 'Transmission' was renamed to 'Transmission Weight' in Blender 4.0
+    node.inputs['Transmission Weight'].default_value = transmission
+    # Note: 'Transmission Roughness' was removed in Blender 4.0 - parameter kept for API compat
+    # 'Emission' was renamed to 'Emission Color' in Blender 4.0
+    node.inputs['Emission Color'].default_value = emission
+    node.inputs['Emission Strength'].default_value = emission_strength
     return add_node_material(mat, node)
 
 
@@ -836,8 +817,8 @@ def boolean_op(op:str, id1:Id, id2:Id)->Id:
     bool_modifier.object = obj2
     C.view_layer.objects.active = obj1
     bpy.ops.object.modifier_apply(modifier=bool_modifier.name)
-    obj1.data.use_auto_smooth = True
-    obj1.data.auto_smooth_angle = pi/30
+    # Note: use_auto_smooth was removed in Blender 4.0+
+    # Smooth shading is now handled via mesh attributes or geometry nodes
     D.objects.remove(obj2,do_unlink = True)
     return id1
 
@@ -864,8 +845,7 @@ def slice(id:Id, p:Point3d, v:Vector3d)->Id:
     bool_mod.object = plane
     C.view_layer.objects.active = obj
     bpy.ops.object.modifier_apply(modifier=bool_mod.name)
-    obj.data.use_auto_smooth = True
-    obj.data.auto_smooth_angle = pi/6
+    # Note: use_auto_smooth was removed in Blender 4.0+
     D.objects.remove(plane, do_unlink=True)
     return id
 
@@ -1333,9 +1313,11 @@ class Khepri(object):
     def __init__(self):
         pass
 
+# Use this when Blender is the server
+#init_client_server("Blender", 11003)
 
-
-set_backend_port(11003)
+# or this when it is the client
+init_client_server("Blender", 0)
 
 if bpy.app.background:
     while True:

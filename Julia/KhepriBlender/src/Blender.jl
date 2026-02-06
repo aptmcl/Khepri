@@ -4,7 +4,7 @@ export blender
 #=
 #To dribble Blender, do:
 
-blender_exe_path = raw"C:\Program Files\Blender Foundation\Blender 3.6\blender.exe"
+blender_exe_path = raw"C:\Program Files\Blender Foundation\Blender 5.0\blender.exe"
 using OutputCollectors
 oc = OutputCollector(`$blender_exe_path $["--python", joinpath(@__DIR__, "BlenderServer.py")]`, verbose=true)
 =#
@@ -213,7 +213,7 @@ start_blender() =
     sleep(1) : # Just wait a little longer
     let blender_cmd =
 		  Sys.iswindows() ?
-      	    joinpath(readdir("C:/Program Files/Blender Foundation/", join=true)[1], "blender.exe") :
+      	    joinpath(readdir("C:/Program Files/Blender Foundation/", join=true)[end], "blender.exe") :
   		    Sys.isapple() ?
 		  	  "/Applications/Blender.app/Contents/MacOS/Blender" :
     	      "blender"
@@ -247,7 +247,7 @@ KhepriBase.after_connecting(b::BLR) =
 	set_material(b, material_clay, b -> b_plastic_material(b, "Clay", rgb(0.9, 0.9, 0.9),	1.0))
   end
 
-const blender = BLR("Blender", blender_port, remote_functions(blender_api))
+const blender = BLR("Blender", blender_port, blender_api)
 
 KhepriBase.has_boolean_ops(::Type{BLR}) = HasBooleanOps{true}()
 
