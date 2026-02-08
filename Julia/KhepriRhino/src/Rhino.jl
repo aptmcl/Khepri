@@ -1,5 +1,8 @@
 export rhino
 
+# Coordinate convention: Rhino uses right-handed Z-up, same as Khepri.
+# No axis transforms needed.
+
 ### PLugin
 #=
 Whenever the plugin is updated, run this function and commit the plugin files.
@@ -149,7 +152,10 @@ public Guid TableAndChairs(Point3d c, double angle, int family)
 public Guid CreateLayer(String name, bool active, Color color)
 public Guid CurrentLayer()
 public void SetCurrentLayer(Guid id)
-public void SetLayerActive(Guid id, bool active) {
+public void SetLayerActive(Guid id, bool active)
+public String LayerName(Guid id)
+public Color LayerColor(Guid id)
+public bool LayerActive(Guid id)
 public Guid ShapeLayer(RhinoObject objId)
 public void SetShapeLayer(RhinoObject objId, Guid layerId)
 public Point3d[] CurvePointsAt(RhinoObject obj, double[] ts)
@@ -193,6 +199,7 @@ public void ClayRenderBlack(string env, double rotation, int width, int height, 
 public void ClayRenderWhite(string env, double rotation, int width, int height, int quality, string path)
 public void SetBackgroundHDRi(string path, double angle)
 public void SaveView(int width, int height, string path)
+public void ZoomExtents()
 """
 #public Guid CreateAngularDimension(string text, Plane p, double radius, double startAngle, double endAngle, double scale, double offset, Options props)
 
@@ -236,7 +243,9 @@ const RHNativeRef = NativeRef{RHKey, RHId}
 const RHNativeRefs = NativeRefs{RHKey, RHId}
 const RH = SocketBackend{RHKey, RHId}
 
-KhepriBase.void_ref(::RH) = RHNativeRef(0 % UInt128)
+KhepriBase.shape_storage_type(::Type{RH}) = RemoteShapeStorage()
+
+KhepriBase.void_ref(::RH) = 0 % UInt128
 
 KhepriBase.failed_connecting(b::RH) =
   begin
@@ -800,7 +809,7 @@ KhepriBase.b_set_view_top(b::RH) =
 KhepriBase.b_delete_refs(b::RH, refs::Vector{RHId}) =
   @remote(b, DeleteMany(refs))
 
-KhepriBase.b_all_shape_refs(b::RH) =
+KhepriBase.b_existing_shape_refs(::RemoteShapeStorage, b::RH) =
   @remote(b, GetAllShapes())
 
 KhepriBase.b_delete_all_shape_refs(b::RH) =
@@ -827,6 +836,13 @@ KhepriBase.b_layer(b::RH, name, active, color) =
 
 KhepriBase.b_delete_all_shapes_in_layer(b::RH, layer) =
   @remote(b, DeleteAllInLayer(layer))
+
+KhepriBase.b_create_layer_from_ref_value(b::RH, r) =
+  let name = @remote(b, LayerName(r)),
+      c = @remote(b, LayerColor(r)),
+      active = @remote(b, LayerActive(r))
+    layer(name, active, rgb(c.r, c.g, c.b))
+  end
 
 KhepriBase.b_create_shape_from_ref_value(b::RH, r) =
   let code = @remote(b, ShapeCode(r))
