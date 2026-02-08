@@ -1,5 +1,8 @@
 export autocad
 
+# Coordinate convention: AutoCAD uses right-handed Z-up, same as Khepri.
+# No axis transforms needed.
+
 #=
 We need to ensure the AutoCAD plugin is properly installed.
 For AutoCAD, there are a few places where plugins can be installed:
@@ -339,6 +342,9 @@ public void SetLayerColor(ObjectId id, Color color, byte transparency)
 public void SetShapeColor(ObjectId id, Color color)
 public ObjectId CurrentLayer()
 public void SetCurrentLayer(ObjectId id)
+public string LayerName(ObjectId id)
+public Color LayerColor(ObjectId id)
+public bool LayerActive(ObjectId id)
 public ObjectId ShapeLayer(ObjectId objId)
 public void SetShapeLayer(ObjectId objId, ObjectId layerId)
 public void SetSystemVariableInt(string name, int value)
@@ -447,6 +453,8 @@ const ACADRefs = Vector{ACADRef}
 const ACADNativeRef = NativeRef{ACADKey, ACADId}
 const ACAD = SocketBackend{ACADKey, ACADId}
 
+KhepriBase.shape_storage_type(::Type{ACAD}) = RemoteShapeStorage()
+
 KhepriBase.before_connecting(b::ACAD) =
   begin
     check_plugin()
@@ -465,7 +473,7 @@ KhepriBase.after_connecting(b::ACAD) =
 
 const autocad = ACAD("AutoCAD", autocad_port, acad_api)
 
-KhepriBase.void_ref(b::ACAD) = ACADNativeRef(-1)
+KhepriBase.void_ref(b::ACAD) = -1
 
 # Primitives
 KhepriBase.b_point(b::ACAD, p, mat) =
@@ -1020,7 +1028,7 @@ KhepriBase.b_realistic_sky(b::ACAD, date, latitude, longitude, elevation, meridi
   @remote(b, SetSkyFromDateLocation(date, latitude, longitude, meridian, elevation))
 
 # HACK: This should be filtered in the backend
-KhepriBase.b_all_shape_refs(b::ACAD) =
+KhepriBase.b_existing_shape_refs(::RemoteShapeStorage, b::ACAD) =
   filter(r -> @remote(b, ShapeCode(r)) != 0, @remote(b, GetAllShapes()))
 
 KhepriBase.b_delete_refs(b::ACAD, rs::Vector{ACADId}) =
@@ -1275,17 +1283,12 @@ KhepriBase.b_create_shape_from_ref_value(b::ACAD, r) =
     end
   end
 
-#= Should be more or less like this:
 KhepriBase.b_create_layer_from_ref_value(b::ACAD, r) =
   let name = @remote(b, LayerName(r)),
-      color = rgb(@remote(b, LayerColor(r))[1:3]...),
-      alpha = round(UInt8, @remote(b, LayerAlpha(r))*255),
+      c = @remote(b, LayerColor(r)),
       active = @remote(b, LayerActive(r))
-    layer(name, active, color, alpha)
+    layer(name, active, rgb(c.r, c.g, c.b))
   end
-=#
-KhepriBase.b_create_layer_from_ref_value(b::ACAD, r) =
-  layer("Unknown", true, rgb(0, 0, 0))
 
 #=
 In case we need to realize an Unknown shape, we just copy it
@@ -1396,10 +1399,7 @@ backend_changed_shape(b::ACAD, ss::Shapes) =
     end
 
 
-# HACK: This should be filtered on the plugin, not here.
-KhepriBase.b_all_shapes(b::ACAD) =
-  Shape[get_or_create_shape_from_ref_value(b, r)
-        for r in filter(r -> @remote(b, ShapeCode(r)) != 0, @remote(b, GetAllShapes()))]
+# b_all_shapes now handled by RemoteShapeStorage dispatch in KhepriBase
 
 KhepriBase.b_all_shapes_in_layer(b::ACAD, layer) =
   Shape[get_or_create_shape_from_ref_value(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
