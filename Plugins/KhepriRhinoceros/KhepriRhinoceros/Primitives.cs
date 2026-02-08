@@ -159,7 +159,22 @@ namespace KhepriRhinoceros {
             view.Redraw();
         }
         public void View(Point3d position, Point3d target, double lens) => SetView(position, target, lens, true, "Shaded");
-        public void ViewTop() => SetView(new Point3d(0.0, 0.0, 1.0), Point3d.Origin, 50.0, false, "Wireframe");
+        public void ViewTop() {
+            RhinoView view = doc.Views.Find("Top", true);
+            if (view != null) {
+                view.Maximized = true;
+                view.Redraw();
+            } else {
+                view = doc.Views.ActiveView;
+                view.Maximized = true;
+                RhinoViewport viewport = view.ActiveViewport;
+                viewport.ChangeToParallelProjection(true);
+                viewport.SetCameraLocation(new Point3d(0, 0, 1), false);
+                viewport.SetCameraTarget(Point3d.Origin, false);
+                viewport.CameraUp = Vector3d.YAxis;
+                view.Redraw();
+            }
+        }
 
         RhinoView PerspectiveView() =>
             doc.Views.Find("Perspective", true) ?? doc.Views.ActiveView;
@@ -782,31 +797,45 @@ namespace KhepriRhinoceros {
                 raise RuntimeError('Continue this')
 
 
-                /*
-                public Guid Loft(Guid[] profilesIds, Guid[] guidesIds, bool ruled, bool closed) {
-                    Document doc = Application.DocumentManager.MdiActiveDocument;
-                    using (doc.LockDocument())
-                    using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                        Guid[] profiles = profilesIds.Select(i => tr.GetObject(i, OpenMode.ForRead) as Guid).ToArray();
-                        Guid[] guides = guidesIds.Select(i => tr.GetObject(i, OpenMode.ForRead) as Guid).ToArray();
-                        LoftOptionsBuilder lob = new LoftOptionsBuilder();
-                        lob.NormalOption = LoftOptionsNormalOption.NoNormal;
-                        lob.Ruled = ruled;
-                        lob.Closed = closed;
-                        if (profiles[0] is Region) {
-                            using (Solid3d s = new Solid3d()) {
-                                s.CreateLoftedSolid(profiles, guides, null, lob.ToLoftOptions());
-                                return addAndCommit(s, doc, tr);
-                            }
-                        } else {
-                            using (LoftedSurface s = new LoftedSurface()) {
-                                s.CreateLoftedSurface(profiles, guides, null, lob.ToLoftOptions());
-                                return addAndCommit(s, doc, tr);
-                            }
-                        }
-                    }
+        public Brep Loft(RhinoObject[] profiles, RhinoObject[] rails, bool ruled, bool closed) {
+            double tol = doc.ModelAbsoluteTolerance;
+            Brep[] breps;
+            if (rails.Length == 0) {
+                Point3d startPt = Point3d.Unset;
+                Point3d endPt = Point3d.Unset;
+                int startIdx = 0;
+                int endIdx = profiles.Length;
+                if (profiles[0].Geometry is Point p0) {
+                    startPt = p0.Location;
+                    startIdx = 1;
                 }
-                */
+                if (profiles[profiles.Length - 1].Geometry is Point pN) {
+                    endPt = pN.Location;
+                    endIdx = profiles.Length - 1;
+                }
+                Curve[] curves = profiles.Skip(startIdx).Take(endIdx - startIdx)
+                    .Select(AsCurve).ToArray();
+                LoftType loftType = ruled ? LoftType.Straight : LoftType.Normal;
+                breps = Brep.CreateFromLoft(curves, startPt, endPt, loftType, closed);
+            } else if (rails.Length == 1) {
+                Curve[] curves = profiles.Select(AsCurve).ToArray();
+                breps = Brep.CreateFromSweep(AsCurve(rails[0]), curves, closed, tol);
+            } else {
+                Curve[] curves = profiles.Select(AsCurve).ToArray();
+                breps = Brep.CreateFromSweep(AsCurve(rails[0]), AsCurve(rails[1]), curves, closed, tol);
+            }
+            if (breps == null || breps.Length == 0) {
+                throw new Exception("Loft failed");
+            }
+            if (breps.Length == 1) {
+                return breps[0];
+            }
+            Brep[] joined = Brep.JoinBreps(breps, tol);
+            if (joined != null && joined.Length > 0) {
+                return joined[0];
+            }
+            return breps[0];
+        }
 
         public bool DoBrepsIntersect(Brep brepA, Brep brepB, double tolerance) {
             Curve[] outCurves;
@@ -819,19 +848,28 @@ namespace KhepriRhinoceros {
             Brep[] breps = objs.Select(AsBrep).ToArray();
             Brep[] newBreps = null;
             for (int e = 5; e > 2; e--) {
-                // This can't be trusted. Fails when breps do not intersect.
                 newBreps = Brep.CreateBooleanUnion(breps, Math.Pow(10, -e));
-                if (newBreps != null) {
+                if (newBreps != null && newBreps.Length > 0) {
                     break;
                 }
             }
-            if (newBreps == null) {
-                throw new Exception("Union failed");
+            if (newBreps == null || newBreps.Length == 0) {
+                // Union failed, likely because breps don't intersect.
+                // Return the originals unchanged.
+                return objs.Select(obj => obj.Id).ToArray();
             }
             foreach(RhinoObject obj in objs) {
                 doc.Objects.Delete(obj, true);
             }
-            return newBreps.Select(brep => doc.Objects.AddBrep(brep)).ToArray();
+            Guid[] result = newBreps
+                .Where(brep => brep != null)
+                .Select(brep => doc.Objects.AddBrep(brep))
+                .Where(id => id != Guid.Empty)
+                .ToArray();
+            if (result.Length == 0) {
+                throw new Exception("Union failed: could not add result to document");
+            }
+            return result;
         }
 
         public Guid[] Intersect(RhinoObject obj0, RhinoObject obj1) {
@@ -850,7 +888,11 @@ namespace KhepriRhinoceros {
             if (newBreps.Length > 0) {
                 doc.Objects.Delete(obj0, true);
                 doc.Objects.Delete(obj1, true);
-                return newBreps.Select(brep => doc.Objects.AddBrep(brep)).ToArray();
+                return newBreps
+                    .Where(brep => brep != null)
+                    .Select(brep => doc.Objects.AddBrep(brep))
+                    .Where(id => id != Guid.Empty)
+                    .ToArray();
             }
             Point3d c1 = brep1.Vertices[0].Location;
             if (brep0.IsPointInside(c1, doc.ModelAbsoluteTolerance, false)) {
@@ -860,7 +902,7 @@ namespace KhepriRhinoceros {
                 Point3d c0 = brep0.Vertices[0].Location;
                 if (brep1.IsPointInside(c0, doc.ModelAbsoluteTolerance, false)) {
                     doc.Objects.Delete(obj1, true);
-                    return new[] { obj1.Id };
+                    return new[] { obj0.Id };
                 } else {
                     doc.Objects.Delete(obj0, true);
                     doc.Objects.Delete(obj1, true);
@@ -885,7 +927,11 @@ namespace KhepriRhinoceros {
             if (newBreps.Length > 0) {
                 doc.Objects.Delete(obj0, true);
                 doc.Objects.Delete(obj1, true);
-                return newBreps.Select(brep => doc.Objects.AddBrep(brep)).ToArray();
+                return newBreps
+                    .Where(brep => brep != null)
+                    .Select(brep => doc.Objects.AddBrep(brep))
+                    .Where(id => id != Guid.Empty)
+                    .ToArray();
             }
             Point3d c1 = brep1.Vertices[0].Location;
             if (brep0.IsPointInside(c1, doc.ModelAbsoluteTolerance, false)) {
@@ -1539,31 +1585,41 @@ def shape_vertices(shape):
 def show_vertices(shape):
     map(lambda p: sphere(p, 0.05), shape_vertices(shape))
 
-            
-            public Guid Revolve(Guid profileId, Point3d p, Vector3d n, double startAngle, double amplitude) {
-            Document doc = Application.DocumentManager.MdiActiveDocument;
-            using (doc.LockDocument())
-            using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                Guid profile = tr.GetObject(profileId, OpenMode.ForWrite) as Guid;
-                RevolveOptionsBuilder rob = new RevolveOptionsBuilder();
-                rob.CloseToAxis = false;
-                rob.DraftAngle = 0;
-                rob.TwistAngle = 0;
-                if (profile is Region) {
-                    using (Solid3d sol = new Solid3d()) {
-                        sol.CreateRevolvedSolid(profile, p, n, amplitude, startAngle, rob.ToRevolveOptions());
-                        return addAndCommit(sol, doc, tr);
-                    }
-                } else {
-                    using (RevolvedSurface ss = new RevolvedSurface()) {
-                        ss.CreateRevolvedSurface(profile, p, n, amplitude, startAngle, rob.ToRevolveOptions());
-                        return addAndCommit(ss, doc, tr);
-                    }
-                }
+        */
+
+        Brep RevolveCurve(Curve curve, Line axis, double startAngle, double endAngle) {
+            RevSurface revSrf = RevSurface.Create(curve, axis, startAngle, endAngle);
+            if (revSrf == null) {
+                throw new Exception("Revolve failed");
             }
+            Brep brep = Brep.CreateFromRevSurface(revSrf, false, false);
+            brep = brep.CapPlanarHoles(doc.ModelAbsoluteTolerance) ?? brep;
+            return brep;
         }
 
-            */
+        public Brep Revolve(RhinoObject profile, Point3d p, Vector3d n, double startAngle, double amplitude) {
+            double endAngle = startAngle + amplitude;
+            Line axis = new Line(p, p + n);
+            if (profile.Geometry is Curve curve) {
+                return RevolveCurve(curve, axis, startAngle, endAngle);
+            }
+            Brep brep = AsBrep(profile);
+            Curve[] outerBorders = Curve.JoinCurves(brep.DuplicateNakedEdgeCurves(true, false));
+            Brep[] outerSolids = outerBorders.Select(border => RevolveCurve(border, axis, startAngle, endAngle)).ToArray();
+            Curve[] innerBorders = Curve.JoinCurves(brep.DuplicateNakedEdgeCurves(false, true));
+            if (innerBorders.Length == 0) {
+                if (outerSolids.Length == 1) {
+                    return outerSolids[0];
+                }
+                return SingletonElement(Brep.JoinBreps(outerSolids, doc.ModelAbsoluteTolerance));
+            }
+            Brep[] innerSolids = innerBorders.Select(border => RevolveCurve(border, axis, startAngle, endAngle)).ToArray();
+            Brep[] result = TryBooleanDifference(outerSolids, innerSolids);
+            if (result == null) {
+                throw new Exception("Revolve subtraction failed");
+            }
+            return result[0];
+        }
 
         public Guid Move(Guid id, Vector3d v) => doc.Objects.Transform(id, Transform.Translation(v), true);
         public Guid Scale(Guid id, Point3d p, double s) => doc.Objects.Transform(id, Transform.Scale(p, s), true);
@@ -1694,11 +1750,11 @@ def show_vertices(shape):
             }
             return new Point3d[] { bb.Min, bb.Max };
         }
- /*       public void ZoomExtents() {
-            dynamic acad = Application.AcadApplication;
-            acad.ZoomExtents();
+        public void ZoomExtents() {
+            RhinoView view = doc.Views.ActiveView;
+            view.ActiveViewport.ZoomExtents();
+            view.Redraw();
         }
-        */
 
         public Guid CreateLayer(String name, bool active, Color color) {
             int idx = doc.Layers.FindByFullPath(name, -1);
