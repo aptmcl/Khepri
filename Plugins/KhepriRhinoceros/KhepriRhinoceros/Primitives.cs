@@ -391,7 +391,6 @@ namespace KhepriRhinoceros {
                     new PolylineCurve(pts.Concat(new[] { pts[0] }))).ToArray();
         public Guid SurfaceFromCurvesPoints(Point3d[][] ptss, bool[] smooths, MatId mat) =>
             SurfaceFromCurves(ClosedCurvesFromPoints(ptss, smooths), mat);
-        //public Guid Sphere(Point3d c, double r, int mat) => doc.Objects.AddSphere(new Sphere(c, r), WithMaterial(mat));
         public Guid Sphere(Point3d c, double r, MatId mat) => Add(new Sphere(c, r), mat);
         public Guid Torus(Point3d c, Vector3d vz, double majorRadius, double minorRadius, MatId mat) =>
             Add(new Torus(new Plane(c, vz), majorRadius, minorRadius).ToRevSurface(), mat);
@@ -521,7 +520,6 @@ namespace KhepriRhinoceros {
         public Brep AsBrep(RhinoObject obj) =>
             (obj.Geometry as Brep) ?? (obj.Geometry as Extrusion)?.ToBrep();
 
-        //        public AsGeometry(RhinoObject obj) => 
         public BrepFace AsBrepFace(RhinoObject obj) {
             Brep brep = AsBrep(obj);
             Debug.Assert(brep.Faces.Count == 1, "Brep '" + obj + "' has more than one face!");
@@ -630,30 +628,6 @@ namespace KhepriRhinoceros {
                 }
                 return pts;
             }
-            public Curve PolyFrom(Arc arc, Document doc, Transaction tr) {
-                BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
-                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
-                /*
-                // Plane pl = new Plane(new Point3d(0, 0, 0), arc.Normal);
-                double deltaAng = arc.EndAngle - arc.StartAngle;
-                if (deltaAng < 0) { deltaAng += 2 * Math.PI; }
-                double bulge = Math.Tan(deltaAng * 0.25);
-                Polyline poly = new Polyline();
-                poly.AddVertexAt(0, new Point2d(arc.StartPoint.X, arc.StartPoint.Y), bulge, 0, 0);
-                poly.AddVertexAt(1, new Point2d(arc.EndPoint.X, arc.EndPoint.Y), 0, 0, 0);
-                poly.LayerId = arc.LayerId;
-                poly.Normal = arc.Normal;
-                arc.Erase();
-                return poly;
-                */
-    /*            Point3dCollection pts = CurveLocations(arc, 32);
-                arc.Erase();
-                Curve c = new Polyline3d(Poly3dType.SimplePoly, pts, false);
-                btr.AppendGuid(c);
-                tr.AddNewlyCreatedDBObject(c, true);
-                return c;
-            }
-            */
 
     public Guid JoinCurves(Guid[] ids) {
             PolyCurve curve = new PolyCurve();
@@ -666,24 +640,7 @@ namespace KhepriRhinoceros {
             }
             return doc.Objects.Add(curve);
         }
-        /*
-                public DBNurbSurface AsNurbSurface(Guid ent) {
-                    var ns = DBSurface.CreateFrom(ent).ConvertToNurbSurface();
-                    if (ns.Length != 1) {
-                        throw new AcadException(Autodesk.AutoCAD.Runtime.ErrorStatus.InvalidInput,
-                            "Generated zero or more than one Nurb surface");
-                    } else {
-                        return ns[0];
-                    }
-                }
-                public Guid NurbSurfaceFrom(Guid id) {
-                    Document doc = Application.DocumentManager.MdiActiveDocument;
-                    using (doc.LockDocument())
-                    using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                        return addAndCommit(AsNurbSurface(tr.GetObject(id, OpenMode.ForRead) as Guid), doc, tr);
-                    }
-                }
-                */
+
         public double[] SurfaceDomain(RhinoObject obj) {
             Surface s = AsSurface(obj);
             Interval domain0 = s.Domain(0);
@@ -1779,34 +1736,6 @@ def show_vertices(shape):
         public bool LayerActive(Guid id) =>
             doc.Layers[doc.Layers.Find(id, true, -1)].IsVisible;
 
-        /*
-                public void SetSystemVariableInt(string name, int value) {
-                    Application.SetSystemVariable(name, value);
-                }
-                public void DisableUpdate() {
-
-                    IntPtr handle = Application.MainWindow.Handle;
-                    NativeMethods.SendMessage(handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
-                    //            LockWindowUpdate(handle);
-
-                    //            Message msgSuspendUpdate = Message.Create(handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
-                    //            NativeWindow window = NativeWindow.FromHandle(handle);
-                    //            Application.MainWindow.UnmanagedWindow.DefWndProc(ref msgSuspendUpdate);
-                }
-
-                public void EnableUpdate() {
-                    IntPtr handle = Application.MainWindow.Handle;
-                    NativeMethods.SendMessage(handle, WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
-                    //            LockWindowUpdate(IntPtr.Zero);
-
-                    //            IntPtr handle = Application.MainWindow.Handle;
-                    //            Message msgResumeUpdate = Message.Create(handle, WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
-                    //            NativeWindow window = NativeWindow.FromHandle(handle);
-                    //            window.DefWndProc(ref msgResumeUpdate);
-                    Application.UpdateScreen();
-                }
-
-                    */
         Curve ArcFromPointsAngle(Point3d p0, Point3d p1, double angle) {
             Vector3d v = p1 - p0;
             double d2 = v.X * v.X + v.Y * v.Y;
@@ -1820,33 +1749,6 @@ def show_vertices(shape):
             double startAngle = Math.Atan2(v1.Y, v1.X);
             return new ArcCurve(new Circle(center, radius), startAngle, angle);
         }
-        /*       DBObjectCollection ClosedPathCurveArray(XYZ[] pts, double[] angles) {
-                   DBObjectCollection profile = new DBObjectCollection();
-                   for (int i = 0; i < pts.Length; i++) {
-                       if (angles[i] == 0) {
-                           profile.Add(PolyLine(new XYZ[] { pts[i], pts[(i + 1) % pts.Length] }));
-                       } else {
-                           profile.Add(ArcFromPointsAngle(pts[i], pts[(i + 1) % pts.Length], angles[i]));
-                       }
-                   }
-                   return profile;
-               }
-
-               //BIM operations
-
-               public Guid CreatePathFloor(Point2d[] pts, double[] angles, BIMLevel level, FloorFamily family) {
-                   double elevation = level.elevation - family.totalThickness + family.coatingThickness;
-                   Vector3d dir = new Vector3d(0, 0, family.totalThickness);
-                   Document doc = Application.DocumentManager.MdiActiveDocument;
-                   using (doc.LockDocument())
-                   using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                       using (Solid3d s = new Solid3d()) {
-                           s.CreateExtrudedSolid(SurfaceLightweightPolyLine(pts, angles, elevation), dir, new SweepOptions());
-                           return addAndCommit(s, doc, tr);
-                       }
-                   }
-               }
-               */
 
         Guid ClosedPathCurveArray(Point3d[] pts, double[] angles) {
             PolyCurve curve = new PolyCurve();
@@ -2001,28 +1903,6 @@ def show_vertices(shape):
         Vector3d Vcyl(double rho, double phi, double z) => new Vector3d(rho * Math.Cos(phi), rho * Math.Sin(phi), z);
 
 
-        //public Brep Chair2(Point3d c, double angle, double length, double width, double height, double seat_height, double thickness) {
-        //    Brep table = BaseRectangularTable(length, width, seat_height, thickness, thickness);
-        //    double vx = length / 2;
-        //    double vy = width / 2;
-        //    double vz = height;
-        //    Brep back = Brep.CreateFromBox(new BoundingBox(
-        //        new Point3d(-vx, -vy, seat_height - thickness / 2),
-        //        new Point3d(-vx + thickness, +vy, height)));
-        //    /*Box(new Point3d((length - thickness) / -2, width / -2, seat_height), thickness, width, height - seat_height);
-        //    Brep back = XYCenteredBox(c + vcyl((length - thickness)/2, angle + Math.PI, seat_height),
-        //        vcyl(1, angle, 0),
-        //        vcyl(1, angle + Math.PI / 2, 0),
-        //        thickness,
-        //        width,
-        //        height - seat_height);
-        //    //doc.Objects.AddBrep(table); doc.Objects.AddBrep(back);
-        //    // We should expect only one element but Rhino is returning more than one
-        //    return Brep.CreateBooleanUnion(new Brep[] { back, table }, doc.ModelAbsoluteTolerance)[0]; */
-        //    return RotateAndTranslate(c, angle, Brep.CreateBooleanUnion(new Brep[] { back, table }, doc.ModelAbsoluteTolerance)[0]);
-        //}
-
-
         // Illustrations
 
         public DimensionStyle GetDimensionStyle(String name) {
@@ -2085,6 +1965,26 @@ def show_vertices(shape):
             l.Location = p;
             l.Diffuse = c;
             l.PowerCandela = power;
+            obj.CommitChanges();
+            return obj.Id;
+        }
+        public Guid SpotLight(Point3d position, double hotspot, double falloff, Point3d target) {
+            LightObject obj = doc.Lights[doc.Lights.Add(new Light())];
+            Light l = obj.LightGeometry;
+            l.LightStyle = LightStyle.WorldSpot;
+            l.Location = position;
+            l.Direction = target - position;
+            l.SpotAngleRadians = falloff;
+            l.HotSpot = hotspot / falloff;
+            obj.CommitChanges();
+            return obj.Id;
+        }
+        public Guid IESLight(string webFile, Point3d position, Point3d target, Vector3d rotation) {
+            LightObject obj = doc.Lights[doc.Lights.Add(new Light())];
+            Light l = obj.LightGeometry;
+            l.LightStyle = LightStyle.WorldSpot;
+            l.Location = position;
+            l.Direction = target - position;
             obj.CommitChanges();
             return obj.Id;
         }
