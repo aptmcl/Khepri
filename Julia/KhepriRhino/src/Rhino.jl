@@ -694,8 +694,8 @@ KhepriBase.b_table_and_chairs(b::RH, c, angle, family) =
     @remote(b, TableAndChairs(c, angle, realize(b, family)))
 
 # Lights
-KhepriBase.b_pointlight(b::RH, loc::Loc, color::RGB, intensity::Real, range::Real) =
-  @remote(b, PointLight(loc, color, intensity))
+KhepriBase.b_pointlight(b::RH, loc, energy, color) =
+  @remote(b, PointLight(loc, color, energy))
 
 
 
@@ -781,13 +781,11 @@ KhepriBase.b_arcs_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, mat
     refs
   end
 
-#=
-KhepriBase.b_spotlight(b::ACAD, loc::Loc, dir::Vec, hotspot::Real, falloff::Real) =
-    @remote(b, SpotLight(loc, hotspot, falloff, loc + dir))
+KhepriBase.b_spotlight(b::RH, loc, dir, hotspot, falloff) =
+  @remote(b, SpotLight(loc, hotspot, falloff, loc + dir))
 
-KhepriBase.b_ieslight(b::ACAD, file::String, loc::Loc, dir::Vec, alpha::Real, beta::Real, gamma::Real) =
-    @remote(b, IESLight(file, loc, loc + dir, vxyz(alpha, beta, gamma)))
-=#
+KhepriBase.b_ieslight(b::RH, file, loc, dir, alpha, beta, gamma) =
+  @remote(b, IESLight(file, loc, loc + dir, vxyz(alpha, beta, gamma)))
 
 ############################################
 
