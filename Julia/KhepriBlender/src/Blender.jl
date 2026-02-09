@@ -224,35 +224,41 @@ start_blender() =
     	  wait=false)
     end
 
+#=
+KhepriBase.before_connecting(b::BLR) =
+  begin
+    start_blender()
+  end
 KhepriBase.retry_connecting(b::BLR) =
   (@info("Starting $(b.name)."); start_blender(); sleep(2))
-
-
+=#
 
 KhepriBase.after_connecting(b::BLR) =
   begin
 	starting_blender(false)
-	#set_material(b, material_basic, )
-	set_material(b, material_metal, "asset_base_id:f1774cb0-b679-46b4-879e-e7223e2b4b5f asset_type:material")
-	#set_material(b, material_glass, "asset_base_id:ee2c0812-17f5-40d4-992c-68c5a66261d7 asset_type:material")
-	set_material(b, material_glass, "asset_base_id:ffa3c281-6184-49d8-b05e-8c6e9fe93e68 asset_type:material")
-	set_material(b, material_wood, "asset_base_id:d5097824-d5a1-4b45-ab5b-7b16bdc5a627 asset_type:material")
-	#set_material(b, material_concrete, "asset_base_id:0662b3bf-a762-435d-9407-e723afd5eafc asset_type:material")
-	set_material(b, material_concrete, "asset_base_id:df1161da-050c-4638-b376-38ced992ec18 asset_type:material")
-	set_material(b, material_plaster, "asset_base_id:c674137d-cfae-45f1-824f-e85dc214a3af asset_type:material")
-
-	#set_material(b, material_grass, "asset_base_id:97b171b4-2085-4c25-8793-2bfe65650266 asset_type:material")
-	#set_material(b, material_grass, "asset_base_id:7b05be22-6bed-4584-a063-d0e616ddea6a asset_type:material")
-	set_material(b, material_grass, "asset_base_id:b4be2338-d838-433b-9f0d-2aa9b97a0a8a asset_type:material")
-	set_material(b, material_clay, b -> b_plastic_material(b, "Clay", rgb(0.9, 0.9, 0.9),	1.0))
   end
+
+set_default_materials() = begin
+	#set_material(BLR, material_basic, )
+	set_material(BLR, material_metal, "asset_base_id:f1774cb0-b679-46b4-879e-e7223e2b4b5f asset_type:material")
+	#set_material(BLR, material_glass, "asset_base_id:ee2c0812-17f5-40d4-992c-68c5a66261d7 asset_type:material")
+	set_material(BLR, material_glass, "asset_base_id:ffa3c281-6184-49d8-b05e-8c6e9fe93e68 asset_type:material")
+	set_material(BLR, material_wood, "asset_base_id:d5097824-d5a1-4b45-ab5b-7b16bdc5a627 asset_type:material")
+	#set_material(BLR, material_concrete, "asset_base_id:0662b3bf-a762-435d-9407-e723afd5eafc asset_type:material")
+	set_material(BLR, material_concrete, "asset_base_id:df1161da-050c-4638-b376-38ced992ec18 asset_type:material")
+	set_material(BLR, material_plaster, "asset_base_id:c674137d-cfae-45f1-824f-e85dc214a3af asset_type:material")
+	#set_material(BLR, material_grass, "asset_base_id:97b171b4-2085-4c25-8793-2bfe65650266 asset_type:material")
+	#set_material(BLR, material_grass, "asset_base_id:7b05be22-6bed-4584-a063-d0e616ddea6a asset_type:material")
+	set_material(BLR, material_grass, "asset_base_id:b4be2338-d838-433b-9f0d-2aa9b97a0a8a asset_type:material")
+	set_material(BLR, material_clay, b -> b_plastic_material(b, "Clay", rgb(0.9, 0.9, 0.9),	1.0))
+end
 
 const blender = BLR("Blender", blender_port, blender_api)
 
 KhepriBase.has_boolean_ops(::Type{BLR}) = HasBooleanOps{true}()
 
 KhepriBase.backend(::BLRRef) = blender
-KhepriBase.void_ref(b::BLR) = BLRRef(-1 % Int32)
+KhepriBase.void_ref(b::BLR) = -1 % Int32
 
 # Primitives
 KhepriBase.b_point(b::BLR, p, mat) =
