@@ -400,14 +400,14 @@ const TikZRefs = Vector{TikZRef}
 const TikZNativeRef = NativeRef{TikZKey, TikZId}
 const TikZ = IOBackend{TikZKey, TikZId, Vector}
 
-KhepriBase.void_ref(b::TikZ) = TikZNativeRef(nothing)
+KhepriBase.void_ref(b::TikZ) = nothing
 
 const tikz = TikZ(view=top_view(), extra=[])
 
 KhepriBase.backend_name(b::TikZ) = "TikZ"
 
 export tikz_option
-tikz_option(str) = material(str, tikz=>str)
+tikz_option(str) = material(str, TikZ=>str)
 
 export very_thin, thin, thick, very_thick
 very_thin = tikz_option("very thin")
