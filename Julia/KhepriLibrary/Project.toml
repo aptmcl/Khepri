@@ -1,13 +1,14 @@
 name = "KhepriLibrary"
 uuid = "8d9b4417-9d01-497e-926e-b66204e3c46e"
 authors = ["António Menezes Leitão <antonio.menezes.leitao@gmail.com>"]
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 KhepriBase = "4cc0fe96-1163-46f3-ba32-de1e65d9548f"
 
 [compat]
-julia = "1.5"
+KhepriBase = "0.8"
+julia = "1.12"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
