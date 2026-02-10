@@ -119,10 +119,7 @@ const UEId = Int
 const UEIds = Vector{UEId}
 const UERef = GenericRef{UEKey, UEId}
 const UERefs = Vector{UERef}
-const UEEmptyRef = EmptyRef{UEKey, UEId}
 const UENativeRef = NativeRef{UEKey, UEId}
-const UEUnionRef = UnionRef{UEKey, UEId}
-const UESubtractionRef = SubtractionRef{UEKey, UEId}
 const UE = SocketBackend{UEKey, UEId}
 
 # Void reference for empty results
@@ -434,7 +431,7 @@ realize(b::UE, s::Panel) =
 # Walls
 backend_wall(b::UE, w_path, w_height, l_thickness, r_thickness, family) =
   path_length(w_path) < path_tolerance() ?
-    UEEmptyRef() :
+    void_ref(b) :
     let w_paths = subpaths(w_path),
         r_w_paths = subpaths(offset(w_path, -r_thickness)),
         l_w_paths = subpaths(offset(w_path, l_thickness)),
@@ -447,7 +444,7 @@ backend_wall(b::UE, w_path, w_height, l_thickness, r_thickness, family) =
           push!(refs, realize_pyramid_frustum(b, c_l_w_path, c_r_w_path, material))
         end
       end
-      length(refs) == 1 ? refs[1] : UEUnionRef(refs)
+      length(refs) == 1 ? refs[1] : refs
     end
 
 realize_pyramid_frustum(b::UE, bot_path::Path, top_path::Path, material) =
