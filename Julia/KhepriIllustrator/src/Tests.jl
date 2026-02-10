@@ -1,7 +1,8 @@
+using KhepriIllustrator
+using Test
 #=
 For basic arithmetic:
 =#
-eval_expr(jl"1+2")
 @test eval_expr(jl"1+2") == 3
 @test eval_expr(jl"(2 + 3)*(4 + 5)") === 45
 
@@ -356,3 +357,10 @@ let x = 1, y = x + 1
   y
 end
 """) === 2
+
+@test eval_expr(jl"vcat([1,2,3], [4,5], [6,7,8])") == [1,2,3,4,5,6,7,8]
+@test eval_expr(jl"[[1,2,3]..., [4,5]..., [6,7,8]...]") == [1,2,3,4,5,6,7,8]
+@test eval_expr(jl"vcat([[1,2,3], [4,5], [6,7,8]]...)") == [1,2,3,4,5,6,7,8]
+
+@test eval_expr(jl"[i for i in 0:6]") == [0,1,2,3,4,5,6]
+

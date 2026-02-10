@@ -108,8 +108,8 @@ with_recursive_illustration(f) = begin
       #opacity = 1.0/max(recursive_level, 1),
       color = rgba(illustration_colors[(func_idx-1)%(length(illustration_colors))+1], opacity),
       #color = rgba(illustration_colors[1], opacity),
-      opacity_material = material(layer("illustration_$(func_idx)_$(opacity)", true, color))
-      #opacity_material = material(layer("opacity_$(opacity)", true, rgba(opacity, 0.0, 0.5, opacity)))
+      opacity_material = material_in_layer(layer("illustration_$(func_idx)_$(opacity)", true, color))
+      #opacity_material = material_in_layer(layer("opacity_$(opacity)", true, rgba(opacity, 0.0, 0.5, opacity)))
     #println("current_recursive_level:", current_recursive_level(), "  Opacity:", opacity)
     #println(illustrations_stack, " ", last, " ", recursive_level, " ", idx, " ", opacity_material)
     with(default_annotation_material, opacity_material, 
@@ -408,7 +408,7 @@ illustrate(f::typeof(intermediate_loc), (p_expr, q_expr, factor_expr), p::Loc, q
 # We need to complement the automatic illustrations with manual ones.
 
 with_annotation_material(f) =
-  with(f, default_curve_material, material(layer("illustration_1_1.0", true, rgba(illustration_colors[1], 1.0))))
+  with(f, default_curve_material, material_in_layer(layer("illustration_1_1.0", true, rgba(illustration_colors[1], 1.0))))
 
 macro illustrator_plus(body)
   :(without_illustration(()->with_annotation_material(()->$body)))
