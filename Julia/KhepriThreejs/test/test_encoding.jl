@@ -74,10 +74,11 @@ using Test
         seekstart(io)
         decoded_frame = KhepriThreejs.decode(Val(:THR), Val(:Frame3d), io)
 
-        # Check origin
-        @test decoded_frame.x ≈ 1.0
-        @test decoded_frame.y ≈ 2.0
-        @test decoded_frame.z ≈ 3.0
+        # Check origin (u0 returns a point in the CS, so world coords are accessed via in_world)
+        world_pt = in_world(decoded_frame)
+        @test world_pt.x ≈ 1.0
+        @test world_pt.y ≈ 2.0
+        @test world_pt.z ≈ 3.0
 
         # Check transform (identity in this case for rotation part)
         t = decoded_frame.cs.transform
