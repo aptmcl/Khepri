@@ -1,3 +1,6 @@
+# Coordinate convention: Revit uses right-handed Z-up, same as Khepri.
+# No axis transforms needed.
+
 export
     revit,
     all_walls,
@@ -178,7 +181,7 @@ decode(ns::Val{:RVT}, t::Union{Val{:ElementId},Val{:Element},Val{:Level},Val{:Fl
 
 @encode_decode_as(:RVT, Val{:Length}, Val{:double})
 
-revit_api = @remote_functions :RVT """
+revit_api = @remote_api :RVT """
 public bool ConvertIFCFile(string file)
 public bool LoadRVTFile(string file)
 public Element Sphere(XYZ centre, Length radius)
@@ -222,8 +225,8 @@ public Element CreateColumn(XYZ location, ElementId baseLevelId, ElementId topLe
 public Element CreateColumnPoints(XYZ p0, XYZ p1, Level level0, Level level1, ElementId famId)
 public ElementId[] CreateLineWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId)
 public ElementId[] CreateUnconnectedLineWall(XYZ[] pts, ElementId baseLevelId, double height, ElementId famId)
-public ElementId CreateSplineWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool closed)
-public ElementId CreateSplineCurtainWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool closed)
+public ElementId CreatePathWall(XYZ[] pts, double[] angles, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool isStructural)
+public ElementId CreatePathCurtainWall(XYZ[] pts, double[] angles, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool isStructural)
 public Element CreateLineRailing(XYZ[] pts, ElementId baseLevelId, ElementId familyId)
 public Element CreatePolygonRailing(XYZ[] pts, ElementId baseLevelId, ElementId familyId)
 public Element CreateElementLocDirOnHost(XYZ location, XYZ direction, Element host, ElementId famId)
@@ -250,16 +253,19 @@ public void RenderView(string path)
 public void EnergyAnalysis()
 """
 
+#=         //AML Revit cannot handle walls with curves that are not lines or arcs!!!!
+public ElementId CreateSplineWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool closed)
+public ElementId CreateSplineCurtainWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool closed)
+=#
+
 abstract type RVTKey end
 const RVTId = Int64
 const RVTIds = Vector{RVTId}
-const RVTRef = GenericRef{RVTKey, RVTId}
-const RVTRefs = Vector{RVTRef}
 const RVTNativeRef = NativeRef{RVTKey, RVTId}
 const RVT = SocketBackend{RVTKey, RVTId}
 const RVTVoidId = RVTId(-1)
 
-KhepriBase.void_ref(b::RVT) = RVTNativeRef(RVTVoidId)
+KhepriBase.void_ref(b::RVT) = RVTVoidId
 
 KhepriBase.has_boolean_ops(::Type{RVT}) = HasBooleanOps{true}()
 
@@ -269,30 +275,31 @@ KhepriBase.before_connecting(b::RVT) =
   check_plugin()
 KhepriBase.after_connecting(b::RVT) =
   begin
-    set_backend_family(default_wall_family(), revit, revit_system_family())
-    set_backend_family(default_window_family(), revit, revit_file_family(
+    set_backend_family(default_wall_family(), b, revit_system_family())
+    set_backend_family(default_curtain_wall_family(), b, revit_system_family())
+    set_backend_family(default_window_family(), b, revit_file_family(
       revit_library_path("Metric Library", raw"Windows\M_Instance-Window-Fixed.rfa"),
       [], ["Width"=>f->f.width*to_feet, "Height"=>f->f.height*to_feet],
       (f, p)->p+vx(f.width/2, p.cs)))
-    set_backend_family(default_door_family(), revit, revit_system_family(
+    set_backend_family(default_door_family(), b, revit_system_family(
       [], [], (f, p)->p+vx(f.width/2, p.cs)))
-    set_backend_family(default_slab_family(), revit, revit_system_family())
-    set_backend_family(default_column_family(), revit, revit_file_family(
+    set_backend_family(default_slab_family(), b, revit_system_family())
+    set_backend_family(default_column_family(), b, revit_file_family(
           revit_library_path("Metric Library", raw"Structural Columns\Concrete\M_Concrete-Rectangular-Column.rfa"),
           ["b"=>f->f.profile.dx, "h"=>f->f.profile.dy]))
-    set_backend_family(default_beam_family(), revit, revit_file_family(
+    set_backend_family(default_beam_family(), b, revit_file_family(
           revit_library_path("Metric Library", raw"Structural Framing\Wood\M_Timber.rfa"),
           ["b"=>f->f.profile.dx, "d"=>f->f.profile.dy]))
-    set_backend_family(default_truss_bar_family(), revit, revit_file_family(
+    set_backend_family(default_truss_bar_family(), b, revit_file_family(
           revit_library_path("Metric Library", raw"Structural Framing\Steel\M_W-Wide Flange.rfa")))
-    set_backend_family(default_truss_node_family(), revit, revit_file_family(
+    set_backend_family(default_truss_node_family(), b, revit_file_family(
           revit_library_path("Metric Library", raw"Structural Framing\Steel\M_W-Wide Flange.rfa")))
-    set_backend_family(default_toilet_family(), revit, revit_file_family(
+    set_backend_family(default_toilet_family(), b, revit_file_family(
           revit_library_path("Metric Library", raw"Plumbing\Architectural\Fixtures\Water Closets\M_Toilet-Domestic-3D.rfa"),
           [], [], (f, c)->add_y(loc_from_o_phi(c, π/2), -0.12)))
-    set_backend_family(default_closet_family(), revit, revit_file_family(
+    set_backend_family(default_closet_family(), b, revit_file_family(
           revit_library_path("Metric Library", raw"Furniture\Storage\M_Shelving.rfa")))
-    set_backend_family(default_sink_family(), revit, revit_file_family(
+    set_backend_family(default_sink_family(), b, revit_file_family(
             revit_library_path("Metric Library", raw"Plumbing\Architectural\Fixtures\Sinks\M_Sink Vanity-Square.rfa"),
             [], [], (f, c)->add_y(loc_from_o_phi(c, π/2), 0.0)))
     #=
@@ -300,7 +307,7 @@ KhepriBase.after_connecting(b::RVT) =
     #set_backend_family(default_door_family(), unity, unity_material_family("Materials/Wood/InteriorWood2"))
 
     =#
-    set_backend_family(default_panel_family(), revit, revit_system_family())
+    set_backend_family(default_panel_family(), b, revit_system_family())
   end
 
 const revit = RVT("Revit", revit_port, revit_api)
@@ -457,14 +464,14 @@ KhepriBase.b_slab(b::RVT, profile::Region, level, family) =
 
 KhepriBase.b_slab(b::RVT, contour::ClosedPolygonalPath, level, family) =
   begin
-    @remote(b, CreatePolygonalFloor(convert(ClosedPolygonalPath, contour).vertices, ref(b, level).value))
+    @remote(b, CreatePolygonalFloor(convert(ClosedPolygonalPath, contour).vertices, ref(b, level)))
     # we are not using the family yet
     # ref(b, s.family))
   end
 
 KhepriBase.b_slab(b::RVT, contour::RectangularPath, level, family) =
   begin
-    @remote(b, CreatePolygonalFloor(path_vertices(contour), ref(b, level).value))
+    @remote(b, CreatePolygonalFloor(path_vertices(contour), ref(b, level)))
     # we are not using the family yet
     # ref(b, s.family))
   end
@@ -477,26 +484,40 @@ create_slab_opening(b::RVT, contour::ClosedPath, slab_r) =
     @remote(b, CreatePathOpening(locs, arcs, slab_r))
   end
 
+locs_and_arcs(path::OpenPolygonalPath) =
+  let vs = path_vertices(path)
+    (vs, zeros(length(vs)-1))
+  end
+
+locs_and_arcs(path::ClosedPolygonalPath) =
+  let vs = path_vertices(path)
+    (vs, zeros(length(vs)))
+  end
+
 locs_and_arcs(arc::ArcPath) =
-    ([arc.center + vpol(arc.radius, arc.start_angle)],
-     [arc.amplitude])
+  let p0 = arc.center + vpol(arc.radius, arc.start_angle),
+      p1 = arc.center + vpol(arc.radius, arc.start_angle + arc.amplitude)
+    ([p0, p1], [arc.amplitude])
+  end
 
 locs_and_arcs(circle::CircularPath) =
-    let (locs1, arcs1) = locs_and_arcs(arc_path(circle.center, circle.radius, 0, pi))
-        (locs2, arcs2) = locs_and_arcs(arc_path(circle.center, circle.radius, pi, pi))
-        ([locs1..., locs2...], [arcs1..., arcs2...])
-    end
+  let p0 = circle.center + vpol(circle.radius, 0),
+      p1 = circle.center + vpol(circle.radius, π)
+    ([p0, p1], [π, π])
+  end
+# We should implement the arc-line approximation to splines that exist in RhinoCommon.
+locs_and_arcs(circle::SplinePath) = error("Must be finished")
 
 KhepriBase.b_slab(b::RVT, contour::ClosedPath, level, family) =
   let (locs, arcs) = locs_and_arcs(contour)
-    @remote(b, CreatePathFloor(locs, arcs, ref(b, level).value))
+    @remote(b, CreatePathFloor(locs, arcs, ref(b, level)))
     # we are not using the family yet
     # ref(b, s.family))
   end
 
 KhepriBase.b_roof(b::RVT, contour::ClosedPath, level, family) =
   let (locs, arcs) = locs_and_arcs(contour)
-    @remote(b, CreatePathRoof(locs, arcs, ref(b, level).value, family))
+    @remote(b, CreatePathRoof(locs, arcs, ref(b, level), family))
   end
 
 #Beams are aligned along the top axis.
@@ -517,17 +538,17 @@ KhepriBase.b_free_column(b::RVT, cb, h, angle, family) =
 
 KhepriBase.realize_wall_no_openings(b::RVT, s::Wall) =
   # Revit also considers unconnected walls. These have a top level with id -1
-  if ref(b, s.top_level).value == RVTVoidId
+  if ref_value(b, s.top_level) == RVTVoidId
       @remote(b, CreateUnconnectedLineWall(
           convert(OpenPolygonalPath, s.path).vertices,
-          ref(b, s.bottom_level).value,
+          ref_value(b, s.bottom_level),
           s.top_level.height - s.bottom_level.height,
           realize(b, s.family)))
   else
       @remote(b, CreateLineWall(
           convert(OpenPolygonalPath, s.path).vertices,
-          ref(b, s.bottom_level).value,
-          ref(b, s.top_level).value,
+          ref_value(b, s.bottom_level),
+          ref_value(b, s.top_level),
           realize(b, s.family)))
   end
 
@@ -547,7 +568,7 @@ realize(b::RVT, s::Window) =
     @remote(b, InsertWindow(
         pt.x,
         pt.y,
-        ref(b, s.wall).value,
+        ref_value(b, s.wall),
         backend_get_family_ref(b, s.family, rvtf),
         collect(params),
         [param_map[param](s.family) for param in params]))
@@ -559,7 +580,7 @@ realize(b::RVT, s::Door) =
     @remote(b, InsertDoor(
         pt.x,
         pt.y,
-        ref(b, s.wall).value,
+        ref_value(b, s.wall),
         backend_get_family_ref(b, s.family, rvtf)))
   end
 
@@ -574,22 +595,27 @@ backend_add_window(b::RVT, w::Wall, loc::Loc, family::WindowFamily) =
     end
 #
 
+KhepriBase.b_curtain_wall(b::RVT, path, bottom_level, top_level, family, offset) =
+  let (locs, arcs) = locs_and_arcs(path)
+    @remote(b, CreatePathCurtainWall(locs, arcs, ref_value(b, bottom_level).value, ref(b, top_level), realize(b, family), false))
+  end
+
 KhepriBase.b_toilet(b::RVT, c, host, family) =
   let rvtf = backend_family(b, family),
       c = rvtf.location_transform(rvtf, c)
-    @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref(b, host).value, realize(b, family)))
+    @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref_value(b, host), realize(b, family)))
   end
 
 KhepriBase.b_closet(b::RVT, c, host, family) =
   let rvtf = backend_family(b, family),
       c = rvtf.location_transform(rvtf, c)
-    @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref(b, host).value, realize(b, family)))
+    @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref_value(b, host), realize(b, family)))
   end
 
 KhepriBase.b_sink(b::RVT, c, host, family) =
   let rvtf = backend_family(b, family),
       c = rvtf.location_transform(rvtf, c)
-    @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref(b, host).value, realize(b, family)))
+    @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref_value(b, host), realize(b, family)))
   end
 
 realize(b::RVT, s::TrussNode) =
@@ -604,7 +630,7 @@ realize(b::RVT, s::TrussBar) =
 
 
 # Revit does not use materials!
-KhepriBase.material_ref(b::RVT, m::Material) = nothing
+#KhepriBase.material_ref(b::RVT, m::Material) = nothing
 
 
 KhepriBase.b_pyramid(b::RVT, bs, t, bmat, smat) =
@@ -706,7 +732,7 @@ zoom_extents(b::RVT) = @remote(b, ZoomExtents())
 view_top(b::RVT) =
     @remote(b, ViewTop())
 
-KhepriBase.b_delete_all_refs(b::RVT) =
+KhepriBase.b_delete_all_shape_refs(b::RVT) =
   @remote(b, DeleteAllElements())
 
 prompt_position(prompt::String, b::RVT) =
@@ -726,7 +752,7 @@ level_from_ref(r, b::RVT) =
 unconnected_level(h::Real, b::RVT) =
     level(h, ref=DynRefs(b=>RVTNativeRef(RVTVoidId)))
 
-all_Elements(b::RVT) =
+all_elements(b::RVT) =
     [element_from_ref(r, b) for r in @remote(b, DocElements())]
 
 all_walls(b::RVT) =
@@ -735,18 +761,17 @@ all_walls_at_level(level::Level, b::RVT) =
     [wall_from_ref(r, b) for r in @remote(b, DocWallsAtLevel(ref(level).value))]
 
 wall_from_ref(r, b::RVT) =
-    begin
-        path = convert(Path, @remote(b, LineWallVertices(r)))
-        bottom_level_id = @remote(b, ElementLevel(r))
-        top_level_id = @remote(b, WallTopLevel(r))
-        bottom_level = level_from_ref(bottom_level_id, b)
+    let path = convert(Path, @remote(b, LineWallVertices(r))),
+        bottom_level_id = @remote(b, ElementLevel(r)),
+        top_level_id = @remote(b, WallTopLevel(r)),
+        bottom_level = level_from_ref(bottom_level_id, b),
         top_level = top_level_id == RVTVoidId ?
                         unconnected_level(bottom_level.height + @remote(b, WallHeight(r)), b) :
                         level_from_ref(top_level_id, b)
-        wall(path,
-             bottom_level=bottom_level,
-             top_level=top_level,
-             ref=DynRefs(b=>RVTNativeRef(r)))
+      wall(path,
+           bottom_level=bottom_level,
+           top_level=top_level,
+           ref=DynRefs(b=>RVTNativeRef(r)))
     end
 
 #=
