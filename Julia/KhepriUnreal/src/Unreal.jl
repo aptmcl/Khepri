@@ -1,7 +1,7 @@
 # KhepriUnreal - Unreal Engine Backend for Khepri
 # Updated to match current KhepriBase architecture
 
-export unreal, fast_unreal, unreal_material_family, unreal_resource_family
+export unreal, unreal_material_family, unreal_resource_family
 
 using KhepriBase
 

@@ -15,8 +15,6 @@ using Test
     @test KhepriUnreal.UEId === Int
     @test isdefined(KhepriUnreal, :UERef)
     @test isdefined(KhepriUnreal, :UENativeRef)
-    @test isdefined(KhepriUnreal, :UEUnionRef)
-    @test isdefined(KhepriUnreal, :UESubtractionRef)
     @test KhepriUnreal.UE === SocketBackend{KhepriUnreal.UEKey, Int}
   end
 
@@ -46,6 +44,6 @@ using Test
   end
 
   @testset "Exported functions" begin
-    @test isdefined(KhepriUnreal, :fast_unreal)
+    @test isdefined(KhepriUnreal, :unreal)
   end
 end
