@@ -60,7 +60,7 @@ decode(::Val{:UE}, t::Val{:FVector}, c::IO) =
  Remote API Definition
 ==============================================================================#
 
-unreal_api = @remote_functions :UE """
+unreal_api = @remote_api :UE """
 public AActor Primitive::Sphere(FVector center, float radius)
 public AActor Primitive::Box(FVector pos, FVector vx, FVector vy, FVector size)
 public AActor Primitive::RightCuboid(FVector pos, FVector vx, FVector vy, float sx, float sy, float sz, float angle)
