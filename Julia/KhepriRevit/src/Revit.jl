@@ -251,6 +251,11 @@ public XYZ GetTarget()
 public double GetLens()
 public void RenderView(string path)
 public void EnergyAnalysis()
+public ElementId CreatePolygonalCeiling(XYZ[] pts, ElementId levelId)
+public ElementId CreatePathCeiling(XYZ[] pts, double[] angles, ElementId levelId)
+public ElementId CreateRamp(XYZ p0, XYZ p1, double width, double thickness, ElementId baseLevelId, double baseOffset, double topOffset)
+public Element CreateStraightStair(XYZ basePoint, VXYZ direction, double width, ElementId baseLevelId, ElementId topLevelId, ElementId familyId)
+public Element CreateSpiralStair(XYZ center, double radius, double startAngle, double includedAngle, bool clockwise, double width, ElementId baseLevelId, ElementId topLevelId, ElementId familyId)
 """
 
 #=         //AML Revit cannot handle walls with curves that are not lines or arcs!!!!
@@ -308,6 +313,11 @@ KhepriBase.after_connecting(b::RVT) =
 
     =#
     set_backend_family(default_panel_family(), b, revit_system_family())
+    set_backend_family(default_ceiling_family(), b, revit_system_family())
+    set_backend_family(default_railing_family(), b, revit_system_family())
+    set_backend_family(default_ramp_family(), b, revit_system_family())
+    set_backend_family(default_stair_family(), b, revit_system_family())
+    set_backend_family(default_stair_landing_family(), b, revit_system_family())
   end
 
 const revit = RVT("Revit", revit_port, revit_api)
@@ -519,6 +529,56 @@ KhepriBase.b_roof(b::RVT, contour::ClosedPath, level, family) =
   let (locs, arcs) = locs_and_arcs(contour)
     @remote(b, CreatePathRoof(locs, arcs, ref(b, level), family))
   end
+
+# Ceiling
+KhepriBase.b_ceiling(b::RVT, profile::Region, level, family) =
+  b_ceiling(b, outer_path(profile), level, family)
+
+KhepriBase.b_ceiling(b::RVT, contour::ClosedPolygonalPath, level, family) =
+  @remote(b, CreatePolygonalCeiling(contour.vertices, ref(b, level)))
+
+KhepriBase.b_ceiling(b::RVT, contour::RectangularPath, level, family) =
+  @remote(b, CreatePolygonalCeiling(path_vertices(contour), ref(b, level)))
+
+KhepriBase.b_ceiling(b::RVT, contour::ClosedPath, level, family) =
+  let (locs, arcs) = locs_and_arcs(contour)
+    @remote(b, CreatePathCeiling(locs, arcs, ref(b, level)))
+  end
+
+# Railing
+KhepriBase.b_railing(b::RVT, path::OpenPolygonalPath, level, host, family) =
+  @remote(b, CreateLineRailing(path.vertices, ref(b, level), realize(b, family)))
+
+KhepriBase.b_railing(b::RVT, path::ClosedPolygonalPath, level, host, family) =
+  @remote(b, CreatePolygonRailing(path.vertices, ref(b, level), realize(b, family)))
+
+KhepriBase.b_railing(b::RVT, path, level, host, family) =
+  @remote(b, InsertRailing(ref_value(b, host), realize(b, family)))
+
+# Ramp
+KhepriBase.b_ramp(b::RVT, path, bottom_level, top_level, family) =
+  let p0 = in_world(path_start(path)),
+      p1 = in_world(path_end(path)),
+      bottom_h = level_height(b, bottom_level),
+      top_h = level_height(b, top_level)
+    @remote(b, CreateRamp(p0, p1, family.width, family.thickness,
+                          ref(b, bottom_level), 0.0, top_h - bottom_h))
+  end
+
+# Stair
+KhepriBase.b_stair(b::RVT, base_point, direction, bottom_level, top_level, family) =
+  @remote(b, CreateStraightStair(
+    base_point, direction, family.width,
+    ref(b, bottom_level), ref(b, top_level), realize(b, family)))
+
+KhepriBase.b_spiral_stair(b::RVT, center, radius, start_angle, included_angle,
+                           clockwise, bottom_level, top_level, family) =
+  @remote(b, CreateSpiralStair(
+    center, radius, start_angle, included_angle, clockwise, family.width,
+    ref(b, bottom_level), ref(b, top_level), realize(b, family)))
+
+KhepriBase.b_stair_landing(b::RVT, region, level, family) =
+  b_slab(b, region, level, family)
 
 #Beams are aligned along the top axis.
 KhepriBase.b_beam(b::RVT, c, h, angle, family) =
