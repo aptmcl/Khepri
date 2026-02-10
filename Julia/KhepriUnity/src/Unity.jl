@@ -1,7 +1,10 @@
 export unity, fast_unity,
        unity_material_family
 
-#
+# Coordinate convention: Unity uses left-handed Y-up.
+# Khepri uses right-handed Z-up. The Y-Z swap is done in encode/decode
+# of Vector3 below: raw_point(p)[[1,3,2]] swaps Y and Z.
+
 # UNI is a subtype of CS
 parse_signature(::Val{:Unity}, sig::T) where {T} = parse_signature(Val(:CS), sig)
 encode(::Val{:Unity}, t::Val{T}, c::IO, v) where {T} = encode(Val(:CS), t, c, v)
@@ -125,6 +128,26 @@ public void SetSun(float altitude, float azimuth)
 public String ShapeType(GameObject s)
 public Vector3 SphereCenter(GameObject s)
 public float SphereRadius(GameObject s)
+public void SetSimHSF(float relaxationTime, float maxSpeedCoef, float V, float sigma, float U, float R, float c, float phi)
+public void SetSimNone()
+public void SetVelGaussHSF(float mean, float stdDev, float min, float max)
+public void SetVelUniformHSF(float min, float max)
+public void SetVelHSF(float vel)
+public int CreateSimGoal(Vector3 pos, Vector3 scale, float rot)
+public void CreateSimAgent(Vector3 pos, float rot, int rgb, int[] goalIDs)
+public void SpawnAgentsRect(int count, Vector3 center, float dx, float dz, float rot, int rgb, int[] goalIDs)
+public void SpawnAgentsEllipse(int count, Vector3 center, float dx, float dz, float rot, int rgb, int[] goalIDs)
+public void SpawnAgentsPolygon(int count, int rgb, int[] goalIDs, Vector3[] vertices)
+public void StartSimulation(float maxTime)
+public void SetSimulationSpeed(float speed)
+public bool IsSimulationFinished()
+public bool WasSimulationSuccessful()
+public float GetEvacuationTime()
+public void ResetSimulation()
+public void UpdateNavMesh()
+public void SetSimRandSeed(int seed)
+public void SetNavMeshArea(GameObject obj, int area)
+public void RunSimulation(float maxTime)
 """
 
 #= These depend on the editor
@@ -142,7 +165,7 @@ const Unity = SocketBackend{UnityKey, UnityId}
 # For users to be able to initialize each of the connections
 export Unity
 
-KhepriBase.void_ref(b::Unity) = UnityNativeRef(-1 % Int32)
+KhepriBase.void_ref(b::Unity) = -1 % Int32
 
 KhepriBase.before_connecting(b::Unity) = nothing #check_plugin()
 KhepriBase.after_connecting(b::Unity) =
@@ -692,3 +715,104 @@ KhepriBase.b_select_shapes(b::Unity, prompt::String) =
 KhepriBase.b_set_sun_orientation(b::Unity, altitude, azimuth) =
   @remote(b, SetSun(altitude, azimuth))
 =#
+
+# ============================================================
+# Agent-based simulation — b_* implementations for Unity
+# ============================================================
+
+# NavMesh tagging flag (Julia-side; zero cost when disabled)
+const nav_mesh_tagging = Parameter{Bool}(false)
+
+KhepriBase.b_enable_nav_mesh_tagging(b::Unity, enable) =
+  nav_mesh_tagging(enable)
+
+# area=0 is Walkable, area=1 is Not Walkable (Unity NavMesh area indices)
+KhepriBase.b_set_nav_mesh_area(b::Unity, shape, area) =
+  @remote(b, SetNavMeshArea(ref_value(b, shape), area))
+
+KhepriBase.b_update_nav_mesh(b::Unity) =
+  @remote(b, UpdateNavMesh())
+
+# Tag a vector of raw refs for NavMesh
+tag_refs_nav_mesh(b::Unity, refs, area) =
+  for r in (refs isa Vector ? refs : [refs])
+    r != void_ref(b) && @remote(b, SetNavMeshArea(r, area))
+  end
+
+# Automatic NavMesh tagging for BIM elements
+KhepriBase.realize(b::Unity, w::Wall) =
+  let refs = realize(has_boolean_ops(Unity), b, w)
+    nav_mesh_tagging() && tag_refs_nav_mesh(b, refs, 1)
+    refs
+  end
+
+KhepriBase.realize(b::Unity, s::Slab) =
+  let refs = b_slab(b, s.region, s.level, s.family)
+    nav_mesh_tagging() && tag_refs_nav_mesh(b, refs, 0)
+    refs
+  end
+
+# Movement model
+KhepriBase.b_set_sim_hsf(b::Unity, relaxation_time, max_speed_coef, V, sigma, U, R, c, phi) =
+  @remote(b, SetSimHSF(relaxation_time, max_speed_coef, V, sigma, U, R, c, phi))
+
+KhepriBase.b_set_sim_none(b::Unity) =
+  @remote(b, SetSimNone())
+
+# Velocity distribution
+KhepriBase.b_set_vel_gauss_hsf(b::Unity, mean, std_dev, min_v, max_v) =
+  @remote(b, SetVelGaussHSF(mean, std_dev, min_v, max_v))
+
+KhepriBase.b_set_vel_uniform_hsf(b::Unity, min_v, max_v) =
+  @remote(b, SetVelUniformHSF(min_v, max_v))
+
+KhepriBase.b_set_vel_hsf(b::Unity, vel) =
+  @remote(b, SetVelHSF(vel))
+
+# Goals and agents
+KhepriBase.b_create_sim_goal(b::Unity, pos, scale, rot) =
+  @remote(b, CreateSimGoal(pos, scale, rot))
+
+KhepriBase.b_create_sim_agent(b::Unity, pos, rot, goal_ids, color) =
+  @remote(b, CreateSimAgent(pos, rot, color, Int32.(goal_ids)))
+
+KhepriBase.b_spawn_agents_rect(b::Unity, count, center, dx, dz, rot, goal_ids, color) =
+  @remote(b, SpawnAgentsRect(count, center, dx, dz, rot, color, Int32.(goal_ids)))
+
+KhepriBase.b_spawn_agents_ellipse(b::Unity, count, center, dx, dz, rot, goal_ids, color) =
+  @remote(b, SpawnAgentsEllipse(count, center, dx, dz, rot, color, Int32.(goal_ids)))
+
+KhepriBase.b_spawn_agents_polygon(b::Unity, count, vertices, goal_ids, color) =
+  @remote(b, SpawnAgentsPolygon(count, color, Int32.(goal_ids), vertices))
+
+# Simulation control
+KhepriBase.b_start_simulation(b::Unity, max_time) =
+  @remote(b, StartSimulation(max_time))
+
+KhepriBase.b_set_simulation_speed(b::Unity, speed) =
+  @remote(b, SetSimulationSpeed(speed))
+
+KhepriBase.b_is_simulation_finished(b::Unity) =
+  @remote(b, IsSimulationFinished())
+
+KhepriBase.b_was_simulation_successful(b::Unity) =
+  @remote(b, WasSimulationSuccessful())
+
+KhepriBase.b_get_evacuation_time(b::Unity) =
+  @remote(b, GetEvacuationTime())
+
+KhepriBase.b_reset_simulation(b::Unity) =
+  @remote(b, ResetSimulation())
+
+KhepriBase.b_set_sim_rand_seed(b::Unity, seed) =
+  @remote(b, SetSimRandSeed(seed))
+
+# Blocking simulation: void RPC starts the sim, then we block
+# reading the deferred result that Unity sends when the sim ends.
+KhepriBase.b_run_simulation(b::Unity, max_time) =
+  let conn = connection(b)
+    @remote(b, RunSimulation(max_time))
+    evac_time = read(conn, Float32)
+    success = read(conn, UInt8) == 0x01
+    (evacuation_time=evac_time, successful=success)
+  end
