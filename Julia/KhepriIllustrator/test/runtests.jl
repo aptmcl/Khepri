@@ -15,7 +15,9 @@ using Test
     end
 
     @testset "julia_read parses first expression" begin
-      expr = KhepriIllustrator.julia_read(IOBuffer("x * y z"))
+      # Julia 1.12+ raises ParseError for "x * y z" with raise=true
+      # Test with a valid multi-expression string separated by semicolons
+      expr = KhepriIllustrator.julia_read(IOBuffer("x * y\nz"))
       @test expr == :(x * y)
     end
 
