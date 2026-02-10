@@ -1,7 +1,7 @@
 name = "KhepriPOVRay"
 uuid = "a0383a2d-1751-46ec-a2af-70a49b2064d3"
 authors = ["António Menezes Leitão <antonio.menezes.leitao@gmail.com>"]
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 ColorTypes = "3da002f7-5984-5a60-b8a6-cbb66c0b333f"
@@ -11,9 +11,9 @@ Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
 
 [compat]
 ColorTypes = "0.11"
-KhepriBase = "0.6"
+KhepriBase = "0.8"
 Reexport = "1.2"
-julia = "1.9"
+julia = "1.12"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
