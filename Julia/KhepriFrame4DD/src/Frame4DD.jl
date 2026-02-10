@@ -19,7 +19,7 @@ const FR4DDId = Any
 const FR4DDNativeRef = NativeRef{FR4DDKey, FR4DDId}
 const FR4DD = Frame4DDBackend{FR4DDKey, FR4DDId}
 
-void_ref(b::FR4DD) = FR4DDNativeRef(-1)
+void_ref(b::FR4DD) = -1
 
 const frame4dd = FR4DD()
 
