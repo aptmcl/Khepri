@@ -379,15 +379,15 @@ backend_get_family_ref(b::UE, f::Family, uf::UEResourceFamily) =
 
 # Tables and Chairs
 backend_rectangular_table(b::UE, c, angle, family) =
-  @remote(b, Primitive__InstantiateBIMElement(realize(b, family), c, -angle))
+  @remote(b, Primitive__InstantiateBIMElement(family_ref(b, family), c, -angle))
 
 backend_chair(b::UE, c, angle, family) =
-  @remote(b, Primitive__InstantiateBIMElement(realize(b, family), c, -angle))
+  @remote(b, Primitive__InstantiateBIMElement(family_ref(b, family), c, -angle))
 
 # Slabs
 backend_slab(b::UE, profile, holes, thickness, family) =
   let bot_vs = path_vertices(profile)
-    @remote(b, Primitive__Slab(bot_vs, map(path_vertices, holes), thickness, realize(b, family)))
+    @remote(b, Primitive__Slab(bot_vs, map(path_vertices, holes), thickness, family_ref(b, family)))
   end
 
 # Beams
@@ -398,7 +398,7 @@ realize(b::UE, s::Beam) =
     @remote(b, Primitive__BeamRectSection(
       c, vz(1, c.cs), vx(1, c.cs),
       profile.dx, profile.dy, s.h, -s.angle,
-      realize(b, s.family)))
+      family_ref(b, s.family)))
   end
 
 realize_beam_profile(b::UE, s::Union{Beam,FreeColumn,Column}, profile::CircularPath, cb::Loc, length::Real) =
@@ -406,7 +406,7 @@ realize_beam_profile(b::UE, s::Union{Beam,FreeColumn,Column}, profile::CircularP
     cb,
     profile.radius,
     add_z(cb, length * support_z_fighting_factor),
-    realize(b, s.family)))
+    family_ref(b, s.family)))
 
 realize_beam_profile(b::UE, s::Union{Beam,FreeColumn,Column}, profile::RectangularPath, cb::Loc, length::Real) =
   let profile_u0 = profile.corner,
@@ -415,7 +415,7 @@ realize_beam_profile(b::UE, s::Union{Beam,FreeColumn,Column}, profile::Rectangul
       c, vy(1, c.cs), vz(1, c.cs), profile.dy, profile.dx,
       length * support_z_fighting_factor,
       -s.angle,
-      realize(b, s.family)))
+      family_ref(b, s.family)))
   end
 
 # Panels
@@ -425,7 +425,7 @@ realize(b::UE, s::Panel) =
     @remote(b, Primitive__Panel(
       map(p -> p - n, verts),
       n * 2,
-      realize(b, s.family)))
+      family_ref(b, s.family)))
   end
 
 # Walls
@@ -436,7 +436,7 @@ backend_wall(b::UE, w_path, w_height, l_thickness, r_thickness, family) =
         r_w_paths = subpaths(offset(w_path, -r_thickness)),
         l_w_paths = subpaths(offset(w_path, l_thickness)),
         w_height = w_height * wall_z_fighting_factor,
-        material = realize(b, family),
+        material = family_ref(b, family),
         refs = UENativeRef[]
       for (w_seg_path, r_w_path, l_w_path) in zip(w_paths, r_w_paths, l_w_paths)
         let c_r_w_path = closed_path_for_height(r_w_path, w_height),
