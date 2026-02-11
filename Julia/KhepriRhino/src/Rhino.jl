@@ -679,19 +679,19 @@ realize(b::RH, f::ChairFamily) =
     @remote(b, CreateChairFamily(f.length, f.width, f.height, f.seat_height, f.thickness))
 realize(b::RH, f::TableChairFamily) =
     @remote(b, CreateRectangularTableAndChairsFamily(
-        realize(b, f.table_family), realize(b, f.chair_family),
+        family_ref(b, f.table_family), family_ref(b, f.chair_family),
         f.table_family.length, f.table_family.width,
         f.chairs_top, f.chairs_bottom, f.chairs_right, f.chairs_left,
         f.spacing))
 
 KhepriBase.b_table(b::RH, c, angle, family) =
-    @remote(b, Table(c, angle, realize(b, family)))
+    @remote(b, Table(c, angle, family_ref(b, family)))
 
 KhepriBase.b_chair(b::RH, c, angle, family) =
-    @remote(b, Chair(c, angle, realize(b, family)))
+    @remote(b, Chair(c, angle, family_ref(b, family)))
 
 KhepriBase.b_table_and_chairs(b::RH, c, angle, family) =
-    @remote(b, TableAndChairs(c, angle, realize(b, family)))
+    @remote(b, TableAndChairs(c, angle, family_ref(b, family)))
 
 # Lights
 KhepriBase.b_pointlight(b::RH, loc, energy, color) =
