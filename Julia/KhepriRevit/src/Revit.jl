@@ -180,6 +180,7 @@ decode(ns::Val{:RVT}, t::Union{Val{:ElementId},Val{:Element},Val{:Level},Val{:Fl
   decode_or_error(ns, Val(:long), c, Int64(-1234))
 
 @encode_decode_as(:RVT, Val{:Length}, Val{:double})
+@encode_decode_as(:RVT, Val{:object}, Val{:Any})
 
 revit_api = @remote_api :RVT """
 public bool ConvertIFCFile(string file)
@@ -474,14 +475,14 @@ KhepriBase.b_slab(b::RVT, profile::Region, level, family) =
 
 KhepriBase.b_slab(b::RVT, contour::ClosedPolygonalPath, level, family) =
   begin
-    @remote(b, CreatePolygonalFloor(convert(ClosedPolygonalPath, contour).vertices, ref(b, level)))
+    @remote(b, CreatePolygonalFloor(convert(ClosedPolygonalPath, contour).vertices, ref_value(b, level)))
     # we are not using the family yet
     # ref(b, s.family))
   end
 
 KhepriBase.b_slab(b::RVT, contour::RectangularPath, level, family) =
   begin
-    @remote(b, CreatePolygonalFloor(path_vertices(contour), ref(b, level)))
+    @remote(b, CreatePolygonalFloor(path_vertices(contour), ref_value(b, level)))
     # we are not using the family yet
     # ref(b, s.family))
   end
@@ -520,14 +521,14 @@ locs_and_arcs(circle::SplinePath) = error("Must be finished")
 
 KhepriBase.b_slab(b::RVT, contour::ClosedPath, level, family) =
   let (locs, arcs) = locs_and_arcs(contour)
-    @remote(b, CreatePathFloor(locs, arcs, ref(b, level)))
+    @remote(b, CreatePathFloor(locs, arcs, ref_value(b, level)))
     # we are not using the family yet
     # ref(b, s.family))
   end
 
 KhepriBase.b_roof(b::RVT, contour::ClosedPath, level, family) =
   let (locs, arcs) = locs_and_arcs(contour)
-    @remote(b, CreatePathRoof(locs, arcs, ref(b, level), family))
+    @remote(b, CreatePathRoof(locs, arcs, ref_value(b, level), family))
   end
 
 # Ceiling
@@ -535,25 +536,25 @@ KhepriBase.b_ceiling(b::RVT, profile::Region, level, family) =
   b_ceiling(b, outer_path(profile), level, family)
 
 KhepriBase.b_ceiling(b::RVT, contour::ClosedPolygonalPath, level, family) =
-  @remote(b, CreatePolygonalCeiling(contour.vertices, ref(b, level)))
+  @remote(b, CreatePolygonalCeiling(contour.vertices, ref_value(b, level)))
 
 KhepriBase.b_ceiling(b::RVT, contour::RectangularPath, level, family) =
-  @remote(b, CreatePolygonalCeiling(path_vertices(contour), ref(b, level)))
+  @remote(b, CreatePolygonalCeiling(path_vertices(contour), ref_value(b, level)))
 
 KhepriBase.b_ceiling(b::RVT, contour::ClosedPath, level, family) =
   let (locs, arcs) = locs_and_arcs(contour)
-    @remote(b, CreatePathCeiling(locs, arcs, ref(b, level)))
+    @remote(b, CreatePathCeiling(locs, arcs, ref_value(b, level)))
   end
 
 # Railing
 KhepriBase.b_railing(b::RVT, path::OpenPolygonalPath, level, host, family) =
-  @remote(b, CreateLineRailing(path.vertices, ref(b, level), realize(b, family)))
+  @remote(b, CreateLineRailing(path.vertices, ref_value(b, level), family_ref(b, family)))
 
 KhepriBase.b_railing(b::RVT, path::ClosedPolygonalPath, level, host, family) =
-  @remote(b, CreatePolygonRailing(path.vertices, ref(b, level), realize(b, family)))
+  @remote(b, CreatePolygonRailing(path.vertices, ref_value(b, level), family_ref(b, family)))
 
 KhepriBase.b_railing(b::RVT, path, level, host, family) =
-  @remote(b, InsertRailing(ref_value(b, host), realize(b, family)))
+  @remote(b, InsertRailing(ref_value(b, host), family_ref(b, family)))
 
 # Ramp
 KhepriBase.b_ramp(b::RVT, path, bottom_level, top_level, family) =
@@ -562,30 +563,30 @@ KhepriBase.b_ramp(b::RVT, path, bottom_level, top_level, family) =
       bottom_h = level_height(b, bottom_level),
       top_h = level_height(b, top_level)
     @remote(b, CreateRamp(p0, p1, family.width, family.thickness,
-                          ref(b, bottom_level), 0.0, top_h - bottom_h))
+                          ref_value(b, bottom_level), 0.0, top_h - bottom_h))
   end
 
 # Stair
 KhepriBase.b_stair(b::RVT, base_point, direction, bottom_level, top_level, family) =
   @remote(b, CreateStraightStair(
     base_point, direction, family.width,
-    ref(b, bottom_level), ref(b, top_level), realize(b, family)))
+    ref_value(b, bottom_level), ref_value(b, top_level), family_ref(b, family)))
 
 KhepriBase.b_spiral_stair(b::RVT, center, radius, start_angle, included_angle,
                            clockwise, bottom_level, top_level, family) =
   @remote(b, CreateSpiralStair(
     center, radius, start_angle, included_angle, clockwise, family.width,
-    ref(b, bottom_level), ref(b, top_level), realize(b, family)))
+    ref_value(b, bottom_level), ref_value(b, top_level), family_ref(b, family)))
 
 KhepriBase.b_stair_landing(b::RVT, region, level, family) =
   b_slab(b, region, level, family)
 
 #Beams are aligned along the top axis.
 KhepriBase.b_beam(b::RVT, c, h, angle, family) =
-  @remote(b, CreateBeam(c, add_z(c, h), angle, realize(b, family)))
+  @remote(b, CreateBeam(c, add_z(c, h), angle, family_ref(b, family)))
 
 KhepriBase.b_column(b::RVT, cb, angle, bottom_level, top_level, family) =
-  @remote(b, CreateColumn(cb, realize(b, bottom_level), realize(b, top_level), realize(b, family)))
+  @remote(b, CreateColumn(cb, ref_value(b, bottom_level), ref_value(b, top_level), family_ref(b, family)))
 
 #Columns are aligned along the center axis.
 KhepriBase.b_free_column(b::RVT, cb, h, angle, family) =
@@ -593,7 +594,7 @@ KhepriBase.b_free_column(b::RVT, cb, h, angle, family) =
       cb = in_world(cb),
       lb = @remote(b, FindOrCreateLevelAtElevation(cb.z)),
       lt = @remote(b, FindOrCreateLevelAtElevation(ct.z))
-    @remote(b, CreateColumnPoints(cb, ct, lb, lt, realize(b, family)))
+    @remote(b, CreateColumnPoints(cb, ct, lb, lt, family_ref(b, family)))
   end
 
 KhepriBase.realize_wall_no_openings(b::RVT, s::Wall) =
@@ -603,13 +604,13 @@ KhepriBase.realize_wall_no_openings(b::RVT, s::Wall) =
           convert(OpenPolygonalPath, s.path).vertices,
           ref_value(b, s.bottom_level),
           s.top_level.height - s.bottom_level.height,
-          realize(b, s.family)))
+          family_ref(b, s.family)))
   else
       @remote(b, CreateLineWall(
           convert(OpenPolygonalPath, s.path).vertices,
           ref_value(b, s.bottom_level),
           ref_value(b, s.top_level),
-          realize(b, s.family)))
+          family_ref(b, s.family)))
   end
 
 realize_wall_openings(b::RVT, w::Wall, w_ref, openings) =
@@ -629,7 +630,7 @@ realize(b::RVT, s::Window) =
         pt.x,
         pt.y,
         ref_value(b, s.wall),
-        backend_get_family_ref(b, s.family, rvtf),
+        family_ref(b, s.family),
         collect(params),
         [param_map[param](s.family) for param in params]))
   end
@@ -641,7 +642,7 @@ realize(b::RVT, s::Door) =
         pt.x,
         pt.y,
         ref_value(b, s.wall),
-        backend_get_family_ref(b, s.family, rvtf)))
+        family_ref(b, s.family)))
   end
 
 backend_add_door(b::RVT, w::Wall, loc::Loc, family::DoorFamily) = finish_this()
@@ -657,32 +658,32 @@ backend_add_window(b::RVT, w::Wall, loc::Loc, family::WindowFamily) =
 
 KhepriBase.b_curtain_wall(b::RVT, path, bottom_level, top_level, family, offset) =
   let (locs, arcs) = locs_and_arcs(path)
-    @remote(b, CreatePathCurtainWall(locs, arcs, ref_value(b, bottom_level).value, ref(b, top_level), realize(b, family), false))
+    @remote(b, CreatePathCurtainWall(locs, arcs, ref_value(b, bottom_level), ref_value(b, top_level), family_ref(b, family), false))
   end
 
 KhepriBase.b_toilet(b::RVT, c, host, family) =
   let rvtf = backend_family(b, family),
       c = rvtf.location_transform(rvtf, c)
-    @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref_value(b, host), realize(b, family)))
+    @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref_value(b, host), family_ref(b, family)))
   end
 
 KhepriBase.b_closet(b::RVT, c, host, family) =
   let rvtf = backend_family(b, family),
       c = rvtf.location_transform(rvtf, c)
-    @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref_value(b, host), realize(b, family)))
+    @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref_value(b, host), family_ref(b, family)))
   end
 
 KhepriBase.b_sink(b::RVT, c, host, family) =
   let rvtf = backend_family(b, family),
       c = rvtf.location_transform(rvtf, c)
-    @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref_value(b, host), realize(b, family)))
+    @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref_value(b, host), family_ref(b, family)))
   end
 
 realize(b::RVT, s::TrussNode) =
-  @remote(b, CreateBeam(s.p, add_x(s.p, 0.1), 0, realize(b, s.family)))
+  @remote(b, CreateBeam(s.p, add_x(s.p, 0.1), 0, family_ref(b, s.family)))
 
 realize(b::RVT, s::TrussBar) =
-  @remote(b, CreateBeam(s.p0, s.p1, s.angle, realize(b, s.family)))
+  @remote(b, CreateBeam(s.p0, s.p1, s.angle, family_ref(b, s.family)))
 
 ############################################
 # Select New Family ...
