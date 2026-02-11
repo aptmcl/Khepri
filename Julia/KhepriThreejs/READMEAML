@@ -65,4 +65,7 @@ cd Threejs
 npm run build:watch
 ```
 
+## Before Shipping
 
+- In `KhepriThree.js/vite.config.ts`, remove `minify: false` (or set it to true) to re-enable minification for production builds.
+- In `KhepriThree.js/tsconfig.json`, remove `"sourceMap": true` (as noted in the file: "Remove for production").
