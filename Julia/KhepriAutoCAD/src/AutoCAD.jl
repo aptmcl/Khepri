@@ -993,19 +993,19 @@ realize(b::ACAD, f::ChairFamily) =
     @remote(b, CreateChairFamily(f.length, f.width, f.height, f.seat_height, f.thickness))
 realize(b::ACAD, f::TableChairFamily) =
     @remote(b, CreateRectangularTableAndChairsFamily(
-        realize(b, f.table_family), realize(b, f.chair_family),
+        family_ref(b, f.table_family), family_ref(b, f.chair_family),
         f.table_family.length, f.table_family.width,
         f.chairs_top, f.chairs_bottom, f.chairs_right, f.chairs_left,
         f.spacing))
 
 KhepriBase.b_table(b::ACAD, c, angle, family) =
-    @remote(b, Table(c, angle, realize(b, family)))
+    @remote(b, Table(c, angle, family_ref(b, family)))
 
 KhepriBase.b_chair(b::ACAD, c, angle, family) =
-    @remote(b, Chair(c, angle, realize(b, family)))
+    @remote(b, Chair(c, angle, family_ref(b, family)))
 
 KhepriBase.b_table_and_chairs(b::ACAD, c, angle, family) =
-    @remote(b, TableAndChairs(c, angle, realize(b, family)))
+    @remote(b, TableAndChairs(c, angle, family_ref(b, family)))
 
 ############################################
 
