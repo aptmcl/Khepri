@@ -638,7 +638,7 @@ function make_sphere_object(c, r)
 
   faces = Vector{Int}[]
   for j in 0:n_lon-1
-    push!(faces, [1, 2 + j, 2 + ((j+1) % n_lon)])
+    push!(faces, [1, 2 + ((j+1) % n_lon), 2 + j])
   end
   for i in 0:n_lat-3
     for j in 0:n_lon-1
@@ -652,7 +652,7 @@ function make_sphere_object(c, r)
   north_pole = length(vertices)
   base = north_pole - n_lon
   for j in 0:n_lon-1
-    push!(faces, [base + j, north_pole, base + ((j+1) % n_lon)])
+    push!(faces, [base + j, base + ((j+1) % n_lon), north_pole])
   end
 
   Thebes.make((vertices, faces), "sphere")
