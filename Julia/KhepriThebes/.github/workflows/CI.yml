@@ -3,11 +3,9 @@ on:
   push:
     branches:
       - main
-    tags: '*'
+    tags: ['*']
   pull_request:
 concurrency:
-  # Skip intermediate builds: always.
-  # Cancel intermediate builds: only if it is a pull request build.
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
@@ -42,6 +40,10 @@ jobs:
   docs:
     name: Documentation
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+      statuses: write
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
@@ -51,10 +53,3 @@ jobs:
       - uses: julia-actions/julia-docdeploy@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
-      - run: |
-          julia --project=docs -e '
-            using Documenter: DocMeta, doctest
-            using KhepriThebes
-            DocMeta.setdocmeta!(KhepriThebes, :DocTestSetup, :(using KhepriThebes); recursive=true)
-            doctest(KhepriThebes)'
