@@ -18,4 +18,5 @@ makedocs(;
 
 deploydocs(;
     repo="github.com/aptmcl/KhepriAutoCAD.jl",
+    devbranch="master",
 )
