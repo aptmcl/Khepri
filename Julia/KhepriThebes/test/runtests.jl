@@ -18,7 +18,7 @@ using Test
 
     @testset "void_ref" begin
       vr = KhepriBase.void_ref(thebes)
-      @test vr === nothing
+      @test vr === 0
     end
 
     @testset "has refs field" begin
@@ -47,8 +47,7 @@ using Test
 
     @testset "ThebesId type exists" begin
       @test isdefined(KhepriThebes, :ThebesId)
-      # ThebesId can be Nothing or RGBA (for material colors)
-      @test KhepriThebes.ThebesId === Union{Nothing, RGBA}
+      @test KhepriThebes.ThebesId === Int
     end
 
     @testset "ThebesRef type exists" begin

@@ -42,8 +42,7 @@ Base.show(io::IO, ::MIME"application/pdf", f::ThebesPDFFile) =
 # ============================================================================
 
 abstract type ThebesKey end
-# ThebesId can be Nothing or an RGBA color for materials
-const ThebesId = Union{Nothing, RGBA}
+const ThebesId = Int
 const ThebesRef = GenericRef{ThebesKey, ThebesId}
 const ThebesNativeRef = NativeRef{ThebesKey, ThebesId}
 
@@ -127,12 +126,21 @@ end
   output_format::Symbol=:svg
   # Scene storage for retained mode rendering
   scene::Vector{SceneItem}=SceneItem[]
+  # Monotonic ref counter and dirty flag for scene rebuild
+  next_id::Int=1
+  scene_dirty::Bool=false
 end
 
 const TBS = ThebesBackend
 const thebes = TBS()
 
-KhepriBase.void_ref(b::TBS) = nothing
+KhepriBase.void_ref(b::TBS) = 0
+
+function next_ref!(b::TBS)
+  id = b.next_id
+  b.next_id += 1
+  id
+end
 KhepriBase.backend_name(b::TBS) = "Thebes"
 
 # ============================================================================
@@ -428,11 +436,13 @@ function reset_thebes(b::TBS=thebes)
   end
   b.drawing = nothing
   empty!(b.scene)
+  b.next_id = 1
+  b.scene_dirty = false
   b
 end
 
-# Backend operation to delete all shapes - resets the drawing
-KhepriBase.b_delete_ref(b::TBS, r::ThebesId) = nothing
+KhepriBase.b_delete_ref(b::TBS, r::ThebesId) =
+  b.scene_dirty = true
 
 KhepriBase.b_delete_all_shape_refs(b::TBS) =
   begin
@@ -440,6 +450,18 @@ KhepriBase.b_delete_all_shape_refs(b::TBS) =
     empty!(b.refs.shapes)
     nothing
   end
+
+function rebuild_scene!(b::TBS)
+  empty!(b.scene)
+  b.next_id = 1
+  b.scene_dirty = false
+  let shapes = collect(keys(b.refs.shapes))
+    empty!(b.refs.shapes)
+    for s in shapes
+      force_realize(b, s)
+    end
+  end
+end
 
 # Layer operations (no-op — Thebes does not support layers)
 KhepriBase.b_layer(b::TBS, name, active, color) = BasicLayer(name, active, color)
@@ -497,38 +519,38 @@ end
 # ============================================================================
 
 KhepriBase.b_point(b::TBS, p, mat) =
-  (push!(b.scene, ScenePoint(p, mat)); nothing)
+  (push!(b.scene, ScenePoint(p, mat)); next_ref!(b))
 
 KhepriBase.b_line(b::TBS, ps, mat) =
-  (push!(b.scene, SceneLine(collect(ps), mat)); nothing)
+  (push!(b.scene, SceneLine(collect(ps), mat)); next_ref!(b))
 
 KhepriBase.b_polygon(b::TBS, ps, mat) =
-  (push!(b.scene, ScenePolygon(collect(ps), mat)); nothing)
+  (push!(b.scene, ScenePolygon(collect(ps), mat)); next_ref!(b))
 
 KhepriBase.b_spline(b::TBS, ps, v0, v1, mat) =
-  (push!(b.scene, SceneSpline(collect(ps), false, mat)); nothing)
+  (push!(b.scene, SceneSpline(collect(ps), false, mat)); next_ref!(b))
 
 KhepriBase.b_closed_spline(b::TBS, ps, mat) =
-  (push!(b.scene, SceneSpline(collect(ps), true, mat)); nothing)
+  (push!(b.scene, SceneSpline(collect(ps), true, mat)); next_ref!(b))
 
 KhepriBase.b_circle(b::TBS, c, r, mat) =
   let n = 64,
       pts = [c + vpol(r, i * 2π / n) for i in 0:n-1]
     push!(b.scene, ScenePolygon(pts, mat))
-    nothing
+    next_ref!(b)
   end
 
 KhepriBase.b_arc(b::TBS, c, r, α, Δα, mat) =
   let n = max(8, round(Int, abs(Δα) / (π/16))),
       pts = [c + vpol(r, α + i * Δα / n) for i in 0:n]
     push!(b.scene, SceneLine(pts, mat))
-    nothing
+    next_ref!(b)
   end
 
 KhepriBase.b_rectangle(b::TBS, c, dx, dy, mat) =
   let pts = [c, c + vx(dx), c + vxy(dx, dy), c + vy(dy)]
     push!(b.scene, ScenePolygon(pts, mat))
-    nothing
+    next_ref!(b)
   end
 
 # ============================================================================
@@ -536,26 +558,26 @@ KhepriBase.b_rectangle(b::TBS, c, dx, dy, mat) =
 # ============================================================================
 
 KhepriBase.b_trig(b::TBS, p1, p2, p3, mat) =
-  (push!(b.scene, SceneTrig(p1, p2, p3, mat)); nothing)
+  (push!(b.scene, SceneTrig(p1, p2, p3, mat)); next_ref!(b))
 
 KhepriBase.b_quad(b::TBS, p1, p2, p3, p4, mat) =
-  (push!(b.scene, SceneQuad(p1, p2, p3, p4, mat)); nothing)
+  (push!(b.scene, SceneQuad(p1, p2, p3, p4, mat)); next_ref!(b))
 
 KhepriBase.b_surface_polygon(b::TBS, ps, mat) =
-  (push!(b.scene, SceneSurfacePolygon(collect(ps), mat)); nothing)
+  (push!(b.scene, SceneSurfacePolygon(collect(ps), mat)); next_ref!(b))
 
 KhepriBase.b_surface_circle(b::TBS, c, r, mat) =
   let n = 64,
       pts = [c + vpol(r, i * 2π / n) for i in 0:n-1]
     push!(b.scene, SceneSurfacePolygon(pts, mat))
-    nothing
+    next_ref!(b)
   end
 
 KhepriBase.b_surface_arc(b::TBS, c, r, α, Δα, mat) =
   let n = max(8, round(Int, abs(Δα) / (π/16))),
       pts = [c, [c + vpol(r, α + i * Δα / n) for i in 0:n]...]
     push!(b.scene, SceneSurfacePolygon(pts, mat))
-    nothing
+    next_ref!(b)
   end
 
 # ============================================================================
@@ -828,7 +850,7 @@ end
 
 # Box
 KhepriBase.b_box(b::TBS, c, dx, dy, dz, mat) =
-  (push!(b.scene, SceneObject(make_box_object(c, dx, dy, dz), mat)); nothing)
+  (push!(b.scene, SceneObject(make_box_object(c, dx, dy, dz), mat)); next_ref!(b))
 
 # Cuboid (8 corner points version)
 function make_cuboid_object(pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3)
@@ -847,46 +869,46 @@ function make_cuboid_object(pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3)
 end
 
 KhepriBase.b_cuboid(b::TBS, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat) =
-  (push!(b.scene, SceneObject(make_cuboid_object(pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3), mat)); nothing)
+  (push!(b.scene, SceneObject(make_cuboid_object(pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3), mat)); next_ref!(b))
 
 # Sphere
 KhepriBase.b_sphere(b::TBS, c, r, mat) =
-  (push!(b.scene, SceneObject(make_sphere_object(c, r), mat)); nothing)
+  (push!(b.scene, SceneObject(make_sphere_object(c, r), mat)); next_ref!(b))
 
 # Cylinder
 KhepriBase.b_cylinder(b::TBS, cb, r, h, mat) =
-  (push!(b.scene, SceneObject(make_cylinder_object(cb, r, h), mat)); nothing)
+  (push!(b.scene, SceneObject(make_cylinder_object(cb, r, h), mat)); next_ref!(b))
 
 # Cone
 KhepriBase.b_cone(b::TBS, cb, r, h, mat) =
-  (push!(b.scene, SceneObject(make_cone_object(cb, r, h), mat)); nothing)
+  (push!(b.scene, SceneObject(make_cone_object(cb, r, h), mat)); next_ref!(b))
 
 # Torus
 KhepriBase.b_torus(b::TBS, c, re, ri, mat) =
-  (push!(b.scene, SceneObject(make_torus_object(c, re, ri), mat)); nothing)
+  (push!(b.scene, SceneObject(make_torus_object(c, re, ri), mat)); next_ref!(b))
 
 # Frustum (truncated cone)
 KhepriBase.b_cone_frustum(b::TBS, cb, rb, h, rt, mat) =
-  (push!(b.scene, SceneObject(make_cone_frustum_object(cb, rb, h, rt), mat)); nothing)
+  (push!(b.scene, SceneObject(make_cone_frustum_object(cb, rb, h, rt), mat)); next_ref!(b))
 
 # Pyramid - override both signatures to ensure make_pyramid_object is used
 KhepriBase.b_pyramid(b::TBS, cbs, ct, mat) =
-  (push!(b.scene, SceneObject(make_pyramid_object(cbs, ct), mat)); nothing)
+  (push!(b.scene, SceneObject(make_pyramid_object(cbs, ct), mat)); next_ref!(b))
 
 # Override generic pyramid to use our optimized implementation with correct winding
 KhepriBase.b_generic_pyramid(b::TBS, bs, t, smooth, bmat, smat) =
-  (push!(b.scene, SceneObject(make_pyramid_object(bs, t), bmat)); nothing)
+  (push!(b.scene, SceneObject(make_pyramid_object(bs, t), bmat)); next_ref!(b))
 
 # Override generic pyramid frustum
 KhepriBase.b_generic_pyramid_frustum(b::TBS, bs, ts, smooth, bmat, tmat, smat) =
-  (push!(b.scene, SceneObject(make_pyramid_frustum_object(bs, ts), bmat)); nothing)
+  (push!(b.scene, SceneObject(make_pyramid_frustum_object(bs, ts), bmat)); next_ref!(b))
 
 # ============================================================================
 # Text (Retained Mode)
 # ============================================================================
 
 KhepriBase.b_text(b::TBS, str, p, size, mat) =
-  (push!(b.scene, SceneText(str, p, Float64(size), mat)); nothing)
+  (push!(b.scene, SceneText(str, p, Float64(size), mat)); next_ref!(b))
 
 # ============================================================================
 # Rendering (Retained Mode)
@@ -986,6 +1008,10 @@ end
 
 # Render all scene items to a new Luxor drawing
 function render_scene!(b::TBS)
+  if b.scene_dirty
+    rebuild_scene!(b)
+  end
+
   if isempty(b.scene)
     @warn "No shapes to render. Create some shapes first."
     return false
