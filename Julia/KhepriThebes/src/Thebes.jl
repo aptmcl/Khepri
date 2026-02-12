@@ -149,10 +149,11 @@ KhepriBase.backend_name(b::TBS) = "Thebes"
 
 # Extract color from a material reference
 # The mat parameter can be:
-# - Nothing (void_ref) -> use default color
+# - Nothing -> use default color
 # - RGBA -> use directly
-# - StandardMaterial proxy -> extract base_color
-# - Other material proxies -> extract base_color if available
+# - RGB -> convert to RGBA
+# - Any type with a base_color field (e.g., StandardMaterial) -> extract base_color
+# - Other (e.g., Int void_ref) -> nothing (triggers fallback to fill_color)
 function extract_color(mat)
   if isnothing(mat)
     nothing
@@ -206,6 +207,37 @@ KhepriBase.b_plastic_material(b::TBS, name, color, roughness) = extract_color(co
 KhepriBase.b_metal_material(b::TBS, name, color, roughness, ior) = extract_color(color)
 KhepriBase.b_glass_material(b::TBS, name, color, roughness, ior) = extract_color(color)
 KhepriBase.b_mirror_material(b::TBS, name, color) = extract_color(color)
+
+# Default RGBA colors for predefined BIM material names.
+# When a MaterialInLayer has no backend-specific spec, Thebes uses the layer
+# name to pick a sensible color so that BIM elements are visible.
+const thebes_default_material_colors = Dict{String, RGBA}(
+  "Concrete" => rgba(0.65, 0.65, 0.65, 1.0),
+  "Plaster"  => rgba(0.9, 0.85, 0.8, 1.0),
+  "Glass"    => rgba(0.7, 0.85, 0.95, 0.5),
+  "Metal"    => rgba(0.7, 0.7, 0.75, 1.0),
+  "Wood"     => rgba(0.55, 0.35, 0.2, 1.0),
+  "Grass"    => rgba(0.3, 0.55, 0.2, 1.0),
+  "Clay"     => rgba(0.76, 0.5, 0.3, 1.0),
+  "Points"   => rgba(0.0, 0.0, 0.0, 1.0),
+  "Curves"   => rgba(0.0, 0.0, 0.0, 1.0),
+  "Surfaces" => rgba(0.7, 0.7, 0.7, 1.0),
+  "Basic"    => rgba(0.7, 0.7, 0.7, 1.0),
+)
+const thebes_default_material_color = rgba(0.7, 0.7, 0.7, 1.0)
+
+# Override b_material for Thebes: when a MaterialInLayer has no
+# backend-specific data (spec is nothing), derive the color from the
+# layer name.  This ensures BIM elements are visible without requiring
+# explicit backend material configuration.
+KhepriBase.b_material(b::TBS, layer, spec) =
+  if isnothing(spec)
+    layer isa BasicLayer ?
+      get(thebes_default_material_colors, layer.name, thebes_default_material_color) :
+      thebes_default_material_color
+  else
+    b_get_material(b, spec)
+  end
 
 # Use FrontendView so set_view works with b.view
 KhepriBase.view_type(::Type{TBS}) = FrontendView()
