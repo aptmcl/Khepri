@@ -22,4 +22,5 @@ makedocs(;
 
 deploydocs(;
     repo="github.com/aptmcl/KhepriRevit.jl",
+    devbranch="master",
 )
