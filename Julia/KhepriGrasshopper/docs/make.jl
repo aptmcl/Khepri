@@ -18,4 +18,5 @@ makedocs(;
 
 deploydocs(;
     repo="github.com/aptmcl/KhepriGrasshopper.jl",
+    devbranch="master",
 )
