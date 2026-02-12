@@ -13,6 +13,10 @@ makedocs(;
     ),
     pages=[
         "Home" => "index.md",
+        "Setup" => "setup.md",
+        "Families" => "families.md",
+        "BIM Elements" => "elements.md",
+        "Geometry & Interop" => "geometry.md",
     ],
 )
 
