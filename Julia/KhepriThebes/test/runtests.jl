@@ -226,6 +226,41 @@ using Test
     end
   end
 
+  @testset "standard_material rendering" begin
+    reset_thebes()
+    backend(thebes)
+    delete_all_shapes()
+
+    # Pass layer positionally to avoid current_layer() default evaluation
+    red_mat = standard_material("RedMat", layer("Red"), rgba(1, 0, 0, 1))
+    sphere(u0(), 5, material=red_mat)
+
+    path = tempname() * ".svg"
+    save_thebes(path)
+    svg = read(path, String)
+    rm(path, force=true)
+
+    # Luxor renders fills as rgb(XX%, 0%, 0%) for red materials.
+    # Verify the SVG contains red-only fills (nonzero red, zero green/blue).
+    @test occursin("fill", svg)
+    @test occursin(r"fill=\"rgb\(\d+\.\d+%, 0%, 0%\)\"", svg)
+  end
+
   # Clean up
   reset_thebes()
+
+  # Conformance tests
+  @testset "Backend Conformance (Thebes)" begin
+    include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "BackendConformanceTests.jl"))
+    using .BackendConformanceTests
+
+    run_conformance_tests(thebes,
+      reset! = () -> begin
+        reset_thebes()
+        delete_all_shapes()
+        backend(thebes)
+      end,
+      skip = Symbol[]
+    )
+  end
 end
