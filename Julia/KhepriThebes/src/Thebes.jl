@@ -200,7 +200,12 @@ end
 KhepriBase.b_new_material(b::TBS, name, base_color, metallic, specular, roughness,
                           clearcoat, clearcoat_roughness, ior,
                           transmission, transmission_roughness,
-                          emission_color, emission_strength) =
+                          emission_color, emission_strength,
+                          sheen_color, sheen_roughness,
+                          anisotropy, anisotropy_direction,
+                          ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
+                          post_lighting_color,
+                          absorption, micro_thickness, thickness) =
   isnothing(base_color) ? nothing : extract_color(base_color)
 
 KhepriBase.b_plastic_material(b::TBS, name, color, roughness) = extract_color(color)
