@@ -537,7 +537,7 @@ KhepriBase.backend_name(::POVRay) = "POVRay"
 # not have boolean operations at the level of references
 KhepriBase.has_boolean_ops(::Type{POVRay}) = HasBooleanOps{false}()
 
-KhepriBase.void_ref(b::POVRay) = POVRayRef(-1)
+KhepriBase.void_ref(b::POVRay) = -1
 
 const povray = POVRay()
 
@@ -548,7 +548,12 @@ KhepriBase.b_new_material(b::POVRay, name,
 						              ior,
 						              transmission, transmission_roughness,
 	                        emission_color,
-						              emission_strength) =
+						              emission_strength,
+						              sheen_color, sheen_roughness,
+						              anisotropy, anisotropy_direction,
+						              ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
+						              post_lighting_color,
+						              absorption, micro_thickness, thickness) =
   povray_material()
 KhepriBase.b_plastic_material(b::POVRay, name, color, roughness) =
   povray_material()
@@ -576,12 +581,9 @@ KhepriBase.b_surface_polygon_with_holes(b::POVRay, ps, qss, mat) =
 KhepriBase.b_surface_circle(b::POVRay, c, r, mat) =
   	write_povray_object(connection(b), "disc", mat, c, uvz(c.cs), r)
 
-KhepriBase.b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_v, interpolator, mat) =
+KhepriBase.b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
   let io = connection(b),
-      pts = smooth_u || smooth_v ?
-              [location_at(interpolator, u, v)
-               for u in division(0, 1, 4*size(ptss, 1)), v in division(0, 1, 4*size(ptss, 2))] :
-              ptss,
+      ptss = maybe_interpolate_grid(ptss, smooth_u, smooth_v),
       (si, sj) = size(pts),
       idxs = quad_grid_indexes(si, sj, closed_u, closed_v)
     write_povray_object(io, "mesh2", nothing) do
