@@ -402,7 +402,12 @@ KhepriBase.b_new_material(b::BLR, name,
 						  ior,
 						  transmission, transmission_roughness,
 	                 	  emission_color,
-						  emission_strength) =
+						  emission_strength,
+						  sheen_color, sheen_roughness,
+						  anisotropy, anisotropy_direction,
+						  ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
+						  post_lighting_color,
+						  absorption, micro_thickness, thickness) =
   @remote(b, new_material(name,
   						  convert(RGBA, base_color),
 						  metallic, specular, roughness,
@@ -473,8 +478,25 @@ KhepriBase.b_get_view(b::BLR) =
 KhepriBase.b_zoom_extents(b::BLR) = 
   @remote(b, frame_all())
 
-KhepriBase.b_set_view_top(b::BLR) = 
+KhepriBase.b_set_view_top(b::BLR) =
   @remote(b, set_view_top())
+
+KhepriBase.b_view_settings(b::BLR;
+    renderer::Symbol=:cycles,
+    samples::Int=1200,
+    denoising::Bool=true,
+    motion_blur::Bool=false,
+    transparent::Bool=false,
+    exposure::Float64=Float64(render_exposure())) =
+  if renderer == :cycles
+    @remote(b, cycles_renderer(samples, denoising, motion_blur, transparent, exposure))
+  elseif renderer == :clay
+    @remote(b, clay_renderer(samples, denoising, motion_blur, transparent))
+  elseif renderer == :default
+    @remote(b, default_renderer())
+  else
+    error("Unknown Blender renderer: $renderer. Options: :cycles, :clay, :default")
+  end
 
 KhepriBase.b_realistic_sky(b::BLR, altitude, azimuth, turbidity, sun) =
   @remote(b, set_sun_sky(deg2rad(altitude), deg2rad(azimuth), turbidity, sun))
