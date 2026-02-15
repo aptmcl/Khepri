@@ -667,8 +667,8 @@ texify(expr) = latexify(expr)
 KhepriBase.b_labels(b::TikZ, p, data, mat) =
   withTikZXForm(b, p, mat) do out, c
     tikz_node(out, c, "",
-        "fill,circle,outer sep=0,inner sep=0,minimum size=2pt,illustration,$(tikz_color(data[1].mat.layer.color)),"*
-        join(["label={[scale=$scale,illustration,$(tikz_color(mat.layer.color))]$ϕ:$(texify(txt))}"
+        "fill,circle,outer sep=0,inner sep=0,minimum size=2pt,illustration,$(tikz_color(material_color(data[1].mat))),"*
+        join(["label={[scale=$scale,illustration,$(tikz_color(material_color(mat)))]$ϕ:$(texify(txt))}"
               for ((; txt, mat, scale), ϕ) in zip(data, division(-45, 315, length(data), false))], ","))
   end
 
@@ -681,7 +681,7 @@ arrow_spec(color, scale, left, right) =
 KhepriBase.b_radii_illustration(b::TikZ, c, rs, rs_txts, mats, mat) =
   withTikZXForm(b, c, mat) do out, cc
     for (r,r_txt,ϕ,mat) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false), mats)
-      color = tikz_color(mat.layer.color)
+      color = tikz_color(material_color(mat))
       tikz_polar_segment(out, c, vpol(r, ϕ), arrow_spec(color, default_annotation_scale(), true, true))
       tikz_node(out, intermediate_loc(c, c + vpol(r, ϕ)), "", node_spec(color, default_annotation_scale(), ϕ+π/2, r_txt))
     end
@@ -690,7 +690,7 @@ KhepriBase.b_radii_illustration(b::TikZ, c, rs, rs_txts, mats, mat) =
 KhepriBase.b_vectors_illustration(b::TikZ, p, a, rs, rs_txts, mats, mat) =
   withTikZXForm(b, p, mat) do out, c
     for (r, r_txt, mat) in zip(rs, rs_txts, mats)
-      color = tikz_color(mat.layer.color)
+      color = tikz_color(material_color(mat))
       tikz_polar_segment(out, c, vpol(r, a), arrow_spec(color, default_annotation_scale(), true, true))
       tikz_node(out, intermediate_loc(c, c + vpol(r, a)), "", node_spec(color, default_annotation_scale(), a-π/2, r_txt))
     end
@@ -704,7 +704,7 @@ KhepriBase.b_angles_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts,
         idxs = sortperm(as),
         (rs, ss, as, r_txts, s_txts, a_txts, mats) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs], mats[idxs])
       for (r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
-        color = tikz_color(mat.layer.color)
+        color = tikz_color(material_color(mat))
         tikz_params = "illustration,"*color
         if !(r ≈ 0.0)
           if !(s ≈ 0.0)
@@ -739,7 +739,7 @@ KhepriBase.b_arcs_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, m
         idxs = sortperm(ss),
         (rs, ss, as, r_txts, s_txts, a_txts, mats) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs], mats[idxs])
       for (i, r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(1:n, rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
-        color = tikz_color(mat.layer.color)
+        color = tikz_color(material_color(mat))
         tikz_params = "illustration,"*color
         if !(r ≈ 0.0)
           if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
