@@ -1736,6 +1736,15 @@ def show_vertices(shape):
         public bool LayerActive(Guid id) =>
             doc.Layers[doc.Layers.Find(id, true, -1)].IsVisible;
 
+        public void SetLayerMaterial(Guid layerId, int materialIndex) {
+            if (materialIndex >= 0 && materialIndex < renderMaterials.Count) {
+                int idx = doc.Layers.Find(layerId, true, -1);
+                if (idx >= 0) {
+                    doc.Layers[idx].RenderMaterial = renderMaterials[materialIndex];
+                }
+            }
+        }
+
         Curve ArcFromPointsAngle(Point3d p0, Point3d p1, double angle) {
             Vector3d v = p1 - p0;
             double d2 = v.X * v.X + v.Y * v.Y;
