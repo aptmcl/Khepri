@@ -347,6 +347,7 @@ public Color LayerColor(ObjectId id)
 public bool LayerActive(ObjectId id)
 public ObjectId ShapeLayer(ObjectId objId)
 public void SetShapeLayer(ObjectId objId, ObjectId layerId)
+public void SetLayerMaterial(ObjectId layerId, ObjectId materialId)
 public void SetSystemVariableInt(string name, int value)
 public int Command(string cmd)
 public void DisableUpdate()
@@ -1024,6 +1025,28 @@ KhepriBase.b_zoom_extents(b::ACAD) =
 KhepriBase.b_set_view_top(b::ACAD) =
   @remote(b, ViewTop())
 
+# AutoCAD visual styles: Realistic, Conceptual, Wireframe, Hidden, Shaded,
+# ShadedWithEdges, ShadesOfGray, Sketchy, X-Ray, 2dWireframe
+const acad_visual_styles = Dict(
+  :realistic => "Realistic",
+  :conceptual => "Conceptual",
+  :wireframe => "Wireframe",
+  :hidden => "Hidden",
+  :shaded => "Shaded",
+  :shaded_with_edges => "ShadedWithEdges",
+  :shades_of_gray => "ShadesOfGray",
+  :sketchy => "Sketchy",
+  :xray => "X-Ray",
+  :wireframe_2d => "2dWireframe")
+
+KhepriBase.b_view_settings(b::ACAD; visual_style::Symbol=:conceptual) =
+  let style = get(acad_visual_styles, visual_style) do
+        error("Unknown AutoCAD visual style: $visual_style. Options: $(join(keys(acad_visual_styles), ", "))")
+      end,
+      (camera, target, lens) = b_get_view(b)
+    @remote(b, SetView(camera, target, lens, true, style))
+  end
+
 KhepriBase.b_realistic_sky(b::ACAD, date, latitude, longitude, elevation, meridian, turbidity, sun) =
   @remote(b, SetSkyFromDateLocation(date, latitude, longitude, meridian, elevation))
 
@@ -1076,7 +1099,7 @@ vector_props = merge(Dict("Dimatfit"=>Int32(1), "Dimsah"=>true, "Dimtad"=>Int32(
 radii_props = merge(Dict("Dimatfit"=>Int32(1), "Dimsah"=>true, "Dimtad"=>Int32(2)), base_props)
 
 KhepriBase.b_labels(b::ACAD, p, data, mat) =
-  [with(current_layer, mat.layer) do
+  [with(current_layer, material_layer(mat)) do
     #Impossible to make this work!!!!
     #@remote(b, CreateLeaderDimension(txt, p, p+vpol(default_annotation_scale(), ϕ), default_annotation_scale(), mark, label_props))
     @remote(b, CreateNonLeaderDimension(txt, p, p+vpol(0.2*scale, ϕ), scale, mark, label_props))
@@ -1088,14 +1111,14 @@ KhepriBase.b_labels(b::ACAD, p, data, mat) =
 
 #
 KhepriBase.b_radii_illustration(b::ACAD, c, rs, rs_txts, mats, mat) =
-  [with(current_layer, mat.layer) do
+  [with(current_layer, material_layer(mat)) do
     @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(r, ϕ), 0.0, default_annotation_scale(), "", "_NONE", radii_props))
    end
    for (r, r_txt, ϕ, mat) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false), mats)]
 
 # Maybe merge the texts when the radii are the same.
 KhepriBase.b_vectors_illustration(b::ACAD, p, a, rs, rs_txts, mats, mat) =
-  [with(current_layer, mat.layer) do
+  [with(current_layer, material_layer(mat)) do
     @remote(b, CreateDiametricDimension(r_txt, p, p+vpol(r, a), 0.0, default_annotation_scale(), "", "_NONE", vector_props))
    end
    for (r, r_txt, mat) in zip(rs, rs_txts, mats)]
@@ -1110,7 +1133,7 @@ KhepriBase.b_angles_illustration(b::ACAD, c, rs, ss, as, r_txts, s_txts, a_txts,
       idxs = sortperm(as),
       (rs, ss, as, r_txts, s_txts, a_txts, mats) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs], mats[idxs])
     for (r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
-      with(current_layer, mat.layer) do
+      with(current_layer, material_layer(mat)) do
         if !(r ≈ 0.0)
           if !(s ≈ 0.0)
             let arrows = s > 0 ? ("_NONE", "",) : ("", "_NONE")
@@ -1145,7 +1168,7 @@ KhepriBase.b_arcs_illustration(b::ACAD, c, rs, ss, as, r_txts, s_txts, a_txts, m
       idxs = sortperm(ss),
       (rs, ss, as, r_txts, s_txts, a_txts, mats) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs], mats[idxs])
     for (i, r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(1:n, rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
-      with(current_layer, mat.layer) do
+      with(current_layer, material_layer(mat)) do
         if !(r ≈ 0.0)
           if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
             let arrows = s > 0 ? ("_NONE", "",) : ("", "_NONE")
@@ -1180,6 +1203,9 @@ KhepriBase.b_layer(b::ACAD, name, active, color) =
 
 KhepriBase.b_delete_all_shapes_in_layer(b::ACAD, layer) =
   @remote(b, DeleteAllInLayer(layer))
+
+KhepriBase.b_set_layer_material(b::ACAD, layer_ref, mat_ref) =
+  @remote(b, SetLayerMaterial(layer_ref, mat_ref))
 
 switch_to_layer(to, b::ACAD) =
     if to != from
