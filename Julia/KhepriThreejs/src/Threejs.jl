@@ -58,10 +58,11 @@ encode(ns::Val{:THR}, t::Val{:Matrix4x4Y}, c::IO, p) =
 
 encode(ns::Val{:THR}, t::Val{:Frame3d}, c::IO, v) = begin
   encode(ns, Val(:Point3d), c, v)
-  t = v.cs.transform
-  encode(Val(:TS), Val(:float3), c, (t[1,1], t[2,1], t[3,1]))
-  encode(Val(:TS), Val(:float3), c, (t[1,2], t[2,2], t[3,2]))
-  encode(Val(:TS), Val(:float3), c, (t[1,3], t[2,3], t[3,3]))
+  let t = v.cs.transform
+    encode(Val(:TS), Val(:float3), c, (t[1,1], t[2,1], t[3,1]))
+    encode(Val(:TS), Val(:float3), c, (t[1,2], t[2,2], t[3,2]))
+    encode(Val(:TS), Val(:float3), c, (t[1,3], t[2,3], t[3,3]))
+  end
 end
 
 decode(ns::Val{:THR}, t::Val{:Frame3d}, c::IO) =
@@ -84,6 +85,9 @@ threejs_api = @remote_api :THR """
 typedFunction("getOperationNamed", [Str], Int32, (name: string) => {
 typedFunction("delete", [Int32], None, (i: number) =>
 typedFunction("deleteAll", [], None, () => {
+typedFunction("createLayer", [Str], Int32, (name: string) => {
+typedFunction("getCurrentLayer", [], Int32, () => {
+typedFunction("setCurrentLayer", [Int32], None, (idx: number) => {
 typedFunction("addAnnotation", [Point3d, Str], Int32, (p: THREE.Vector3, txt: string) =>
 typedFunction("deleteAnnotation", [Int32], None, (i: number) => 
 typedFunction("guiCreate", [Str, Int32], GUIId, (title: string, kind: number) => {
@@ -105,7 +109,7 @@ typedFunction("sphere", [Point3d, Float32, MatId], Id, (c: THREE.Vector3, r: num
 typedFunction("box", [Matrix4x4, Float32, Float32, Float32, MatId], Id, (m: THREE.Matrix4, dx: number, dy: number, dz: number, mat: THREE.Material) =>
 typedFunction("torus", [Matrix4x4, Float32, Float32, MatId], Id, (m: THREE.Matrix4, re: number, ri: number, mat: THREE.Material) =>
 typedFunction("cylinder", [Matrix4x4Y, Float32, Float32, Float32, Bool, MatId], Id, (m: THREE.Matrix4, rb: number, rt: number, h: number, open: boolean, mat: THREE.Material) =>
-typedFunction("mesh", [ArrayFloat32, MatId], Id, (vs: Float32Array, _idxs: Int32Array, mat: THREE.Material) => {
+typedFunction("mesh", [ArrayFloat32, MatId], Id, (vs: Float32Array, mat: THREE.Material) => {
 typedFunction("meshIndexed", [ArrayFloat32, ArrayInt32, MatId], Id, (vs: Float32Array, idxs: Int32Array, mat: THREE.Material) => {
 typedFunction("quadStrip", [[Point3d], [Point3d], Bool, MatId], Id, (ps: THREE.Vector3[], qs: THREE.Vector3[], smooth: boolean, mat: THREE.Material) => {
 typedFunction("surfaceGrid", [[[Point3d]], Bool, Bool, Bool, Bool, MatId], Id, (points: THREE.Vector3[][], uClosed: boolean, vClosed: boolean, uSmooth: boolean, vSmooth: boolean, mat: THREE.Material) => {    
@@ -183,7 +187,7 @@ set_default_materials() =
 	  set_material(THR, material_metal, b->threejs_metal_material(b, 0.4))
 	  #set_material(THR, material_wood, b->threejs_material(b, RGB(169/255,122/255,87/255)))
 	  set_material(THR, material_wood,
-      b->threejs_glTF_material(b, "/resources/materials/plywood/plywood_4k.gltf"))
+      b->threejs_glTF_material(b, "resources/materials/plywood/plywood_4k.gltf"))
 	  set_material(THR, material_concrete, b->threejs_material(b, RGB(140/255,140/255,140/255)))
 	  set_material(THR, material_plaster, b->threejs_plaster_material(b))
 	  #set_material(THR, material_plaster, b->threejs_material(b, RGB(0.7,0.7,0.7)))
@@ -193,12 +197,9 @@ set_default_materials() =
 
 KhepriBase.b_get_material(b::THR, f::Function) = f(b)
 
-#const threejs = THR("Threejs", "0.0.0.0" #="127.0.0.1"=#, threejs_port, threejs_api)
-
 KhepriBase.has_boolean_ops(::Type{THR}) = HasBooleanOps{false}()
 
-#KhepriBase.backend(::THRRef) = threejs
-KhepriBase.void_ref(b::THR) = THRRef(-1 % Int32)
+KhepriBase.void_ref(b::THR) = -1 % Int32
 
 threejs_material(b, color) =
   @remote(b, MeshLambertMaterial(
@@ -241,20 +242,6 @@ threejs_plaster_material(b) =
      specularIntensity=0.2,
      specularColor=colorant"#FFFFFF")))
 
-old_threejs_glass_material(b, opacity=0.3, color=RGB(0.95,0.95,1.0)) =
-  @remote(b, MeshPhysicalMaterial(
-    (#"vertexColors" => 0,
-     transparent=true,
-     opacity=opacity,
-     #"depthTest" => true,
-     #"linewidth" => 1.0,
-     #"depthFunc" => 3,
-     side=2,
-     color=color,
-     reflectivity=0.1,
-     depthWrite=false
-    )))
-
 threejs_glass_material(b, opacity=0.3, color=RGB(1.0,1.0,1.0)) =
   @remote(b, MeshPhysicalMaterial(
     (color=color,           # Base color (white for clear glass)
@@ -277,15 +264,6 @@ threejs_glass_material(b, opacity=0.3, color=RGB(1.0,1.0,1.0)) =
      # Attenuation for colored glass (slight blue tint for modern glass)
      attenuationColor=colorant"#ADD8E6",
      attenuationDistance=1.0)))
-
-old_threejs_metal_material(b, roughness=0.5, color=RGB(0.9,0.9,0.9)) =
-  @remote(b, MeshStandardMaterial(
-    (#metalness=1.0,
-     roughness=roughness,
-     side=2,
-     color=color,
-     depthWrite=true
-    )))
 
 threejs_metal_material(b, roughness=0.0, color=RGB(0.9,0.9,0.9)) =
   @remote(b, MeshPhysicalMaterial(
@@ -336,14 +314,13 @@ KhepriBase.b_point(b::THR, p, mat) =
 KhepriBase.b_line(b::THR, ps, mat) = begin
   @remote(b, line(ps, mat))
 end
-#=
-KhepriBase.b_polygon(b::THR, ps, mat) =
-	@remote(b, line(ps, true, mat))
-=#
-KhepriBase.b_spline(b::THR, ps, v1, v2, mat) =
-  # TODO: Implement proper spline with tangent vectors v1, v2
-  # For now, using Catmull-Rom spline without tangent constraints
-  @remote(b, spline(ps, false, mat))
+
+KhepriBase.b_spline(b::THR, ps, v0, v1, mat) =
+  if !(v0 isa Vec) && !(v1 isa Vec)
+    @remote(b, spline(ps, false, mat))
+  else
+    @invoke b_spline(b::Backend, ps, v0, v1, mat)
+  end
 
 KhepriBase.b_closed_spline(b::THR, ps, mat) =
   @remote(b, spline(ps, true, mat))
@@ -396,11 +373,6 @@ KhepriBase.b_ngon(b::THR, ps, pivot, smooth, mat) =
 KhepriBase.b_quad_strip(b::THR, ps, qs, smooth, mat) =
   @remote(b, quadStrip(ps, qs, smooth, mat))
 
-#=
-KhepriBase.b_quad_strip_closed(b::THR, ps, qs, smooth, mat) =
-  @remote(b, quad_strip_closed(ps, qs, smooth, mat))
-
-=#
 # Threejs can cover polygons with holes
 KhepriBase.b_surface_polygon(b::THR, ps, mat) =
   b_surface_polygon_with_holes(b, ps, [], mat)
@@ -426,10 +398,6 @@ KhepriBase.b_surface_grid(b::THR, ptss, closed_u, closed_v, smooth_u, smooth_v, 
     @remote(b, surfaceGrid(eachrow(ptss), closed_u, closed_v, smooth_u, smooth_v, mat))
   end
 
-#=
-KhepriBase.b_generic_pyramid_frustum(b::THR, bs, ts, smooth, bmat, tmat, smat) =
-  @remote(b, pyramid_frustum(bs, ts, smooth, bmat, tmat, smat))
-=#
 KhepriBase.b_cone(b::THR, cb, r, h, bmat, smat) =
   @remote(b, cylinder(add_z(cb, h/2), r, 0, h, false, smat))
 
@@ -438,10 +406,7 @@ KhepriBase.b_cone_frustum(b::THR, cb, rb, h, rt, bmat, tmat, smat) =
 
 KhepriBase.b_cylinder(b::THR, cb, r, h, bmat, tmat, smat) =
   @remote(b, cylinder(add_z(cb, h/2), r, r, h, false, smat))
-#=
-KhepriBase.b_cuboid(b::THR, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat) =
-  @remote(b, cuboid([pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3], mat))
-=#
+
 KhepriBase.b_box(b::THR, c, dx, dy, dz, mat) =
     @remote(b, box(add_xyz(c, dx/2, dy/2, dz/2), dx, dy, dz, mat))
 
@@ -473,17 +438,17 @@ KhepriBase.b_mesh_obj_fmt(b::THR, obj_name, base) =
 measure_box(; xlength = 20, ylength = 10, zlength = 5) =
   let cyl_r = 0.01,
       sph_r = 0.05
-    cylinder(x(0), 0.01, x(xlength))
+    cylinder(x(0), cyl_r, x(xlength))
     for i in 1:xlength
-      sphere(xyz(i,0,0), 0.05)
+      sphere(xyz(i,0,0), sph_r)
     end
-    cylinder(x(0), 0.01, y(ylength))
+    cylinder(x(0), cyl_r, y(ylength))
     for i in 1:ylength
-      sphere(xyz(0,i,0), 0.05)
+      sphere(xyz(0,i,0), sph_r)
     end
-    cylinder(x(0), 0.01, z(zlength))
+    cylinder(x(0), cyl_r, z(zlength))
     for i in 1:zlength
-      sphere(xyz(0,0,i), 0.05)
+      sphere(xyz(0,0,i), sph_r)
     end
   end
 
@@ -493,76 +458,19 @@ KhepriBase.b_set_environment(b::THR, env_name, set_background) =
 KhepriBase.b_set_view(b::THR, camera, target, lens, aperture) =
   @remote(b, setView(camera, target, lens, aperture))
 
-KhepriBase.b_zoom_extents(b::THR) = 
-  @remote(b, zoomExtents())
- 
 KhepriBase.b_delete_ref(b::THR, r::THRId) =
   @remote(b, delete(r))
 
 KhepriBase.b_delete_all_shape_refs(b::THR) =
   @remote(b, deleteAll())
 
-#=
-backend_stroke(b::THR, path::OpenSplinePath) =
-  if (path.v0 == false) && (path.v1 == false)
-    add_object(b, threejs_line(path_frames(path), line_material(b)))
-  elseif (path.v0 != false) && (path.v1 != false)
-    @remote(b, InterpSpline(path.vertices, path.v0, path.v1))
-  else
-    @remote(b, InterpSpline(
-                     path.vertices,
-                     path.v0 == false ? path.vertices[2]-path.vertices[1] : path.v0,
-                     path.v1 == false ? path.vertices[end-1]-path.vertices[end] : path.v1))
-  end
-backend_stroke(b::THR, path::ClosedSplinePath) =
-    add_object(b, threejs_line(path_frames(path), line_material(b)))
-backend_fill(b::THR, path::ClosedSplinePath) =
-    add_object(b, threejs_surface_polygon(path_frames(path), material(b)))
-
-#=
-smooth_pts(pts) = in_world.(path_frames(open_spline_path(pts)))
-
-=#
-
 # Layers
-current_layer(b::THR) =
-  b.layer
+KhepriBase.b_layer(b::THR, name, active, color) = @remote(b, createLayer(name))
+KhepriBase.b_current_layer_ref(b::THR) = @remote(b, getCurrentLayer())
+KhepriBase.b_current_layer_ref(b::THR, layer) = @remote(b, setCurrentLayer(layer))
+KhepriBase.b_delete_all_shapes_in_layer(b::THR, layer) =
+  @warn "KhepriThreejs: per-layer shape deletion not supported; use delete_all_shapes() instead"
 
-current_layer(layer, b::THR) =
-  b.layer = layer
-
-backend_create_layer(b::THR, name::String, active::Bool, color::RGB) =
-  begin
-    @assert active
-    thr_layer(name, color)
-  end
-
-#=
-create_ground_plane(shapes, material=default_THR_ground_material()) =
-  if shapes == []
-    error("No shapes selected for analysis. Use add-THR-shape!.")
-  else
-    let (p0, p1) = bounding_box(union(shapes)),
-        (center, ratio) = (quad_center(p0, p1, p2, p3),
-                  distance(p0, p4)/distance(p0, p2));
-     ratio == 0 ?
-      error("Couldn"t compute height. Use add-THR-shape!.") :
-      let pts = map(p -> intermediate_loc(center, p, ratio*10), [p0, p1, p2, p3]);
-         create_surface_layer(pts, 0, ground_layer(), material)
-        end
-       end
-  end
-        w = max(floor_extra_factor()*distance(p0, p1), floor_extra_width())
-        with(current_layer,floor_layer()) do
-          box(xyz(min(p0.x, p1.x)-w, min(p0.y, p1.y)-w, p0.z-1-floor_distance()),
-              xyz(max(p0.x, p1.x)+w, max(p0.y, p1.y)+w, p0.z-0-floor_distance()))
-        end
-      end
-    end
-
-=#
-
-=#
 ####################################################
 KhepriBase.b_labels(b::THR, p, data, mat) =
   [@remote(b, addAnnotation(p, txt)) #p+vpol(0.2*scale, ϕ), txt))
@@ -610,17 +518,10 @@ KhepriBase.b_gui_add_button_load_file(b::THR, gui, name, handler) =
 
 
 export grid_helper, dark_grid_helper, light_grid_helper
-grid_helper(size, divisions, color_line, color_grid) =
-  @remote(threejs, gridHelper(size, divisions, color_line, color_grid))
+grid_helper(size, divisions, color_line, color_grid; backend=current_backend()) =
+  @remote(backend, gridHelper(size, divisions, color_line, color_grid))
 
-dark_grid_helper() =
-  grid_helper(1000, 1000, RGB(0.25, 0.25, 0.25), RGB(0.125, 0.125, 0.125))
-light_grid_helper() =
-  grid_helper(1000, 1000, RGB(0.75, 0.75, 0.75), RGB(0.875, 0.875, 0.875))
-
-#=
-handle_backend_requests(b=current_backend()[1]) =
-  let 
-  
-
-=#
+dark_grid_helper(; backend=current_backend()) =
+  grid_helper(1000, 1000, RGB(0.25, 0.25, 0.25), RGB(0.125, 0.125, 0.125); backend)
+light_grid_helper(; backend=current_backend()) =
+  grid_helper(1000, 1000, RGB(0.75, 0.75, 0.75), RGB(0.875, 0.875, 0.875); backend)
