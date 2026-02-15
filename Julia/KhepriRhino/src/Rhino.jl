@@ -158,6 +158,7 @@ public Color LayerColor(Guid id)
 public bool LayerActive(Guid id)
 public Guid ShapeLayer(RhinoObject objId)
 public void SetShapeLayer(RhinoObject objId, Guid layerId)
+public void SetLayerMaterial(Guid layerId, int materialIndex)
 public Point3d[] CurvePointsAt(RhinoObject obj, double[] ts)
 public Vector3d[] CurveTangentsAt(RhinoObject obj, double[] ts)
 public Vector3d[] CurveNormalsAt(RhinoObject obj, double[] ts)
@@ -709,7 +710,7 @@ angular_props = merge(base_props)
 diametric_props = merge(base_props)
 
 KhepriBase.b_labels(b::RH, p, data, mat) =
-  [with(current_layer, mat.layer) do
+  [with(current_layer, material_layer(mat)) do
     @remote(b, CreateLeaderDimension(txt, p, p+vpol(scale, ϕ), scale, mark, label_props))
    end
    for ((; txt, mat, scale), ϕ, mark)
@@ -719,14 +720,14 @@ KhepriBase.b_labels(b::RH, p, data, mat) =
 
 #
 KhepriBase.b_radii_illustration(b::RH, c, rs, rs_txts, mats, mat) =
-  [with(current_layer, mat.layer) do
+  [with(current_layer, material_layer(mat)) do
     @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(r, ϕ), c+vpol(0.1, ϕ+pi/2), default_annotation_scale(), "", diametric_props))
    end
    for (r, r_txt, ϕ, mat) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false), mats)]
 
 # Maybe merge the texts when the radii are the same.
 KhepriBase.b_vectors_illustration(b::RH, p, a, rs, rs_txts, mats, mat) =
-  [with(current_layer, mat.layer) do
+  [with(current_layer, material_layer(mat)) do
     @remote(b, CreateDiametricDimension(r_txt, p, p+vpol(r, a), p+vpol(0.1, a+pi/2), default_annotation_scale(), "", diametric_props))
    end
    for (r, r_txt, mat) in zip(rs, rs_txts, mats)]
@@ -739,7 +740,7 @@ KhepriBase.b_angles_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, m
       idxs = sortperm(as),
       (rs, ss, as, r_txts, s_txts, a_txts) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs])
     for (r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
-      with(current_layer, mat.layer) do
+      with(current_layer, material_layer(mat)) do
         if !(r ≈ 0.0)
           if !(s ≈ 0.0)
           #  push!(refs, @remote(b, CreateAngularDimension(s_txt, c, ar, 0, s, default_annotation_scale(), 5, no_props)))
@@ -766,7 +767,7 @@ KhepriBase.b_arcs_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, mat
       idxs = sortperm(ss),
       (rs, ss, as, r_txts, s_txts, a_txts) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs])
     for (i, r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(1:n, rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
-      with(current_layer, mat.layer) do
+      with(current_layer, material_layer(mat)) do
         if !(r ≈ 0.0)
           if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
             push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.8*ar, 0), c+vpol(0.8*ar, s), c+vpol(ar, s/2), default_annotation_scale(), "", angular_props)))
@@ -804,6 +805,25 @@ KhepriBase.b_zoom_extents(b::RH) =
 KhepriBase.b_set_view_top(b::RH) =
   @remote(b, ViewTop())
 
+# Rhino display modes: Wireframe, Shaded, Rendered, Ghosted, XRay, Technical, Artistic, Pen
+const rhino_display_modes = Dict(
+  :wireframe => "Wireframe",
+  :shaded => "Shaded",
+  :rendered => "Rendered",
+  :ghosted => "Ghosted",
+  :xray => "XRay",
+  :technical => "Technical",
+  :artistic => "Artistic",
+  :pen => "Pen")
+
+KhepriBase.b_view_settings(b::RH; display_mode::Symbol=:shaded) =
+  let mode = get(rhino_display_modes, display_mode) do
+        error("Unknown Rhino display mode: $display_mode. Options: $(join(keys(rhino_display_modes), ", "))")
+      end,
+      (camera, target, lens) = b_get_view(b)
+    @remote(b, SetView(camera, target, lens, true, mode))
+  end
+
 KhepriBase.b_delete_refs(b::RH, refs::Vector{RHId}) =
   @remote(b, DeleteMany(refs))
 
@@ -834,6 +854,9 @@ KhepriBase.b_layer(b::RH, name, active, color) =
 
 KhepriBase.b_delete_all_shapes_in_layer(b::RH, layer) =
   @remote(b, DeleteAllInLayer(layer))
+
+KhepriBase.b_set_layer_material(b::RH, layer_ref, mat_ref) =
+  @remote(b, SetLayerMaterial(layer_ref, mat_ref))
 
 KhepriBase.b_create_layer_from_ref_value(b::RH, r) =
   let name = @remote(b, LayerName(r)),
