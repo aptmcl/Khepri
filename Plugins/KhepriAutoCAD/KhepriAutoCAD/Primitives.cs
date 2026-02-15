@@ -326,12 +326,6 @@ namespace KhepriAutoCAD {
                 return ptsArr;
             } else {
                 // Let's use an approximation
-                /* Not good enough
-                int count = s.NumControlPoints + 1;
-                Point3d[] pts = new Point3d[count];
-                double start = s.StartParam;
-                double end = s.EndParam;
-                return Enumerable.Range(0, count + 1).Select(i => s.GetPointAtParameter(start + (end - start) * i / count)).ToArray(); */
                 Polyline poly = s.ToPolyline() as Polyline;
                 return Enumerable.Range(0, poly.NumberOfVertices).Select(i => poly.GetPoint3dAt(i)).ToArray();
             }
@@ -535,8 +529,6 @@ namespace KhepriAutoCAD {
             SurfaceFromCurve(new Circle(c, n, r), matId);
         public Entity SurfaceEllipse(Point3d c, Vector3d n, Vector3d majorAxis, double radiusRatio, ObjectId matId) =>
             SurfaceFromCurve(new Ellipse(c, n, majorAxis, radiusRatio, 0, 2 * Math.PI), matId);
-        //        public Entity SurfaceArc(Point3d c, Vector3d n, double radius, double startAngle, double endAngle) =>
-        //            SurfaceFromCurve(new Arc(c, n, radius, startAngle, endAngle));
         public Entity SurfaceClosedPolyLine(Point3d[] pts, ObjectId matId) =>
             SurfaceFromCurve(new Polyline3d(Poly3dType.SimplePoly, new Point3dCollection(pts), true), matId);
 
@@ -634,25 +626,11 @@ namespace KhepriAutoCAD {
             shape.CreateBox(Math.Abs(dx), Math.Abs(dy), Math.Abs(dz));
             return Transform(WithMaterial(shape, matId), new Vector3d(dx / 2, dy / 2, dz / 2), frame);
         }
-        //Solid3d shape = new Solid3d();
-        //Vector3d vz = vx.CrossProduct(vy);
-        //shape.CreateBox(Math.Abs(dx), Math.Abs(dy), Math.Abs(dz));
-        //shape.TransformBy(Matrix3d.Displacement(new Vector3d(dx / 2, dy / 2, dz / 2)));
-        //shape.TransformBy(Matrix3d.AlignCoordinateSystem(
-        //    Point3d.Origin, Vector3d.XAxis, Vector3d.YAxis, Vector3d.ZAxis,
-        //    corner, vx, vy, vz));
-        //return shape;
 
         public Entity CenteredBox(Frame3d frame, double dx, double dy, double dz, ObjectId matId) {
             Solid3d shape = new Solid3d();
             shape.CreateBox(Math.Abs(dx), Math.Abs(dy), Math.Abs(dz));
             return Transform(WithMaterial(shape, matId), new Vector3d(0, 0, dz / 2), frame);
-            //Vector3d vz = vx.CrossProduct(vy);
-            //shape.TransformBy(Matrix3d.Displacement(new Vector3d(0, 0, dz / 2)));
-            //shape.TransformBy(Matrix3d.AlignCoordinateSystem(
-            //    Point3d.Origin, Vector3d.XAxis, Vector3d.YAxis, Vector3d.ZAxis,
-            //    corner, vx, vy, vz));
-            //return shape;
         }
         Int32Collection NGonFaces(int n) {
             Int32Collection facearray = new Int32Collection();
@@ -886,19 +864,6 @@ namespace KhepriAutoCAD {
         public Curve PolyFrom(Arc arc, Document doc, Transaction tr) {
             BlockTable bt = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
             BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
-            /*
-            // Plane pl = new Plane(new Point3d(0, 0, 0), arc.Normal);
-            double deltaAng = arc.EndAngle - arc.StartAngle;
-            if (deltaAng < 0) { deltaAng += 2 * Math.PI; }
-            double bulge = Math.Tan(deltaAng * 0.25);
-            Polyline poly = new Polyline();
-            poly.AddVertexAt(0, new Point2d(arc.StartPoint.X, arc.StartPoint.Y), bulge, 0, 0);
-            poly.AddVertexAt(1, new Point2d(arc.EndPoint.X, arc.EndPoint.Y), 0, 0, 0);
-            poly.LayerId = arc.LayerId;
-            poly.Normal = arc.Normal;
-            arc.Erase();
-            return poly;
-            */
             Point3dCollection pts = CurveLocations(arc, 32);
             arc.Erase();
             Curve c = new Polyline3d(Poly3dType.SimplePoly, pts, false);
@@ -1438,6 +1403,14 @@ namespace KhepriAutoCAD {
             Entity sh = tr.GetObject(objId, OpenMode.ForWrite) as Entity;
             sh.LayerId = layerId;
         }
+        public void SetLayerMaterial(ObjectId layerId, ObjectId materialId) {
+            if (materialId != ObjectId.Null) {
+                CommitAndStartTransaction();
+                LayerTableRecord layer = (LayerTableRecord)tr.GetObject(layerId, OpenMode.ForWrite);
+                layer.MaterialId = materialId;
+                CommitAndStartOpenCloseTransaction();
+            }
+        }
         public void SetSystemVariableInt(string name, int value) {
             Application.SetSystemVariable(name, value);
         }
@@ -1526,221 +1499,20 @@ namespace KhepriAutoCAD {
             ddoc.SendCommand("_RENDER\n");
             Application.SetSystemVariable("EXPVALUE", prevEXPVALUE);
         }
-        //public void Render(int width, int height, string path, int renderLevel, int iblenv, double rotation, double exposure) {
-        //    Document doc = Application.DocumentManager.MdiActiveDocument;
-        //    using (doc.LockDocument())
-        //    using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-        //        DBDictionary namedObjs = tr.GetObject(doc.Database.NamedObjectsDictionaryId, OpenMode.ForRead) as DBDictionary;
-        //        RenderGlobal renderGlobal;
-        //        if (namedObjs.Contains("ACAD_RENDER_GLOBAL")) {
-        //            renderGlobal = tr.GetObject(namedObjs.GetAt("ACAD_RENDER_GLOBAL"), OpenMode.ForWrite) as RenderGlobal;
-        //        } else {
-        //            tr.GetObject(doc.Database.NamedObjectsDictionaryId, OpenMode.ForWrite);
-        //            //namedObjs.UpgradeOpen();
-        //            renderGlobal = new RenderGlobal();
-        //            namedObjs.SetAt("ACAD_RENDER_GLOBAL", renderGlobal);
-        //            tr.AddNewlyCreatedDBObject(renderGlobal, true);
-        //        }
-        //        renderGlobal.ProcedureAndDestination = new RenderGlobal.ProcedureAndDestinationParameter(RenderGlobal.Procedure.View, RenderGlobal.Destination.Window);
-        //        renderGlobal.Dimensions = new RenderGlobal.DimensionsParameter(width, height);
-        //        renderGlobal.SaveEnabled = true;
-        //        renderGlobal.SaveFileName = path;
-        //        DBDictionary settings;
-        //        if (namedObjs.Contains("ACAD_RENDER_RAPIDRT_SETTINGS")) {
-        //            settings = tr.GetObject(namedObjs.GetAt("ACAD_RENDER_RAPIDRT_SETTINGS"), OpenMode.ForRead) as DBDictionary;
-        //        } else {
-        //            tr.GetObject(doc.Database.NamedObjectsDictionaryId, OpenMode.ForWrite);
-        //            //namedObjs.UpgradeOpen();
-        //            settings = new DBDictionary();
-        //            namedObjs.SetAt("ACAD_RENDER_RAPIDRT_SETTINGS", settings);
-        //            tr.AddNewlyCreatedDBObject(settings, true);
-        //        }
-        //        RapidRTRenderSettings renderSettings;
-        //        if (settings.Contains("Khepri")) {
-        //            renderSettings = tr.GetObject(settings.GetAt("Khepri"), OpenMode.ForWrite) as RapidRTRenderSettings;
-        //        } else {
-        //            tr.GetObject(namedObjs.GetAt("ACAD_RENDER_RAPIDRT_SETTINGS"), OpenMode.ForWrite);
-        //            renderSettings = new RapidRTRenderSettings();
-        //            renderSettings.Name = "Khepri";
-        //            renderSettings.Description = "Custom render preset for Khepri";
-        //            settings.SetAt("Khepri", renderSettings);
-        //            tr.AddNewlyCreatedDBObject(renderSettings, true);
-        //        }
-        //        renderSettings.RenderTarget = RapidRTRenderTarget.Level;
-        //        renderSettings.RenderLevel = renderLevel;
-        //        renderSettings.LightingModel = RapidRTLightingMode.Advanced;
-
-
-        //        ObjectId rtId = ObjectId.Null;
-        //        ObjectId iblId = ObjectId.Null;
-        //        ViewportTable vt = tr.GetObject(doc.Database.ViewportTableId, OpenMode.ForRead) as ViewportTable;
-        //        DBDictionary bkDict = null;
-        //        const string dictKey = "ACAD_BACKGROUND";
-        //        const string rtkey = "RAPIDRTRENDERENVIRONMENT";
-        //        if (namedObjs.Contains(dictKey)) {
-        //            rtId = nod.GetAt(dictKey);
-        //            bkDict = tr.GetObject(rtId, OpenMode.ForWrite) as DBDictionary;
-        //        } else {
-        //            bkDict = new DBDictionary();
-        //            nod.UpgradeOpen();
-        //            rtId = nod.SetAt(dictKey, bkDict);
-        //            tr.AddNewlyCreatedDBObject(bkDict, true);
-        //        }
-        //        //if (bkDict.Contains(rtkey)) {
-        //        //    ibl = bkDict.GetAt(rtkey) as IBL;
-        //        //} else {
-        //            IBLBackground ibl = new IBLBackground();
-        //            ibl.IBLImageName = "Grid Lights";
-        //            ibl.Enable = true;
-        //            ibl.DisplayImage = false;
-        //            ibl.Rotation = rotation;
-        //            iblId = bkDict.SetAt(rtkey, ibl);
-        //            tr.AddNewlyCreatedDBObject(ibl, true);
-        //        //}
-        //        tr.Commit();
-        //        //string fmt = "._-render _custom Khepri _R {0} {1} _yes {2}\n";
-        //        //string s = String.Format(fmt, width, height, path);
-        //        //Document doc = Application.DocumentManager.MdiActiveDocument;
-        //        //doc.SendStringToExecute(s, false, false, false);
-        //        //dynamic ddoc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
-        //    }
-        //    object prevEXPVALUE = Application.GetSystemVariable("EXPVALUE");
-        //    Application.SetSystemVariable("EXPVALUE", exposure);
-        //    //object prevIBLVALUE = Application.GetSystemVariable("IBLENVIRONMENT");
-        //    //Application.SetSystemVariable("IBLENVIRONMENT", iblenv);
-        //    dynamic ddoc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
-        //    ddoc.SendCommand("_-RENDERPRESETS _custom Khepri\n");
-        //    ddoc.SendCommand("_RENDER\n");
-        //    Application.SetSystemVariable("EXPVALUE", prevEXPVALUE);
-        //    //Application.SetSystemVariable("IBLENVIRONMENT", prevIBLVALUE);
-        //    //            doc.Editor.Command("_-RENDERPRESETS", "_custom", "Khepri");
-        //    //          doc.Editor.Command("_RENDER");
-        //    //                ddoc.SendCommand(s);
-        //}
-
-        /*
-                public int MentalRayRender(int width, int height, string path, double exposure) {
-                    Version version = Application.Version;
-                    if (version.Major > 20 || (version.Major == 20 && version.Minor > 0)) { //MentalRay is hidden
-                        Application.SetSystemVariable("RENDERENGINE", 0);
-                    }
-                    string fmt = "._-render P _R {1} {2} _yes {3}\n";
-                    string s = String.Format(fmt, width, height, path);
-                    //Document doc = Application.DocumentManager.MdiActiveDocument;
-                    //doc.SendStringToExecute(s, false, false, false);
-                    dynamic doc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
-                    doc.SendCommand(s);
-                    return 1;
-                }
-
-                public void SetKhepriRapidRTRenderSettings(int renderLevel) {
-                    Document doc = Application.DocumentManager.MdiActiveDocument;
-                    using (doc.LockDocument())
-                    using (Transaction tr = doc.Database.TransactionManager.StartTransaction()) {
-                        DBDictionary namedObjs = tr.GetObject(doc.Database.NamedObjectsDictionaryId, OpenMode.ForRead) as DBDictionary;
-                        DBDictionary renderSettings;
-                        RapidRTRenderSettings renderSetting;
-                        if (namedObjs.Contains("ACAD_RENDER_RAPIDRT_SETTINGS")) {
-                            renderSettings = tr.GetObject(namedObjs.GetAt("ACAD_RENDER_RAPIDRT_SETTINGS"), OpenMode.ForWrite) as DBDictionary;
-                        } else {
-                            namedObjs.UpgradeOpen();
-                            renderSettings = new DBDictionary();
-                            namedObjs.SetAt("ACAD_RENDER_RAPIDRT_SETTINGS", renderSettings);
-                            tr.AddNewlyCreatedDBObject(renderSettings, true);
-                        }
-                        if (!renderSettings.Contains("Khepri")) {
-                            renderSetting = new RapidRTRenderSettings();
-                            renderSetting.Name = "Khepri";
-                            renderSetting.Description = "Khepri custom render settings";
-                            // Set renderer settings
-                            renderSetting.BackFacesEnabled = false;
-                            renderSetting.MaterialsEnabled = false;
-                            renderSetting.ShadowsEnabled = false;
-                            renderSetting.TextureSampling = false;
-                            // Set Rendering duration
-                            renderSetting.RenderTarget = RapidRTRenderTarget.Level;
-                            renderSetting.RenderLevel = 10;
-                            // Set rendering accuracy
-                            renderSetting.LightingModel = RapidRTLightingMode.Simplified;
-                            // Material rendering settings
-                            renderSetting.FilterHeight = 5;
-                            renderSetting.FilterWidth = 5;
-                            renderSetting.FilterType = RapidRTFilterType.Mitchell;
-                            renderSetting.DisplayIndex = 20;
-                            renderSettings.SetAt("Khepri", renderSetting);
-                            tr.AddNewlyCreatedDBObject(renderSetting, true);
-                        } else {
-                            renderSetting = tr.GetObject(renderSettings.GetAt("Khepri"), OpenMode.ForWrite) as RapidRTRenderSettings;
-                        }
-                        renderSetting.RenderLevel = renderLevel;
-                        tr.Commit();
-                    }
-                    // Set the new render preset MyPreset current
-                    doc.Editor.Command("_-RENDERPRESETS", "_custom", "Khepri");
-                }
-
-                public int RapidRTRender(int width, int height, string path, string quality, double exposure) {
-                    Version version = Application.Version;
-                    if (version.Major > 20 || (version.Major == 20 && version.Minor > 0)) { //RapidRT is the default
-                        Application.SetSystemVariable("RENDERENGINE", 1);
-                    }
-                    string fmt = "._-render {0} _R {1} {2} _yes {3}\n";
-                    string s = String.Format(fmt, quality, width, height, path);
-                    Application.SetSystemVariable("EXPVALUE", exposure);
-                    //Document doc = Application.DocumentManager.MdiActiveDocument;
-                    //doc.SendStringToExecute(s, false, false, false);
-                    dynamic doc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
-                    doc.SendCommand(s);
-                    return 1;
-                }
-
-                public int Render(int width, int height, string path, int levels, double exposure) {
-                    Version version = Application.Version;
-                    string fmt = "._-render {0} _R {1} {2} _yes {3}\n";
-                    string s = String.Format(fmt,
-                        (version.Major < 20 ||
-                         (version.Major == 20 && version.Minor == 0) ? "P" : quality),
-                        width, height, path);
-                    //Document doc = Application.DocumentManager.MdiActiveDocument;
-                    //doc.SendStringToExecute(s, false, false, false);
-                    Application.SetSystemVariable("RENDERTARGET", 0); //0 = by levels, 1 = by time
-                    //Application.SetSystemVariable("RENDERTIME", 0); //
-                    Application.SetSystemVariable("RENDERLEVEL", 25); //0 = by levels, 1 = by time
-                    Application.SetSystemVariable("SKYSTATUS", 2); //Sky background and illumination
-                    Application.SetSystemVariable("RENDERLIGHTCALC", 1); //Should we allow this as a parameter?
-                    Application.SetSystemVariable("EXPVALUE", exposure);
-                    dynamic doc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
-                    doc.SendCommand(s);
-                    return 1;
-                }
-                */
         public int Command(string cmd) {
             dynamic doc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
             doc.SendCommand(cmd);
             return 1;
         }
         private const int WM_SETREDRAW = 0x000B;
-
         public void DisableUpdate() {
-
             IntPtr handle = Application.MainWindow.Handle;
             NativeMethods.SendMessage(handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
-            //            LockWindowUpdate(handle);
-
-            //            Message msgSuspendUpdate = Message.Create(handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
-            //            NativeWindow window = NativeWindow.FromHandle(handle);
-            //            Application.MainWindow.UnmanagedWindow.DefWndProc(ref msgSuspendUpdate);
         }
 
         public void EnableUpdate() {
             IntPtr handle = Application.MainWindow.Handle;
             NativeMethods.SendMessage(handle, WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
-            //            LockWindowUpdate(IntPtr.Zero);
-
-            //            IntPtr handle = Application.MainWindow.Handle;
-            //            Message msgResumeUpdate = Message.Create(handle, WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
-            //            NativeWindow window = NativeWindow.FromHandle(handle);
-            //            window.DefWndProc(ref msgResumeUpdate);
             Application.UpdateScreen();
         }
 
@@ -1799,12 +1571,6 @@ namespace KhepriAutoCAD {
                 result &= p(sh);
                 return result;
         }
-        //       public bool IsCylinderP(Solid3d solid)
-        //       {
-        //           Acad3DSolid oSol = (Acad3DSolid)solid.AcadObject;
-        //           return oSol.SolidType.equals("Cylinder");
-        //       }
-        //       public bool IsCylinder(ObjectId id) => IsSolid3dAndSatisfies(id, IsCylinderP);
 
         //BIM operations
 
@@ -1828,9 +1594,6 @@ namespace KhepriAutoCAD {
         }
         public ObjectId CreateInstanceFromBlockNamedAtRotated(String name, Point3d c, double angle) =>
             CreateInstanceFromBlockNamed(name, new Frame3d(c, vpol(1, angle), vpol(1, angle + Math.PI / 2)));
-        //    CreateInstanceFromBlockNamed(
-        //        name,
-        //        Matrix3d.Displacement(c - Point3d.Origin) * Matrix3d.Rotation(angle, Vector3d.ZAxis, Point3d.Origin));
 
         public ObjectId CreateBlockInstance(ObjectId id, Frame3d frame) {
             Database db = doc.Database;
@@ -1840,9 +1603,6 @@ namespace KhepriAutoCAD {
         }
         public ObjectId CreateBlockInstanceAtRotated(ObjectId family, Point3d c, double angle) =>
             CreateBlockInstance(family, new Frame3d(c, vpol(1, angle), vpol(1, angle + Math.PI / 2)));
-        //    CreateBlockInstance(
-        //        family,
-        //        Matrix3d.Displacement(c - Point3d.Origin) * Matrix3d.Rotation(angle, Vector3d.ZAxis, Point3d.Origin));
 
         //Creating blocks
         String GenerateBlockName(BlockTable bt, String name) {
