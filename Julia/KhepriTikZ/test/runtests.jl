@@ -249,4 +249,21 @@ end
   #   end
   # end
 
+  # Visual regression tests
+  @testset "Visual Regression (TikZ)" begin
+    include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
+    using .VisualTests
+
+    run_visual_tests(tikz,
+      golden_dir = joinpath(@__DIR__, "golden"),
+      reset! = () -> begin
+        delete_all_shapes()
+        clear_tikz_buffer!(tikz)
+        backend(tikz)
+      end,
+      compare = text_compare,
+      skip = [:csg]
+    )
+  end
+
 end
