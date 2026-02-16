@@ -891,6 +891,18 @@ KhepriBase.b_render_and_save_view(b::POVRay, path::String) =
     end
   end
 
+# raw_view: .pov source output (skip POV-Ray rendering) — exact text comparison
+KhepriBase.b_raw_pathname(::POVRay, name) =
+  with(render_ext, ".pov") do
+    render_default_pathname(name)
+  end
+
+KhepriBase.b_raw_view(b::POVRay, path) =
+  begin
+    export_to_povray(b, path)
+    path
+  end
+
 KhepriBase.b_render_final_setup(b::POVRay, kind) =
   if kind == :white
     b.render_env = ClayEnvironment()

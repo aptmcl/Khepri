@@ -151,3 +151,13 @@ end
   end
 
 end
+
+# ── Visual regression tests ──────────────────────────────────────────
+include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
+using .VisualTests
+
+run_visual_tests(povray,
+  golden_dir = joinpath(@__DIR__, "golden"),
+  reset! = () -> begin delete_all_shapes(); backend(povray) end,
+  compare = text_compare,
+)
