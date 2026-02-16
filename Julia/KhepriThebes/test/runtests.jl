@@ -249,6 +249,23 @@ using Test
   # Clean up
   reset_thebes()
 
+  # Visual regression tests
+  @testset "Visual Regression (Thebes)" begin
+    include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
+    using .VisualTests
+
+    run_visual_tests(thebes,
+      golden_dir = joinpath(@__DIR__, "golden"),
+      reset! = () -> begin
+        reset_thebes()
+        delete_all_shapes()
+        backend(thebes)
+      end,
+      compare = text_compare,
+      skip = [:csg]
+    )
+  end
+
   # Conformance tests
   @testset "Backend Conformance (Thebes)" begin
     include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "BackendConformanceTests.jl"))
