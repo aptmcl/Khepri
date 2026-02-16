@@ -1499,6 +1499,12 @@ namespace KhepriAutoCAD {
             ddoc.SendCommand("_RENDER\n");
             Application.SetSystemVariable("EXPVALUE", prevEXPVALUE);
         }
+        public void SaveView(int width, int height, string path) {
+            CommitAndStartTransaction();
+            using (Bitmap bitmap = doc.CapturePreviewImage((uint)width, (uint)height)) {
+                bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            }
+        }
         public int Command(string cmd) {
             dynamic doc = Application.DocumentManager.MdiActiveDocument.GetAcadDocument();
             doc.SendCommand(cmd);
