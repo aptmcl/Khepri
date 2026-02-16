@@ -80,7 +80,6 @@ Whenever the plugin is updated, run this function and commit the plugin files.
 upgrade_plugin()
 =#
 
-
 autocad_version(path) =
   let doc = readxml(path),
       app_pkg = findfirst("//ApplicationPackage", doc)
@@ -444,6 +443,7 @@ public void SelectShapes(ObjectId[] ids)
 public void DeselectShapes(ObjectId[] ids)
 public void DeselectAllShapes()
 public void Render(int width, int height, string path, int renderLevel, string iblEnv, double rotation, double exposure)
+public void SaveView(int width, int height, string path)
 """
 
 abstract type ACADKey end
@@ -650,8 +650,16 @@ KhepriBase.b_get_material(b::ACAD, spec::AbstractString) =
     @remote(b, GetMaterialNamed("Global"))
   end
 
-KhepriBase.b_new_material(b::ACAD, path, color, specularity, roughness, transmissivity, transmitted_specular) =
-  @remote(b, CreateColoredMaterialNamed(path, color, specularity, transmissivity))
+KhepriBase.b_new_material(b::ACAD, name, base_color, metallic, specular, roughness,
+                           clearcoat, clearcoat_roughness, ior,
+                           transmission, transmission_roughness,
+                           emission_color, emission_strength,
+                           sheen_color, sheen_roughness,
+                           anisotropy, anisotropy_direction,
+                           ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
+                           post_lighting_color,
+                           absorption, micro_thickness, thickness) =
+  @remote(b, CreateColoredMaterialNamed(name, base_color, specular, transmission))
 
 const MaterialProjection = (InheritProjection=0, Planar=1, Box=2, Cylinder=3, Sphere=4)
 const MaterialTiling = (InheritTiling=0, Tile=1, Crop=2, Clamp=3, Mirror=4)
@@ -1024,6 +1032,9 @@ KhepriBase.b_zoom_extents(b::ACAD) =
 
 KhepriBase.b_set_view_top(b::ACAD) =
   @remote(b, ViewTop())
+
+KhepriBase.b_shot_view(b::ACAD, path::String) =
+  @remote(b, SaveView(render_width(), render_height(), path))
 
 # AutoCAD visual styles: Realistic, Conceptual, Wireframe, Hidden, Shaded,
 # ShadedWithEdges, ShadesOfGray, Sketchy, X-Ray, 2dWireframe
