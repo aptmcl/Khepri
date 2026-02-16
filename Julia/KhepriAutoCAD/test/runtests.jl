@@ -26,7 +26,6 @@ using Test
 
   @testset "Configuration parameters" begin
     @test KhepriAutoCAD.autocad_template isa KhepriBase.Parameter
-    @test isfile(KhepriAutoCAD.autocad_template()) || !isfile(KhepriAutoCAD.autocad_template())  # path may or may not exist
     @test KhepriAutoCAD.use_shx isa KhepriBase.Parameter
     @test use_shx() isa Bool
   end
@@ -53,5 +52,26 @@ using Test
     @test mt.Crop == 2
     @test mt.Clamp == 3
     @test mt.Mirror == 4
+  end
+
+  # Visual regression tests (require running AutoCAD with Khepri plugin on Windows)
+  if get(ENV, "KHEPRI_AUTOCAD_TESTS", "0") == "1"
+    if !Sys.iswindows()
+      error("AutoCAD visual tests require Windows. Run these tests from a native Windows Julia installation.")
+    end
+    @testset "Visual Regression (AutoCAD)" begin
+      include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
+      using .VisualTests
+
+      run_visual_tests(autocad,
+        golden_dir = joinpath(@__DIR__, "golden"),
+        reset! = () -> begin
+          delete_all_shapes()
+          backend(autocad)
+        end,
+        compare = pixel_diff_compare,
+        skip = Symbol[]
+      )
+    end
   end
 end
