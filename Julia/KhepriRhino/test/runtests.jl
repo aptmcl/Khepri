@@ -40,4 +40,25 @@ using Test
     @test isdefined(KhepriRhino, :RhinoLayerFamily)
     @test KhepriRhino.RhinoLayerFamily <: KhepriRhino.RhinoFamily
   end
+
+  # Visual regression tests (require running Rhino with Khepri plugin on Windows)
+  if get(ENV, "KHEPRI_RHINO_TESTS", "0") == "1"
+    if !Sys.iswindows()
+      error("Rhino visual tests require Windows. Run these tests from a native Windows Julia installation.")
+    end
+    @testset "Visual Regression (Rhino)" begin
+      include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
+      using .VisualTests
+
+      run_visual_tests(rhino,
+        golden_dir = joinpath(@__DIR__, "golden"),
+        reset! = () -> begin
+          delete_all_shapes()
+          backend(rhino)
+        end,
+        compare = pixel_diff_compare,
+        skip = Symbol[]
+      )
+    end
+  end
 end

@@ -1,7 +1,7 @@
 name = "KhepriRhino"
 uuid = "27da4253-bb12-40dc-baea-7a8a96820661"
-authors = ["António Menezes Leitão <antonio.menezes.leitao@gmail.com>"]
 version = "0.2.0"
+authors = ["António Menezes Leitão <antonio.menezes.leitao@gmail.com>"]
 
 [deps]
 ColorTypes = "3da002f7-5984-5a60-b8a6-cbb66c0b333f"
@@ -13,11 +13,13 @@ Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 [compat]
 ColorTypes = "0.11"
 KhepriBase = "0.7"
+PNGFiles = "0.4"
 Reexport = "0.2, 1.0"
 julia = "1.12"
 
 [extras]
+PNGFiles = "f57f5aa1-a3ce-4bc8-8ab9-96f992907883"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test"]
+test = ["Test", "PNGFiles"]
