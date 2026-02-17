@@ -24,6 +24,12 @@ vrotate(<0,0,1000000000>,<-Al,Az,0>)
 #include "transforms.inc"
 
 
+
+
+
+
+
+
 plane {<1.7567700000000004,-30.834400000000002,7.8561499999999995>, -10000 texture { pigment { color rgb <0,0,0> }}}
 camera {
   location <8.057, 9.5719, -23.2615>

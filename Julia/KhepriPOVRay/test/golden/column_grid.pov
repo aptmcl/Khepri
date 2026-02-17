@@ -28,10 +28,33 @@ vrotate(<0,0,1000000000>,<-Al,Az,0>)
 
 
 
-plane {<-0.983021,-1.284879,0.35200399999999993>, -10000 texture { pigment { color rgb <0,0,0> }}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+plane {<22.0,22.0,17.5>, -10000 texture { pigment { color rgb <0,0,0> }}}
 camera {
-  location <-0.498875, 0.681738, -0.825617>
-  look_at <0.484146, 0.329734, 0.459262>
+  location <30, 20, 30>
+  look_at <8, 2.5, 8>
   right x*image_width/image_height
   angle 39.59775270904986
 }
