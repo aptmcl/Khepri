@@ -64,9 +64,10 @@ decode(ns::Val{:RH}, t::Val{:Plane}, c::IO) =
 
 rhino_api = @remote_api :RH """
 public void RunScript(string script)
-public void SetView(Point3d position, Point3d target, double lens, bool perspective, string style)
-public void View(Point3d position, Point3d target, double lens)
-public void ViewTop()
+public void SetView(Point3d position, Point3d target, double lens)
+public void SetViewDisplayMode(string mode)
+public void SetViewTop()
+public void ViewSize(int width, int height)
 public Point3d ViewCamera()
 public Point3d ViewTarget()
 public double ViewLens()
@@ -477,25 +478,16 @@ rhino_default_material = RhinoDefaultMaterial
 KhepriBase.b_get_material(b::RH, mat::RhinoDefaultMaterial) =
   b_get_material(b, joinpath(@remote(b, DefaultMaterialsFolder()), mat.name*".rmtl"))
 
-KhepriBase.b_new_material(b::RH, name, color, specularity, roughness, transmissivity, transmitted_specular) =
-  Guid(@remote(b, new_material(path, convert(RGBA, color), specularity, roughness)) + 1)
-
-#=
-KhepriBase.b_new_material(b::RH, name,
-						  base_color,
-						  metallic, specular, roughness,
-	                 	  clearcoat, clearcoat_roughness,
-						  ior,
-						  transmission, transmission_roughness,
-	                 	  emission_color,
-						  emission_strength) =
-  @remote(b, new_material(name,
-  						  convert(RGBA, base_color),
-						  metallic, specular, roughness,
-  						  clearcoat, clearcoat_roughness,
-  				  		  ior,
-  				  		  transmission, transmission_roughness,
-						  convert(RGBA, emission_color), emission_strength))
+KhepriBase.b_new_material(b::RH, name, base_color, metallic, specular, roughness,
+                           clearcoat, clearcoat_roughness, ior,
+                           transmission, transmission_roughness,
+                           emission_color, emission_strength,
+                           sheen_color, sheen_roughness,
+                           anisotropy, anisotropy_direction,
+                           ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
+                           post_lighting_color,
+                           absorption, micro_thickness, thickness) =
+  Guid(@remote(b, new_material(name, convert(RGBA, base_color), specular, roughness)) + 1)
 
 KhepriBase.b_plastic_material(b::RH, name, color, roughness) =
   @remote(b, new_material(name, convert(RGBA, color), 0.0, 1.0, roughness, 0.0, 0.0, 1.4, 0.0, 0.0, RGBA(0.0, 0.0, 0.0, 1.0), 0.0))
@@ -508,7 +500,6 @@ KhepriBase.b_glass_material(b::RH, name, color, roughness, ior) =
 
 KhepriBase.b_mirror_material(b::RH, name, color) =
   @remote(b, new_mirror_material(name, convert(RGBA, color)))
-=#
 
 backend_map_division(b::RH, f::Function, s::Shape1D, n::Int) =
   let conn = connection(b),
@@ -803,7 +794,10 @@ KhepriBase.b_zoom_extents(b::RH) =
   @remote(b, ZoomExtents())
 
 KhepriBase.b_set_view_top(b::RH) =
-  @remote(b, ViewTop())
+  @remote(b, SetViewTop())
+
+KhepriBase.b_set_view_size(b::RH, width, height) =
+  @remote(b, ViewSize(width, height))
 
 # Rhino display modes: Wireframe, Shaded, Rendered, Ghosted, XRay, Technical, Artistic, Pen
 const rhino_display_modes = Dict(
@@ -969,6 +963,10 @@ KhepriBase.b_all_shapes_in_layer(b::RH, layer) =
 
 # Khepri render quality ranges from -1 to 1
 # Rhino render quality ranges from 0 to 3
+# -- shot_view: fast viewport capture (no ray-tracing) --
+KhepriBase.b_shot_view(b::RH, path::String) =
+  @remote(b, SaveView(render_width(), render_height(), path))
+
 KhepriBase.b_render_and_save_view(b::RH, path::String) =
   let kind = render_kind()
     if kind == :realistic
