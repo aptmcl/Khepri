@@ -1,30 +1,37 @@
-﻿using System;
-using System.Diagnostics;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+﻿using KhepriBase;
 using Rhino;
-using Rhino.Geometry;
-using Rhino.DocObjects;
-using Rhino.Display;
 using Rhino.Commands;
+using Rhino.Display;
+using Rhino.DocObjects;
+using Rhino.Geometry;
+using Rhino.Geometry.Intersect;
 using Rhino.Input;
-using KhepriBase;
 using Rhino.PlugIns;
 using Rhino.Render;
-using System.Threading;
-using Color = System.Drawing.Color;
-using Rhino.Runtime.InteropWrappers;
-using MatId = System.Int32;
-using System.IO;
-using System.Reflection;
-using Rhino.Geometry.Intersect;
-using static System.Net.Mime.MediaTypeNames;
 using Rhino.Render.Fields;
+using Rhino.Runtime.InteropWrappers;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using System.Windows.Forms;
+using static System.Net.Mime.MediaTypeNames;
+using Color = System.Drawing.Color;
+using MatId = System.Int32;
 
 namespace KhepriRhinoceros {
 
     class Primitives : KhepriBase.Primitives {
+
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+        const uint SWP_NOMOVE = 0x0002;
+        const uint SWP_NOZORDER = 0x0004;
 
         RhinoDoc doc;
 
@@ -137,7 +144,7 @@ namespace KhepriRhinoceros {
                 MaterialSource = ObjectMaterialSource.MaterialFromObject
             };
     
-        public void SetView(Point3d position, Point3d target, double lens, bool perspective, string mode) {
+        public void View(Point3d position, Point3d target, double lens, bool perspective) {
             RhinoView view = PerspectiveView();
             if (!view.Maximized) {
                 view.Maximized = true;
@@ -154,26 +161,23 @@ namespace KhepriRhinoceros {
             viewport.Camera35mmLensLength = lens;
             viewport.SetCameraLocation(position, false);
             viewport.SetCameraDirection(target - position, true);
-            //viewport.SetCameraTarget(target, false);
-            //viewport.DisplayMode = DisplayModeDescription.FindByName(mode);
             view.Redraw();
         }
-        public void View(Point3d position, Point3d target, double lens) => SetView(position, target, lens, true, "Shaded");
-        public void ViewTop() {
-            RhinoView view = doc.Views.Find("Top", true);
-            if (view != null) {
-                view.Maximized = true;
-                view.Redraw();
-            } else {
-                view = doc.Views.ActiveView;
-                view.Maximized = true;
-                RhinoViewport viewport = view.ActiveViewport;
-                viewport.ChangeToParallelProjection(true);
-                viewport.SetCameraLocation(new Point3d(0, 0, 1), false);
-                viewport.SetCameraTarget(Point3d.Origin, false);
-                viewport.CameraUp = Vector3d.YAxis;
-                view.Redraw();
-            }
+        public void SetView(Point3d position, Point3d target, double lens) => View(position, target, lens, true);
+        public void SetViewTop() {
+            RhinoView view = doc.Views.Find("Top", true) ?? doc.Views.ActiveView;
+            view.Maximized = true;
+            RhinoViewport viewport = view.ActiveViewport;
+            viewport.ChangeToParallelProjection(true);
+            viewport.SetCameraLocation(new Point3d(0, 0, 1), false);
+            viewport.SetCameraTarget(Point3d.Origin, false);
+            viewport.CameraUp = Vector3d.YAxis;
+            view.Redraw();
+        }
+        public void SetViewDisplayMode(string mode) =>
+            doc.Views.ActiveView.ActiveViewport.DisplayMode = DisplayModeDescription.FindByName(mode);
+        public void ViewSize(int width, int height) {
+            SetWindowPos(RhinoApp.MainApplicationWindow, IntPtr.Zero, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER);
         }
 
         RhinoView PerspectiveView() =>
@@ -628,8 +632,8 @@ namespace KhepriRhinoceros {
                 }
                 return pts;
             }
-
-    public Guid JoinCurves(Guid[] ids) {
+    */
+        public Guid JoinCurves(Guid[] ids) {
             PolyCurve curve = new PolyCurve();
             foreach (Guid id in ids) {
                 Curve crv = ((Curve)doc.Objects.Find(id).Geometry);
@@ -752,7 +756,7 @@ namespace KhepriRhinoceros {
                                          native_ref_or_union(i_refs))
             else:
                 raise RuntimeError('Continue this')
-
+        */
 
         public Brep Loft(RhinoObject[] profiles, RhinoObject[] rails, bool ruled, bool closed) {
             double tol = doc.ModelAbsoluteTolerance;
