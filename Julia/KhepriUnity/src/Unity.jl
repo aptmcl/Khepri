@@ -118,6 +118,7 @@ public bool WasCanceled()
 public ObjectId[] GetAllShapes()
 public ObjectId[] GetAllShapesInLayer(ObjectId layerId)
 public void SetResolution(int width, int height)
+public void ViewSize(int width, int height)
 public void ScreenShot(String path)
 public void SelectGameObjects(GameObject[] objs)
 public void StartSelectingGameObject()
@@ -147,6 +148,7 @@ public void ResetSimulation()
 public void UpdateNavMesh()
 public void SetSimRandSeed(int seed)
 public void SetNavMeshArea(GameObject obj, int area)
+public void SetTag(GameObject obj, String tag)
 public void RunSimulation(float maxTime)
 """
 
@@ -510,6 +512,9 @@ zoom_extents(b::Unity) = @remote(b, ZoomExtents())
 
 view_top(b::Unity) = @remote(b, ViewTop())
 
+KhepriBase.b_set_view_size(b::Unity, width, height) =
+  @remote(b, ViewSize(width, height))
+
 KhepriBase.b_delete_refs(b::Unity, refs::Vector{UnityId}) =
   @remote(b, DeleteMany(refs))
 
@@ -729,6 +734,9 @@ KhepriBase.b_enable_nav_mesh_tagging(b::Unity, enable) =
 # area=0 is Walkable, area=1 is Not Walkable (Unity NavMesh area indices)
 KhepriBase.b_set_nav_mesh_area(b::Unity, shape, area) =
   @remote(b, SetNavMeshArea(ref_value(b, shape), area))
+
+set_tag(b::Unity, shape, tag) =
+  @remote(b, SetTag(ref_value(b, shape), tag))
 
 KhepriBase.b_update_nav_mesh(b::Unity) =
   @remote(b, UpdateNavMesh())
