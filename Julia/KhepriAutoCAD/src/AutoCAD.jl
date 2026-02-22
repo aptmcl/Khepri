@@ -260,14 +260,18 @@ public Entity NGon(Point3d[] pts, Point3d pivot, int smoothLevel, ObjectId matId
 public Entity SurfacePolygon(Point3d[] pts, ObjectId matId)
 public Entity SurfacePolygonWithHoles(Point3d[] outer, Point3d[][] inners, ObjectId matId)
 public Entity RegionWithHoles(Point3d[][] ptss, bool[] smooths, ObjectId matId)
+public Entity RegionCircleWithHoles(Point3d[] centers, Vector3d[] normals, double[] radii, ObjectId matId)
 public Entity PrismWithHoles(Point3d[][] ptss, bool[] smooths, Vector3d dir, ObjectId matId)
 public void SetLengthUnit(String unit)
 public void SetView(Point3d position, Point3d target, double lens, bool perspective, string style)
+public void SetViewCamera(Point3d position, Point3d target, double lens)
+public void SetViewStyle(string style)
 public void View(Point3d position, Point3d target, double lens)
 public void ViewTop()
 public Point3d ViewCamera()
 public Point3d ViewTarget()
 public double ViewLens()
+public void ViewSize(int width, int height)
 public ObjectId GetMaterialNamed(String Name)
 public ObjectId CreateMaterialNamed(String name, String textureMapPath, double uScale, double vScale, double uOffset, double vOffset, int projection, int uTiling, int vTiling, Color diffuseColor, double refractionIndex, double opacity, double reflectivity, double translucence, int illuminationModel)
 public ObjectId CreateColoredMaterialNamed(String name, Color color, double reflectivity, double translucence)
@@ -443,6 +447,8 @@ public void SelectShapes(ObjectId[] ids)
 public void DeselectShapes(ObjectId[] ids)
 public void DeselectAllShapes()
 public void Render(int width, int height, string path, int renderLevel, string iblEnv, double rotation, double exposure)
+public void SetupTestView()
+public void TeardownTestView()
 public void SaveView(int width, int height, string path)
 """
 
@@ -556,6 +562,27 @@ KhepriBase.b_surface_polygon(b::ACAD, ps, mat) =
 
 KhepriBase.b_surface_polygon_with_holes(b::ACAD, ps, qss, mat) =
   @remote(b, RegionWithHoles([ps, qss...], falses(1 + length(qss)), mat))
+
+KhepriBase.b_surface_polygon_with_holes(b::ACAD, ps, qss, smooths, mat) =
+  @remote(b, RegionWithHoles([ps, qss...], smooths, mat))
+
+KhepriBase.b_surface(b::ACAD, region::Region, mat) =
+  let paths = region.paths
+    if all(p -> p isa CircularPath, paths)
+      @remote(b, RegionCircleWithHoles(
+        [p.center for p in paths],
+        [vz(1, p.center.cs) for p in paths],
+        [p.radius for p in paths],
+        mat))
+    else
+      b_surface_polygon_with_holes(
+        b,
+        path_vertices(outer_path(region)),
+        [reverse(path_vertices(path)) for path in inner_paths(region)],
+        BitVector([is_smooth_path(path) for path in paths]),
+        mat)
+    end
+  end
 
 KhepriBase.b_surface_closed_spline(b::ACAD, ps, mat) =
   @remote(b, SurfaceFromCurves([@remote(b, InterpClosedSpline(path.vertices))], mat))
@@ -1022,7 +1049,7 @@ KhepriBase.b_table_and_chairs(b::ACAD, c, angle, family) =
 #   @remote(b, BoundingBox(ref_values(shapes)))
 
 KhepriBase.b_set_view(b::ACAD, camera::Loc, target::Loc, lens::Real, aperture::Real) =
-  @remote(b, View(camera, target, lens))
+  @remote(b, SetViewCamera(camera, target, lens))
 
 KhepriBase.b_get_view(b::ACAD) =
   @remote(b, ViewCamera()), @remote(b, ViewTarget()), @remote(b, ViewLens())
@@ -1033,8 +1060,20 @@ KhepriBase.b_zoom_extents(b::ACAD) =
 KhepriBase.b_set_view_top(b::ACAD) =
   @remote(b, ViewTop())
 
+KhepriBase.b_set_view_size(b::ACAD, width, height) =
+  @remote(b, ViewSize(width, height))
+
+KhepriBase.b_setup_raw_view(b::ACAD) = begin
+  b_set_view_size(b, render_width(), render_height())
+  b_view_settings(b; visual_style=:wireframe)
+end
+
 KhepriBase.b_shot_view(b::ACAD, path::String) =
   @remote(b, SaveView(render_width(), render_height(), path))
+
+setup_test_view(b::ACAD) = (@remote(b, SetupTestView()); b_setup_raw_view(b))
+teardown_test_view(b::ACAD) = @remote(b, TeardownTestView())
+export setup_test_view, teardown_test_view
 
 # AutoCAD visual styles: Realistic, Conceptual, Wireframe, Hidden, Shaded,
 # ShadedWithEdges, ShadesOfGray, Sketchy, X-Ray, 2dWireframe
@@ -1053,9 +1092,8 @@ const acad_visual_styles = Dict(
 KhepriBase.b_view_settings(b::ACAD; visual_style::Symbol=:conceptual) =
   let style = get(acad_visual_styles, visual_style) do
         error("Unknown AutoCAD visual style: $visual_style. Options: $(join(keys(acad_visual_styles), ", "))")
-      end,
-      (camera, target, lens) = b_get_view(b)
-    @remote(b, SetView(camera, target, lens, true, style))
+      end
+    @remote(b, SetViewStyle(style))
   end
 
 KhepriBase.b_realistic_sky(b::ACAD, date, latitude, longitude, elevation, meridian, turbidity, sun) =

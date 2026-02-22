@@ -5,7 +5,6 @@
 # require a running AutoCAD instance with the Khepri plugin.
 
 using KhepriAutoCAD
-using KhepriBase
 using Test
 
 @testset "KhepriAutoCAD.jl" begin
@@ -63,15 +62,19 @@ using Test
       include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
       using .VisualTests
 
-      run_visual_tests(autocad,
-        golden_dir = joinpath(@__DIR__, "golden"),
-        reset! = () -> begin
-          delete_all_shapes()
-          backend(autocad)
-        end,
-        compare = pixel_diff_compare,
-        skip = Symbol[]
-      )
+      setup_test_view(autocad)
+      try
+        run_visual_tests(autocad,
+          golden_dir = joinpath(@__DIR__, "golden"),
+          reset! = () -> begin
+            delete_all_shapes()
+            backend(autocad)
+          end,
+          compare = pixel_diff_compare,
+          skip = Symbol[])
+      finally
+        teardown_test_view(autocad)
+      end
     end
   end
 end
