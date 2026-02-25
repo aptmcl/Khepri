@@ -138,7 +138,7 @@ public int CreateSimGoal(Vector3 pos, Vector3 scale, float rot)
 public void CreateSimAgent(Vector3 pos, float rot, int rgb, int[] goalIDs)
 public void SpawnAgentsRect(int count, Vector3 center, float dx, float dz, float rot, int rgb, int[] goalIDs)
 public void SpawnAgentsEllipse(int count, Vector3 center, float dx, float dz, float rot, int rgb, int[] goalIDs)
-public void SpawnAgentsPolygon(int count, int rgb, int[] goalIDs, Vector3[] vertices)
+public void SpawnAgentsPolygon(int count, float h, int rgb, int[] goalIDs, Vector3[] vertices)
 public void StartSimulation(float maxTime)
 public void SetSimulationSpeed(float speed)
 public bool IsSimulationFinished()
@@ -630,6 +630,12 @@ Khepri.create_block("Foo", [circle(radius=r) for r in 1:10])
 
 KhepriBase.b_pointlight(b::Unity, loc::Loc, color::RGB, intensity::Real, range::Real) =
     @remote(b, PointLight(loc, color, range, intensity))
+
+KhepriBase.b_ieslight(b::Unity, file, loc, dir, alpha, beta, gamma) =
+    @remote(b, PointLight(loc, rgb(1, 1, 1), 10.0, 1500.0))
+
+KhepriBase.b_arealight(b::Unity, loc, dir, size, energy, color) =
+    @remote(b, PointLight(loc, color, 10.0, energy))
 #=
 backend_spotlight(b::Unity, loc::Loc, dir::Vec, hotspot::Real, falloff::Real) =
     @remote(b, SpotLight(loc, hotspot, falloff, loc + dir))
@@ -790,8 +796,8 @@ KhepriBase.b_spawn_agents_rect(b::Unity, count, center, dx, dz, rot, goal_ids, c
 KhepriBase.b_spawn_agents_ellipse(b::Unity, count, center, dx, dz, rot, goal_ids, color) =
   @remote(b, SpawnAgentsEllipse(count, center, dx, dz, rot, color, Int32.(goal_ids)))
 
-KhepriBase.b_spawn_agents_polygon(b::Unity, count, vertices, goal_ids, color) =
-  @remote(b, SpawnAgentsPolygon(count, color, Int32.(goal_ids), vertices))
+KhepriBase.b_spawn_agents_polygon(b::Unity, count, h, vertices, goal_ids, color) =
+  @remote(b, SpawnAgentsPolygon(count, h, color, Int32.(goal_ids), vertices))
 
 # Simulation control
 KhepriBase.b_start_simulation(b::Unity, max_time) =
