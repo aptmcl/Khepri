@@ -1296,6 +1296,9 @@ KhepriBase.b_spotlight(b::ACAD, loc, dir, hotspot, falloff) =
 KhepriBase.b_ieslight(b::ACAD, file, loc, dir, alpha, beta, gamma) =
   @remote(b, IESLight(file, loc, loc + dir, vxyz(alpha, beta, gamma)))
 
+KhepriBase.b_arealight(b::ACAD, loc, dir, size, energy, color) =
+  @remote(b, PointLight(loc, color, energy))
+
 # User Selection
 
 KhepriBase.b_create_shape_from_ref_value(b::ACAD, r) = 
