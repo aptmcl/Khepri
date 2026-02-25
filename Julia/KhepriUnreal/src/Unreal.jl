@@ -114,6 +114,7 @@ public AActor Primitive::CreateParent(String name)
 public int Primitive::HighlightRefs(TArray<AActor> actors)
 public int Primitive::UnhighlightRefs(TArray<AActor> actors)
 public int Primitive::UnhighlightAllRefs()
+public int Primitive::ViewSize(int width, int height)
 """
 
 #=============================================================================
@@ -416,6 +417,12 @@ KhepriBase.b_pointlight(b::UE, loc, energy, color) =
 KhepriBase.b_spotlight(b::UE, loc, dir, hotspot, falloff) =
   @remote(b, Primitive__Spotlight(loc, dir, rgb(1, 1, 1), 10.0 * ue_scale, 1500.0, hotspot, falloff))
 
+KhepriBase.b_ieslight(b::UE, file, loc, dir, alpha, beta, gamma) =
+  @remote(b, Primitive__Spotlight(loc, dir, rgb(1, 1, 1), 10.0 * ue_scale, 1500.0, pi/4, pi/3))
+
+KhepriBase.b_arealight(b::UE, loc, dir, size, energy, color) =
+  @remote(b, Primitive__PointLight(loc, color, 10.0 * ue_scale, energy))
+
 #=============================================================================
  View and Rendering
 ==============================================================================#
@@ -430,6 +437,9 @@ KhepriBase.b_get_view(b::UE) =
 
 KhepriBase.b_zoom_extents(b::UE) =
   @remote(b, Primitive__ZoomExtents())
+
+KhepriBase.b_set_view_size(b::UE, width, height) =
+  @remote(b, Primitive__ViewSize(width, height))
 
 KhepriBase.b_render_and_save_view(b::UE, path::String) =
   let dir = dirname(path),
