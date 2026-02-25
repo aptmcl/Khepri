@@ -23,6 +23,15 @@ KhepriUnity is a **SocketBackend** using the `:CS` (C#) binary protocol. It hand
 - **Material families**: `UnityMaterialFamily` mapping to Unity material paths
 - **Fast mode**: `fast_unity()` for optimized bulk geometry transfer
 - **Game objects**: Direct creation and manipulation of Unity GameObjects
+- **Lighting**: Point lights, IES lights (approximated), and area lights (approximated)
+
+## Lighting Support
+
+| Light Type | Implementation |
+|------------|---------------|
+| `pointlight` | Native Unity `PointLight` |
+| `ieslight` | Approximated as Unity `PointLight` |
+| `arealight` | Approximated as Unity `PointLight` |
 
 ## Setup
 
