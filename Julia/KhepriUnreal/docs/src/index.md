@@ -21,7 +21,7 @@ KhepriUnreal is a **SocketBackend** using the `:CPP` (C++) binary protocol. It h
 - **CSG via BSP**: Boolean union and subtraction through Unreal's BSP system
 - **BIM elements**: Walls, slabs, beams, panels, tables, chairs via `InstantiateBIMElement`
 - **Fast mode**: `fast_unreal()` for optimized bulk geometry transfer
-- **Lighting**: Point lights and spotlights with physically-based parameters
+- **Lighting**: Point lights, spotlights, IES lights (approximated as spotlights), and area lights (approximated as point lights)
 
 ## Setup
 
