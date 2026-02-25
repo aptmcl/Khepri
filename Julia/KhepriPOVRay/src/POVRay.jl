@@ -755,6 +755,12 @@ KhepriBase.b_pointlight(b::POVRay, loc::Loc, color::RGB, intensity::Real, range:
   # assume 1500 candela intensity as default
   write_povray_pointlight(connection(b), loc, rgb(red(color)*intensity/1500, green(color)*intensity/1500, blue(color)*intensity/1500))
 
+KhepriBase.b_ieslight(b::POVRay, file, loc, dir, alpha, beta, gamma) =
+  write_povray_pointlight(connection(b), loc, rgb(1, 1, 1))
+
+KhepriBase.b_arealight(b::POVRay, loc, dir, size, energy, color) =
+  write_povray_pointlight(connection(b), loc, color)
+
 export povray_family_materials
 
 povray_family_materials(m1, m2=m1, m3=m2, m4=m3) = (materials=(m1, m2, m3, m4), )
