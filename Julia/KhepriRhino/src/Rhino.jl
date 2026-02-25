@@ -779,13 +779,16 @@ KhepriBase.b_spotlight(b::RH, loc, dir, hotspot, falloff) =
 KhepriBase.b_ieslight(b::RH, file, loc, dir, alpha, beta, gamma) =
   @remote(b, IESLight(file, loc, loc + dir, vxyz(alpha, beta, gamma)))
 
+KhepriBase.b_arealight(b::RH, loc, dir, size, energy, color) =
+  @remote(b, PointLight(loc, color, energy))
+
 ############################################
 
 # KhepriBase.b_bounding_box(b::RH, shapes::Shapes) =
 #   @remote(b, BoundingBox(ref_values(b, shapes)))
 
 KhepriBase.b_set_view(b::RH, camera, target, lens, aperture) =
-  @remote(b, View(camera, target, lens))
+  @remote(b, SetView(camera, target, lens))
 
 KhepriBase.b_get_view(b::RH) =
   @remote(b, ViewCamera()), @remote(b, ViewTarget()), @remote(b, ViewLens())
@@ -799,23 +802,28 @@ KhepriBase.b_set_view_top(b::RH) =
 KhepriBase.b_set_view_size(b::RH, width, height) =
   @remote(b, ViewSize(width, height))
 
+KhepriBase.b_setup_raw_view(b::RH) = begin
+  b_set_view_size(b, render_width(), render_height())
+  b_view_settings(b; visual_style=:shaded)
+end
+
 # Rhino display modes: Wireframe, Shaded, Rendered, Ghosted, XRay, Technical, Artistic, Pen
 const rhino_display_modes = Dict(
   :wireframe => "Wireframe",
   :shaded => "Shaded",
   :rendered => "Rendered",
+  :realistic => "Rendered",
   :ghosted => "Ghosted",
   :xray => "XRay",
   :technical => "Technical",
   :artistic => "Artistic",
   :pen => "Pen")
 
-KhepriBase.b_view_settings(b::RH; display_mode::Symbol=:shaded) =
+KhepriBase.b_view_settings(b::RH; visual_style::Symbol=:shaded, display_mode::Symbol=visual_style) =
   let mode = get(rhino_display_modes, display_mode) do
         error("Unknown Rhino display mode: $display_mode. Options: $(join(keys(rhino_display_modes), ", "))")
-      end,
-      (camera, target, lens) = b_get_view(b)
-    @remote(b, SetView(camera, target, lens, true, mode))
+      end
+    @remote(b, SetViewDisplayMode(mode))
   end
 
 KhepriBase.b_delete_refs(b::RH, refs::Vector{RHId}) =
