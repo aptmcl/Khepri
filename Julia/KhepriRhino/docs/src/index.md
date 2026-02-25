@@ -21,6 +21,7 @@ KhepriRhino is a **SocketBackend** using the `:CS` (C#) binary protocol. Shape r
 - **Material library**: Version-aware loading from Rhino's built-in material folders (Rhino 5 vs 6+)
 - **Grasshopper integration**: Enable/disable/run the Grasshopper solver from Julia
 - **Rendering modes**: Realistic, clay (white/black variants), HDRi environments
+- **Lighting**: Point lights, spotlights, IES photometric lights, and area lights (approximated as point lights)
 - **Layer families**: Layer management via `RhinoLayerFamily`
 - **Sweep and thickening**: Advanced surface operations
 
