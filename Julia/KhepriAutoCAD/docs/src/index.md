@@ -20,6 +20,7 @@ KhepriAutoCAD is a **SocketBackend** using the `:CS` (C#) binary protocol. The J
 - **Dimension styles**: Architectural (`_ARCHTICK`) and mechanical dimension formats
 - **Material system**: Fine-grained control via `AutoCADBasicMaterial` with projection and tiling modes
 - **BIM elements**: Walls, floors, doors, windows, tables, chairs
+- **Lighting**: Point lights, spotlights, IES photometric lights, and area lights (approximated as point lights)
 - **User selection**: Interactive pick of positions, points, curves, surfaces, and solids
 - **Plugin auto-update**: Automatic deployment of C# plugin DLLs
 - **SHX fonts**: Optional SHX text rendering via the `use_shx` parameter
