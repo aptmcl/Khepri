@@ -250,6 +250,7 @@ public void SetView(XYZ camera, XYZ target, int width, int height, double lens)
 public XYZ GetCamera()
 public XYZ GetTarget()
 public double GetLens()
+public void ViewSize(int width, int height)
 public void RenderView(string path)
 public void EnergyAnalysis()
 public ElementId CreatePolygonalCeiling(XYZ[] pts, ElementId levelId)
@@ -274,6 +275,10 @@ const RVTVoidId = RVTId(-1)
 KhepriBase.void_ref(b::RVT) = RVTVoidId
 
 KhepriBase.has_boolean_ops(::Type{RVT}) = HasBooleanOps{true}()
+
+# SocketBackend has no current_layer field; override to avoid field-access crash
+KhepriBase.b_current_layer_ref(b::RVT) = nothing
+KhepriBase.b_current_layer_ref(b::RVT, layer) = nothing
 
 const to_feet = 3.28084 # In most cases, the plugin accepts SI
 #
@@ -783,10 +788,11 @@ KhepriBase.b_set_view(b::RVT, camera::Loc, target::Loc, lens::Real, aperture::Re
 KhepriBase.b_get_view(b::RVT) =
   @remote(b, GetCamera()), @remote(b, GetTarget()), @remote(b, GetLens())
 
+KhepriBase.b_set_view_size(b::RVT, width, height) =
+  @remote(b, ViewSize(width, height))
+
 KhepriBase.b_render_and_save_view(b::RVT, path::String) =
   @remote(b, RenderView(path))
-
-
 
 zoom_extents(b::RVT) = @remote(b, ZoomExtents())
 
