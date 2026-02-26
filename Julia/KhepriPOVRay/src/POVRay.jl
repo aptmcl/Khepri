@@ -822,6 +822,7 @@ povray_environment_string(b::POVRay, env::ClayEnvironment) =
 
 export_to_povray(b::POVRay, path::String) =
   let buf = connection(b)
+    take!(buf)
     realize_shapes(b)
     open(path, "w") do out
       # write the sky
@@ -838,11 +839,7 @@ export_to_povray(b::POVRay, path::String) =
         write_povray_object(out, "plane", material_ref(b, b.ground_material), :y, b.ground_level)
       end
       # write the objects
-      let str = String(take!(buf))
-        #save again
-        println(buf, str)
-        write(out, str)
-      end
+      write(out, String(take!(buf)))
       let v = in_world(b.view.camera - b.view.target)
         println(out, "plane {<$(v.x),$(v.y),$(v.z)>, -10000 texture { pigment { color rgb <0,0,0> }}}")
       end
@@ -913,11 +910,11 @@ KhepriBase.b_render_final_setup(b::POVRay, kind) =
   if kind == :white
     b.render_env = ClayEnvironment()
     b.ground_level = 0
-    b.ground_material = material("Ground", povray=>povray_definition("Ground", "texture", "{ pigment { color rgb 3 } finish { reflection 0 ambient 0 }}"))
+    b.ground_material = material("Ground", POVRay=>povray_definition("Ground", "texture", "{ pigment { color rgb 3 } finish { reflection 0 ambient 0 }}"))
   elseif kind == :black
     error("Finish this")
   elseif kind == :realistic
     b.render_env = RealisticSkyEnvironment(5, true)
     b.ground_level = 0
-    b.ground_material = material("Ground", povray=>povray_gray_ground)
+    b.ground_material = material("Ground", POVRay=>povray_gray_ground)
   end
