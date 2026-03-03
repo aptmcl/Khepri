@@ -1,0 +1,285 @@
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using UnityEngine;
+using Unity.AI.Navigation;
+using UnityEngine.Events;
+using UnityEngine.AI;
+
+namespace KhepriUnity {
+
+    public class SystemManager : MonoBehaviour, IAgentRegistry {
+        public static SystemManager instance = null;
+        public static UniqueID uniqueID = new UniqueID();
+        public static string agentTag = "Agent";
+        public static string obstacleTag = "Obstacle";
+        public UnityEvent OnSimulationReset = new UnityEvent();
+
+        [Header("Simulation Properties")]
+        public float simulationSpeed = 1f;
+        public GameObject agent;
+        public GameObject goal;
+
+        private List<Agent_> agentsList = new List<Agent_>();
+        public static Dictionary<int, Goal_> goalsList = new Dictionary<int, Goal_>();
+        private NavMeshSurface navMeshSurface;
+        private float maxSimTime = 0;
+        private float simTime = 0;
+
+        // NavMesh query caching for performance (initialized in Awake —
+        // NavMeshPath constructor is not allowed in field initializers)
+        private NavMeshPath _cachedPath;
+        private Dictionary<(Vector3 start, int goalId), (float distance, float timestamp)> _distanceCache;
+
+        private bool isActive = false;
+        public static bool isFinished = false;
+        public static bool timeOut = false;
+
+        private int expectedAgentCount = 0;
+        private int currentAgentCount = 0;
+        private bool isReady = false;
+
+        private List<Agent_> pendingDestruction = new List<Agent_>();
+
+        private void Awake() {
+            if (instance == null)
+            {
+                instance = this;
+                navMeshSurface = GetComponent<NavMeshSurface>();
+                _cachedPath = new NavMeshPath();
+                _distanceCache = new Dictionary<(Vector3, int), (float, float)>();
+            }
+            else if (instance != this)
+            {
+                Destroy(gameObject);
+            }
+        }
+
+        private void FixedUpdate()
+        {
+            if (isActive) {
+                Time.timeScale = simulationSpeed;
+                float dt = Time.fixedDeltaTime;
+
+                foreach (Agent_ agent in agentsList) 
+                {
+                    agent.UpdateAgent(dt);
+                }
+
+                SimMetrics.UpdateMetric(Time.fixedDeltaTime);
+                simTime += dt;
+
+                DestroyPendingAgents();
+
+                if (simTime >= maxSimTime) 
+                {
+                    timeOut = true;
+                    OnSimulationEnded();
+                }
+            }
+        }
+
+        public void SetAgentCount(int count)
+        {
+            expectedAgentCount = count;
+            Debug.Log(expectedAgentCount);
+            currentAgentCount = 0;
+            isReady = false;
+        }
+
+        public int AddGoal(
+            Vector3 pos, // goal center coordinates
+            Vector3 scale, // scale in each axis
+            float rot) // rotation in degrees TODO: overload with radians
+        {
+            GameObject goalInstance = Instantiate(goal, pos, Quaternion.Euler(0, rot, 0));
+            goalInstance.transform.localScale = scale;
+            Goal_ goal_ = goalInstance.GetComponent<Goal_>();
+            int goalID = goal_.GenerateID();
+            goalsList.Add(goalID, goal_);
+            goalInstance.SetActive(true);
+            return goalID;
+        }
+
+        public Transform GetGoalPosition(int goalID) 
+        {
+            return goalID != -1 ? goalsList[goalID].transform : null;
+        }
+
+        public bool IsPosAvailable(Vector3 pos, float radius)
+        {
+            foreach (Agent_ a in agentsList)
+            {
+                if ((a.transform.position - pos).sqrMagnitude < radius * radius)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        public void InstantiateAgent(Vector3 pos, float rotation, Color color, IMovement movement, List<Goal_> goals) 
+        {
+            GameObject agentInstance = Instantiate(agent, pos, Quaternion.Euler(0, rotation, 0));
+            Agent_ agent_ = agentInstance.GetComponent<Agent_>();
+            agent_.allGoals = goals;
+            agent_.AssignGoal();
+            agent_.color = color;
+            agent_.baseMovement = movement;
+            agent_.baseMovement.SetAgent(agent_);
+            agent_.k = UnityEngine.Random.Range(0.2f, 3.0f);
+            agent_.GenerateID();
+            agentInstance.SetActive(true);
+
+            currentAgentCount++;
+            if (currentAgentCount >= expectedAgentCount)
+            {
+                agentsList.Sort((a, b) => a.agentID.CompareTo(b.agentID));
+                isReady = true;
+                Debug.Log("All agents spawned and have goals. Ready to simulate.");
+            }
+        }
+
+        public void AddAgent(Agent_ agent) 
+        {
+            agentsList.Add(agent);
+        }
+
+        public void RemoveAgent(Agent_ agent) {
+            agentsList.Remove(agent);
+            
+            foreach (Agent_ a in agentsList) 
+            {
+                a.RemoveNearbyAgent(agent);
+            }
+
+            if (agentsList.Count == 0) 
+            {
+                OnSimulationEnded();
+            }
+        }
+
+        public IReadOnlyList<Agent_> GetAgents() {
+            return agentsList.AsReadOnly();
+        }
+
+        // IAgentRegistry interface method - delegates to GetDistance
+        /*public float GetDistanceToGoal(Vector3 position, int goalId) {
+            return GetDistance(position, goalId);
+        }*/
+
+        private void OnSimulationEnded() 
+        {
+            isActive = false;
+            isFinished = true;
+            isReady = false;
+            simTime = 0;
+        }
+
+        public void UpdateNavMesh() {
+            navMeshSurface.navMeshData = null;
+            navMeshSurface.BuildNavMesh();
+        }
+
+        public bool IsPointOnNavMesh(Vector3 point, float maxDistance = 50f)
+        {
+            NavMeshHit hit;
+            bool isOnNavMesh = NavMesh.SamplePosition(point, out hit, maxDistance, NavMesh.AllAreas);
+            if ((point - new Vector3(hit.position.x, hit.position.y, hit.position.z)).sqrMagnitude < 0.01f)
+            {
+                return true;
+            }
+            return false;
+        }
+
+        /*public float GetDistance(Vector3 start, int goalID) {
+            if (goalID == -1 || !goalsList.ContainsKey(goalID)) {
+                return float.MaxValue;
+            }
+
+            // Round position for cache key (reduces cache misses for similar positions)
+            float tolerance = KhepriConstants.NAVMESH_POSITION_TOLERANCE;
+            Vector3 roundedStart = new Vector3(
+                Mathf.Round(start.x / tolerance) * tolerance,
+                Mathf.Round(start.y / tolerance) * tolerance,
+                Mathf.Round(start.z / tolerance) * tolerance
+            );
+
+            var cacheKey = (roundedStart, goalID);
+            float currentTime = Time.time;
+
+            // Check cache for valid entry
+            if (_distanceCache.TryGetValue(cacheKey, out var cached)) {
+                if (currentTime - cached.timestamp < KhepriConstants.NAVMESH_CACHE_VALIDITY_SECONDS) {
+                    return cached.distance;
+                }
+            }
+
+            Vector3 end = goalsList[goalID].transform.position;
+
+            // Reuse cached path object instead of allocating new one
+            if (NavMesh.CalculatePath(start, end, NavMesh.AllAreas, _cachedPath)) {
+                float totalDistance = 0.0f;
+
+                for (int i = 1; i < _cachedPath.corners.Length; i++) {
+                    totalDistance += Vector3.Distance(_cachedPath.corners[i - 1], _cachedPath.corners[i]);
+                }
+
+                // Store in cache
+                _distanceCache[cacheKey] = (totalDistance, currentTime);
+                return totalDistance;
+            }
+
+            return float.MaxValue;
+        }*/
+
+        public void StartSimulation(float maxSimTime) {
+            this.maxSimTime = maxSimTime;
+            if (isReady)
+            {
+                isActive = true;
+            }
+            //isFinished = false; // TODO ver com o antónio
+            //timeOut = false;
+            timeOut = false;
+            SimMetrics.ResetMetrics();
+            simTime = 0f;
+        }
+
+        public void ScheduleForDestruction(Agent_ agent)
+        {
+            if (!pendingDestruction.Contains(agent))
+                pendingDestruction.Add(agent);
+        }
+
+        public void DestroyPendingAgents()
+        {
+            foreach (Agent_ agent in pendingDestruction)
+            {
+                if (agent != null)
+                    GameObject.Destroy(agent.gameObject);
+            }
+            pendingDestruction.Clear();
+        }
+
+        public void ResetScene() {
+            OnSimulationReset.Invoke();
+
+            isActive = false;
+            isFinished = false;
+            timeOut = false;
+            isReady = false;
+            simTime = 0f;
+
+            agentsList = new List<Agent_>();
+            pendingDestruction = new List<Agent_>();
+
+            goalsList = new Dictionary<int, Goal_>();
+
+            _distanceCache.Clear();
+            UpdateNavMesh();
+            SimMetrics.ResetMetrics();
+
+            uniqueID.ResetID();
+        }
+    }
+}
