@@ -215,40 +215,59 @@ public class KhepriEditor : Editor {
 
     #endregion
 
+    private static bool _callbacksRegistered = false;
+
     public void OnEnable() {
         khepri = (Khepri) target;
         if (!khepri.hasStarted)
             khepri.Start();
-        
-        EditorApplication.playModeStateChanged += delegate(PlayModeStateChange change) {
-            if (change == PlayModeStateChange.ExitingEditMode) {
+
+        if (!_callbacksRegistered) {
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+            _callbacksRegistered = true;
+        }
+    }
+
+    public void OnDisable() {
+        if (_callbacksRegistered) {
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            _callbacksRegistered = false;
+        }
+    }
+
+    private static void OnPlayModeStateChanged(PlayModeStateChange change) {
+        if (khepri == null) return;
+
+        switch (change) {
+            case PlayModeStateChange.ExitingEditMode:
                 EditorUtility.SetDirty(khepri);
+                khepri.wasRunningBeforePlayMode = khepri.isKhepriRunning;
                 StopKhepri();
                 khepri.khepriWithNavigation = false;
                 khepri.khepriWithoutNavigation = false;
-            }
-        };
-        
-        EditorApplication.playModeStateChanged += delegate(PlayModeStateChange change) {
-            if (change == PlayModeStateChange.EnteredEditMode) {
+                break;
+            case PlayModeStateChange.EnteredEditMode:
                 khepri.startKhepriOnLoad = false;
                 khepri.startKhepriinPlaymode = false;
-            }
-        };
-        
-        EditorApplication.playModeStateChanged += delegate(PlayModeStateChange change) {
-            if (change == PlayModeStateChange.ExitingPlayMode) {
+                if (khepri.wasRunningBeforePlayMode) {
+                    khepri.wasRunningBeforePlayMode = false;
+                    StartKhepri();
+                }
+                break;
+            case PlayModeStateChange.ExitingPlayMode:
+                khepri.wasRunningBeforePlayMode = khepri.isKhepriRunning;
                 StopKhepri();
                 khepri.khepriWithNavigation = false;
                 khepri.khepriWithoutNavigation = false;
-            }
-        };
-        
-        EditorApplication.playModeStateChanged += delegate(PlayModeStateChange change) {
-            if (change == PlayModeStateChange.EnteredPlayMode) {
+                break;
+            case PlayModeStateChange.EnteredPlayMode:
                 UpdateSettings();
-            }
-        };
+                if (khepri.wasRunningBeforePlayMode) {
+                    khepri.wasRunningBeforePlayMode = false;
+                    StartKhepri();
+                }
+                break;
+        }
     }
 
     // Draws UI
@@ -558,18 +577,18 @@ public class KhepriEditor : Editor {
         GUILayout.EndHorizontal();
         EditorGUI.EndDisabledGroup();
     }
-    bool StartKhepri()
+    static bool StartKhepri()
     {
         SceneLoad.visualizing = false;
         bool? success = khepri.sceneLoad?.StartServer();
         if (success != true) // this can either be false (if starting the server failed) or null (if sceneload wasn't initialized properly)
             return false;
-        
+
         khepri.isKhepriRunning = true;
         EditorApplication.update += khepri.sceneLoad.Update;
         return true;
     }
-    void StopKhepri() 
+    static void StopKhepri()
     {
         if (khepri.isKhepriRunning) {
             khepri.sceneLoad?.StopServer();
@@ -734,7 +753,7 @@ public class KhepriEditor : Editor {
 
         HandleOptimize();
     }
-    void HandleOptimize() {
+    static void HandleOptimize() {
         khepri.sceneLoad?.primitives.SetEnableMergeParent(khepri.enableMeshCombine);
     }
     void GenerateEnableMaterialsUI() {
@@ -766,7 +785,7 @@ public class KhepriEditor : Editor {
 
         HandleEnableMaterials();
     }
-    void HandleEnableMaterials() {
+    static void HandleEnableMaterials() {
         khepri.sceneLoad?.primitives.SetApplyMaterials(khepri.enableMaterials);
         if (khepri.enableMaterials) {
             QualitySettings.globalTextureMipmapLimit = khepri.textureQualitySelected;
@@ -829,7 +848,7 @@ public class KhepriEditor : Editor {
 
         HandleEnableShadows();
     }
-    void HandleEnableShadows() {
+    static void HandleEnableShadows() {
         QualitySettings.shadows = khepri.enableShadows ? ShadowQuality.All : ShadowQuality.Disable;
         QualitySettings.shadowDistance = khepri.shadowDistance;
         QualitySettings.pixelLightCount = khepri.pixelLightCount;
@@ -968,7 +987,7 @@ public class KhepriEditor : Editor {
         --EditorGUI.indentLevel;
         EditorGUILayout.EndVertical();
     }
-    void HandleEnableLOD() {
+    static void HandleEnableLOD() {
         khepri.sceneLoad?.primitives.SetApplyLOD(khepri.enableLOD);
         List<LODLevel> lodLevels = new List<LODLevel>();
         for (int i = 0; i < khepri.numLevels; i++) {
@@ -1013,7 +1032,7 @@ public class KhepriEditor : Editor {
     void GenerateEnableCollidersUI() {
         khepri.enableColliders = EditorGUILayout.Toggle(enableCollidersText, khepri.enableColliders);
     }
-    void HandleEnableCollider() {
+    static void HandleEnableCollider() {
         khepri.sceneLoad?.primitives.SetApplyColliders(khepri.enableColliders);
     }
     void GenerateEnableVRUI() {
@@ -1082,7 +1101,7 @@ public class KhepriEditor : Editor {
         GUILayout.EndVertical();
         HandleDayNight();
     }
-    void HandleDayNight() {
+    static void HandleDayNight() {
         if (khepri.directionalLight != null)
                 khepri.directionalLight.lightmapBakeType = khepri.realTimeDirectionalLight
                     ? LightmapBakeType.Realtime
@@ -1143,7 +1162,7 @@ public class KhepriEditor : Editor {
         GUILayout.EndVertical();
         HandleIllumination();
     }
-    void HandleIllumination() {
+    static void HandleIllumination() {
         khepri.sceneLoad?.primitives.SetEnableLights(khepri.enablePointlights);
         khepri.sceneLoad?.primitives.SetEnablePointLightsShadow(khepri.enablePointlightsShadows);
 
@@ -1246,7 +1265,7 @@ public class KhepriEditor : Editor {
 
         HandleLightmapBake();
     }
-    void HandleLightmapBake() {
+    static void HandleLightmapBake() {
         if (khepri.giModeSelected == 0) {
             Lightmapping.bakedGI = false;
             Lightmapping.realtimeGI = false;
@@ -1338,7 +1357,7 @@ public class KhepriEditor : Editor {
         GUILayout.EndVertical();
         HandleOcclusionBake();
     }
-    void HandleOcclusionBake() {
+    static void HandleOcclusionBake() {
         StaticOcclusionCullingVisualization.showOcclusionCulling = khepri.enableOcclusionVisualization;
     }
     void GeneratePlayerUI() {
@@ -1361,7 +1380,7 @@ public class KhepriEditor : Editor {
         
         HandlePlayer();
     }
-    void HandlePlayer() {
+    static void HandlePlayer() {
         var player = GameObject.FindWithTag("Player");
         if (player != null) {
             var movement = player.GetComponent<Movement>();
@@ -1404,7 +1423,7 @@ public class KhepriEditor : Editor {
         HandleSelection();
         GUILayout.EndVertical();
     }
-    void HandleSelection() {
+    static void HandleSelection() {
         khepri.sceneLoad?.primitives.SetHighlightMode((Outline.Mode) khepri.highlightModeSelected);
         khepri.sceneLoad?.primitives.SetHighlightColor(khepri.highlightColor);
         khepri.sceneLoad?.primitives.SetHighlightWidth(khepri.highlightWidth);
@@ -1452,7 +1471,7 @@ public class KhepriEditor : Editor {
         }
         GUILayout.EndVertical();
     }
-    void UpdateSettings() {
+    static void UpdateSettings() {
         HandleEnableLOD();
         HandleEnableCollider();
         HandleEnableMaterials();

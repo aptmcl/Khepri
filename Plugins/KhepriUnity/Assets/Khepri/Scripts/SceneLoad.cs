@@ -62,15 +62,32 @@ public class SceneLoad {
         }
     }
 
+    public void Disconnect() {
+        try { channel?.Dispose(); }
+        catch (Exception e) { WriteMessage("Error disposing channel: " + e.Message + "\n"); }
+        channel = null;
+        processor = null;
+        try { client?.Close(); }
+        catch (Exception e) { WriteMessage("Error closing client: " + e.Message + "\n"); }
+        client = null;
+    }
+
     public void StopServer() {
+        Disconnect();
         if (server != null) {
-            server.Stop();
-            WriteMessage("Disconnecting from client\n");
+            try { server.Stop(); }
+            catch (Exception e) { WriteMessage("Error stopping server: " + e.Message + "\n"); }
+            WriteMessage("Server stopped\n");
             server = null;
         }
+        currentState = I_am_the_server ? State.StartingServer : State.WaitingConnections;
     }
 
     public void WaitForConnections() {
+        if (channel != null) {
+            currentState = State.WaitingCommands;
+            return;
+        }
         try {
             WriteMessage("Waiting for connections\n");
             channel = new Channel((I_am_the_server ? server.AcceptTcpClient() : StartClient()).GetStream());

@@ -7,6 +7,8 @@ using UnityEngine;
 public class Khepri : MonoBehaviour {
     public SceneLoad sceneLoad;
     public bool isKhepriRunning = false;
+    [SerializeField]
+    public bool wasRunningBeforePlayMode = false;
     public Transform directionalLightTransform;
     public Light directionalLight;
     public bool hasStarted = false;
@@ -345,9 +347,9 @@ public class Khepri : MonoBehaviour {
     }
     */
     private void Update() {
-        //if (isKhepriRunning) {
+        if (isKhepriRunning) {
             sceneLoad?.Update();
-        //}
+        }
     }
     /*AML
     private void OnDestroy() {
