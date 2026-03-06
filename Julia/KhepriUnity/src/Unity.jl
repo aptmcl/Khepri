@@ -73,6 +73,7 @@ public void Rotate(GameObject s, Vector3 p, Vector3 n, float a)
 public GameObject SurfaceFromGrid(int m, int n, Vector3[] pts, bool closedM, bool closedN, int level)
 public GameObject LoadResource(String name)
 public Material LoadMaterial(String name)
+public Material CreateMaterial(String name, Color baseColor, float alpha, float metallic, float roughness, float transmission, Color emissionColor, float emissionStrength)
 public Material CurrentMaterial()
 public void SetCurrentMaterial(Material material)
 public GameObject InstantiateResource(GameObject family, Vector3 pos, Vector3 vx, Vector3 vy, float scale)
@@ -129,6 +130,7 @@ public void SetSun(float altitude, float azimuth)
 public String ShapeType(GameObject s)
 public Vector3 SphereCenter(GameObject s)
 public float SphereRadius(GameObject s)
+public void SetSimAgentSize(float radius, float height)
 public void SetSimHSF(float relaxationTime, float maxSpeedCoef, float V, float sigma, float U, float R, float c, float phi)
 public void SetSimNone()
 public void SetVelGaussHSF(float mean, float stdDev, float min, float max)
@@ -353,6 +355,34 @@ set_default_materials() =
 
 KhepriBase.b_get_material(b::Unity, path::AbstractString) = (println("Loading material $path");
   @remote(b, LoadMaterial(path)))
+
+KhepriBase.b_new_material(b::Unity, name, base_color, metallic, specular, roughness,
+                          clearcoat, clearcoat_roughness, ior,
+                          transmission, transmission_roughness,
+                          emission_color, emission_strength,
+                          sheen_color, sheen_roughness,
+                          anisotropy, anisotropy_direction,
+                          ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
+                          post_lighting_color,
+                          absorption, micro_thickness, thickness) =
+  @remote(b, CreateMaterial(name, base_color, Float64(alpha(base_color)),
+                            metallic, roughness, transmission,
+                            emission_color, emission_strength))
+
+KhepriBase.b_plastic_material(b::Unity, name, color, roughness) =
+  @remote(b, CreateMaterial(name, color, Float64(alpha(color)),
+                            0.0, roughness, 0.0,
+                            rgb(0,0,0), 0.0))
+
+KhepriBase.b_metal_material(b::Unity, name, color, roughness, ior) =
+  @remote(b, CreateMaterial(name, color, Float64(alpha(color)),
+                            1.0, roughness, 0.0,
+                            rgb(0,0,0), 0.0))
+
+KhepriBase.b_glass_material(b::Unity, name, color, roughness, ior) =
+  @remote(b, CreateMaterial(name, color, Float64(alpha(color)),
+                            0.0, roughness, 0.8,
+                            rgb(0,0,0), 0.0))
 
 fast_unity() =
   begin
@@ -765,6 +795,10 @@ KhepriBase.realize(b::Unity, s::Slab) =
     nav_mesh_tagging() && tag_refs_nav_mesh(b, refs, 0)
     refs
   end
+
+# Agent size
+KhepriBase.b_set_sim_agent_size(b::Unity, radius, height) =
+  @remote(b, SetSimAgentSize(radius, height))
 
 # Movement model
 KhepriBase.b_set_sim_hsf(b::Unity, relaxation_time, max_speed_coef, V, sigma, U, R, c, phi) =
