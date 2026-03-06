@@ -171,7 +171,13 @@ export Unity
 
 KhepriBase.void_ref(b::Unity) = -1 % Int32
 
-KhepriBase.before_connecting(b::Unity) = nothing #check_plugin()
+KhepriBase.before_connecting(b::Unity) =
+  @info """
+  Connecting to Unity on port $(b.port)...
+  If Unity is not running with Khepri, use:
+    setup_unity("/path/to/your/unity/project")
+  Then open the project in Unity and click 'Start Khepri'.
+  """
 KhepriBase.after_connecting(b::Unity) =
   begin
   end

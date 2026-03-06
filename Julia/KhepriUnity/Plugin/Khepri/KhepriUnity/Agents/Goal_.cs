@@ -1,0 +1,28 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace KhepriUnity {
+
+    /* 
+    The goal is an object in the scene that the agents will try to reach.
+    Each goal may be a list of colliders, and the agent will try to reach the closest one.
+    */
+    public class Goal_ : MonoBehaviour {
+        public int uID;
+
+        private void OnTriggerEnter(Collider other)
+        {
+            if (other.gameObject.tag == SystemManager.agentTag)
+            {
+                other.GetComponentInParent<Agent_>().GoalReached(this);
+            }
+        }
+
+        public int GenerateID()
+        {
+            uID = SystemManager.uniqueID.GetUniqueID();
+            return uID;
+        }
+    }
+}

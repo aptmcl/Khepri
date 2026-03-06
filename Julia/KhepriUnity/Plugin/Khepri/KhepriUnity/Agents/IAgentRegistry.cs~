@@ -1,0 +1,34 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace KhepriUnity {
+    /// <summary>
+    /// Interface for agent registry to decouple agents from the SystemManager singleton.
+    /// </summary>
+    public interface IAgentRegistry {
+        /// <summary>
+        /// Register an agent with the system.
+        /// </summary>
+        void AddAgent(Agent_ agent);
+
+        /// <summary>
+        /// Unregister an agent from the system.
+        /// </summary>
+        void RemoveAgent(Agent_ agent);
+
+        /// <summary>
+        /// Get the current list of active agents (read-only).
+        /// </summary>
+        IReadOnlyList<Agent_> GetAgents();
+
+        /// <summary>
+        /// Calculate the NavMesh distance from a position to a goal.
+        /// </summary>
+        float GetDistanceToGoal(Vector3 position, int goalId);
+
+        /// <summary>
+        /// Get the transform of a goal by its ID.
+        /// </summary>
+        Transform GetGoalPosition(int goalId);
+    }
+}

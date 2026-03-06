@@ -5,6 +5,7 @@ using Sockets
 # functions that need specialization
 include(khepribase_interface_file())
 
+include("Plugin.jl")
 include("Unity.jl")
 
 function __init__()

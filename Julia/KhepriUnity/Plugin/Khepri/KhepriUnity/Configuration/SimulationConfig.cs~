@@ -1,0 +1,77 @@
+using UnityEngine;
+
+namespace KhepriUnity.Configuration {
+    [CreateAssetMenu(fileName = "SimulationConfig", menuName = "Khepri/Simulation Configuration")]
+    public class SimulationConfig : ScriptableObject {
+        [Header("Agent Settings")]
+        [SerializeField] private float agentLowPassFilterMin = 0.2f;
+        [SerializeField] private float agentLowPassFilterMax = 4.0f;
+        [SerializeField] private float agentStoppedThreshold = 0.01f;
+        [SerializeField] private float agentTeleportHeight = 200f;
+        
+        [Header("Pathfinding Settings")]
+        [SerializeField] private float pathCacheDistanceThreshold = 1.0f;
+        [SerializeField] private int maxPathCacheSize = 1000;
+        [SerializeField] private float navMeshSampleDistance = 50f;
+        [SerializeField] private float navMeshPositionThreshold = 0.01f;
+        
+        [Header("Mesh Simplification Settings")]
+        [SerializeField] private int minVertexCountForSimplification = 30;
+        [SerializeField] private float lodLevel1Threshold = 0.5f;
+        [SerializeField] private float lodLevel2Threshold = 0.17f;
+        [SerializeField] private float lodLevel3Threshold = 0.02f;
+        
+        [Header("Lighting Settings")]
+        [SerializeField] private bool enableLightsByDefault = true;
+        [SerializeField] private bool enablePointLightShadowsByDefault = true;
+        [SerializeField] private bool enableBakedLightsByDefault = false;
+        
+        [Header("Performance Settings")]
+        [SerializeField] private int initialAgentPoolSize = 100;
+        [SerializeField] private int maxAgentPoolSize = 1000;
+        [SerializeField] private bool enableParallelProcessing = true;
+        
+        // Agent Settings
+        public float AgentLowPassFilterMin => agentLowPassFilterMin;
+        public float AgentLowPassFilterMax => agentLowPassFilterMax;
+        public float AgentStoppedThreshold => agentStoppedThreshold;
+        public float AgentTeleportHeight => agentTeleportHeight;
+        
+        // Pathfinding Settings
+        public float PathCacheDistanceThreshold => pathCacheDistanceThreshold;
+        public int MaxPathCacheSize => maxPathCacheSize;
+        public float NavMeshSampleDistance => navMeshSampleDistance;
+        public float NavMeshPositionThreshold => navMeshPositionThreshold;
+        
+        // Mesh Simplification Settings
+        public int MinVertexCountForSimplification => minVertexCountForSimplification;
+        public float LODLevel1Threshold => lodLevel1Threshold;
+        public float LODLevel2Threshold => lodLevel2Threshold;
+        public float LODLevel3Threshold => lodLevel3Threshold;
+        
+        // Lighting Settings
+        public bool EnableLightsByDefault => enableLightsByDefault;
+        public bool EnablePointLightShadowsByDefault => enablePointLightShadowsByDefault;
+        public bool EnableBakedLightsByDefault => enableBakedLightsByDefault;
+        
+        // Performance Settings
+        public int InitialAgentPoolSize => initialAgentPoolSize;
+        public int MaxAgentPoolSize => maxAgentPoolSize;
+        public bool EnableParallelProcessing => enableParallelProcessing;
+        
+        // Singleton pattern for easy access
+        private static SimulationConfig _instance;
+        public static SimulationConfig Instance {
+            get {
+                if (_instance == null) {
+                    _instance = Resources.Load<SimulationConfig>("SimulationConfig");
+                    if (_instance == null) {
+                        Debug.LogError("SimulationConfig not found in Resources folder. Please create one.");
+                        _instance = CreateInstance<SimulationConfig>();
+                    }
+                }
+                return _instance;
+            }
+        }
+    }
+}
