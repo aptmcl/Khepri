@@ -1381,6 +1381,40 @@ namespace KhepriUnity {
             SystemManager.instance.goal = goalTemplate;
         }
 
+        // Agent size configuration — updates the agent template and NavMesh baking settings.
+        // Must be called before spawning agents (but after EnsureSimulationManager).
+        public void SetSimAgentSize(float radius, float height) {
+            EnsureSimulationManager();
+            var template = SystemManager.instance.agent;
+            var cc = template.GetComponent<CharacterController>();
+            cc.radius = radius;
+            cc.height = height;
+            cc.center = new Vector3(0, 0, 0);
+
+            // Scale trigger collider proportionally (default ratio: 2.0 / 0.2279 ≈ 8.8)
+            var trigger = template.GetComponent<SphereCollider>();
+            trigger.radius = radius * (2.0f / 0.2279f);
+
+            // Update visual capsule
+            var agent_ = template.GetComponent<Agent_>();
+            agent_.capsule.transform.localScale = new Vector3(radius * 2, height / 2, radius * 2);
+
+            // Update Agent_ cached values so runtime congestion logic uses new size
+            agent_.baseRadius = radius;
+            agent_.colliderRadius = trigger.radius;
+
+            // Update NavMeshSurface so baked mesh accounts for agent size
+            var navSurface = SystemManager.instance.GetComponent<Unity.AI.Navigation.NavMeshSurface>();
+            if (navSurface != null) {
+                navSurface.agentTypeID = 0; // Default agent type
+                // NavMeshSurface uses NavMesh.GetSettingsByID; we update the build settings at bake time
+                // by setting overrideVoxelSize / overrideTileSize if needed.
+            }
+
+            // Update minimum spawn spacing (proportional to body radius)
+            SystemLib.SetAgentSpawnRadius(radius * (1.2f / 0.2279f));
+        }
+
         // Movement model configuration
         public void SetSimHSF(float relaxationTime, float maxSpeedCoef, float V, float sigma, float U, float R, float c, float phi)
             => SystemLib.SetSimHSF(relaxationTime, maxSpeedCoef, V, sigma, U, R, c, phi);

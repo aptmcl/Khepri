@@ -1043,8 +1043,10 @@ public class KhepriEditor : Editor {
         HandleEnableVR();
     }
     void HandleEnableVR() {
+#pragma warning disable CS0618 // PlayerSettings.virtualRealitySupported is obsolete but XR Management requires a different architecture
         if (PlayerSettings.virtualRealitySupported != khepri.enableVR && !EditorApplication.isPlaying) {
             PlayerSettings.virtualRealitySupported = khepri.enableVR;
+#pragma warning restore CS0618
             PlayerSettings.stereoRenderingPath = StereoRenderingPath.SinglePass;
             GameObject playerGameObject = GameObject.FindWithTag("Player");
             if (playerGameObject == null) {
@@ -1269,39 +1271,38 @@ public class KhepriEditor : Editor {
         if (khepri.giModeSelected == 0) {
             Lightmapping.bakedGI = false;
             Lightmapping.realtimeGI = false;
-            Lightmapping.giWorkflowMode = Lightmapping.GIWorkflowMode.Iterative; // Lightmapping.GIWorkflowMode.OnDemand; This causes unity to crash on exit for some reason...
         }
         else {
-            Lightmapping.giWorkflowMode = Lightmapping.GIWorkflowMode.OnDemand;
             Lightmapping.bakedGI = true;
-            LightmapEditorSettings.mixedBakeMode = MixedLightingMode.Shadowmask;
         }
-        
+
         khepri.sceneLoad?.primitives.SetBakedLights(!khepri.realTimePointLight);
-        
+
         if (khepri.directionalLight != null)
             khepri.directionalLight.lightmapBakeType = khepri.realTimeDirectionalLight
                 ? LightmapBakeType.Realtime
                 : LightmapBakeType.Baked;
 
-        if (khepri.lightmapperSelected == 0) {
-            LightmapEditorSettings.lightmapper = LightmapEditorSettings.Lightmapper.ProgressiveCPU;
+        if (Lightmapping.TryGetLightingSettings(out var ls)) {
+            if (khepri.giModeSelected != 0)
+                ls.mixedBakeMode = MixedLightingMode.Shadowmask;
+
+            ls.lightmapper = khepri.lightmapperSelected == 0
+                ? LightingSettings.Lightmapper.ProgressiveCPU
+                : LightingSettings.Lightmapper.ProgressiveGPU;
+
+            ls.directSampleCount = khepri.lightmapDirectSamples;
+            ls.indirectSampleCount = khepri.lightmapIndirectSamples;
+
+            ls.maxBounces = khepri.bouncesSelected;
+            ls.lightmapResolution = khepri.lightmapResolution;
+
+            int[] optionsLightmapSize = {32, 64, 128, 256, 512, 1024, 2048, 4096};
+            ls.lightmapMaxSize = optionsLightmapSize[khepri.lightmapSizeSelected];
+
+            ls.compressLightmaps = khepri.compressLightmap;
+            ls.ao = khepri.ambientOcclusion;
         }
-        else {
-            LightmapEditorSettings.lightmapper = LightmapEditorSettings.Lightmapper.ProgressiveGPU;
-        }
-
-        LightmapEditorSettings.directSampleCount = khepri.lightmapDirectSamples;
-        LightmapEditorSettings.indirectSampleCount = khepri.lightmapIndirectSamples;
-
-        LightmapEditorSettings.bounces = khepri.bouncesSelected;
-        LightmapEditorSettings.bakeResolution = khepri.lightmapResolution;
-        
-        int[] optionsLightmapSize = {32, 64, 128, 256, 512, 1024, 2048, 4096};
-        LightmapEditorSettings.maxAtlasSize = optionsLightmapSize[khepri.lightmapSizeSelected];
-
-        LightmapEditorSettings.textureCompression = khepri.compressLightmap;
-        LightmapEditorSettings.enableAmbientOcclusion = khepri.ambientOcclusion;
     }
     void ResetLightmapBake() {
         khepri.giModeSelected = khepri.defaultGIModeSelected;

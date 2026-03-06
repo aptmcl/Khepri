@@ -25,8 +25,8 @@ namespace KhepriUnity {
         //private const int CLOSEST_POINT_UPDATE_INTERVAL = 2; // Update every N frames when nearly stopped
 
         private List<Collider> _obstacles = new List<Collider>(); // List with the closest walls
-        private float baseRadius = 0.2279f;
-        private float colliderRadius = 2f;
+        public float baseRadius = 0.2279f;
+        public float colliderRadius = 2f;
         public GameObject capsule;
         private float stopped = 0f;
         private Vector3 prevPosition;
