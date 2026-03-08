@@ -5,6 +5,16 @@ export
     revit,
     all_walls,
     all_floors,
+    all_columns,
+    all_beams,
+    all_doors,
+    all_windows,
+    all_ceilings,
+    generate_khepri_code,
+    introspect_model,
+    model_to_expr,
+    expr_to_string,
+    wall_with_openings,
     RevitSystemFamily,
     RevitFileFamily,
     RevitInPlaceFamily,
@@ -261,6 +271,38 @@ public ElementId CreatePathCeiling(XYZ[] pts, double[] angles, ElementId levelId
 public ElementId CreateRamp(XYZ p0, XYZ p1, double width, double thickness, ElementId baseLevelId, double baseOffset, double topOffset)
 public Element CreateStraightStair(XYZ basePoint, VXYZ direction, double width, ElementId baseLevelId, ElementId topLevelId, ElementId familyId)
 public Element CreateSpiralStair(XYZ center, double radius, double startAngle, double includedAngle, bool clockwise, double width, ElementId baseLevelId, ElementId topLevelId, ElementId familyId)
+public string WallCurveType(Element element)
+public XYZ[] ArcWallVertices(Element element)
+public Length ArcWallRadius(Element element)
+public double[] ArcWallAngles(Element element)
+public string WallTypeName(Element element)
+public bool WallIsCurtainWall(Element element)
+public Length WallBaseOffset(Element element)
+public Length WallTopOffset(Element element)
+public ElementId[] WallInserts(Element element)
+public XYZ[] FloorBoundaryVertices(Element element)
+public string FloorTypeName(Element element)
+public ElementId FloorLevel(Element element)
+public Element[] DocColumns()
+public XYZ ColumnLocation(Element element)
+public double ColumnRotation(Element element)
+public ElementId ColumnBaseLevel(Element element)
+public ElementId ColumnTopLevel(Element element)
+public Element[] DocBeams()
+public XYZ[] BeamEndpoints(Element element)
+public double BeamRotation(Element element)
+public Element[] DocDoors()
+public Element[] DocWindows()
+public ElementId HostWallId(Element element)
+public double[] HostedElementPosition(Element element)
+public Length[] DoorWindowDimensions(Element element)
+public string ElementFamilyName(Element element)
+public string ElementTypeName(Element element)
+public string ElementFamilyPath(Element element)
+public bool IsSystemFamily(Element element)
+public XYZ[] CeilingBoundaryVertices(Element element)
+public string CeilingTypeName(Element element)
+public ElementId CeilingLevel(Element element)
 """
 
 #=         //AML Revit cannot handle walls with curves that are not lines or arcs!!!!
@@ -701,6 +743,19 @@ backend_add_window(b::RVT, w::Wall, loc::Loc, family::WindowFamily) =
     end
 #
 
+# Functional wall construction with door/window specs.
+# Each spec is a tuple (loc, family).
+wall_with_openings(path; doors=[], windows=[], kwargs...) =
+  let w = wall(path; kwargs...)
+    for (loc, family) in doors
+      push!(w.doors, door(w, loc, family=family))
+    end
+    for (loc, family) in windows
+      push!(w.windows, window(w, loc, family=family))
+    end
+    w
+  end
+
 KhepriBase.b_curtain_wall(b::RVT, path, bottom_level, top_level, family, offset) =
   let (locs, arcs) = locs_and_arcs(path)
     @remote(b, CreatePathCurtainWall(locs, arcs, ref_value(b, bottom_level), ref_value(b, top_level), family_ref(b, family), false))
@@ -868,18 +923,822 @@ all_walls_at_level(level::Level, b::RVT) =
     [wall_from_ref(r, b) for r in @remote(b, DocWallsAtLevel(ref(level).value))]
 
 wall_from_ref(r, b::RVT) =
-    let path = convert(Path, @remote(b, LineWallVertices(r))),
-        bottom_level_id = @remote(b, ElementLevel(r)),
-        top_level_id = @remote(b, WallTopLevel(r)),
-        bottom_level = level_from_ref(bottom_level_id, b),
-        top_level = top_level_id == RVTVoidId ?
-                        unconnected_level(bottom_level.height + @remote(b, WallHeight(r)), b) :
-                        level_from_ref(top_level_id, b)
-      wall(path,
-           bottom_level=bottom_level,
-           top_level=top_level,
+  let curve_type = @remote(b, WallCurveType(r)),
+      is_curtain = @remote(b, WallIsCurtainWall(r)),
+      bottom_level_id = @remote(b, ElementLevel(r)),
+      top_level_id = @remote(b, WallTopLevel(r)),
+      bottom_level = level_from_ref(bottom_level_id, b),
+      top_level = top_level_id == RVTVoidId ?
+                    unconnected_level(bottom_level.height + @remote(b, WallHeight(r)), b) :
+                    level_from_ref(top_level_id, b),
+      path = if curve_type == "Line"
+               convert(Path, @remote(b, LineWallVertices(r)))
+             elseif curve_type == "Arc"
+               let verts = @remote(b, ArcWallVertices(r)),
+                   center = verts[1],
+                   radius = @remote(b, ArcWallRadius(r)),
+                   angles = @remote(b, ArcWallAngles(r))
+                 arc_path(center, radius, angles[1], angles[2] - angles[1])
+               end
+             else
+               convert(Path, @remote(b, LineWallVertices(r)))
+             end
+    is_curtain ?
+      curtain_wall(path, bottom_level=bottom_level, top_level=top_level,
+                   ref=DynRefs(b=>RVTNativeRef(r))) :
+      wall(path, bottom_level=bottom_level, top_level=top_level,
            ref=DynRefs(b=>RVTNativeRef(r)))
+  end
+
+# Floor introspection
+floor_from_ref(r, b::RVT) =
+  let verts = @remote(b, FloorBoundaryVertices(r)),
+      level_id = @remote(b, FloorLevel(r)),
+      lvl = level_from_ref(level_id, b)
+    isempty(verts) ?
+      nothing :
+      slab(closed_polygonal_path(verts), level=lvl,
+           ref=DynRefs(b=>RVTNativeRef(r)))
+  end
+
+all_floors(b::RVT) =
+  filter(!isnothing, [floor_from_ref(r, b) for r in @remote(b, DocFloors())])
+
+# Column introspection
+column_from_ref(r, b::RVT) =
+  let loc = @remote(b, ColumnLocation(r)),
+      base_level_id = @remote(b, ColumnBaseLevel(r)),
+      top_level_id = @remote(b, ColumnTopLevel(r)),
+      base_level = level_from_ref(base_level_id, b),
+      top_level = top_level_id == RVTVoidId ?
+                    base_level :
+                    level_from_ref(top_level_id, b)
+    column(loc, bottom_level=base_level, top_level=top_level,
+           ref=DynRefs(b=>RVTNativeRef(r)))
+  end
+
+all_columns(b::RVT) =
+  [column_from_ref(r, b) for r in @remote(b, DocColumns())]
+
+# Beam introspection
+beam_from_ref(r, b::RVT) =
+  let endpoints = @remote(b, BeamEndpoints(r)),
+      p0 = endpoints[1],
+      p1 = endpoints[2],
+      h = p1.z - p0.z,
+      angle = @remote(b, BeamRotation(r))
+    beam(p0, h, angle=angle,
+         ref=DynRefs(b=>RVTNativeRef(r)))
+  end
+
+all_beams(b::RVT) =
+  [beam_from_ref(r, b) for r in @remote(b, DocBeams())]
+
+# Door/Window introspection — return info tuples for code generation
+struct HostedElementInfo
+  ref::RVTId
+  host_wall_id::RVTId
+  delta_from_start::Float64
+  sill_height::Float64
+  width::Float64
+  height::Float64
+  family_name::String
+  type_name::String
+  is_system::Bool
+end
+
+all_doors(b::RVT) =
+  [let pos = @remote(b, HostedElementPosition(r)),
+       dims = @remote(b, DoorWindowDimensions(r))
+     HostedElementInfo(
+       r,
+       @remote(b, HostWallId(r)),
+       pos[1], pos[2],
+       dims[1], dims[2],
+       @remote(b, ElementFamilyName(r)),
+       @remote(b, ElementTypeName(r)),
+       @remote(b, IsSystemFamily(r)))
+   end
+   for r in @remote(b, DocDoors())]
+
+all_windows(b::RVT) =
+  [let pos = @remote(b, HostedElementPosition(r)),
+       dims = @remote(b, DoorWindowDimensions(r))
+     HostedElementInfo(
+       r,
+       @remote(b, HostWallId(r)),
+       pos[1], pos[2],
+       dims[1], dims[2],
+       @remote(b, ElementFamilyName(r)),
+       @remote(b, ElementTypeName(r)),
+       @remote(b, IsSystemFamily(r)))
+   end
+   for r in @remote(b, DocWindows())]
+
+# Ceiling introspection
+ceiling_from_ref(r, b::RVT) =
+  let verts = @remote(b, CeilingBoundaryVertices(r)),
+      level_id = @remote(b, CeilingLevel(r)),
+      lvl = level_from_ref(level_id, b)
+    isempty(verts) ?
+      nothing :
+      ceiling(closed_polygonal_path(verts), level=lvl,
+              ref=DynRefs(b=>RVTNativeRef(r)))
+  end
+
+all_ceilings(b::RVT) =
+  filter(!isnothing, [ceiling_from_ref(r, b) for r in @remote(b, DocCeilings())])
+
+# ═══════════════════════════════════════════════════════════════════
+# Code Generation — Multi-Pass Pipeline
+# ═══════════════════════════════════════════════════════════════════
+#
+# Architecture (inspired by Tomás Grelha da Cunha's MSc thesis,
+# "Refactoring for Dynamic Languages: The Julia Case", IST 2020):
+#
+# 1. Introspect: Query Revit model → Khepri shape objects
+# 2. meta_program: Convert shapes → raw Julia Expr (AST)
+# 3. Transform: Apply refactoring passes (extract variables, loop rerolling, …)
+# 4. Print: Pretty-print final Expr → .jl file
+#
+# Each transform pass is a function Expr → Expr, composed in sequence.
+
+# ─── Utilities ────────────────────────────────────────────────────
+
+sanitize_name(name) =
+  let s = replace(lowercase(strip(name)), r"[^a-z0-9_]" => "_"),
+      s = replace(s, r"_+" => "_"),
+      s = strip(s, '_')
+    isempty(s) ? "unnamed" : (isdigit(s[1]) ? "_" * s : s)
+  end
+
+# Detect regular grid pattern in a set of values
+function detect_regular_spacing(vals; tol=0.01)
+  sorted = sort(unique(vals))
+  length(sorted) < 2 && return nothing
+  spacing = sorted[2] - sorted[1]
+  spacing < tol && return nothing
+  for i in 2:length(sorted)-1
+    abs((sorted[i+1] - sorted[i]) - spacing) > tol && return nothing
+  end
+  (first=sorted[1], step=spacing, last=sorted[end], count=length(sorted))
+end
+
+# Bottom-up map over an Expr tree
+map_expr(f, e::Expr) = f(Expr(e.head, map(x -> map_expr(f, x), e.args)...))
+map_expr(f, x) = f(x)
+
+# Collect all sub-expressions matching a predicate
+collect_exprs(pred, x) = pred(x) ? [x] : []
+collect_exprs(pred, e::Expr) =
+  let result = pred(e) ? [e] : []
+    for a in e.args
+      append!(result, collect_exprs(pred, a))
     end
+    result
+  end
+
+# Compare two Exprs structurally, returning list of (path, val1, val2) diffs.
+# path is a vector of arg indices.
+expr_diff(e1, e2) = e1 == e2 ? [] : [([],  e1, e2)]
+expr_diff(e1::Expr, e2::Expr) =
+  if e1.head != e2.head || length(e1.args) != length(e2.args)
+    [([], e1, e2)]
+  else
+    let diffs = []
+      for (i, (a1, a2)) in enumerate(zip(e1.args, e2.args))
+        for (path, v1, v2) in expr_diff(a1, a2)
+          push!(diffs, (vcat([i], path), v1, v2))
+        end
+      end
+      diffs
+    end
+  end
+
+# Replace the value at a path in an Expr with a new value
+expr_replace_at(e, path, val) =
+  isempty(path) ? val :
+  let args = collect(e.args)
+    args[path[1]] = expr_replace_at(args[path[1]], path[2:end], val)
+    Expr(e.head, args...)
+  end
+
+# ─── Phase 1: Introspection ───────────────────────────────────────
+
+# Metadata attached to shapes during introspection for use by transform passes.
+# Stored as a Dict keyed by shape identity (objectid).
+const _introspection_meta = Dict{UInt, NamedTuple}()
+
+_set_meta!(shape, meta::NamedTuple) = _introspection_meta[objectid(shape)] = meta
+_get_meta(shape) = get(_introspection_meta, objectid(shape), NamedTuple())
+
+introspect_model(; b::RVT=revit) =
+  let _ = empty!(_introspection_meta),
+      # Levels
+      levels = all_levels(b),
+      # Walls (with doors/windows attached)
+      walls = let wall_shapes = all_walls(b),
+                  door_infos = all_doors(b),
+                  window_infos = all_windows(b),
+                  wall_to_doors = Dict{RVTId, Vector{HostedElementInfo}}(),
+                  wall_to_windows = Dict{RVTId, Vector{HostedElementInfo}}()
+                for d in door_infos
+                  push!(get!(wall_to_doors, d.host_wall_id, HostedElementInfo[]), d)
+                end
+                for wi in window_infos
+                  push!(get!(wall_to_windows, wi.host_wall_id, HostedElementInfo[]), wi)
+                end
+                for w in wall_shapes
+                  let wref = ref_value(b, w),
+                      wd = get(wall_to_doors, wref, HostedElementInfo[]),
+                      ww = get(wall_to_windows, wref, HostedElementInfo[])
+                    for d in wd
+                      let dkey = "$(d.family_name):$(d.type_name)",
+                          dfam = door_family()
+                        _set_meta!(dfam, (family_key=dkey, family_name=d.family_name,
+                                         type_name=d.type_name, is_system=d.is_system, path="",
+                                         category=:door))
+                        push!(w.doors, door(w, xy(d.delta_from_start, d.sill_height), family=dfam))
+                      end
+                    end
+                    for wn in ww
+                      let wkey = "$(wn.family_name):$(wn.type_name)",
+                          wfam = window_family()
+                        _set_meta!(wfam, (family_key=wkey, family_name=wn.family_name,
+                                         type_name=wn.type_name, is_system=wn.is_system, path="",
+                                         category=:window))
+                        push!(w.windows, window(w, xy(wn.delta_from_start, wn.sill_height), family=wfam))
+                      end
+                    end
+                  end
+                  # Collect wall family metadata
+                  let fam_name = @remote(b, ElementFamilyName(ref_value(b, w))),
+                      type_name = @remote(b, ElementTypeName(ref_value(b, w))),
+                      is_sys = @remote(b, IsSystemFamily(ref_value(b, w))),
+                      is_curtain = is_curtain_wall(w)
+                    _set_meta!(w.family, (family_key="$fam_name:$type_name",
+                                         family_name=fam_name, type_name=type_name,
+                                         is_system=is_sys, path="",
+                                         category=is_curtain ? :curtain_wall : :wall))
+                  end
+                end
+                wall_shapes
+              end,
+      # Floors → slabs
+      floors = all_floors(b),
+      # Columns
+      columns = all_columns(b),
+      # Beams
+      beams = all_beams(b),
+      # Ceilings
+      ceilings = all_ceilings(b)
+    # Collect family metadata for floors, columns, beams, ceilings
+    for f in floors
+      let fam_name = @remote(b, ElementFamilyName(ref_value(b, f))),
+          type_name = @remote(b, ElementTypeName(ref_value(b, f))),
+          is_sys = @remote(b, IsSystemFamily(ref_value(b, f)))
+        _set_meta!(f.family, (family_key="$fam_name:$type_name",
+                              family_name=fam_name, type_name=type_name,
+                              is_system=is_sys, path="", category=:slab))
+      end
+    end
+    for c in columns
+      let fam_name = @remote(b, ElementFamilyName(ref_value(b, c))),
+          type_name = @remote(b, ElementTypeName(ref_value(b, c))),
+          fam_path = @remote(b, ElementFamilyPath(ref_value(b, c))),
+          is_sys = @remote(b, IsSystemFamily(ref_value(b, c)))
+        _set_meta!(c.family, (family_key="$fam_name:$type_name",
+                              family_name=fam_name, type_name=type_name,
+                              is_system=is_sys, path=fam_path, category=:column))
+      end
+    end
+    for bm in beams
+      let fam_name = @remote(b, ElementFamilyName(ref_value(b, bm))),
+          type_name = @remote(b, ElementTypeName(ref_value(b, bm))),
+          fam_path = @remote(b, ElementFamilyPath(ref_value(b, bm))),
+          is_sys = @remote(b, IsSystemFamily(ref_value(b, bm)))
+        _set_meta!(bm.family, (family_key="$fam_name:$type_name",
+                               family_name=fam_name, type_name=type_name,
+                               is_system=is_sys, path=fam_path, category=:beam))
+      end
+    end
+    for ce in ceilings
+      let fam_name = @remote(b, ElementFamilyName(ref_value(b, ce))),
+          type_name = @remote(b, ElementTypeName(ref_value(b, ce))),
+          is_sys = @remote(b, IsSystemFamily(ref_value(b, ce)))
+        _set_meta!(ce.family, (family_key="$fam_name:$type_name",
+                               family_name=fam_name, type_name=type_name,
+                               is_system=is_sys, path="", category=:ceiling))
+      end
+    end
+    (levels=levels, walls=walls, floors=floors, columns=columns,
+     beams=beams, ceilings=ceilings)
+  end
+
+is_curtain_wall(w) = w isa CurtainWall
+
+# ─── Phase 2: Model → Expr ───────────────────────────────────────
+
+# Side-channel: maps family Expr (from meta_program) to its introspection metadata.
+# Populated by model_to_expr, consumed by extract_families and add_backend_families.
+const _family_expr_meta = Dict{Expr, NamedTuple}()
+
+# Register a family's meta_program Expr with its metadata
+_register_family_expr!(family) =
+  let m = _get_meta(family)
+    if !isempty(m)
+      _family_expr_meta[meta_program(family)] = m
+    end
+  end
+
+function model_to_expr(model)
+  empty!(_family_expr_meta)
+  stmts = Expr[]
+  for l in model.levels
+    push!(stmts, meta_program(l))
+  end
+  for w in model.walls
+    _register_family_expr!(w.family)
+    for d in w.doors _register_family_expr!(d.family) end
+    for wn in w.windows _register_family_expr!(wn.family) end
+    push!(stmts, meta_program(w))
+  end
+  for f in model.floors
+    _register_family_expr!(f.family)
+    push!(stmts, meta_program(f))
+  end
+  for c in model.columns
+    _register_family_expr!(c.family)
+    push!(stmts, meta_program(c))
+  end
+  for bm in model.beams
+    _register_family_expr!(bm.family)
+    push!(stmts, meta_program(bm))
+  end
+  for ce in model.ceilings
+    _register_family_expr!(ce.family)
+    push!(stmts, meta_program(ce))
+  end
+  Expr(:block, stmts...)
+end
+
+# ─── Phase 3: Transform Passes ───────────────────────────────────
+
+# 3.1 Extract levels: deduplicate level(h) calls into named variables
+function extract_levels(e::Expr)
+  level_calls = collect_exprs(
+    x -> x isa Expr && x.head == :call && x.args[1] == :level && length(x.args) == 2,
+    e)
+  unique_levels = unique(level_calls)
+  isempty(unique_levels) && return e
+  # Sort by height value
+  sorted = sort(unique_levels, by=x -> x.args[2] isa Real ? x.args[2] : 0.0)
+  assignments = Expr[]
+  replacements = Dict{Expr, Symbol}()
+  for (i, lc) in enumerate(sorted)
+    var = Symbol("level_$(i-1)")
+    push!(assignments, Expr(:(=), var, lc))
+    replacements[lc] = var
+  end
+  body = map_expr(x -> get(replacements, x, x), e)
+  Expr(:block, assignments..., body.args...)
+end
+
+# 3.2 Extract families: deduplicate family constructors into named variables
+function extract_families(e::Expr)
+  family_fns = Set([:wall_family, :curtain_wall_family, :slab_family, :ceiling_family,
+                    :column_family, :beam_family, :door_family, :window_family])
+  family_calls = collect_exprs(
+    x -> x isa Expr && x.head == :call && x.args[1] in family_fns,
+    e)
+  unique_families = unique(family_calls)
+  isempty(unique_families) && return e
+  assignments = Expr[]
+  replacements = Dict{Expr, Symbol}()
+  for fc in unique_families
+    # Use introspection metadata for descriptive variable names
+    meta = get(_family_expr_meta, fc, nothing)
+    var = if meta !== nothing
+      Symbol(sanitize_name("$(meta.category)_$(meta.family_name)_$(meta.type_name)"))
+    else
+      let cat = replace(string(fc.args[1]), "_family" => "")
+        Symbol("$(cat)_fam_$(length(assignments)+1)")
+      end
+    end
+    push!(assignments, Expr(:(=), var, fc))
+    replacements[fc] = var
+  end
+  stmts = e.head == :block ? e.args : [e]
+  # Find where levels end and elements start
+  first_non_assign = findfirst(
+    s -> !(s isa Expr && s.head == :(=) && s.args[2] isa Expr &&
+           s.args[2].head == :call && s.args[2].args[1] == :level),
+    stmts)
+  insert_pos = first_non_assign === nothing ? length(stmts) + 1 : first_non_assign
+  body = map_expr(x -> get(replacements, x, x), Expr(:block, stmts...))
+  Expr(:block, body.args[1:insert_pos-1]..., assignments..., body.args[insert_pos:end]...)
+end
+
+# 3.3 Add backend family mappings
+# Uses _family_expr_meta populated by model_to_expr
+add_backend_families(model) = (e::Expr) ->
+  let stmts = e.head == :block ? collect(e.args) : [e],
+      family_fns = Set([:wall_family, :curtain_wall_family, :slab_family, :ceiling_family,
+                        :column_family, :beam_family, :door_family, :window_family]),
+      # Build var→meta lookup: when extract_families created `var = XXX_family(...)`,
+      # the RHS Expr should be a key in _family_expr_meta
+      new_stmts = Any[]
+    for s in stmts
+      push!(new_stmts, s)
+      if s isa Expr && s.head == :(=) &&
+         s.args[2] isa Expr && s.args[2].head == :call &&
+         s.args[2].args[1] in family_fns
+        let var = s.args[1],
+            rhs = s.args[2],
+            meta = get(_family_expr_meta, rhs, nothing)
+          if meta !== nothing
+            let backend_call = if meta.is_system || isempty(meta.path)
+                  Expr(:call, :set_backend_family, var, :revit,
+                       Expr(:call, :revit_system_family))
+                else
+                  Expr(:call, :set_backend_family, var, :revit,
+                       Expr(:call, :revit_file_family, Expr(:macrocall, Symbol("@raw_str"), nothing, meta.path)))
+                end
+              push!(new_stmts, backend_call)
+            end
+          end
+        end
+      end
+    end
+    Expr(:block, new_stmts...)
+  end
+
+# 3.4 Loop rerolling: detect repeated shape calls forming grid patterns
+loop_rerolling(e::Expr) =
+  let stmts = e.head == :block ? collect(e.args) : [e],
+      result = Any[],
+      # Group consecutive statements by their "template" (shape call with same structure)
+      i = 1
+    while i <= length(stmts)
+      let s = stmts[i]
+        if s isa Expr && s.head == :call
+          # Try to find a run of structurally similar calls
+          let run_end = i,
+              template = s
+            for j in (i+1):length(stmts)
+              let sj = stmts[j]
+                if sj isa Expr && sj.head == :call && sj.args[1] == template.args[1] &&
+                   length(sj.args) == length(template.args)
+                  let diffs = expr_diff(template, sj)
+                    # Only consider if all diffs are at leaf values (numbers, symbols)
+                    all(d -> !(d[2] isa Expr) && !(d[3] isa Expr), diffs) || break
+                    run_end = j
+                  end
+                else
+                  break
+                end
+              end
+            end
+            if run_end - i + 1 >= 4  # Need at least 4 similar statements
+              let run = stmts[i:run_end],
+                  rerolled = _try_reroll(run)
+                if rerolled !== nothing
+                  push!(result, rerolled)
+                  i = run_end + 1
+                  continue
+                end
+              end
+            end
+          end
+        end
+        push!(result, s)
+        i += 1
+      end
+    end
+    Expr(:block, result...)
+  end
+
+function _try_reroll(stmts)
+  length(stmts) < 4 && return nothing
+  template = stmts[1]
+  all_diffs = [expr_diff(template, s) for s in stmts[2:end]]
+  isempty(all_diffs) && return nothing
+  ref_paths = Set([d[1] for d in all_diffs[1]])
+  all(ds -> Set([d[1] for d in ds]) == ref_paths, all_diffs) || return nothing
+  paths = sort(collect(ref_paths))
+  isempty(paths) && return nothing
+  # Collect value sequences for each varying path
+  value_lists = Dict{Vector{Int}, Vector{Any}}()
+  for p in paths
+    value_lists[p] = [_get_diff_value(template, p)]
+  end
+  for ds in all_diffs
+    for (p, _, v2) in ds
+      push!(value_lists[p], v2)
+    end
+  end
+  # Try to detect 2D grid pattern (two varying paths)
+  if length(paths) == 2
+    _try_reroll_2d(template, paths, value_lists)
+  elseif length(paths) == 1
+    _try_reroll_1d(template, paths[1], value_lists[paths[1]])
+  else
+    nothing
+  end
+end
+
+_get_diff_value(e::Expr, path) =
+  isempty(path) ? e : _get_diff_value(e.args[path[1]], path[2:end])
+_get_diff_value(x, path) = isempty(path) ? x : error("path too deep")
+
+function _try_reroll_1d(template, path, values)
+  range = _try_make_range(values)
+  range === nothing && return nothing
+  let var = gensym_short(:i),
+      body = expr_replace_at(template, path, var)
+    Expr(:for, Expr(:(=), var, range), Expr(:block, body))
+  end
+end
+
+# Detect if v1, v2 form a nested grid pattern, returning path info
+function _detect_nesting(v1, v2, n, p1, p2)
+  let inner_unique = unique(v2), m = length(inner_unique)
+    if n % m == 0
+      let k = n ÷ m
+        if all(i -> v2[i] == inner_unique[((i-1) % m) + 1], 1:n)
+          let outer_unique = [v1[(i-1)*m + 1] for i in 1:k]
+            if all(i -> all(j -> v1[(i-1)*m + j] == outer_unique[i], 1:m), 1:k)
+              return (p1, outer_unique, p2, inner_unique)
+            end
+          end
+        end
+      end
+    end
+    # Try swapped
+    let inner_unique = unique(v1), m = length(inner_unique)
+      if n % m == 0
+        let k = n ÷ m
+          if all(i -> v1[i] == inner_unique[((i-1) % m) + 1], 1:n)
+            let outer_unique = [v2[(i-1)*m + 1] for i in 1:k]
+              if all(i -> all(j -> v2[(i-1)*m + j] == outer_unique[i], 1:m), 1:k)
+                return (p2, outer_unique, p1, inner_unique)
+              end
+            end
+          end
+        end
+      end
+    end
+    nothing
+  end
+end
+
+function _try_reroll_2d(template, paths, value_lists)
+  let p1 = paths[1], p2 = paths[2],
+      v1 = value_lists[p1], v2 = value_lists[p2],
+      n = length(v1),
+      nested = _detect_nesting(v1, v2, n, p1, p2)
+    nested === nothing && return nothing
+    let (outer_path, outer_vals, inner_path, inner_vals) = nested,
+        outer_range = _try_make_range(outer_vals),
+        inner_range = _try_make_range(inner_vals)
+      (outer_range === nothing || inner_range === nothing) && return nothing
+      let outer_var = gensym_short(:x),
+          inner_var = gensym_short(:y),
+          body = expr_replace_at(
+                   expr_replace_at(template, outer_path, outer_var),
+                   inner_path, inner_var)
+        Expr(:for, Expr(:(=), outer_var, outer_range),
+             Expr(:block,
+                  Expr(:for, Expr(:(=), inner_var, inner_range),
+                       Expr(:block, body))))
+      end
+    end
+  end
+end
+
+gensym_short(base::Symbol) =
+  let names = Dict(:x => :x, :y => :y, :z => :z, :i => :i, :j => :j)
+    get(names, base, base)
+  end
+
+# Try to convert a value list to a range expression
+function _try_make_range(vals)
+  n = length(vals)
+  n < 2 && return Expr(:vect, vals...)
+  sorted = sort(vals)
+  spacing = sorted[2] - sorted[1]
+  if spacing > 0 && all(i -> abs((sorted[i] - sorted[i-1]) - spacing) < 0.001, 2:n)
+    let first_v = meta_program(sorted[1]),
+        step_v = meta_program(spacing),
+        last_v = meta_program(sorted[end])
+      if step_v == 1
+        Expr(:call, :(:), first_v, last_v)
+      else
+        Expr(:call, :(:), first_v, step_v, last_v)
+      end
+    end
+  else
+    Expr(:vect, map(meta_program, sorted)...)
+  end
+end
+
+# 3.5 Detect level repetition: identical floor plans across levels → for loop
+detect_level_repetition(e::Expr) =
+  let stmts = e.head == :block ? collect(e.args) : [e]
+    # Group shape calls by their level reference
+    # This is a complex analysis — for now, return unchanged
+    # TODO: Implement when models with repeated floor plans are available
+    e
+  end
+
+# 3.6 Add header
+add_header(e::Expr) =
+  Expr(:block,
+       Expr(:toplevel_comment, "Auto-generated Khepri code from Revit model"),
+       Expr(:toplevel_comment, "Generated on: $(Dates.now())"),
+       Expr(:using, Expr(:., :KhepriRevit)),
+       stmts_of(e)...)
+
+stmts_of(e::Expr) = e.head == :block ? e.args : [e]
+
+# ─── Phase 4: Pretty-Printing ────────────────────────────────────
+
+function expr_to_string(e::Expr; indent=0)
+  let ind = "  " ^ indent,
+      io = IOBuffer()
+    _print_block(io, e, indent)
+    String(take!(io))
+  end
+end
+
+function _print_block(io, e::Expr, indent)
+  let stmts = e.head == :block ? e.args : [e],
+      prev_section = :none
+    for (i, s) in enumerate(stmts)
+      let cur_section = _stmt_section(s)
+        # Add blank line between sections
+        if i > 1 && cur_section != prev_section && prev_section != :none
+          println(io)
+        end
+        _print_stmt(io, s, indent)
+        println(io)
+        prev_section = cur_section
+      end
+    end
+  end
+end
+
+_stmt_section(s) =
+  if s isa Expr
+    if s.head == :toplevel_comment
+      :header
+    elseif s.head == :using
+      :header
+    elseif s.head == :(=) && s.args[2] isa Expr
+      let rhs = s.args[2]
+        if rhs.head == :call && rhs.args[1] == :level
+          :levels
+        elseif rhs.head == :call && rhs.args[1] in (:wall_family, :curtain_wall_family,
+            :slab_family, :ceiling_family, :column_family, :beam_family,
+            :door_family, :window_family)
+          :families
+        else
+          :elements
+        end
+      end
+    elseif s.head == :call && s.args[1] == :set_backend_family
+      :families
+    elseif s.head == :for
+      :elements
+    elseif s.head == :call
+      :elements
+    else
+      :other
+    end
+  else
+    :other
+  end
+
+function _print_stmt(io, s::Expr, indent)
+  let ind = "  " ^ indent
+    if s.head == :toplevel_comment
+      print(io, "$(ind)# $(s.args[1])")
+    elseif s.head == :using
+      print(io, "$(ind)using $(join(map(_expr_str, s.args), ", "))")
+    elseif s.head == :(=)
+      print(io, "$(ind)$(s.args[1]) = $(_expr_str(s.args[2]))")
+    elseif s.head == :for
+      let binding = s.args[1],
+          body = s.args[2]
+        print(io, "$(ind)for $(_expr_str(binding))")
+        println(io)
+        _print_block(io, body, indent + 1)
+        print(io, "$(ind)end")
+      end
+    elseif s.head == :call
+      _print_call(io, s, ind)
+    else
+      print(io, "$(ind)$(_expr_str(s))")
+    end
+  end
+end
+
+_print_stmt(io, s, indent) = print(io, "  " ^ indent, _expr_str(s))
+
+function _print_call(io, e::Expr, ind)
+  let fn = e.args[1],
+      args = e.args[2:end],
+      # Separate positional and keyword args
+      pos_args = filter(a -> !(a isa Expr && a.head == :kw), args),
+      kw_args = filter(a -> a isa Expr && a.head == :kw, args),
+      short = _expr_str(e)
+    if length(short) + length(ind) <= 80
+      print(io, "$(ind)$(short)")
+    else
+      # Multi-line format
+      print(io, "$(ind)$(fn)(")
+      let parts = vcat(map(_expr_str, pos_args), map(_kw_str, kw_args)),
+          first_line = "$(fn)("
+        for (i, p) in enumerate(parts)
+          if i == 1
+            print(io, p)
+          else
+            print(io, ",\n$(ind)  $(p)")
+          end
+        end
+        print(io, ")")
+      end
+    end
+  end
+end
+
+_kw_str(e::Expr) = "$(e.args[1])=$(_expr_str(e.args[2]))"
+
+function _expr_str(e::Expr)
+  if e.head == :call
+    let fn = e.args[1],
+        args = e.args[2:end],
+        pos = filter(a -> !(a isa Expr && a.head == :kw), args),
+        kw = filter(a -> a isa Expr && a.head == :kw, args),
+        parts = vcat(map(_expr_str, pos), map(_kw_str, kw))
+      "$(fn)($(join(parts, ", ")))"
+    end
+  elseif e.head == :(=)
+    "$(_expr_str(e.args[1])) = $(_expr_str(e.args[2]))"
+  elseif e.head == :kw
+    "$(e.args[1])=$(_expr_str(e.args[2]))"
+  elseif e.head == :vect
+    "[$(join(map(_expr_str, e.args), ", "))]"
+  elseif e.head == :tuple
+    "($(join(map(_expr_str, e.args), ", ")))"
+  elseif e.head == :ref
+    "$(_expr_str(e.args[1]))[$(join(map(_expr_str, e.args[2:end]), ", "))]"
+  elseif e.head == :.
+    join(map(a -> a isa QuoteNode ? string(a.value) : _expr_str(a), e.args), ".")
+  elseif e.head == :macrocall
+    let macro_name = string(e.args[1])
+      if macro_name == "@raw_str"
+        "raw\"$(e.args[end])\""
+      else
+        string(e)
+      end
+    end
+  elseif e.head == :using
+    "using $(join(map(_expr_str, e.args), ", "))"
+  else
+    string(e)
+  end
+end
+
+_expr_str(s::Symbol) = string(s)
+_expr_str(x::Real) = string(meta_program(x))
+_expr_str(x::Int) = string(x)
+_expr_str(x::String) = repr(x)
+_expr_str(x::Bool) = string(x)
+_expr_str(x::QuoteNode) = string(x.value)
+_expr_str(::Nothing) = "nothing"
+_expr_str(x) = string(x)
+
+# ─── Phase 5: Main Entry Point ───────────────────────────────────
+
+function generate_khepri_code(output_path::String; b::RVT=revit)
+  let model = introspect_model(b=b),
+      raw_expr = model_to_expr(model),
+      passes = [extract_levels,
+                extract_families,
+                add_backend_families(model),
+                loop_rerolling,
+                detect_level_repetition,
+                add_header],
+      refined_expr = foldl((e, pass) -> pass(e), passes, init=raw_expr),
+      code = expr_to_string(refined_expr)
+    open(output_path, "w") do io
+      write(io, code)
+    end
+    println("Generated Khepri code: $output_path")
+    output_path
+  end
+end
 
 #=
 

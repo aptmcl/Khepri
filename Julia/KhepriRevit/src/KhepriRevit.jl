@@ -2,6 +2,7 @@ module KhepriRevit
 using KhepriBase
 using Sockets
 using EzXML
+using Dates
 
 # functions that need specialization
 include(khepribase_interface_file())
