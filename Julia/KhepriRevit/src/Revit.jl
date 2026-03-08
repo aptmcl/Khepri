@@ -472,27 +472,6 @@ switch_to_backend(from::Backend, to::RVT) =
         default_level(level(height))
     end
 
-#=
-realize(b::RVT, f::TableFamily) =
-    @remote(b, CreateRectangularTableFamily(f.length, f.width, f.height, f.top_thickness, f.leg_thickness))
-realize(b::RVT, f::ChairFamily) =
-    @remote(b, CreateChairFamily(f.length, f.width, f.height, f.seat_height, f.thickness))
-realize(b::RVT, f::TableChairFamily) =
-    @remote(b, CreateRectangularTableAndChairsFamily(
-        ref(f.table_family), ref(f.chair_family),
-        f.table_family.length, f.table_family.width,
-        f.chairs_top, f.chairs_bottom, f.chairs_right, f.chairs_left,
-        f.spacing)))
-
-backend_rectangular_table(b::RVT, c, angle, family) =
-    @remote(b, Table(c, angle, ref(family)))
-
-backend_chair(b::RVT, c, angle, family) =
-    @remote(b, Chair(c, angle, ref(family)))
-
-backend_rectangular_table_and_chairs(b::RVT, c, angle, family) =
-    @remote(b, TableAndChairs(c, angle, ref(family)))
-=#
 
 KhepriBase.b_slab(b::RVT, profile::Region, level, family) =
   let outer = outer_path(profile),
@@ -693,7 +672,7 @@ realize_wall_path(b::RVT, s::Wall, path) =
     end
   end
 
-realize_wall_openings(b::RVT, w::Wall, w_ref, openings) =
+KhepriBase.realize_wall_openings(b::RVT, w::Wall, w_ref, openings) =
   begin
       for opening in openings
           realize(b, opening)
@@ -725,22 +704,6 @@ realize(b::RVT, s::Door) =
         family_ref(b, s.family)))
   end
 
-backend_add_door(b::RVT, w::Wall, loc::Loc, family::DoorFamily) =
-  let d = door(w, loc, family=family)
-    push!(w.doors, d)
-    if realized(w) && ! realized(d)
-      realize(b, d)
-    end
-    w
-  end
-backend_add_window(b::RVT, w::Wall, loc::Loc, family::WindowFamily) =
-    let d = window(w, loc, family=family)
-        push!(w.windows, d)
-        if realized(w) && ! realized(d)
-            realize(b, d)
-        end
-        w
-    end
 #
 
 # Functional wall construction with door/window specs.
@@ -798,7 +761,7 @@ KhepriBase.b_pyramid(b::RVT, bs, t, bmat, smat) =
   @remote(b, Pyramid(bs, t))
 KhepriBase.b_pyramid_frustum(b::RVT, bs, ts, bmat, tmat, smat) =
   @remote(b, PyramidFrustum(bs, ts))
-backend_right_cuboid(b::RVT, cb, width, height, h, material) =
+KhepriBase.b_right_cuboid(b::RVT, cb, width, height, h, mat) =
   @remote(b, CenteredBox(cb, width, height, h))
 KhepriBase.b_box(b::RVT, c, dx, dy, dz, mat) =
   @remote(b, Box(c, dx, dy, dz))
@@ -815,39 +778,16 @@ realize(b::RVT, s::Torus) =
   @remote(b, Torus(s.center, vz(1, s.center.cs), s.re, s.ri))
 
 #
-realize_prism(b::RVT, top, bot, side, path::PathSet, h::Real) =
-  let v = planar_path_normal(path)*h,
-      contour = path.paths[1],
-      holes = path.paths[2:end]
-    @remote(b, ExtrudedContour(
-      path_vertices(contour), is_smooth_path(contour),
-      path_vertices.(holes), is_smooth_path.(holes),
-      v
-      ))
-  end
 
-backend_surface_grid(b::RVT, points, closed_u, closed_v, smooth_u, smooth_v) =
+KhepriBase.b_surface_grid(b::RVT, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
     @remote(b, SurfaceFromGrid(
-        size(points,2),
-        size(points,1),
-        reshape(points,:),
+        size(ptss,2),
+        size(ptss,1),
+        reshape(ptss,:),
         closed_u,
         closed_v,
         0))
 
-#=
-unite_ref(b::RVT, r0::RVTNativeRef, r1::RVTNativeRef) =
-    ensure_ref(b, @remote(b, Union(r0.value, r1.value)))
-
-intersect_ref(b::RVT, r0::RVTNativeRef, r1::RVTNativeRef) =
-    ensure_ref(b, @remote(b, Intersection(r0.value, r1.value)))
-
-subtract_ref(b::RVT, r0::RVTNativeRef, r1::RVTNativeRef) =
-    ensure_ref(b, @remote(b, Subtraction(r0.value, r1.value)))
-
-unite_refs(b::RVT, refs::Vector{<:RVTRef}) =
-    RVTUnionRef(tuple(refs...))
-=#
 ############################################
 
 # Create 4 (3) reference planes that give the panel outline

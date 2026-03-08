@@ -157,7 +157,7 @@ KhepriRevit can read elements from existing Revit documents:
 # Get all levels
 levels = all_levels(revit)
 
-# Get all walls
+# Get all walls (including doors and windows)
 walls = all_walls(revit)
 
 # Get walls at a specific level
@@ -166,15 +166,30 @@ walls_at_level = all_walls_at_level(my_level, revit)
 # Get all elements
 elements = all_elements(revit)
 
-# Get all floors
+# Get all floors, columns, beams, ceilings
 floors = all_floors(revit)
+columns = all_columns(revit)
+beams = all_beams(revit)
+ceilings = all_ceilings(revit)
+
+# Get all doors and windows (as HostedElementInfo with host wall ID)
+doors = all_doors(revit)
+windows = all_windows(revit)
 ```
+
+For full model introspection and code generation from an existing Revit
+document, see [Code Generation](@ref codegen).
 
 ### Wall Reconstruction
 
 `all_walls` reconstructs full Khepri `Wall` objects from Revit data:
 
-1. Queries wall vertices via `LineWallVertices` → converts to a `Path`
+1. Queries wall geometry — supports three path types:
+   - **Line walls** via `LineWallVertices` → `OpenPolygonalPath`
+   - **Arc walls** via `ArcWallCenter`/`ArcWallRadius`/`ArcWallAngles` →
+     `ArcPath` (center, radius, start/end angles in local coordinate system)
+   - **Curtain walls** are detected via `WallIsCurtainWall` and created as
+     `CurtainWall` shapes
 2. Queries the bottom level via `ElementLevel` → creates a Khepri `Level`
 3. Queries the top level via `WallTopLevel`:
    - If valid → creates a connected `Level`
@@ -208,16 +223,14 @@ Removes all elements from the Revit document via `DeleteAllElements()`.
 - **Spline paths are not supported**: Walls, curtain walls, slabs, and roofs
   can only use paths composed of lines and arcs. Spline paths throw an error.
 
-- **`backend_add_door` is not implemented**: Doors must be specified as part of
-  the wall's openings, not added after wall creation.
+- **Doors and windows**: Doors and windows can be added to walls as
+  part of the wall's openings (via `wall_with_openings`). The `loc`
+  parameter uses wall-relative coordinates: `loc.x` is the distance along
+  the wall, `loc.y` is the sill height.
 
 - **Some family parameters require `to_feet` conversion**: Whether a parameter
   needs conversion depends on how the specific Revit family defines its
   parameters. See the [Families](@ref families) page.
-
-- **Table and chair families are commented out**: The `TableFamily`,
-  `ChairFamily`, and `TableChairFamily` realizations exist in the source but
-  are disabled.
 
 - **Named geometry variants**: Some geometry operations have `Named` variants
   (e.g., `ConeFrustumNamed`, `PyramidFrustumNamed`, `ExtrudedContourNamed`)
