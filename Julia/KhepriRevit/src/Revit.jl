@@ -209,9 +209,9 @@ public ElementId FamilyElement(ElementId familyId, string[] names, Length[] valu
 public String InstalledLibraryPath(String root)
 public void MoveElement(ElementId id, XYZ translation)
 public void RotateElement(ElementId id, double angle, XYZ axis0, XYZ axis1)
-public ElementId CreatePolygonalFloor(XYZ[] pts, ElementId levelId)
+public ElementId CreatePolygonalFloor(XYZ[] pts, ElementId levelId, ElementId famId)
 public ElementId CreatePolygonalRoof(XYZ[] pts, ElementId levelId, ElementId famId)
-public ElementId CreatePathFloor(XYZ[] pts, double[] angles, ElementId levelId)
+public ElementId CreatePathFloor(XYZ[] pts, double[] angles, ElementId levelId, ElementId famId)
 public ElementId CreatePathRoof(XYZ[] pts, double[] angles, ElementId levelId, ElementId famId)
 public Element InsertDoor(Length deltaFromStart, Length deltaFromGround, Element host, ElementId familyId)
 public Element InsertWindow(Length deltaFromStart, Length deltaFromGround, Element host, ElementId familyId, string[] names, object[] values)
@@ -226,7 +226,10 @@ public Element CreateColumn(XYZ location, ElementId baseLevelId, ElementId topLe
 public Element CreateColumnPoints(XYZ p0, XYZ p1, Level level0, Level level1, ElementId famId)
 public ElementId[] CreateLineWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId)
 public ElementId[] CreateUnconnectedLineWall(XYZ[] pts, ElementId baseLevelId, double height, ElementId famId)
-public ElementId CreatePathWall(XYZ[] pts, double[] angles, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool isStructural)
+public ElementId[] CreatePathWall(XYZ[] pts, double[] angles, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool isStructural)
+public ElementId[] CreateUnconnectedPathWall(XYZ[] pts, double[] angles, ElementId baseLevelId, double height, ElementId famId)
+public Element CreateArcWall(XYZ center, Length radius, double startAngle, double endAngle, ElementId baseLevelId, ElementId topLevelId, ElementId famId)
+public Element CreateUnconnectedArcWall(XYZ center, Length radius, double startAngle, double endAngle, ElementId baseLevelId, double height, ElementId famId)
 public ElementId CreatePathCurtainWall(XYZ[] pts, double[] angles, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool isStructural)
 public Element CreateLineRailing(XYZ[] pts, ElementId baseLevelId, ElementId familyId)
 public Element CreatePolygonRailing(XYZ[] pts, ElementId baseLevelId, ElementId familyId)
@@ -253,8 +256,8 @@ public double GetLens()
 public void ViewSize(int width, int height)
 public void RenderView(string path)
 public void EnergyAnalysis()
-public ElementId CreatePolygonalCeiling(XYZ[] pts, ElementId levelId)
-public ElementId CreatePathCeiling(XYZ[] pts, double[] angles, ElementId levelId)
+public ElementId CreatePolygonalCeiling(XYZ[] pts, ElementId levelId, ElementId famId)
+public ElementId CreatePathCeiling(XYZ[] pts, double[] angles, ElementId levelId, ElementId famId)
 public ElementId CreateRamp(XYZ p0, XYZ p1, double width, double thickness, ElementId baseLevelId, double baseOffset, double topOffset)
 public Element CreateStraightStair(XYZ basePoint, VXYZ direction, double width, ElementId baseLevelId, ElementId topLevelId, ElementId familyId)
 public Element CreateSpiralStair(XYZ center, double radius, double startAngle, double includedAngle, bool clockwise, double width, ElementId baseLevelId, ElementId topLevelId, ElementId familyId)
@@ -280,7 +283,12 @@ KhepriBase.has_boolean_ops(::Type{RVT}) = HasBooleanOps{true}()
 KhepriBase.b_current_layer_ref(b::RVT) = nothing
 KhepriBase.b_current_layer_ref(b::RVT, layer) = nothing
 
-const to_feet = 3.28084 # In most cases, the plugin accepts SI
+# Unit conversion: Revit internal units are feet.
+# - `Length` parameters: C# `rLength()` applies `* to_feet` automatically
+# - `object` parameters: C# `rObject()` reads raw doubles (no conversion)
+# - `family_map` values: send in meters (C# converts via `Length`)
+# - `instance_map` values: must be pre-converted to feet in Julia (sent as `object`)
+const to_feet = 3.28084
 #
 KhepriBase.before_connecting(b::RVT) =
   check_plugin()
@@ -364,29 +372,20 @@ struct RevitSystemFamily <: RevitFamily
   family_map::Dict{String, Function}
   instance_map::Dict{String, Function}
   location_transform::Function
-  instance_ref::Parameter{RVTId}
 end
 
 revit_system_family(family_map=(), instance_map=(), location_transform=(f, p)->p) =
   RevitSystemFamily(
     Dict(family_map...),
     Dict(instance_map...),
-    location_transform,
-    Parameter(RVTId(0))) # instead of RVTVoidId.  We need to think this carefully.
+    location_transform)
 
 backend_get_family_ref(b::RVT, f::Family, rvtf::RevitSystemFamily) =
-  begin
-    if rvtf.instance_ref()===RVTVoidId
-      let param_map = rvtf.family_map,
-          params = keys(param_map)
-        rvtf.instance_ref(
-            @remote(b, FamilyElement(
-                0,
-                collect(params),
-                [param_map[param](f) for param in params])))
-      end
-    end
-    rvtf.instance_ref()
+  let param_map = rvtf.family_map,
+      params = keys(param_map)
+    isempty(params) ?
+      RVTId(0) :
+      @remote(b, FamilyElement(0, collect(params), [param_map[param](f) for param in params]))
   end
 
 struct RevitFileFamily <: RevitFamily
@@ -394,8 +393,6 @@ struct RevitFileFamily <: RevitFamily
   family_map::Dict{String, Function}
   instance_map::Dict{String, Function}
   location_transform::Function
-  family_ref::Parameter{RVTId}
-  instance_ref::Parameter{RVTId}
 end
 
 revit_file_family(path, family_map=(), instance_map=(), location_transform=(f, p)->p) =
@@ -403,26 +400,13 @@ revit_file_family(path, family_map=(), instance_map=(), location_transform=(f, p
     path,
     Dict(family_map...),
     Dict(instance_map...),
-    location_transform,
-    Parameter(RVTVoidId),
-    Parameter(RVTVoidId))
+    location_transform)
 
 backend_get_family_ref(b::RVT, f::Family, rvtf::RevitFileFamily) =
-  begin
-    if true #rvtf.family_ref()===RVTVoidId
-      rvtf.family_ref(@remote(b, LoadFamily(rvtf.path)))
-    end
-    if true #rvtf.instance_ref()===RVTVoidId
-      let param_map = rvtf.family_map,
-          params = keys(param_map)
-        rvtf.instance_ref(
-            @remote(b, FamilyElement(
-                rvtf.family_ref(),
-                collect(params),
-                [param_map[param](f) for param in params])))
-      end
-    end
-    rvtf.instance_ref()
+  let family_id = @remote(b, LoadFamily(rvtf.path)),
+      param_map = rvtf.family_map,
+      params = keys(param_map)
+    @remote(b, FamilyElement(family_id, collect(params), [param_map[param](f) for param in params]))
   end
 #
 
@@ -479,18 +463,10 @@ KhepriBase.b_slab(b::RVT, profile::Region, level, family) =
   end
 
 KhepriBase.b_slab(b::RVT, contour::ClosedPolygonalPath, level, family) =
-  begin
-    @remote(b, CreatePolygonalFloor(convert(ClosedPolygonalPath, contour).vertices, ref_value(b, level)))
-    # we are not using the family yet
-    # ref(b, s.family))
-  end
+  @remote(b, CreatePolygonalFloor(convert(ClosedPolygonalPath, contour).vertices, ref_value(b, level), family_ref(b, family)))
 
 KhepriBase.b_slab(b::RVT, contour::RectangularPath, level, family) =
-  begin
-    @remote(b, CreatePolygonalFloor(path_vertices(contour), ref_value(b, level)))
-    # we are not using the family yet
-    # ref(b, s.family))
-  end
+  @remote(b, CreatePolygonalFloor(path_vertices(contour), ref_value(b, level), family_ref(b, family)))
 
 create_slab_opening(b::RVT, contour::ClosedPolygonalPath, slab_r) =
   @remote(b, CreatePolygonalOpening(convert(ClosedPolygonalPath, contour).vertices, slab_r))
@@ -521,19 +497,32 @@ locs_and_arcs(circle::CircularPath) =
       p1 = circle.center + vpol(circle.radius, π)
     ([p0, p1], [π, π])
   end
+locs_and_arcs(path::OpenPathSequence) =
+  let all_locs = [],
+      all_arcs = []
+    for (i, sub) in enumerate(path.paths)
+      (ls, as) = locs_and_arcs(sub)
+      if i == 1
+        append!(all_locs, ls)
+      else
+        append!(all_locs, ls[2:end])
+      end
+      append!(all_arcs, as)
+    end
+    (all_locs, all_arcs)
+  end
+
 # We should implement the arc-line approximation to splines that exist in RhinoCommon.
 locs_and_arcs(circle::SplinePath) = error("Must be finished")
 
 KhepriBase.b_slab(b::RVT, contour::ClosedPath, level, family) =
   let (locs, arcs) = locs_and_arcs(contour)
-    @remote(b, CreatePathFloor(locs, arcs, ref_value(b, level)))
-    # we are not using the family yet
-    # ref(b, s.family))
+    @remote(b, CreatePathFloor(locs, arcs, ref_value(b, level), family_ref(b, family)))
   end
 
 KhepriBase.b_roof(b::RVT, contour::ClosedPath, level, family) =
   let (locs, arcs) = locs_and_arcs(contour)
-    @remote(b, CreatePathRoof(locs, arcs, ref_value(b, level), family))
+    @remote(b, CreatePathRoof(locs, arcs, ref_value(b, level), family_ref(b, family)))
   end
 
 # Ceiling
@@ -541,14 +530,14 @@ KhepriBase.b_ceiling(b::RVT, profile::Region, level, family) =
   b_ceiling(b, outer_path(profile), level, family)
 
 KhepriBase.b_ceiling(b::RVT, contour::ClosedPolygonalPath, level, family) =
-  @remote(b, CreatePolygonalCeiling(contour.vertices, ref_value(b, level)))
+  @remote(b, CreatePolygonalCeiling(contour.vertices, ref_value(b, level), family_ref(b, family)))
 
 KhepriBase.b_ceiling(b::RVT, contour::RectangularPath, level, family) =
-  @remote(b, CreatePolygonalCeiling(path_vertices(contour), ref_value(b, level)))
+  @remote(b, CreatePolygonalCeiling(path_vertices(contour), ref_value(b, level), family_ref(b, family)))
 
 KhepriBase.b_ceiling(b::RVT, contour::ClosedPath, level, family) =
   let (locs, arcs) = locs_and_arcs(contour)
-    @remote(b, CreatePathCeiling(locs, arcs, ref_value(b, level)))
+    @remote(b, CreatePathCeiling(locs, arcs, ref_value(b, level), family_ref(b, family)))
   end
 
 # Railing
@@ -603,19 +592,63 @@ KhepriBase.b_free_column(b::RVT, cb, h, angle, family) =
   end
 
 KhepriBase.realize_wall_no_openings(b::RVT, s::Wall) =
+  realize_wall_path(b, s, s.path)
+
+realize_wall_path(b::RVT, s::Wall, path::OpenPolygonalPath) =
   # Revit also considers unconnected walls. These have a top level with id -1
   if ref_value(b, s.top_level) == RVTVoidId
-      @remote(b, CreateUnconnectedLineWall(
-          convert(OpenPolygonalPath, s.path).vertices,
+    @remote(b, CreateUnconnectedLineWall(
+        path.vertices,
+        ref_value(b, s.bottom_level),
+        s.top_level.height - s.bottom_level.height,
+        family_ref(b, s.family)))
+  else
+    @remote(b, CreateLineWall(
+        path.vertices,
+        ref_value(b, s.bottom_level),
+        ref_value(b, s.top_level),
+        family_ref(b, s.family)))
+  end
+
+realize_wall_path(b::RVT, s::Wall, path::ArcPath) =
+  let center = in_world(path.center),
+      radius = path.radius,
+      # Transform angles from the arc center's local CS to world CS
+      cx = in_world(vx(1, path.center.cs)),
+      cs_angle = atan(cx.y, cx.x),
+      start_angle = path.start_angle + cs_angle,
+      end_angle = start_angle + path.amplitude
+    if ref_value(b, s.top_level) == RVTVoidId
+      @remote(b, CreateUnconnectedArcWall(
+          center, radius, start_angle, end_angle,
           ref_value(b, s.bottom_level),
           s.top_level.height - s.bottom_level.height,
           family_ref(b, s.family)))
-  else
-      @remote(b, CreateLineWall(
-          convert(OpenPolygonalPath, s.path).vertices,
+    else
+      @remote(b, CreateArcWall(
+          center, radius, start_angle, end_angle,
           ref_value(b, s.bottom_level),
           ref_value(b, s.top_level),
           family_ref(b, s.family)))
+    end
+  end
+
+realize_wall_path(b::RVT, s::Wall, path) =
+  let (locs, arcs) = locs_and_arcs(path)
+    if ref_value(b, s.top_level) == RVTVoidId
+      @remote(b, CreateUnconnectedPathWall(
+          locs, arcs,
+          ref_value(b, s.bottom_level),
+          s.top_level.height - s.bottom_level.height,
+          family_ref(b, s.family)))
+    else
+      @remote(b, CreatePathWall(
+          locs, arcs,
+          ref_value(b, s.bottom_level),
+          ref_value(b, s.top_level),
+          family_ref(b, s.family),
+          false))
+    end
   end
 
 realize_wall_openings(b::RVT, w::Wall, w_ref, openings) =
@@ -630,10 +663,10 @@ realize(b::RVT, s::Window) =
   let rvtf = backend_family(b, s.family),
       param_map = rvtf.instance_map,
       params = keys(param_map),
-      pt = in_world(rvtf.location_transform(s.family, s.loc))
+      loc = rvtf.location_transform(s.family, s.loc)
     @remote(b, InsertWindow(
-        pt.x,
-        pt.y,
+        loc.x,
+        loc.y,
         ref_value(b, s.wall),
         family_ref(b, s.family),
         collect(params),
@@ -642,15 +675,22 @@ realize(b::RVT, s::Window) =
 
 realize(b::RVT, s::Door) =
   let rvtf = backend_family(b, s.family),
-    pt = in_world(rvtf.location_transform(s.family, s.loc))
+      loc = rvtf.location_transform(s.family, s.loc)
     @remote(b, InsertDoor(
-        pt.x,
-        pt.y,
+        loc.x,
+        loc.y,
         ref_value(b, s.wall),
         family_ref(b, s.family)))
   end
 
-backend_add_door(b::RVT, w::Wall, loc::Loc, family::DoorFamily) = finish_this()
+backend_add_door(b::RVT, w::Wall, loc::Loc, family::DoorFamily) =
+  let d = door(w, loc, family=family)
+    push!(w.doors, d)
+    if realized(w) && ! realized(d)
+      realize(b, d)
+    end
+    w
+  end
 backend_add_window(b::RVT, w::Wall, loc::Loc, family::WindowFamily) =
     let d = window(w, loc, family=family)
         push!(w.windows, d)
@@ -668,19 +708,19 @@ KhepriBase.b_curtain_wall(b::RVT, path, bottom_level, top_level, family, offset)
 
 KhepriBase.b_toilet(b::RVT, c, host, family) =
   let rvtf = backend_family(b, family),
-      c = rvtf.location_transform(rvtf, c)
+      c = rvtf.location_transform(family, c)
     @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref_value(b, host), family_ref(b, family)))
   end
 
 KhepriBase.b_closet(b::RVT, c, host, family) =
   let rvtf = backend_family(b, family),
-      c = rvtf.location_transform(rvtf, c)
+      c = rvtf.location_transform(family, c)
     @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref_value(b, host), family_ref(b, family)))
   end
 
 KhepriBase.b_sink(b::RVT, c, host, family) =
   let rvtf = backend_family(b, family),
-      c = rvtf.location_transform(rvtf, c)
+      c = rvtf.location_transform(family, c)
     @remote(b, CreateElementLocDirOnHost(c, vx(1, c.cs), ref_value(b, host), family_ref(b, family)))
   end
 

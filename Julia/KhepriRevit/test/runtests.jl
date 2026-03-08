@@ -43,6 +43,27 @@ using Test
     @test KhepriRevit.RevitInPlaceFamily <: KhepriRevit.RevitFamily
   end
 
+  @testset "Family construction" begin
+    sf = KhepriRevit.revit_system_family()
+    @test sf isa KhepriRevit.RevitSystemFamily
+    @test isempty(sf.family_map)
+    @test isempty(sf.instance_map)
+    @test !hasfield(KhepriRevit.RevitSystemFamily, :instance_ref)
+
+    ff = KhepriRevit.revit_file_family("/tmp/test.rfa")
+    @test ff isa KhepriRevit.RevitFileFamily
+    @test ff.path == "/tmp/test.rfa"
+    @test isempty(ff.family_map)
+    @test isempty(ff.instance_map)
+    @test !hasfield(KhepriRevit.RevitFileFamily, :family_ref)
+    @test !hasfield(KhepriRevit.RevitFileFamily, :instance_ref)
+
+    sf2 = KhepriRevit.revit_system_family(
+      ["b"=>f->1.0], ["h"=>f->2.0], (f, p)->p)
+    @test length(sf2.family_map) == 1
+    @test length(sf2.instance_map) == 1
+  end
+
   @testset "Boolean operations" begin
     @test KhepriBase.has_boolean_ops(KhepriRevit.RVT) isa KhepriBase.HasBooleanOps{true}
   end
