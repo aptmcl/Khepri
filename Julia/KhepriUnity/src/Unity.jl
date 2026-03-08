@@ -271,55 +271,6 @@ KhepriBase.b_surface_polygon(b::Unity, ps, mat) =
 KhepriBase.b_surface_polygon_with_holes(b::Unity, ps, qss, mat) =
   @remote(b, SurfacePolygonWithHolesWithMaterial(ps, qss, mat))
 
-#=
-
-KhepriBase.b_surface_arc(b::Unity, c, r, α, Δα, mat) =
-  @remote(b, SurfaceArc(c, vx(1, c.cs), vy(1, c.cs), r, α, α + Δα, mat))
-
-KhepriBase.b_surface_grid(b::Unity, ptss, closed_u, closed_v, smooth_u, smooth_v, interpolator, mat) =
-  let (nu, nv) = size(ptss),
-      order(n) = min(2*ceil(Int,n/16) + 1, 5)
-    @remote(b, SurfaceFromGrid(nu, nv,
-                               reshape(permutedims(ptss), :),
-                               closed_u, closed_v,
-                               smooth_u ? order(nu) : 1,
-                               smooth_v ? order(nv) : 1,
-							   mat))
-  end
-#
-backend_surface_grid(b::Unity, points, closed_u, closed_v, smooth_u, smooth_v) =
-  # we create two surfaces to have normals on both sides
-  let ptss = points,
-      s1 = size(ptss,1),
-      s2 = size(ptss,2),
-      refs = UnityId[]
-    if smooth_u && smooth_v
-      push!(refs, @remote(b, SurfaceFromGrid(s2, s1, reshape(ptss,:), closed_u, closed_v, 2)))
-    elseif smooth_u
-      for i in 1:(closed_v ? s1 : s1-1)
-        push!(refs, @remote(b, SurfaceFromGrid(s2, 2, reshape(ptss[[i,i%s1+1],:],:), closed_u, false, 2)))
-      end
-    elseif smooth_v
-      for i in 1:(closed_u ? s2 : s2-1)
-        push!(refs, @remote(b, SurfaceFromGrid(2, s1, reshape(ptss[:,[i,i%s1+1]],:), false, closed_v, 2)))
-      end
-    else
-      for i in 1:(closed_v ? s1 : s1-1)
-        for j in 1:(closed_u ? s2 : s2-1)
-          push!(refs, @remote(b, SurfaceFromGrid(2, 2, reshape(ptss[[i,i%s1+1],[j,j%s2+1]],:), false, false, 2)))
-        end
-      end
-    end
-    refs
-  end
-
-backend_surface_mesh(b::Unity, vertices, faces) =
-  @remote(b, SurfaceMesh(vertices, vcat(faces...)))
-
-# This is wrong, for sure!
-b_surface_ellipse(b::Unity, c, rx, ry) =
-   @remote(b, SurfaceEllipse(c, vz(1, c.cs), rx, ry))
-=#
 ############################################################
 # Third tier: solids
 
@@ -405,43 +356,23 @@ slow_unity() =
 realize(b::Unity, s::Text) =
   @remote(b, Text(s.str, s.corner, vz(-1, s.corner.cs), vy(1, s.corner.cs), "Fonts/Inconsolata-Regular", s.height))
 
-backend_right_cuboid(b::Unity, cb, width, height, h, angle, material) =
-  isnothing(material) ?
-    @remote(b, RightCuboid(cb, vz(1, cb.cs), vx(1, cb.cs), height, width, h, angle)) :
-    @remote(b, RightCuboidWithMaterial(cb, vz(1, cb.cs), vx(1, cb.cs), height, width, h, angle, material))
+KhepriBase.b_right_cuboid(b::Unity, cb, width, height, h, mat) =
+  isnothing(mat) ?
+    @remote(b, RightCuboid(cb, vz(1, cb.cs), vx(1, cb.cs), height, width, h, 0)) :
+    @remote(b, RightCuboidWithMaterial(cb, vz(1, cb.cs), vx(1, cb.cs), height, width, h, 0, mat))
 
 ###
-unite_ref(b::Unity, r0::UnityNativeRef, r1::UnityNativeRef) =
-    ensure_ref(b, @remote(b, Unite(r0.value, r1.value)))
+KhepriBase.b_unite_ref(b::Unity, s, r) =
+    @remote(b, Unite(s, r))
 
-intersect_ref(b::Unity, r0::UnityNativeRef, r1::UnityNativeRef) =
-    ensure_ref(b, @remote(b, Intersect(r0.value, r1.value)))
+KhepriBase.b_intersect_ref(b::Unity, s, r) =
+    @remote(b, Intersect(s, r))
 
-subtract_ref(b::Unity, r0::UnityNativeRef, r1::UnityNativeRef) =
-    let r = @remote(b, Subtract(r0.value, r1.value))
-      @remote(b, DeleteMany([r0.value, r1.value]))
-      r
+KhepriBase.b_subtract_ref(b::Unity, s, r) =
+    let result = @remote(b, Subtract(s, r))
+      @remote(b, DeleteMany([s, r]))
+      result
     end
-
-unite_refs(b::Unity, refs::Vector{<:UnityRef}) =
-    UnityUnionRef(tuple(refs...))
-
-#=
-realize(b::Unity, s::UnionShape) =
-  let r = foldl((r0,r1)->unite_ref(b,r0,r1), map(ref, s.shapes),
-                init=UnityEmptyRef())
-    delete_shapes(s.shapes)
-    #@remote(b, Canonicalize(r.value))
-    r
-  end
-
-realize(b::Unity, s::IntersectionShape) =
-  let r = foldl((r0,r1)->intersect_ref(b,r0,r1), map(ref, s.shapes),
-                init=UnityUniversalRef())
-    delete_shapes(s.shapes)
-    r
-  end
-=#
 realize(b::Unity, s::Slice) =
   slice_ref(b, ref(b, s.shape), s.p, s.n)
 
