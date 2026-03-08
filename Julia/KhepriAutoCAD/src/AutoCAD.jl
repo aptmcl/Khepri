@@ -741,20 +741,6 @@ KhepriBase.b_get_material(b::ACAD, m::AutoCADBasicMaterial) =
 Default families
 =#
 
-#=
-backend_fill_curves(b::ACAD, refs::ACADIds) = @remote(b, SurfaceFromCurves(refs))
-backend_fill_curves(b::ACAD, ref::ACADId) = @remote(b, SurfaceFromCurves([ref]))
-backend_stroke_unite(b::ACAD, refs) = @remote(b, JoinCurves(refs))
-
-realize(b::ACAD, s::Ellipse) =
-  if s.radius_x > s.radius_y
-    @remote(b, Ellipse(s.center, vz(1, s.center.cs), vxyz(s.radius_x, 0, 0, s.center.cs), s.radius_y/s.radius_x))
-  else
-    @remote(b, Ellipse(s.center, vz(1, s.center.cs), vxyz(0, s.radius_y, 0, s.center.cs), s.radius_x/s.radius_y))
-  end
-realize(b::ACAD, s::EllipticArc) =
-  error("Finish this")
-=#
 
 KhepriBase.b_surface(b::ACAD, frontier::Shapes, mat) =
   let #ids = map(r->@remote(b, NurbSurfaceFrom(r)), @remote(b, SurfaceFromCurves(ref_values(s.frontier))))
@@ -845,7 +831,7 @@ KhepriBase.b_text(b::ACAD, str, p, size, mat) =
     @remote(b, Text(str, p, vx(1, p.cs), vy(1, p.cs), size))
   
 
-backend_right_cuboid(b::ACAD, cb, width, height, h, material) =
+KhepriBase.b_right_cuboid(b::ACAD, cb, width, height, h, mat) =
   @remote(b, CenteredBox(cb, width, height, h))
 
 KhepriBase.b_extruded_curve(b::ACAD, s::Shape1D, v, cb, mat) =
