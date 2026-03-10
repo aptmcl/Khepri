@@ -1010,15 +1010,27 @@ backend_frame_at(b::ACAD, s::Shape2D, u::Real, v::Real) = @remote(b, SurfaceFram
 
 # BIM
 realize(b::ACAD, f::TableFamily) =
-    @remote(b, CreateRectangularTableFamily(f.length, f.width, f.height, f.top_thickness, f.leg_thickness))
+    let bf = get(f.implemented_as, typeof(b), nothing)
+      isnothing(bf) ?
+        @remote(b, CreateRectangularTableFamily(f.length, f.width, f.height, f.top_thickness, f.leg_thickness)) :
+        backend_get_family_ref(b, f, bf)
+    end
 realize(b::ACAD, f::ChairFamily) =
-    @remote(b, CreateChairFamily(f.length, f.width, f.height, f.seat_height, f.thickness))
+    let bf = get(f.implemented_as, typeof(b), nothing)
+      isnothing(bf) ?
+        @remote(b, CreateChairFamily(f.length, f.width, f.height, f.seat_height, f.thickness)) :
+        backend_get_family_ref(b, f, bf)
+    end
 realize(b::ACAD, f::TableChairFamily) =
-    @remote(b, CreateRectangularTableAndChairsFamily(
-        family_ref(b, f.table_family), family_ref(b, f.chair_family),
-        f.table_family.length, f.table_family.width,
-        f.chairs_top, f.chairs_bottom, f.chairs_right, f.chairs_left,
-        f.spacing))
+    let bf = get(f.implemented_as, typeof(b), nothing)
+      isnothing(bf) ?
+        @remote(b, CreateRectangularTableAndChairsFamily(
+            family_ref(b, f.table_family), family_ref(b, f.chair_family),
+            f.table_family.length, f.table_family.width,
+            f.chairs_top, f.chairs_bottom, f.chairs_right, f.chairs_left,
+            f.spacing)) :
+        backend_get_family_ref(b, f, bf)
+    end
 
 KhepriBase.b_table(b::ACAD, c, angle, family) =
     @remote(b, Table(c, angle, family_ref(b, family)))
