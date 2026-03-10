@@ -157,8 +157,4 @@ public class PlayerMovement : MonoBehaviour, Movement {
 	public bool GetCursorMode() {
 		return cursorMode;
 	}
-
-	public void UpdateLaserSettings(float width, Color color) {
-		return;
-	}
 }

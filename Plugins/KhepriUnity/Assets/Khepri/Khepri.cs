@@ -158,10 +158,6 @@ public class Khepri : MonoBehaviour {
     public List<bool> receiveShadowList = new List<bool>() {true, true, false};
     public List<bool> defaultReceiveShadowList = new List<bool>() {true, true, false};
     
-    // VR
-    [SerializeField] 
-    public bool enableVR = false;
-
     // Illumination
     // Day and night
     [SerializeField] 
@@ -291,13 +287,7 @@ public class Khepri : MonoBehaviour {
     [SerializeField] 
     public float highlightWidth = 4;
     public float defaultHighlightWidth = 4;
-    [SerializeField] 
-    public Color vrLaserColor = Color.red;
-    public Color defaultVRLaserColor = Color.red;
-    [SerializeField] 
-    public float vrLaserWidth = 0.002f;
-    public float defaultVRLaserWidth = 0.002f;
-    
+
     // Navigation Controls
     [SerializeField] 
     public bool navigationControlsFoldout = false;
@@ -347,9 +337,7 @@ public class Khepri : MonoBehaviour {
     }
     */
     private void Update() {
-        if (isKhepriRunning) {
-            sceneLoad?.Update();
-        }
+        sceneLoad?.Update();
     }
     /*AML
     private void OnDestroy() {

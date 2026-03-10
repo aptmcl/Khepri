@@ -124,8 +124,6 @@ public class KhepriEditor : Editor {
             "Return all settings to default settings.");
     // Colliders
     private GUIContent enableCollidersText = new GUIContent("Enable Colliders");
-    // VR 
-    private GUIContent enableVRText = new GUIContent("Enable VR");
     // Illumination Settings
     private GUIContent illuminationSettingsText = new GUIContent("Illumination Settings");
     // Day & Night
@@ -206,8 +204,6 @@ public class KhepriEditor : Editor {
     private GUIContent highlightModeText = new GUIContent("Highlight Mode");
     private GUIContent highlightColorText = new GUIContent("Highlight Color");
     private GUIContent highlightWidthText = new GUIContent("Highlight Width");
-    private GUIContent vrLaserColorText = new GUIContent("VR Laser Color");
-    private GUIContent vrLaserWidthText = new GUIContent("VR Laser Width");
     private GUIContent defaultSelectionText = new GUIContent("Default Selection Settings");
     // Navigation
     private GUIContent navigationSettingsText = new GUIContent("Navigation", "Navigation controls.");
@@ -299,8 +295,7 @@ public class KhepriEditor : Editor {
                 GenerateEnableShadowsUI();
                 GenerateEnableLODUI();
                 GenerateEnableCollidersUI();
-                GenerateEnableVRUI();
-                
+
                 // Illumination
                 GUILayout.Space(10);
                 GUILayout.Label(illuminationSettingsText, EditorStyles.boldLabel);
@@ -318,7 +313,7 @@ public class KhepriEditor : Editor {
                 GenerateNavigationUI();
             }
         }
-        
+
         else if (khepri.qualityPresetSelected == 1) { // Analysis
             GenerateOptimizeUI();
             
@@ -334,7 +329,6 @@ public class KhepriEditor : Editor {
                 GenerateEnableShadowsUI();
                 GenerateEnableLODUI();
                 GenerateEnableCollidersUI();
-                GenerateEnableVRUI();
 
                 // Illumination
                 GUILayout.Space(10);
@@ -371,7 +365,6 @@ public class KhepriEditor : Editor {
                 GenerateEnableShadowsUI();
                 GenerateEnableLODUI();
                 GenerateEnableCollidersUI();
-                GenerateEnableVRUI();
 
                 // Illumination
                 GUILayout.Space(10);
@@ -414,7 +407,6 @@ public class KhepriEditor : Editor {
                 GenerateEnableShadowsUI();
                 GenerateEnableLODUI();
                 GenerateEnableCollidersUI();
-                GenerateEnableVRUI();
 
                 // Illumination
                 GUILayout.Space(10);
@@ -1035,35 +1027,6 @@ public class KhepriEditor : Editor {
     static void HandleEnableCollider() {
         khepri.sceneLoad?.primitives.SetApplyColliders(khepri.enableColliders);
     }
-    void GenerateEnableVRUI() {
-        EditorGUI.BeginDisabledGroup(EditorApplication.isPlaying);
-        khepri.enableVR = EditorGUILayout.Toggle(enableVRText, khepri.enableVR);
-        EditorGUI.EndDisabledGroup();
-        
-        HandleEnableVR();
-    }
-    void HandleEnableVR() {
-#pragma warning disable CS0618 // PlayerSettings.virtualRealitySupported is obsolete but XR Management requires a different architecture
-        if (PlayerSettings.virtualRealitySupported != khepri.enableVR && !EditorApplication.isPlaying) {
-            PlayerSettings.virtualRealitySupported = khepri.enableVR;
-#pragma warning restore CS0618
-            PlayerSettings.stereoRenderingPath = StereoRenderingPath.SinglePass;
-            GameObject playerGameObject = GameObject.FindWithTag("Player");
-            if (playerGameObject == null) {
-                Debug.LogWarning("KhepriEditor: Player not found when toggling VR mode.");
-                return;
-            }
-            if (khepri.enableVR && playerGameObject.name == "Player") {
-                DestroyImmediate(playerGameObject);
-                GameObject p = Instantiate(AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Khepri/Prefabs/VRPlayer.prefab"));
-                p.name = "VRPlayer";
-            } else if (!khepri.enableVR && playerGameObject.name == "VRPlayer") {
-                DestroyImmediate(playerGameObject);
-                GameObject p = Instantiate(AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Khepri/Prefabs/Player.prefab"));
-                p.name = "Player";
-            }
-        }
-    }
     void GenerateDayNightUI() {
         GUILayout.BeginVertical("HelpBox");
         khepri.dayNightSettingsFoldout = EditorGUILayout.Foldout(khepri.dayNightSettingsFoldout,
@@ -1410,11 +1373,6 @@ public class KhepriEditor : Editor {
 
             khepri.highlightColor = EditorGUILayout.ColorField(highlightColorText, khepri.highlightColor);
             khepri.highlightWidth = EditorGUILayout.Slider(highlightWidthText, khepri.highlightWidth, 0, 10);
-            
-            EditorGUI.BeginDisabledGroup(!khepri.enableVR);
-            khepri.vrLaserColor = EditorGUILayout.ColorField(vrLaserColorText, khepri.vrLaserColor);
-            khepri.vrLaserWidth = EditorGUILayout.Slider(vrLaserWidthText, khepri.vrLaserWidth , 0, 0.01f);
-            EditorGUI.EndDisabledGroup();
 
             if (GUILayout.Button(defaultSelectionText)) {
                 ResetSelection();
@@ -1428,20 +1386,11 @@ public class KhepriEditor : Editor {
         khepri.sceneLoad?.primitives.SetHighlightMode((Outline.Mode) khepri.highlightModeSelected);
         khepri.sceneLoad?.primitives.SetHighlightColor(khepri.highlightColor);
         khepri.sceneLoad?.primitives.SetHighlightWidth(khepri.highlightWidth);
-        var player = GameObject.FindWithTag("Player");
-        if (player != null) {
-            var movement = player.GetComponent<Movement>();
-            if (movement != null) {
-                movement.UpdateLaserSettings(khepri.vrLaserWidth, khepri.vrLaserColor);
-            }
-        }
     }
     void ResetSelection() {
         khepri.highlightModeSelected = khepri.defaultHighlightModeSelected;
         khepri.highlightColor = khepri.defaultHighlightColor;
         khepri.highlightWidth = khepri.defaultHighlightWidth;
-        khepri.vrLaserColor = khepri.defaultVRLaserColor;
-        khepri.vrLaserWidth = khepri.defaultVRLaserWidth;
     }
     void GenerateNavigationUI() {
         GUILayout.BeginVertical("HelpBox");

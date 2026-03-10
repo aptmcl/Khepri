@@ -6,6 +6,4 @@ public interface Movement
         float maxFallSpeed, float playerRadius);
     
     bool GetCursorMode();
-
-    void UpdateLaserSettings(float width, Color color);
 }
