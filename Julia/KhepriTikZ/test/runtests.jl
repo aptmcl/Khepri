@@ -21,7 +21,7 @@ end
 
   @testset "Backend initialization" begin
     @testset "tikz backend exists" begin
-      @test tikz isa KhepriBase.IOBackend
+      @test tikz isa KhepriBase.LocalBackend
     end
 
     @testset "backend_name" begin
@@ -200,7 +200,7 @@ end
 
   @testset "View settings" begin
     @testset "tikz has view" begin
-      @test hasfield(typeof(tikz), :view)
+      @test hasproperty(tikz, :view)
     end
   end
 

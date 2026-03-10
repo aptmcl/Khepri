@@ -1,0 +1,85 @@
+\documentclass{standalone}
+\usepackage{tikz,tikz-3dplot}
+\usetikzlibrary{perspective,patterns}
+\usetikzlibrary{calc,fadings,decorations.pathreplacing}
+\usetikzlibrary{shapes,fit}
+\usetikzlibrary{hobby}
+\usetikzlibrary{arrows.meta}
+\begin{document}
+\tikzset{illustration/.style={very thin}}
+\tikzset{dimension/.style={very thin,lightgray}}
+\begin{tikzpicture}[]
+\begin{scope}[-1]
+\draw (40.0,1.0)arc(90.0:180.0:1cm);
+\end{scope}
+\begin{scope}[-1]
+\draw (40,0)rectangle(39.0,1.0);
+\end{scope}
+\begin{scope}[-1]
+\draw (39.0,0)arc(180.0:270.0:1.618cm);
+\end{scope}
+\begin{scope}[-1]
+\draw (40.618,0)rectangle(39.0,-1.618);
+\end{scope}
+\begin{scope}[-1]
+\draw (40.618,-1.618)arc(270.0:360.0:2.6179cm);
+\end{scope}
+\begin{scope}[-1]
+\draw (40.618,0.9999)rectangle(43.2359,-1.618);
+\end{scope}
+\begin{scope}[-1]
+\draw (43.2359,0.9999)arc(360.0:450.0:4.2358cm);
+\end{scope}
+\begin{scope}[-1]
+\draw (39.0001,0.9999)rectangle(43.2359,5.2357);
+\end{scope}
+\begin{scope}[-1]
+\draw (39.0001,5.2357)arc(450.0:540.0:6.8535cm);
+\end{scope}
+\begin{scope}[-1]
+\draw (39.0001,-1.6178)rectangle(32.1466,5.2357);
+\end{scope}
+\begin{scope}[-1]
+\draw (32.1466,-1.6178)arc(540.0:630.0:11.089cm);
+\end{scope}
+\begin{scope}[-1]
+\draw (43.2356,-1.6178)rectangle(32.1466,-12.7068);
+\end{scope}
+\begin{scope}[-1]
+\draw (43.2356,-12.7068)arc(630.0:720.0:17.942cm);
+\end{scope}
+\begin{scope}[-1]
+\draw (43.2356,5.2352)rectangle(61.1776,-12.7068);
+\end{scope}
+\begin{scope}[-1]
+\draw (61.1776,5.2352)arc(720.0:810.0:29.0302cm);
+\end{scope}
+\begin{scope}[-1]
+\draw (32.1474,5.2352)rectangle(61.1776,34.2654);
+\end{scope}
+\begin{scope}[-1]
+\draw (32.1474,34.2654)arc(810.0:900.0:46.9708cm);
+\end{scope}
+\begin{scope}[-1]
+\draw (32.1474,-12.7054)rectangle(-14.8234,34.2654);
+\end{scope}
+\begin{scope}[-1]
+\draw (-14.8234,-12.7054)arc(900.0:990.0:75.9988cm);
+\end{scope}
+\begin{scope}[-1]
+\draw (61.1754,-12.7054)rectangle(-14.8234,-88.7042);
+\end{scope}
+\begin{scope}[-1]
+\draw (61.1754,-88.7042)arc(990.0:1080.0:122.966cm);
+\end{scope}
+\begin{scope}[-1]
+\draw (61.1754,34.2618)rectangle(184.1414,-88.7042);
+\end{scope}
+\begin{scope}[-1]
+\fill (184.1414,34.2618)circle(0.03cm);
+\end{scope}
+\begin{scope}[-1]
+\draw (-14.8176,34.2618)rectangle(266.553,34.2618);
+\end{scope}
+\end{tikzpicture}
+\end{document}

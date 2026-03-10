@@ -21,6 +21,8 @@ tikz_options(out::IO, options::Nothing) =
   nothing
 tikz_options(out::IO, options::String) =
   print(out, "[$(options)]")
+tikz_options(out::IO, options::Integer) =
+  nothing  # Ignore void_ref integer values
 
 tikz_draw(out::IO, filled=false) =
   print(out, filled && ! use_wireframe() ? "\\fill " : "\\draw ")
@@ -392,19 +394,19 @@ tikz_set_view_top(out::IO, options) =
 =#
 #
 
-abstract type TikZKey end
-const TikZId = Any
-const TikZIds = Vector{TikZId}
-const TikZRef = GenericRef{TikZKey, TikZId}
-const TikZRefs = Vector{TikZRef}
-const TikZNativeRef = NativeRef{TikZKey, TikZId}
-const TikZ = IOBackend{TikZKey, TikZId, Vector}
+@defbackend TikZ TikZ begin
+  id_type = Any
+  void_ref = -1
+  view_type = FrontendView()
+  parent = LocalBackend
+  mixin(local_shapes)
+  mixin(render_state)
+  mixin(io)
+  view::View = top_view()
+  triangles::Vector{Any} = Any[]
+end
 
-KhepriBase.void_ref(b::TikZ) = -1
-
-const tikz = TikZ(view=top_view(), extra=[])
-
-KhepriBase.backend_name(b::TikZ) = "TikZ"
+const tikz = TikZ(view=top_view())
 
 export tikz_option
 tikz_option(str) = material(str, TikZ=>str)
@@ -435,6 +437,9 @@ KhepriBase.b_get_material(b::TikZ, layer, spec) =
   end
   
 KhepriBase.b_get_material(b::TikZ, spec::Nothing) = void_ref(b)
+
+KhepriBase.b_new_material(b::TikZ, name, base_color, args...) =
+  tikz_color(base_color)
 
 KhepriBase.after_connecting(b::TikZ) =
   begin
@@ -539,7 +544,7 @@ KhepriBase.b_rectangle(b::TikZ, c, dx, dy, mat) =
 # surfaces need to be saved so that they can be sorted
 KhepriBase.b_trig(b::TikZ, p1, p2, p3, mat) =
   begin
-    push!(b.extra, (p1, p2, p3, mat))
+    push!(b.triangles, (p1, p2, p3, mat))
     nothing
   end
 
@@ -564,9 +569,8 @@ tikz_path([x(1),x(2), n"sin(x)", "below"),
 
 
 paint_trig(b::TikZ, (p1, p2, p3, mat)) =
-  let io = connection(b),
-      #c = trig_center(p1, p2, p3),
-      n = trig_normal(p1, p2, p3),
+  let n = try trig_normal(p1, p2, p3) catch; return end,
+      io = connection(b),
       v = rotate_vector(b.view.target - b.view.camera, vz(1), pi/4),
       α = round(Int, angle_between(n, v)/pi*100)
     #if α > 0.5
@@ -838,11 +842,11 @@ gen_tikz_picture(b::TikZ) =
 
 gen_tikz_commands(b::TikZ) =
   begin
-    empty!(b.extra)
+    empty!(b.triangles)
     sort_illustrations!(b)
     realize_shapes(b)
-    painter_sorter!(b.extra, b.view.camera)
-    for tri in b.extra
+    painter_sorter!(b.triangles, b.view.camera)
+    for tri in b.triangles
       paint_trig(b, tri)
     end
   end
@@ -902,6 +906,25 @@ KhepriBase.b_render_and_save_view(b::TikZ, path) =
     end
     to_pdf(texpath)
     #to_dvi(texpath)
+  end
+
+# raw_view: .tex source output (skip PDF compilation) — exact text comparison
+KhepriBase.b_raw_pathname(::TikZ, name) =
+  with(render_ext, ".tex") do
+    render_default_pathname(name)
+  end
+
+KhepriBase.b_raw_view(b::TikZ, path) =
+  let prev_io = b.io
+    open(path, "w") do out
+      b.io = out
+      try
+        gen_tex_document(b)
+      finally
+        b.io = prev_io
+      end
+    end
+    path
   end
 
 export use_external_viewer
