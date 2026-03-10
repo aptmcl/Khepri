@@ -25,10 +25,10 @@ using Autodesk.AutoCAD.Colors;
 using KhepriBase;
 
 using Autodesk.AutoCAD.GraphicsSystem;
-using System.Drawing;
 using System.Reflection;
 using Mapper = Autodesk.AutoCAD.GraphicsInterface.Mapper;
 using GI = Autodesk.AutoCAD.GraphicsInterface;
+using System.Drawing.Imaging;
 using System.Net;
 using System.IO;
 
@@ -56,6 +56,11 @@ namespace KhepriAutoCAD {
     }
 
     public class Primitives : KhepriBase.Primitives {
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+        const uint SWP_NOMOVE = 0x0002;
+        const uint SWP_NOZORDER = 0x0004;
+
         public Processor processor;
         public Transaction tr {
             get => processor.tr;
@@ -157,8 +162,56 @@ namespace KhepriAutoCAD {
             CommitAndStartOpenCloseTransaction();
         }
 
-        public void View(Point3d position, Point3d target, double lens) => SetView(position, target, lens, true, "Conceptual");
-        public void ViewTop() => SetView(new Point3d(0.0, 0.0, 1.0), Point3d.Origin, 50.0, false, "2dWireframe");
+        public void SetViewCamera(Point3d position, Point3d target, double lens, bool perspective) {
+            CommitAndStartTransaction();
+            Database db = doc.Database;
+            Editor ed = doc.Editor;
+            const double DIAG35MM = 42.0;
+            double projectionPlaneDistance = (target - position).Length;
+            double aspectRatio = 1.0;
+                ViewportTable vpTbl = tr.GetObject(db.ViewportTableId, OpenMode.ForRead) as ViewportTable;
+                ViewportTableRecord viewportTableRec = tr.GetObject(vpTbl["*Active"], OpenMode.ForRead) as ViewportTableRecord;
+                aspectRatio = (viewportTableRec.Width / viewportTableRec.Height);
+                double fieldHeight =
+                        (projectionPlaneDistance * DIAG35MM) /
+                        (lens * Math.Sqrt(1.0 + aspectRatio * aspectRatio));
+                double fieldWidth = aspectRatio * fieldHeight;
+                using (ViewTableRecord vtr = ed.GetCurrentView()) {
+                    vtr.BackClipEnabled = false;
+                    vtr.BackClipDistance = 0.0;
+                    vtr.CenterPoint = Point2d.Origin;
+                    vtr.FrontClipAtEye = false;
+                    vtr.FrontClipEnabled = false;
+                    vtr.FrontClipDistance = projectionPlaneDistance;
+                    vtr.LensLength = lens;
+                    vtr.PerspectiveEnabled = perspective;
+                    vtr.Target = target;
+                    vtr.ViewTwist = 0.0;
+                    vtr.ViewDirection = position - target;
+                    vtr.Width = fieldWidth;
+                    vtr.Height = fieldHeight;
+                    ed.SetCurrentView(vtr);
+                    ed.Regen();
+                }
+            CommitAndStartOpenCloseTransaction();
+        }
+        public void SetViewCamera(Point3d position, Point3d target, double lens) => SetViewCamera(position, target, lens, true);
+        public void SetViewStyle(string style) {
+            CommitAndStartTransaction();
+            Database db = doc.Database;
+            Editor ed = doc.Editor;
+                DBDictionary styleDict = tr.GetObject(db.VisualStyleDictionaryId, OpenMode.ForRead) as DBDictionary;
+                ObjectId styleId = styleDict.GetAt(style);
+                using (ViewTableRecord vtr = ed.GetCurrentView()) {
+                    vtr.VisualStyleId = styleId;
+                    ed.SetCurrentView(vtr);
+                }
+                lastVisualStyleId = styleId;
+                ed.Regen();
+            CommitAndStartOpenCloseTransaction();
+        }
+        public void View(Point3d position, Point3d target, double lens) => SetViewCamera(position, target, lens);
+        public void ViewTop() => SetViewCamera(new Point3d(0.0, 0.0, 1.0), Point3d.Origin, 50.0, false);
         public Point3d ViewCamera() {
                 ViewTableRecord view = doc.Editor.GetCurrentView();
                 return view.Target + view.ViewDirection;
@@ -168,6 +221,10 @@ namespace KhepriAutoCAD {
         }
         public double ViewLens() {
                 return doc.Editor.GetCurrentView().LensLength;
+        }
+        public void ViewSize(int width, int height) {
+            SetWindowPos(Autodesk.AutoCAD.ApplicationServices.Application.MainWindow.Handle,
+                         IntPtr.Zero, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER);
         }
         GeoLocationData FindOrCreateGeoLocationData(ObjectId msId, Transaction tr, Database db) {
             try {
@@ -469,7 +526,7 @@ namespace KhepriAutoCAD {
                 mat.Reflectivity = reflectivity;
                 mat.Translucence = translucence;
                 mat.IlluminationModel = (GI.IlluminationModel)illuminationModel;
-                matLib.UpgradeOpen();
+                if (!matLib.IsWriteEnabled) matLib.UpgradeOpen();
                 ObjectId materialId = matLib.SetAt(name, mat);
                 tr.AddNewlyCreatedDBObject(mat, true);
                 return materialId;
@@ -488,7 +545,7 @@ namespace KhepriAutoCAD {
                 mat.Reflectivity = reflectivity;
                 mat.Translucence = translucence;
                 mat.IlluminationModel = GI.IlluminationModel.BlinnShader;
-                matLib.UpgradeOpen();
+                if (!matLib.IsWriteEnabled) matLib.UpgradeOpen();
                 ObjectId materialId = matLib.SetAt(name, mat);
                 tr.AddNewlyCreatedDBObject(mat, true);
                 return materialId;
@@ -694,6 +751,17 @@ namespace KhepriAutoCAD {
                 ObjectId.Null);
         public Entity RegionWithHoles(Point3d[][] ptss, bool[] smooths, ObjectId matId) {
             Region[] regions = ptss.Zip(smooths, (pts, smooth) => (Region)RegionFromPoints(pts, smooth)).ToArray();
+            Region outer = regions[0];
+            for (int i = 1; i < regions.Length; i++) {
+                outer.BooleanOperation(BooleanOperationType.BoolSubtract, regions[i]);
+            }
+            return WithMaterial(outer, matId);
+        }
+        public Entity RegionCircleWithHoles(Point3d[] centers, Vector3d[] normals, double[] radii, ObjectId matId) {
+            Region[] regions = new Region[centers.Length];
+            for (int i = 0; i < centers.Length; i++) {
+                regions[i] = (Region)SurfaceFromCurve(new Circle(centers[i], normals[i], radii[i]), ObjectId.Null);
+            }
             Region outer = regions[0];
             for (int i = 1; i < regions.Length; i++) {
                 outer.BooleanOperation(BooleanOperationType.BoolSubtract, regions[i]);
@@ -1499,10 +1567,64 @@ namespace KhepriAutoCAD {
             ddoc.SendCommand("_RENDER\n");
             Application.SetSystemVariable("EXPVALUE", prevEXPVALUE);
         }
+        private bool wasCleanBeforeSetup = false;
+        private ObjectId lastVisualStyleId = ObjectId.Null;
+        private ObjectId origVisualStyleId = ObjectId.Null;
+        public void SetupTestView() {
+            // Save original visual style and maximize viewport
+            origVisualStyleId = doc.Editor.GetCurrentView().VisualStyleId;
+            CommitAndStartOpenCloseTransaction();
+            wasCleanBeforeSetup = Convert.ToInt32(Application.GetSystemVariable("CLEANSCREENSTATE")) != 0;
+            if (!wasCleanBeforeSetup) {
+                dynamic ddoc = doc.GetAcadDocument();
+                ddoc.SendCommand("CLEANSCREENON\n");
+            }
+            SetViewStyle("Wireframe");
+        }
+        public void TeardownTestView() {
+            // Restore original visual style and UI elements
+            if (origVisualStyleId != ObjectId.Null) {
+                CommitAndStartTransaction();
+                Editor ed = doc.Editor;
+                using (ViewTableRecord vtr = ed.GetCurrentView()) {
+                    vtr.VisualStyleId = origVisualStyleId;
+                    ed.SetCurrentView(vtr);
+                }
+                ed.Regen();
+                CommitAndStartOpenCloseTransaction();
+            }
+            if (!wasCleanBeforeSetup) {
+                CommitAndStartOpenCloseTransaction();
+                dynamic ddoc = doc.GetAcadDocument();
+                ddoc.SendCommand("CLEANSCREENOFF\n");
+            }
+        }
         public void SaveView(int width, int height, string path) {
+            // Re-apply the last visual style set via SetViewStyle.
+            // The GS rendering state is transient and does not persist
+            // across the transaction cycles of intermediate operations.
             CommitAndStartTransaction();
-            using (Bitmap bitmap = doc.CapturePreviewImage((uint)width, (uint)height)) {
-                bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            Editor ed = doc.Editor;
+            if (lastVisualStyleId != ObjectId.Null) {
+                using (ViewTableRecord vtr = ed.GetCurrentView()) {
+                    vtr.VisualStyleId = lastVisualStyleId;
+                    ed.SetCurrentView(vtr);
+                }
+            }
+            ed.Regen();
+            Application.UpdateScreen();
+            System.Windows.Forms.Application.DoEvents();
+            Manager gsm = doc.GraphicsManager;
+            int vpNum = System.Convert.ToInt32(
+                Application.GetSystemVariable("CVPORT"));
+            Point2d screenSize = (Point2d)Application.GetSystemVariable("SCREENSIZE");
+            int vpWidth = (int)screenSize.X;
+            int vpHeight = (int)screenSize.Y;
+            using (View gsView = gsm.GetCurrentAcGsView(vpNum)) {
+                using (System.Drawing.Bitmap bitmap = gsView.GetSnapshot(
+                    new System.Drawing.Rectangle(0, 0, vpWidth, vpHeight))) {
+                    bitmap.Save(path, ImageFormat.Png);
+                }
             }
         }
         public int Command(string cmd) {
