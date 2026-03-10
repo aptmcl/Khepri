@@ -17,6 +17,7 @@ makedocs(;
         "Families" => "families.md",
         "BIM Elements" => "elements.md",
         "Geometry & Interop" => "geometry.md",
+        "Code Generation" => "codegen.md",
     ],
 )
 

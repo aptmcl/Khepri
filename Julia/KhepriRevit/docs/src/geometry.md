@@ -118,6 +118,105 @@ zoom_extents(revit)
 view_top(revit)
 ```
 
+## OBJ Export from Family Files
+
+KhepriRevit can extract the graphical representation (mesh geometry and
+materials) from Revit family files (`.rfa`) and save them as standard
+[Wavefront OBJ](https://en.wikipedia.org/wiki/Wavefront_.obj_file) files with
+accompanying MTL material libraries.
+
+This is useful for:
+- Previewing family geometry in external tools (Blender, MeshLab, etc.)
+- Using Revit family meshes in non-Revit rendering pipelines
+- Archiving family geometry in an open, portable format
+
+### Exporting a Single Family
+
+```julia
+export_family_to_obj(family_path, obj_path)
+```
+
+Opens the `.rfa` file, extracts all mesh geometry at Fine detail level, and
+writes an OBJ file (with an accompanying `.mtl` file in the same directory).
+
+- **`family_path`**: Absolute path to the `.rfa` file. Use
+  [`revit_library_path`](@ref) to resolve library-relative paths.
+- **`obj_path`**: Output path for the `.obj` file. The `.mtl` file is created
+  alongside it with the same base name.
+
+Vertex coordinates are converted from Revit's internal units (feet) to meters.
+Each face in the OBJ is assigned a material group (`usemtl`) corresponding to
+the Revit material applied to that face. The MTL file contains diffuse color
+(`Kd`) and transparency (`d`) properties for each material.
+
+```julia
+# Export a sink family from the Metric Library
+export_family_to_obj(
+  revit_library_path("Metric Library",
+    raw"Plumbing\Architectural\Fixtures\Sinks\M_Sink Vanity-Square.rfa"),
+  raw"C:\Export\sink.obj")
+# Produces: C:\Export\sink.obj and C:\Export\sink.mtl
+
+# Export a custom family file
+export_family_to_obj(
+  raw"C:\MyFamilies\Custom-Column.rfa",
+  raw"C:\Export\custom_column.obj")
+```
+
+### Exporting All Instantiated Families from a Model
+
+```julia
+export_all_families_to_obj(folder_path)
+```
+
+Iterates over all family instances in the currently loaded Revit document,
+identifies the unique families that are actually used, and exports each one as
+an OBJ + MTL pair into the specified folder.
+
+- **`folder_path`**: Path to the output directory. Created automatically if it
+  does not exist.
+
+The output files are named after the Revit family name (with spaces and
+path-separator characters replaced by underscores). Each unique family is
+exported only once, regardless of how many instances exist in the model.
+
+!!! note
+    Only **loadable families** (those backed by `.rfa` files) that appear as
+    `FamilyInstance` elements are exported. **System families** (walls, floors,
+    roofs, ceilings) are not included, as they do not have standalone `.rfa`
+    geometry definitions.
+
+```julia
+# Load a Revit model
+load_rvt_file(raw"C:\Projects\Building.rvt")
+
+# Export all instantiated families to a folder
+export_all_families_to_obj(raw"C:\Export\families")
+# Produces files like:
+#   C:\Export\families\M_Concrete-Rectangular-Column.obj
+#   C:\Export\families\M_Concrete-Rectangular-Column.mtl
+#   C:\Export\families\M_Instance-Window-Fixed.obj
+#   C:\Export\families\M_Instance-Window-Fixed.mtl
+#   C:\Export\families\M_Sink_Vanity-Square.obj
+#   C:\Export\families\M_Sink_Vanity-Square.mtl
+#   ...
+```
+
+### OBJ Format Details
+
+The exported files follow the standard Wavefront OBJ/MTL specification:
+
+- **Vertices** (`v`): Coordinates in meters (converted from Revit's internal
+  feet).
+- **Normals** (`vn`): Per-triangle face normals, computed from cross products.
+- **Faces** (`f`): Triangulated; each face references vertex and normal indices
+  in the format `v//vn`.
+- **Material groups** (`usemtl`): Faces are grouped by their Revit material.
+  Faces with no assigned material use a `default` material (light gray).
+- **MTL properties**: Diffuse color (`Kd`) from the Revit material's `Color`,
+  and dissolve/transparency (`d`) from the material's `Transparency` property.
+  Illumination model is set to `illum 2` (diffuse + specular).
+
 ## IFC Interoperability
 
 KhepriRevit provides three functions for IFC workflow:

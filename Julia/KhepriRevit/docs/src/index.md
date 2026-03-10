@@ -68,6 +68,10 @@ TCP port 11001. See [Setup](@ref setup) for installation instructions.
 - **IFC interoperability**: Import and convert IFC files with
   [`convert_ifc_file`](@ref) and [`load_rvt_file`](@ref).
 
+- **OBJ export**: Extract mesh geometry and materials from Revit family files
+  with [`export_family_to_obj`](@ref), or batch-export all instantiated
+  families from a loaded model with [`export_all_families_to_obj`](@ref).
+
 - **BIM elements**: Walls, floors, roofs, ceilings, doors, windows, columns,
   beams, curtain walls, railings, ramps, stairs, and plumbing fixtures.
   See [BIM Elements](@ref elements).
