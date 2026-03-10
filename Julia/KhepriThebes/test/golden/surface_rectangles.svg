@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="960" height="540" viewBox="0 0 960 540">
-<rect x="-96" y="-54" width="1152" height="648" fill="rgb(100%, 100%, 100%)" fill-opacity="1"/>
-<path fill-rule="nonzero" fill="rgb(100%, 100%, 100%)" fill-opacity="1" d="M 2715.617188 -3134.890625 L -3612.398438 -422.535156 L 480 1866.097656 L 6748.15625 -1639.304688 Z M 2715.617188 -3134.890625 "/>
-<path fill-rule="nonzero" fill="rgb(100%, 100%, 100%)" fill-opacity="1" d="M -5228.101563 270 L -8951.851563 1866.097656 L -3465.476563 6279.035156 L 480 3823.105469 Z M -5228.101563 270 "/>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1920" height="1080" viewBox="0 0 1920 1080">
+<rect x="-192" y="-108" width="2304" height="1296" fill="rgb(100%, 100%, 100%)" fill-opacity="1"/>
+<path fill-rule="nonzero" fill="rgb(100%, 100%, 100%)" fill-opacity="1" d="M 5431.234375 -6269.777344 L -7224.792969 -845.066406 L 960 3732.199219 L 13496.308594 -3278.609375 Z M 5431.234375 -6269.777344 "/>
+<path fill-rule="nonzero" fill="rgb(100%, 100%, 100%)" fill-opacity="1" d="M -10456.199219 540 L -17903.703125 3732.199219 L -6930.949219 12558.070312 L 960 7646.210938 Z M -10456.199219 540 "/>
 </svg>

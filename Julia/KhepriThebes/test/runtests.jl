@@ -22,20 +22,20 @@ using Test
     end
 
     @testset "has refs field" begin
-      @test hasfield(typeof(thebes), :refs)
+      @test hasproperty(thebes, :refs)
       @test thebes.refs isa KhepriBase.References
     end
 
     @testset "has transaction field" begin
-      @test hasfield(typeof(thebes), :transaction)
+      @test hasproperty(thebes, :transaction)
     end
 
     @testset "has drawing field" begin
-      @test hasfield(typeof(thebes), :drawing)
+      @test hasproperty(thebes, :drawing)
     end
 
     @testset "has view field" begin
-      @test hasfield(typeof(thebes), :view)
+      @test hasproperty(thebes, :view)
       @test thebes.view isa KhepriBase.View
     end
   end
@@ -231,8 +231,7 @@ using Test
     backend(thebes)
     delete_all_shapes()
 
-    # Pass layer positionally to avoid current_layer() default evaluation
-    red_mat = standard_material("RedMat", layer("Red"), rgba(1, 0, 0, 1))
+    red_mat = standard_material("RedMat", rgba(1, 0, 0, 1))
     sphere(u0(), 5, material=red_mat)
 
     path = tempname() * ".svg"

@@ -41,11 +41,6 @@ Base.show(io::IO, ::MIME"application/pdf", f::ThebesPDFFile) =
 # Backend Type Definitions
 # ============================================================================
 
-abstract type ThebesKey end
-const ThebesId = Int
-const ThebesRef = GenericRef{ThebesKey, ThebesId}
-const ThebesNativeRef = NativeRef{ThebesKey, ThebesId}
-
 # ============================================================================
 # Scene Storage for Retained Mode Rendering
 # ============================================================================
@@ -110,38 +105,29 @@ struct SceneText <: SceneItem
   mat::Any
 end
 
-@kwdef mutable struct ThebesBackend <: Backend{ThebesKey, ThebesId}
-  drawing::Union{Nothing, Drawing}=nothing
-  transaction::Parameter{KhepriBase.Transaction}=Parameter{KhepriBase.Transaction}(KhepriBase.AutoCommitTransaction())
-  refs::References{ThebesKey, ThebesId}=References{ThebesKey, ThebesId}()
-  view::View=default_view()
-  # Default colors for stroke, fill, and background
-  stroke_color::RGBA=rgba(0, 0, 0, 1)
-  fill_color::RGBA=rgba(1, 1, 1, 1)
-  background_color::RGBA=rgba(1, 1, 1, 1)
-  # Edge stroke settings for 3D objects (0 = no edges)
-  edge_stroke_width::Float64=0.1
-  edge_stroke_color::RGBA=rgba(1, 1, 1, 1)
-  # Output format: :svg (default), :png, or :pdf
-  output_format::Symbol=:svg
-  # Scene storage for retained mode rendering
-  scene::Vector{SceneItem}=SceneItem[]
-  # Monotonic ref counter and dirty flag for scene rebuild
-  next_id::Int=1
-  scene_dirty::Bool=false
+@defbackend Thebes TBS begin
+  id_type = Int
+  void_ref = 0
+  view_type = FrontendView()
+  drawing::Union{Nothing, Drawing} = nothing
+  view::View = default_view()
+  stroke_color::RGBA = rgba(0, 0, 0, 1)
+  fill_color::RGBA = rgba(1, 1, 1, 1)
+  background_color::RGBA = rgba(1, 1, 1, 1)
+  edge_stroke_width::Float64 = 0.1
+  edge_stroke_color::RGBA = rgba(1, 1, 1, 1)
+  output_format::Symbol = :svg
+  scene::Vector{SceneItem} = SceneItem[]
+  next_id::Int = 1
+  scene_dirty::Bool = false
 end
-
-const TBS = ThebesBackend
 const thebes = TBS()
-
-KhepriBase.void_ref(b::TBS) = 0
 
 function next_ref!(b::TBS)
   id = b.next_id
   b.next_id += 1
   id
 end
-KhepriBase.backend_name(b::TBS) = "Thebes"
 
 # ============================================================================
 # Material Support
@@ -244,8 +230,6 @@ KhepriBase.b_material(b::TBS, layer, spec) =
     b_get_material(b, spec)
   end
 
-# Use FrontendView so set_view works with b.view
-KhepriBase.view_type(::Type{TBS}) = FrontendView()
 
 # ============================================================================
 # Bounding Box Computation (On-Demand)
@@ -1117,6 +1101,35 @@ KhepriBase.b_render_and_save_view(b::TBS, path) =
     actual_fmt == :pdf ? ThebesPDFFile(path) :
     ThebesSVGFile(path)  # default
   end
+
+# ============================================================================
+# shot_view / raw_view
+# ============================================================================
+
+# raw_view: SVG output (Luxor's native vector format) — exact text comparison
+KhepriBase.b_raw_pathname(b::TBS, name) =
+  with(render_ext, ".svg") do
+    render_default_pathname(name)
+  end
+
+KhepriBase.b_raw_view(b::TBS, path) =
+  begin
+    saved_format = b.output_format
+    b.output_format = :svg
+    try
+      if !render_scene!(b)
+        return path
+      end
+      Luxor.finish()
+      cp(b.drawing.filename, path, force=true)
+      b.drawing = nothing
+    finally
+      b.output_format = saved_format
+    end
+    path
+  end
+
+# shot_view: PNG output — default b_render_and_save_view already works
 
 # ============================================================================
 # Convenience Functions
