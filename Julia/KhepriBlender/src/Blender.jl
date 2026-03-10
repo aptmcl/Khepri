@@ -149,6 +149,7 @@ def line(ps:List[Point3d], closed:bool, mat:MatId)->Id:
 def bezier(order:int, ps:List[Point3d], closed:bool, tgs:List[Point3d], mat:MatId)->Id:
 def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
 def objmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat:MatId)->Id:
+def import_obj_file(path:str, ox:float, oy:float, oz:float, vxx:float, vxy:float, vxz:float, vyx:float, vyy:float, vyz:float, vzx:float, vzy:float, vzz:float)->Id:
 def trig(p1:Point3d, p2:Point3d, p3:Point3d, mat:MatId)->Id:
 def quad(p1:Point3d, p2:Point3d, p3:Point3d, p4:Point3d, mat:MatId)->Id:
 def quad_strip(ps:List[Point3d], qs:List[Point3d], smooth:bool, mat:MatId)->Id:
@@ -177,6 +178,7 @@ def camera_from_view()->None:
 def set_view(camera:Point3d, target:Point3d, lens:float)->None:
 def get_view()->Tuple[Point3d, Point3d, float]:
 def set_view_top()->None:
+def set_view_size(width:int, height:int)->None:
 def frame_all()->None:
 def set_camera_view(camera:Point3d, target:Point3d, lens:float)->None:
 def set_render_size(width:int, height:int)->None:
@@ -370,6 +372,17 @@ KhepriBase.b_subtract_ref(b::BLR, r, s) =
 #KhepriBase.slice_ref(b::BLR, r, p, v) =
 #  @remote(b, slice(r.value, p, v))
 
+# OBJ/MTL file import
+KhepriBase.b_mesh_obj_fmt(b::BLR, obj_name, transform) =
+  let path = abspath(obj_file_path(obj_name)),
+      t = transform.cs.transform
+    @remote(b, import_obj_file(path,
+      t[1,4], t[2,4], t[3,4],      # origin
+      t[1,1], t[2,1], t[3,1],      # vx column
+      t[1,2], t[2,2], t[3,2],      # vy column
+      t[1,3], t[2,3], t[3,3]))     # vz column
+  end
+
 # Materials
 
 KhepriBase.b_get_material(b::BLR, spec::AbstractString) =
@@ -481,8 +494,18 @@ KhepriBase.b_zoom_extents(b::BLR) =
 KhepriBase.b_set_view_top(b::BLR) =
   @remote(b, set_view_top())
 
+KhepriBase.b_set_view_size(b::BLR, width, height) =
+  @remote(b, set_view_size(width, height))
+
+const blender_visual_style_renderers = Dict(
+  :shaded => :default,
+  :realistic => :cycles)
+
 KhepriBase.b_view_settings(b::BLR;
-    renderer::Symbol=:cycles,
+    visual_style::Symbol=:_none,
+    renderer::Symbol=(visual_style == :_none ? :cycles : get(blender_visual_style_renderers, visual_style) do
+        error("Unsupported visual_style for Blender: $visual_style. Options: :shaded, :realistic (or use renderer= directly)")
+      end),
     samples::Int=1200,
     denoising::Bool=true,
     motion_blur::Bool=false,

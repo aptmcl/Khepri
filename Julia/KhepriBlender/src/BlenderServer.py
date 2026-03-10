@@ -558,6 +558,56 @@ def objmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int
     append_material(obj, mat)
     return id
 
+def import_obj_file(path:str, ox:float, oy:float, oz:float,
+                    vxx:float, vxy:float, vxz:float,
+                    vyx:float, vyy:float, vyz:float,
+                    vzx:float, vzy:float, vzz:float)->Id:
+    """Import an OBJ/MTL file and apply a 4x4 transform.
+
+    The transform is specified as origin (ox,oy,oz) and three basis
+    vectors (vx, vy, vz) which encode scale, rotation, and axis mapping.
+    """
+    # Build 4x4 transform matrix from origin + basis vectors
+    mat = Matrix((
+        (vxx, vyx, vzx, ox),
+        (vxy, vyy, vzy, oy),
+        (vxz, vyz, vzz, oz),
+        (0,   0,   0,   1 )
+    ))
+    # Deselect all
+    bpy.ops.object.select_all(action='DESELECT')
+    # Import OBJ file (no axis conversion — transform handles everything)
+    if hasattr(bpy.ops.wm, 'obj_import'):
+        # Blender 4.x
+        bpy.ops.wm.obj_import(filepath=path, forward_axis='Y', up_axis='Z')
+    elif hasattr(bpy.ops.import_scene, 'obj'):
+        # Blender 3.x
+        bpy.ops.import_scene.obj(filepath=path, axis_forward='Y', axis_up='Z')
+    else:
+        raise Exception("No OBJ importer available in this Blender version")
+    imported = list(bpy.context.selected_objects)
+    if not imported:
+        raise Exception("Failed to import OBJ: " + path)
+    # Join multiple objects into one
+    if len(imported) > 1:
+        bpy.context.view_layer.objects.active = imported[0]
+        bpy.ops.object.join()
+    obj = bpy.context.active_object
+    # Apply transform
+    obj.matrix_world = mat
+    # Register with Khepri ID system
+    id, name = new_id()
+    obj.name = name
+    obj.data.name = name
+    # Move to Khepri's current collection
+    old_collections = list(obj.users_collection)
+    if current_collection not in old_collections:
+        current_collection.objects.link(obj)
+    for col in old_collections:
+        if col != current_collection:
+            col.objects.unlink(obj)
+    return id
+
 def trig(p1:Point3d, p2:Point3d, p3:Point3d, mat:MatId)->Id:
     return objmesh([p1, p2, p3], [], [[0, 1, 2]], False, mat)
 
@@ -1111,6 +1161,26 @@ def camera_from_view()->None:
 #             if region.type == 'WINDOW':
 #                 override = {'area': area, 'region': region, 'edit_object': C.edit_object}
 #                 bpy.ops.view3d.view_all(override)
+
+def set_view_size(width:int, height:int)->None:
+    if os.name == 'nt':
+        import ctypes
+        hwnd = ctypes.c_void_p()
+        pid = os.getpid()
+        user32 = ctypes.windll.user32
+        EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        result = []
+        def callback(hwnd, lParam):
+            proc_id = ctypes.c_ulong()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_id))
+            if proc_id.value == pid and user32.IsWindowVisible(hwnd):
+                result.append(hwnd)
+            return True
+        user32.EnumWindows(EnumWindowsProc(callback), 0)
+        if result:
+            SWP_NOMOVE = 0x0002
+            SWP_NOZORDER = 0x0004
+            user32.SetWindowPos(result[0], None, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER)
 
 def set_render_size(width:int, height:int)->None:
     C.scene.render.resolution_x = width
