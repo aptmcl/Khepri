@@ -337,9 +337,7 @@ public class Khepri : MonoBehaviour {
     }
     */
     private void Update() {
-        if (isKhepriRunning) {
-            sceneLoad?.Update();
-        }
+        sceneLoad?.Update();
     }
     /*AML
     private void OnDestroy() {
