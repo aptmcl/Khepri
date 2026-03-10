@@ -9,9 +9,10 @@ include(khepribase_interface_file())
 include("Threejs.jl")
 
 
-# We need assets, such as toilets, furniture, trees, etc.
-# These can be in different formats, but we will start with the
-# OBJ/MTL format
+# Assets (toilets, furniture, doors, windows, etc.) are supported via
+# ThreeJSObjFileFamily — see the OBJ/MTL Backend Families section in
+# Threejs.jl. Use threejs_obj_family() and set_backend_family() to
+# register OBJ models as backend implementations for Khepri families.
 
 function __init__()
   set_default_materials()

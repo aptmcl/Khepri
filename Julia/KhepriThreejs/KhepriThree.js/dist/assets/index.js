@@ -37652,6 +37652,9 @@ typedFunction("guiAddFolder", [GUIId, Str, Bool], GUIId, (gui, title, closed) =>
   if (closed) folder.close();
   return folder;
 });
+typedFunction("guiRemove", [GUIId], None, (gui) => {
+  gui.destroy();
+});
 typedFunction("guiVisible", [GUIId, Bool], None, (gui, visible) => {
   if (visible) {
     gui.show();
@@ -38064,6 +38067,12 @@ typedFunction("meshObjFmt", [Str, Str, Matrix4x4], Id, (path, name, m2) => {
   new MTLLoader().setPath(path).loadAsync(`${name}.mtl`).then((materials2) => {
     materials2.preload();
     new OBJLoader().setPath(path).setMaterials(materials2).loadAsync(`${name}.obj`).then((object) => {
+      object.traverse((child) => {
+        if (child instanceof Mesh && child.material) {
+          const mats = Array.isArray(child.material) ? child.material : [child.material];
+          mats.forEach((mat) => mat.side = DoubleSide);
+        }
+      });
       parent.add(object);
     }).catch((err) => console.error(err));
   }).catch((err) => console.error(err));

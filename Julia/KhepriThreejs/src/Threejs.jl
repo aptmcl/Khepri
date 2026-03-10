@@ -1,4 +1,4 @@
-export threejs, threejs_material
+export threejs, threejs_material, THR
        
 # THR is a subtype of JS
 parse_signature(::Val{:THR}, sig::T) where {T} = parse_signature(Val(:TS), sig)
@@ -92,6 +92,7 @@ typedFunction("addAnnotation", [Point3d, Str], Int32, (p: THREE.Vector3, txt: st
 typedFunction("deleteAnnotation", [Int32], None, (i: number) => 
 typedFunction("guiCreate", [Str, Int32], GUIId, (title: string, kind: number) => {
 typedFunction("guiAddFolder", [GUIId, Str, Bool], GUIId, (gui: GUI, title: string, closed: boolean) => {
+typedFunction("guiRemove", [GUIId], None, (gui: GUI) => {
 typedFunction("guiVisible", [GUIId, Bool], None, (gui: GUI, visible: boolean) => {
 typedFunction("guiAddButton", [GUIId, Str, Int32], GUIId, (gui: GUI, name: string, request: number) => {
 typedFunction("guiAddCheckbox", [GUIId, Str, Int32, Bool], GUIId, (gui: GUI, name: string, request: number, curr: boolean) => {
@@ -432,8 +433,22 @@ KhepriBase.b_extruded_surface(b::THR, profile::Region, v, cb, bmat, tmat, smat) 
       @invoke b_extruded_surface(b::Backend, profile::Region, v, cb, bmat, tmat, smat)
   end
 
-KhepriBase.b_mesh_obj_fmt(b::THR, obj_name, base) =
-  @remote(b, meshObjFmt("resources/models/obj/$obj_name/", obj_name, base))
+KhepriBase.b_mesh_obj_fmt(b::THR, obj_name, transform) =
+  @remote(b, meshObjFmt("resources/models/obj/$obj_name/", obj_name, transform))
+
+## ─────────────────────────────────────────────────────────────────────
+##  OBJ/MTL Backend Families — backward compatibility
+##
+##  OBJ family types and transform functions are now defined in
+##  KhepriBase (OBJFamily, OBJFileFamily, obj_family). These aliases
+##  preserve backward compatibility for existing user code.
+## ─────────────────────────────────────────────────────────────────────
+
+export threejs_obj_family
+
+const ThreeJSObjFamily = OBJFamily
+const ThreeJSObjFileFamily = OBJFileFamily
+const threejs_obj_family = obj_family
 
 measure_box(; xlength = 20, ylength = 10, zlength = 5) =
   let cyl_r = 0.01,
@@ -494,6 +509,9 @@ KhepriBase.b_gui_create(b::THR, name) =
 
 KhepriBase.b_gui_add_folder(b::THR, gui, name, closed) = 
   @remote(b, guiAddFolder(gui, name, closed))
+
+KhepriBase.b_gui_remove(b::THR, gui) = 
+  @remote(b, guiRemove(gui))
 
 KhepriBase.b_gui_visible(b::THR, gui, isvisible) =
   @remote(b, guiVisible(gui, isvisible))

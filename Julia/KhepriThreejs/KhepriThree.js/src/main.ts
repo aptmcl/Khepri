@@ -1394,6 +1394,10 @@ typedFunction("guiAddFolder", [GUIId, Str, Bool], GUIId, (gui: GUI, title: strin
   return folder;
 });
 
+typedFunction("guiRemove", [GUIId], None, (gui: GUI) => {
+  gui.destroy();
+});
+
 typedFunction("guiVisible", [GUIId, Bool], None, (gui: GUI, visible: boolean) => {
   if (visible) {
     gui.show();
@@ -1799,6 +1803,12 @@ typedFunction("meshObjFmt", [Str, Str, Matrix4x4], Id, (path: string, name: stri
   new MTLLoader().setPath(path).loadAsync(`${name}.mtl`).then(materials => {
     materials.preload();
     new OBJLoader().setPath(path).setMaterials(materials).loadAsync(`${name}.obj`).then(object => {
+      object.traverse(child => {
+        if (child instanceof THREE.Mesh && child.material) {
+          const mats = Array.isArray(child.material) ? child.material : [child.material];
+          mats.forEach(mat => mat.side = THREE.DoubleSide);
+        }
+      });
       parent.add(object);
     }).catch(err => console.error(err));
   }).catch(err => console.error(err));
