@@ -22,21 +22,14 @@ vrotate(<0,0,1000000000>,<-Al,Az,0>)
   translate SolarPosition
 }
 #include "transforms.inc"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+disc {
+  <0, 0, 0>, <0, 1, 0>, 3
+  -1
+}
+disc {
+  <8, 0, 0>, <0, 1, 0>, 2
+  -1
+}
 plane {<0.0,0.0,1000.0>, -10000 texture { pigment { color rgb <0,0,0> }}}
 camera {
   location <0, 1000, 0>

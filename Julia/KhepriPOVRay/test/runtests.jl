@@ -21,7 +21,7 @@ end
 
   @testset "Backend initialization" begin
     @testset "povray backend exists" begin
-      @test povray isa KhepriBase.IOBackend
+      @test povray isa KhepriBase.LocalBackend
     end
 
     @testset "backend_name" begin
@@ -123,7 +123,7 @@ end
     end
 
     @testset "povray has render_env field" begin
-      @test hasfield(typeof(povray), :render_env)
+      @test hasproperty(povray, :render_env)
     end
 
     @testset "render_pathname function" begin

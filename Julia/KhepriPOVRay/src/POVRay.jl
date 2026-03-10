@@ -524,20 +524,21 @@ sky_sphere{
   end
 
 ####################################################
-abstract type POVRayKey end
-const POVRayId = Any
-const POVRayRef = NativeRef{POVRayKey, POVRayId}
-
-const POVRay = IOBackend{POVRayKey, POVRayId, Nothing}
-
-KhepriBase.backend_name(::POVRay) = "POVRay"
+@defbackend POVRay POVRay begin
+  id_type = Any
+  void_ref = -1
+  view_type = FrontendView()
+  parent = LocalBackend
+  mixin(local_shapes)
+  mixin(render_state)
+  mixin(io)
+  view::View = default_view()
+end
 
 # Traits
 # Although we have boolean operation in POVRay at the level of shapes, we do
 # not have boolean operations at the level of references
 KhepriBase.has_boolean_ops(::Type{POVRay}) = HasBooleanOps{false}()
-
-KhepriBase.void_ref(b::POVRay) = -1
 
 const povray = POVRay()
 
@@ -554,15 +555,26 @@ KhepriBase.b_new_material(b::POVRay, name,
 						              ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
 						              post_lighting_color,
 						              absorption, micro_thickness, thickness) =
-  povray_material()
+  povray_material(name,
+    red=Float64(red(base_color)), green=Float64(green(base_color)), blue=Float64(blue(base_color)),
+    specularity=Float64(specular), roughness=Float64(roughness),
+    transmissivity=transmission > 0 ? Float64(transmission) : nothing)
 KhepriBase.b_plastic_material(b::POVRay, name, color, roughness) =
-  povray_material()
+  povray_material(name,
+    red=Float64(red(color)), green=Float64(green(color)), blue=Float64(blue(color)),
+    roughness=Float64(roughness))
 KhepriBase.b_metal_material(b::POVRay, name, color, roughness, ior) =
-  povray_material()
+  povray_material(name,
+    red=Float64(red(color)), green=Float64(green(color)), blue=Float64(blue(color)),
+    specularity=0.8, roughness=Float64(roughness))
 KhepriBase.b_glass_material(b::POVRay, name, color, roughness, ior) =
-  povray_material()
+  povray_material(name,
+    red=Float64(red(color)), green=Float64(green(color)), blue=Float64(blue(color)),
+    transmissivity=0.7, roughness=Float64(roughness))
 KhepriBase.b_mirror_material(b::POVRay, name, color) =
-  povray_material()
+  povray_material(name,
+    red=Float64(red(color)), green=Float64(green(color)), blue=Float64(blue(color)),
+    specularity=1.0)
 
 #
 KhepriBase.b_trig(b::POVRay, p1, p2, p3, mat) =
@@ -584,13 +596,13 @@ KhepriBase.b_surface_circle(b::POVRay, c, r, mat) =
 KhepriBase.b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
   let io = connection(b),
       ptss = maybe_interpolate_grid(ptss, smooth_u, smooth_v),
-      (si, sj) = size(pts),
+      (si, sj) = size(ptss),
       idxs = quad_grid_indexes(si, sj, closed_u, closed_v)
     write_povray_object(io, "mesh2", nothing) do
-      write_povray_object(io, "vertex_vectors", nothing, si*sj, reshape(permutedims(pts), :)...)
+      write_povray_object(io, "vertex_vectors", nothing, si*sj, reshape(permutedims(ptss), :)...)
       # Must understand how to handle smoothness along one direction
       if smooth_u || smooth_v
-        write_povray_object(io, "normal_vectors", nothing, si*sj, reshape(permutedims(add_z.(pts, 1) .- pts), :)...)
+        write_povray_object(io, "normal_vectors", nothing, si*sj, reshape(permutedims(add_z.(ptss, 1) .- ptss), :)...)
       end
       write_povray_object(io, "face_indices", nothing, length(idxs), idxs...)
       #write_povray_object(buf, "normal_indices", nothing, length(idxs), idxs...)
@@ -829,10 +841,12 @@ export_to_povray(b::POVRay, path::String) =
       write(out, povray_environment_string(b, b.render_env))
       # write useful include
       write(out, """#include "transforms.inc"\n""")
-      # write materials (removing duplicate includes)
-      for m in unique(m->m isa POVRayInclude ? m.filename : m,
-                      material_refs(b, used_materials(b)))
-        write_povray_definition(out, m)
+      # write materials (removing duplicate includes and void refs)
+      let vr = void_ref(b)
+        for m in unique(m->m isa POVRayInclude ? m.filename : m,
+                        filter(r -> r != vr, material_refs(b, used_materials(b))))
+          write_povray_definition(out, m)
+        end
       end
       # write the ground
       if !isnothing(b.ground_material)
