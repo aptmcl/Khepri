@@ -167,3 +167,18 @@ KhepriBase.b_node_displacement_function(b::FR4DD, results) =
       vxyz(D[base+1], D[base+2], D[base+3], world_cs)
     end
   end
+
+# Reaction forces — returns Dict mapping supported node IDs to force vectors
+KhepriBase.b_reaction_forces(b::FR4DD, results) =
+  let R = results.load_cases[1].reactions
+    Dict(n.id => vxyz(R[6*(n.id-1)+1], R[6*(n.id-1)+2], R[6*(n.id-1)+3], world_cs)
+         for n in b.truss_node_data if truss_node_is_supported(n))
+  end
+
+# Element axial forces — returns Vector of axial force per bar (positive = tension)
+# Frame4DD convention: column 1 = Nx at node i, negative for tension; we negate to
+# match the standard engineering sign convention (positive = tension, negative = compression)
+KhepriBase.b_element_axial_forces(b::FR4DD, results) =
+  let EF = results.load_cases[1].element_forces
+    [-EF[bar.id, 1] for bar in b.truss_bar_data]
+  end

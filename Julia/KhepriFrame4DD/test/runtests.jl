@@ -221,6 +221,96 @@ using Test
     end
   end
 
+  @testset "Reaction forces" begin
+    delete_all_shapes()
+    backend(frame4dd)
+
+    fixed = truss_node_family_element(
+      default_truss_node_family(),
+      support=truss_node_support(ux=true, uy=true, uz=true, rx=true, ry=true, rz=true))
+    pinned = truss_node_family_element(
+      default_truss_node_family(),
+      support=truss_node_support(ux=true, uy=true, uz=true))
+    free = truss_node_family_element(default_truss_node_family())
+
+    # Simple beam: fixed at left, pinned at right, loaded at midspan
+    truss_node(xyz(0, 0, 0), fixed)
+    truss_node(xyz(5, 0, 0), pinned)
+    truss_node(xyz(2.5, 0, 3), free)
+    truss_bar(xyz(0, 0, 0), xyz(2.5, 0, 3))
+    truss_bar(xyz(2.5, 0, 3), xyz(5, 0, 0))
+    truss_bar(xyz(0, 0, 0), xyz(5, 0, 0))
+
+    results = truss_analysis(vz(-10000))
+    reactions = reaction_forces(results)
+
+    # Only supported nodes should appear in reactions
+    @test haskey(reactions, 1)  # fixed node
+    @test haskey(reactions, 2)  # pinned node
+    @test !haskey(reactions, 3) # free node
+
+    # Vertical equilibrium: sum of vertical reactions = total applied load
+    total_rz = sum(r.z for r in values(reactions))
+    n_free = count(!truss_node_is_supported, frame4dd.truss_node_data)
+    @test total_rz ≈ n_free * 10000 atol=1.0  # reactions balance applied loads
+
+    # Horizontal equilibrium: sum of horizontal reactions ≈ 0
+    total_rx = sum(r.x for r in values(reactions))
+    @test abs(total_rx) < 1.0
+  end
+
+  @testset "Element axial forces" begin
+    delete_all_shapes()
+    backend(frame4dd)
+
+    fixed = truss_node_family_element(
+      default_truss_node_family(),
+      support=truss_node_support(ux=true, uy=true, uz=true, rx=true, ry=true, rz=true))
+    free = truss_node_family_element(default_truss_node_family())
+
+    # Single bar under tension (load pulling away from support)
+    truss_node(xyz(0, 0, 0), fixed)
+    truss_node(xyz(1, 0, 0), free)
+    truss_bar(xyz(0, 0, 0), xyz(1, 0, 0))
+
+    results = truss_analysis(vx(10000))
+    forces = element_axial_forces(results)
+
+    # Should have exactly 1 force value (1 bar)
+    @test length(forces) == 1
+    # Bar under tension should have positive axial force
+    @test forces[1] > 0
+  end
+
+  @testset "Element axial forces — triangle" begin
+    delete_all_shapes()
+    backend(frame4dd)
+
+    fixed = truss_node_family_element(
+      default_truss_node_family(),
+      support=truss_node_support(ux=true, uy=true, uz=true, rx=true, ry=true, rz=true))
+    pinned = truss_node_family_element(
+      default_truss_node_family(),
+      support=truss_node_support(ux=true, uy=true, uz=true))
+    free = truss_node_family_element(default_truss_node_family())
+
+    truss_node(xyz(0, 0, 0), fixed)
+    truss_node(xyz(5, 0, 0), pinned)
+    truss_node(xyz(2.5, 0, 3), free)
+    truss_bar(xyz(0, 0, 0), xyz(5, 0, 0))
+    truss_bar(xyz(0, 0, 0), xyz(2.5, 0, 3))
+    truss_bar(xyz(5, 0, 0), xyz(2.5, 0, 3))
+
+    results = truss_analysis(vz(-10000))
+    forces = element_axial_forces(results)
+
+    # Should have 3 force values (3 bars)
+    @test length(forces) == 3
+    # The diagonal bars (bars 2 and 3) carry compression under downward apex load
+    @test forces[2] < 0
+    @test forces[3] < 0
+  end
+
   @testset "Custom bar family properties" begin
     delete_all_shapes()
     backend(frame4dd)

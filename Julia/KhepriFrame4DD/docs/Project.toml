@@ -1,3 +1,4 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 KhepriFrame4DD = "facca88e-a9e2-48fe-94cb-e86d30575c40"
+KhepriThebes = "fe5acd35-b311-462b-9357-e33995177d6f"

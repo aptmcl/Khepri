@@ -38,6 +38,16 @@ family = frame4dd_circular_tube_truss_bar_family(
 truss_analysis(vz(-1e4))
 ```
 
+## Tutorials
+
+New to KhepriFrame4DD? Start with the tutorials, which progressively introduce
+truss analysis from 2D planar trusses to 3D space structures:
+
+1. **[Planar Truss Analysis](tutorials/tutorial1_planar_truss.md)** — Pratt truss, supports, loads, displacements, reactions, axial forces
+2. **[Warren Truss Bridge](tutorials/tutorial2_warren_bridge.md)** — Parametric generation, multiple load scenarios, force distribution
+3. **[3D Space Truss Tower](tutorials/tutorial3_space_truss_tower.md)** — Combined loading, drift checks, stress verification
+4. **[Flat Truss Grid (Space Frame Deck)](tutorials/tutorial4_truss_grid_deck.md)** — Tributary areas, plate analogy, mesh convergence
+
 ## Dependencies
 
 - **KhepriBase**: Core Khepri functionality
