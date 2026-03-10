@@ -266,11 +266,11 @@ abstract type UEFamily <: Family end
 
 struct UEMaterialFamily <: UEFamily
   name::String
-  ref::Parameter{Any}
+  ref::IdDict{Backend, Any}
 end
 
 unreal_material_family(name, pairs...) =
-  UEMaterialFamily(name, Parameter{Any}(nothing))
+  UEMaterialFamily(name, IdDict{Backend, Any}())
 
 backend_get_family_ref(b::UE, f::Family, uf::UEMaterialFamily) =
   @remote(b, Primitive__LoadMaterial(uf.name))
@@ -278,11 +278,11 @@ backend_get_family_ref(b::UE, f::Family, uf::UEMaterialFamily) =
 struct UEResourceFamily <: UEFamily
   name::String
   parameter_map::Dict{Symbol,String}
-  ref::Parameter{Any}
+  ref::IdDict{Backend, Any}
 end
 
 unreal_resource_family(name, pairs...) =
-  UEResourceFamily(name, Dict(pairs...), Parameter{Any}(nothing))
+  UEResourceFamily(name, Dict(pairs...), IdDict{Backend, Any}())
 
 backend_get_family_ref(b::UE, f::Family, uf::UEResourceFamily) =
   @remote(b, Primitive__LoadResource(uf.name))
