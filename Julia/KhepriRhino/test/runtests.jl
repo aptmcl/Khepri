@@ -52,6 +52,10 @@ using Test
 
       run_visual_tests(rhino,
         golden_dir = joinpath(@__DIR__, "golden"),
+        setup_backend = () -> begin
+          delete_all_shapes()
+          backend(rhino)
+        end,
         reset! = () -> begin
           delete_all_shapes()
           backend(rhino)

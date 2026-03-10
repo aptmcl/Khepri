@@ -128,6 +128,7 @@ public Guid Move(Guid id, Vector3d v)
 public Guid Scale(Guid id, Point3d p, double s)
 public Guid Rotate(Guid id, Point3d p, Vector3d n, double a)
 public Guid Mirror(Guid id, Point3d p, Vector3d n, bool copy)
+public Guid ImportOBJ(string path, Point3d origin, Vector3d vx, Vector3d vy, Vector3d vz)
 public bool IsPoint(RhinoObject e)
 public bool IsCircle(RhinoObject e)
 public bool IsPolyLine(RhinoObject e)
@@ -400,6 +401,17 @@ KhepriBase.b_surface_mesh(b::RH, vertices, faces, mat) =
     @remote(b, Mesh(vertices, map(face->ensure_4(face.-1), faces), mat))
   end
 
+# OBJ/MTL file import — uses Rhino's native import via ImportOBJ API.
+KhepriBase.b_mesh_obj_fmt(b::RH, obj_name, transform) =
+  let path = abspath(obj_file_path(obj_name)),
+      t = transform.cs.transform,
+      origin = xyz(t[1,4], t[2,4], t[3,4]),
+      vx = vxyz(t[1,1], t[2,1], t[3,1]),
+      vy = vxyz(t[1,2], t[2,2], t[3,2]),
+      vz = vxyz(t[1,3], t[2,3], t[3,3])
+    @remote(b, ImportOBJ(path, origin, vx, vy, vz))
+  end
+
 ############################################################
 # Third tier: solids
 
@@ -666,15 +678,27 @@ backend_frame_at(b::RH, s::Shape2D, u::Real, v::Real) =
 # Families
 
 realize(b::RH, f::TableFamily) =
-    @remote(b, CreateRectangularTableFamily(f.length, f.width, f.height, f.top_thickness, f.leg_thickness))
+    let bf = get(f.implemented_as, typeof(b), nothing)
+      isnothing(bf) ?
+        @remote(b, CreateRectangularTableFamily(f.length, f.width, f.height, f.top_thickness, f.leg_thickness)) :
+        backend_get_family_ref(b, f, bf)
+    end
 realize(b::RH, f::ChairFamily) =
-    @remote(b, CreateChairFamily(f.length, f.width, f.height, f.seat_height, f.thickness))
+    let bf = get(f.implemented_as, typeof(b), nothing)
+      isnothing(bf) ?
+        @remote(b, CreateChairFamily(f.length, f.width, f.height, f.seat_height, f.thickness)) :
+        backend_get_family_ref(b, f, bf)
+    end
 realize(b::RH, f::TableChairFamily) =
-    @remote(b, CreateRectangularTableAndChairsFamily(
-        family_ref(b, f.table_family), family_ref(b, f.chair_family),
-        f.table_family.length, f.table_family.width,
-        f.chairs_top, f.chairs_bottom, f.chairs_right, f.chairs_left,
-        f.spacing))
+    let bf = get(f.implemented_as, typeof(b), nothing)
+      isnothing(bf) ?
+        @remote(b, CreateRectangularTableAndChairsFamily(
+            family_ref(b, f.table_family), family_ref(b, f.chair_family),
+            f.table_family.length, f.table_family.width,
+            f.chairs_top, f.chairs_bottom, f.chairs_right, f.chairs_left,
+            f.spacing)) :
+        backend_get_family_ref(b, f, bf)
+    end
 
 KhepriBase.b_table(b::RH, c, angle, family) =
     @remote(b, Table(c, angle, family_ref(b, family)))
@@ -1005,11 +1029,11 @@ abstract type RhinoFamily <: Family end
 struct RhinoLayerFamily <: RhinoFamily
   name::String
   color::RGB
-  ref::Parameter{Any}
+  ref::IdDict{Backend, Any}
 end
 
 rhino_layer_family(name, color::RGB=rgb(1,1,1)) =
-  RhinoLayerFamily(name, color, Parameter{Any}(nothing))
+  RhinoLayerFamily(name, color, IdDict{Backend, Any}())
 
 backend_get_family_ref(b::RH, f::Family, af::RhinoLayerFamily) =
   backend_create_layer(b, af.name, true, af.color)
