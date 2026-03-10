@@ -177,7 +177,7 @@ namespace KhepriRhinoceros {
         public void SetViewDisplayMode(string mode) =>
             doc.Views.ActiveView.ActiveViewport.DisplayMode = DisplayModeDescription.FindByName(mode);
         public void ViewSize(int width, int height) {
-            SetWindowPos(RhinoApp.MainApplicationWindow, IntPtr.Zero, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER);
+            SetWindowPos(RhinoApp.MainWindowHandle(), IntPtr.Zero, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER);
         }
 
         RhinoView PerspectiveView() =>
@@ -243,8 +243,7 @@ namespace KhepriRhinoceros {
             RhinoApp.RunScript($"_-CloseRenderWindow", true);
         }
         public void SaveView(int width, int height, string path) {
-            RhinoView view = PerspectiveView();
-            RhinoViewport viewport = view.ActiveViewport;
+            RhinoView view = doc.Views.ActiveView;
             System.Drawing.Size size = new System.Drawing.Size(width, height);
             var capture = view.CaptureToBitmap(size);
             capture.Save(path);
@@ -1587,6 +1586,40 @@ def show_vertices(shape):
         public Guid Rotate(Guid id, Point3d p, Vector3d n, double a) => doc.Objects.Transform(id, Transform.Rotation(a, n, p), true);
         public Guid Mirror(Guid id, Point3d p, Vector3d n, bool copy) => doc.Objects.Transform(id, Transform.Mirror(p, n), copy);
         public Guid Clone(RhinoObject e) => doc.Objects.Add(e.DuplicateGeometry());
+
+        public Guid ImportOBJ(string path, Point3d origin, Vector3d vx, Vector3d vy, Vector3d vz) {
+            // Record existing objects
+            var before = new HashSet<Guid>(doc.Objects.GetObjectList(ObjectType.AnyObject).Select(o => o.Id));
+            // Import OBJ file via Rhino command (handles OBJ+MTL)
+            string escapedPath = path.Replace("\"", "\\\"");
+            RhinoApp.RunScript($"_-Import \"{escapedPath}\" _Enter", true);
+            // Find newly imported objects
+            var after = doc.Objects.GetObjectList(ObjectType.AnyObject);
+            var newIds = after.Where(o => !before.Contains(o.Id)).Select(o => o.Id).ToList();
+            if (newIds.Count == 0) {
+                return Guid.Empty;
+            }
+            // Build 4x4 transform from origin + basis vectors
+            Transform xform = Transform.Identity;
+            xform[0, 0] = vx.X; xform[0, 1] = vy.X; xform[0, 2] = vz.X; xform[0, 3] = origin.X;
+            xform[1, 0] = vx.Y; xform[1, 1] = vy.Y; xform[1, 2] = vz.Y; xform[1, 3] = origin.Y;
+            xform[2, 0] = vx.Z; xform[2, 1] = vy.Z; xform[2, 2] = vz.Z; xform[2, 3] = origin.Z;
+            xform[3, 0] = 0;    xform[3, 1] = 0;    xform[3, 2] = 0;    xform[3, 3] = 1;
+            // Apply transform to all imported objects
+            foreach (var id in newIds) {
+                doc.Objects.Transform(id, xform, false);
+            }
+            // If multiple objects were imported, join meshes into one
+            if (newIds.Count == 1) {
+                return newIds[0];
+            }
+            // Group all imported objects and return the first one's id
+            int groupIndex = doc.Groups.Add();
+            foreach (var id in newIds) {
+                doc.Groups.AddToGroup(groupIndex, id);
+            }
+            return newIds[0];
+        }
 
         public Point3d[] GetPosition(string prompt) {
             Result res = RhinoGet.GetPoint(prompt, false, out Point3d location);
