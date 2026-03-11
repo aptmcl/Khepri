@@ -29,6 +29,9 @@ jobs:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v2
+      - name: Use KhepriBase master (dev builds only)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: julia --color=yes --project=@. -e 'using Pkg; Pkg.develop(url="https://github.com/aptmcl/KhepriBase.jl")'
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
       - uses: julia-actions/julia-processcoverage@v1
@@ -47,6 +50,9 @@ jobs:
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1'
+      - name: Use KhepriBase master (dev builds only)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: julia --color=yes --project=@. -e 'using Pkg; Pkg.develop(url="https://github.com/aptmcl/KhepriBase.jl")'
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-docdeploy@v1
         env:
