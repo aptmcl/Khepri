@@ -33,9 +33,10 @@ namespace KhepriBase {
             var action = RMIfy.RMIFor(c, p, name, expectedCanonical);
             if (action != null) {
                 operations.Add(action);
+                c.wByte(0);
                 c.wInt32(operations.Count - 1);
             }
-            // Error already written by RMIFor when action is null
+            // Error already written by RMIFor (with NOTOK prefix) when action is null
         }
 
         public void CleanChannel(C c) {

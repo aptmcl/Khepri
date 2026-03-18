@@ -59,25 +59,36 @@ namespace KhepriBase {
         static Expression SerializeReturn(ParameterExpression c, ParameterInfo p, Expression e) {
             var returnType = p.ParameterType;
             var methodName = "w" + MethodNameFromType(returnType);
-            // Use the overload that specifies parameter type to avoid ambiguity
-            // when multiple types have the same name (e.g., System.Drawing.Color vs Autodesk.AutoCAD.Colors.Color)
-            var writer = returnType == typeof(void)
-                ? GetMethod(c.Type, methodName)
-                : GetMethod(c.Type, methodName, returnType);
-            if (returnType == typeof(void))
-                return Expression.Block(e, Expression.Call(c, writer));
-            else
-                return Expression.Call(c, writer, e);
+            var wByteMethod = GetMethod(c.Type, "wByte");
+            var okPrefix = Expression.Call(c, wByteMethod, Expression.Constant((byte)0));
+            if (returnType == typeof(void)) {
+                var writer = GetMethod(c.Type, methodName);
+                return Expression.Block(e, okPrefix, Expression.Call(c, writer));
+            } else {
+                var writer = GetMethod(c.Type, methodName, returnType);
+                var resultVar = Expression.Variable(returnType, "result");
+                return Expression.Block(
+                    new[] { resultVar },
+                    Expression.Assign(resultVar, e),
+                    okPrefix,
+                    Expression.Call(c, writer, resultVar));
+            }
         }
 
         //We need to visualize errors
         static Expression SerializeErrors(ParameterExpression c, ParameterInfo p, Expression e) {
-            var reporter = GetMethod(c.Type, "e" + MethodNameFromType(p.ParameterType));
+            var wByteMethod = GetMethod(c.Type, "wByte");
+            var wStringMethod = GetMethod(c.Type, "wString");
+            var notokPrefix = Expression.Call(c, wByteMethod, Expression.Constant((byte)1));
             var ex = Expression.Parameter(typeof(Exception), "ex");
+            var errorMsg = Expression.Call(
+                typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string), typeof(string) }),
+                Expression.Property(ex, "Message"),
+                Expression.Constant("\n"),
+                Expression.Property(ex, "StackTrace"));
             return Expression.TryCatch(e,
                 Expression.Catch(ex,
-                    Expression.Block(
-                        Expression.Call(c, reporter, ex))));
+                    Expression.Block(notokPrefix, Expression.Call(c, wStringMethod, errorMsg))));
         }
 
         static Action<C,P> GenerateRMIFor<C,P>(C channel, P primitives, MethodInfo f) {
@@ -107,14 +118,14 @@ namespace KhepriBase {
             String error;
             MethodInfo f = TryGetMethod(primitives.GetType(), name, out error);
             if (f == null) {
-                channel.wInt32(-1);
+                channel.wByte(1);
                 channel.wString(error);
                 channel.Flush();
                 return null;
             }
             var actualCanonical = CanonicalFromReflection(f);
             if (expectedCanonical != actualCanonical) {
-                channel.wInt32(-1);
+                channel.wByte(1);
                 channel.wString($"Signature mismatch for '{name}': Julia expects {expectedCanonical} but C# has {actualCanonical}");
                 channel.Flush();
                 return null;
