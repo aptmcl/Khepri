@@ -41,19 +41,11 @@ def r_struct(s, conn):
 def w_struct(s, e, conn):
     conn.sendall(s.pack(e))
 
-def e_struct(s, e, ex, conn):
-    w_struct(s, e, conn)
-    dump_exception(ex, conn)
-
 def r_tuple_struct(s, conn):
     return s.unpack(recvall(conn, s.size))
 
 def w_tuple_struct(s, e, conn):
     conn.sendall(s.pack(*e))
-
-def e_tuple_struct(s, e, ex, conn):
-    w_tuple_struct(s, e, conn)
-    dump_exception(ex, conn)
 
 def r_list_struct(s, conn):
     n = r_int(conn)
@@ -67,10 +59,6 @@ def w_list_struct(s, es, conn):
     for e in es:
         w_struct(s, e, conn)
 
-def e_list(ex, conn):
-    w_int(-1, conn)
-    dump_exception(ex, conn)
-
 int_struct = struct.Struct('i')
 float_struct = struct.Struct('d')
 byte_struct = struct.Struct('1B')
@@ -78,26 +66,19 @@ byte_struct = struct.Struct('1B')
 def w_None(e, conn)->None:
     w_struct(byte_struct, 0, conn)
 
-e_None = partial(e_struct, byte_struct, 127)
-
 def r_bool(conn)->bool:
     return r_struct(byte_struct, conn) == 1
 def w_bool(b:bool, conn)->None:
     w_struct(byte_struct, 1 if b else 0, conn)
 
-e_bool = partial(e_struct, byte_struct, 127)
-
 r_int = partial(r_struct, int_struct)
 w_int = partial(w_struct, int_struct)
-e_int = partial(e_struct, int_struct, -12345678)
 
 r_float = partial(r_struct, float_struct)
 w_float = partial(w_struct, float_struct)
-e_float = partial(w_struct, float_struct, math.nan)
 
 r_Size = partial(r_struct, int_struct)
 w_Size = partial(w_struct, int_struct)
-e_Size = partial(e_struct, int_struct, -1)
 
 def r_str(conn)->str:
     size = 0
@@ -126,14 +107,9 @@ def w_str(s:str, conn):
     conn.send(array)
     conn.sendall(s.encode('utf-8'))
 
-def e_str(ex, conn)->None:
-    w_str("This an error!", conn)
-    dump_exception(ex, conn)
-
 float3_struct = struct.Struct('3d')
 r_float3 = partial(r_tuple_struct, float3_struct)
 w_float3 = partial(w_tuple_struct, float3_struct)
-e_float3 = e_float
 
 def r_List(f, conn):
     n = r_int(conn)
@@ -147,27 +123,20 @@ def w_List(f, es, conn):
     for e in es:
         f(e, conn)
 
-e_List = e_list
-
 r_List_int = partial(r_List, r_int)
 w_List_int = partial(w_List, w_int)
-e_List_int = e_List
 
 r_List_Size = partial(r_List, r_Size)
 w_List_Size = partial(w_List, w_Size)
-e_List_Size = e_List
 
 r_List_float = partial(r_List, r_float)
 w_List_float = partial(w_List, w_float)
-e_List_float = e_List
 
 r_List_float3 = partial(r_List, r_float3)
 w_List_float3 = partial(w_List, w_float3)
-e_List_float3 = e_List
 
 r_List_List_int = partial(r_List, r_List_int)
 w_List_List_int = partial(w_List, w_List_int)
-e_List_List_int = e_List
 
 int_int_struct = struct.Struct('2i')
 r_Tint_intT = partial(r_tuple_struct, int_int_struct)
@@ -175,7 +144,6 @@ w_Tint_intT = partial(w_tuple_struct, int_int_struct)
 
 r_List_Tint_intT = partial(r_List, r_Tint_intT)
 w_List_Tint_intT = partial(w_List, w_Tint_intT)
-e_List_Tint_intT = e_List
 
 ##############################################################
 # For automatic generation of serialize/deserialize code
@@ -210,17 +178,16 @@ def deserialize_parameter(c:str, t)->str:
         return f"r_{method_name_from_type(t)}({c})"
 
 def serialize_return(c:str, t, e:str)->str:
+    ok_prefix = f"w_struct(byte_struct, 0, {c})"
     if is_tuple_type(t):
-        return f"__r = {e}; " + '; '.join([serialize_return(c, pt, f"__r[{i}]")
-                                           for i, pt in enumerate(tuple_elements_type(t))])
+        writes = '; '.join([f"w_{method_name_from_type(pt)}(__r[{i}], {c})"
+                            for i, pt in enumerate(tuple_elements_type(t))])
+        return f"__r = {e}; {ok_prefix}; {writes}"
     else:
-        return f"w_{method_name_from_type(t)}({e}, {c})"
+        return f"__r = {e}; {ok_prefix}; w_{method_name_from_type(t)}(__r, {c})"
 
 def serialize_error(c:str, t, e:str)->str:
-    if is_tuple_type(t):
-        return serialize_error(c, tuple_elements_type(t)[0], e)
-    else:
-        return f"e_{method_name_from_type(t)}({e}, {c})"
+    return f"w_struct(byte_struct, 1, {c}); dump_exception({e}, {c})"
 
 def try_serialize(c:str, t, e:str)->str:
     return f"""
