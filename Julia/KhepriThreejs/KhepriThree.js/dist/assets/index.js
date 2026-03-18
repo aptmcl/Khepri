@@ -37375,9 +37375,18 @@ function sendRequest(request, ...args) {
   return sendWebSocketRequest(connection, request, ...args);
 }
 function sendValue(type, value) {
-  const buf = new ArrayBuffer(type.size(value));
+  const buf = new ArrayBuffer(1 + type.size(value));
   const out = new IODataView(new DataView(buf));
+  out.writeUInt8(0);
   out.writeType(type, value);
+  connection.send(buf);
+}
+function sendError(message) {
+  const msgSize = computeStringSize(message);
+  const buf = new ArrayBuffer(1 + msgSize);
+  const out = new IODataView(new DataView(buf));
+  out.writeUInt8(1);
+  out.writeString(message);
   connection.send(buf);
 }
 function handleMessage(msg) {
@@ -37414,7 +37423,11 @@ function typedFunction(name, argTypes, retType, func) {
   const tf = (io) => {
     const args = argTypes.map((t3) => io.readType(t3));
     io.checkExhausted();
-    sendValue(retType, func(...args));
+    try {
+      sendValue(retType, func(...args));
+    } catch (e2) {
+      sendError(e2 instanceof Error ? e2.message + "\n" + e2.stack : String(e2));
+    }
   };
   return registerOperation(name, tf);
 }
@@ -37423,7 +37436,11 @@ function typedAsyncFunction(name, argTypes, retType, func) {
     const args = argTypes.map((t3) => io.readType(t3));
     io.checkExhausted();
     const continuation = (res) => sendValue(retType, res);
-    func(...args, continuation);
+    try {
+      func(...args, continuation);
+    } catch (e2) {
+      sendError(e2 instanceof Error ? e2.message + "\n" + e2.stack : String(e2));
+    }
   };
   return registerOperation(name, tf);
 }
@@ -37432,8 +37449,7 @@ typedFunction("getOperationNamed", [Str, Str], Int32, (name, canonical) => {
   if (idx !== void 0) {
     return idx;
   } else {
-    console.error(`Requested non-existent function named '${name}' with signature ${canonical}.`);
-    return -1;
+    throw new Error(`Requested non-existent function named '${name}' with signature ${canonical}.`);
   }
 });
 const renderer = new WebGLRenderer({ antialias: true });

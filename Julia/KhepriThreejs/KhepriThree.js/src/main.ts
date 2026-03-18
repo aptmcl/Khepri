@@ -501,9 +501,19 @@ function sendRequest(request: number, ...args: any[]) {
 }
 
 function sendValue<T>(type:Type<T>, value: T) {
-  const buf = new ArrayBuffer(type.size(value));
+  const buf = new ArrayBuffer(TypeSize.UInt8 + type.size(value));
   const out = new IODataView(new DataView(buf));
+  out.writeUInt8(0); // OK prefix
   out.writeType(type, value);
+  connection.send(buf);
+}
+
+function sendError(message: string) {
+  const msgSize = computeStringSize(message);
+  const buf = new ArrayBuffer(TypeSize.UInt8 + msgSize);
+  const out = new IODataView(new DataView(buf));
+  out.writeUInt8(1); // NOTOK prefix
+  out.writeString(message);
   connection.send(buf);
 }
 
@@ -561,7 +571,11 @@ function typedFunction<T>(name: string, argTypes: TypeOrTypeArray[], retType: Ty
     const args = argTypes.map(t => io.readType(t));
     //console.log("Calling", name, "with args", args);
     io.checkExhausted();
-    sendValue(retType, func(...args)); // pass connection for callbacks
+    try {
+      sendValue(retType, func(...args));
+    } catch (e) {
+      sendError(e instanceof Error ? e.message + "\n" + e.stack : String(e));
+    }
   }
   return registerOperation(name, tf);
 }
@@ -571,7 +585,11 @@ function typedAsyncFunction<T>(name: string, argTypes: TypeOrTypeArray[], retTyp
     const args = argTypes.map(t => io.readType(t));
     io.checkExhausted();
     const continuation = (res: any) => sendValue(retType, res);
-    func(...args, continuation);
+    try {
+      func(...args, continuation);
+    } catch (e) {
+      sendError(e instanceof Error ? e.message + "\n" + e.stack : String(e));
+    }
   }
   return registerOperation(name, tf);
 }
@@ -583,8 +601,7 @@ typedFunction("getOperationNamed", [Str, Str], Int32, (name: string, canonical: 
   if (idx !== undefined) {
     return idx;
   } else {
-    console.error(`Requested non-existent function named '${name}' with signature ${canonical}.`);
-    return -1;
+    throw new Error(`Requested non-existent function named '${name}' with signature ${canonical}.`);
   }
 });
 
