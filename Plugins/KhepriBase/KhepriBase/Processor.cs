@@ -28,14 +28,14 @@ namespace KhepriBase {
         }
 
         public void ProvideOperation(C c, P p) {
-            var action = RMIfy.RMIFor(c, p, c.rString());
-            if (action == null) {
-                CleanChannel(c);
-                c.wInt32(-1);
-            } else {
+            var name = c.rString();
+            var expectedCanonical = c.rString();
+            var action = RMIfy.RMIFor(c, p, name, expectedCanonical);
+            if (action != null) {
                 operations.Add(action);
                 c.wInt32(operations.Count - 1);
             }
+            // Error already written by RMIFor when action is null
         }
 
         public void CleanChannel(C c) {

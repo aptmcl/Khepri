@@ -10,16 +10,29 @@ namespace KhepriBase {
         static MethodInfo GetMethod(Type t, String name) {
             try {
                 MethodInfo m = t.GetMethod(name);
-                Debug.Assert(m != null, "There is no method named '" + name + "' in type '" + t + "'");
                 if (m != null) {
                     return m;
                 } else {
                     throw new Exception("There is no method named '" + name + "' in type '" + t + "'");
                 }
             } catch (AmbiguousMatchException) {
-                Debug.Assert(false, "The method '" + name + "' is ambiguous in type '" + t + "'");
                 throw new Exception("The method '" + name + "' is ambiguous in type '" + t + "'");
-                //return null;
+            }
+        }
+
+        static MethodInfo TryGetMethod(Type t, String name, out String error) {
+            try {
+                MethodInfo m = t.GetMethod(name);
+                if (m != null) {
+                    error = null;
+                    return m;
+                } else {
+                    error = "Method '" + name + "' not found in " + t.Name;
+                    return null;
+                }
+            } catch (AmbiguousMatchException) {
+                error = "Method '" + name + "' is ambiguous in " + t.Name;
+                return null;
             }
         }
 
@@ -27,14 +40,12 @@ namespace KhepriBase {
         static MethodInfo GetMethod(Type t, String name, Type paramType) {
             try {
                 MethodInfo m = t.GetMethod(name, new Type[] { paramType });
-                Debug.Assert(m != null, "There is no method named '" + name + "(" + paramType + ")' in type '" + t + "'");
                 if (m != null) {
                     return m;
                 } else {
                     throw new Exception("There is no method named '" + name + "(" + paramType + ")' in type '" + t + "'");
                 }
             } catch (AmbiguousMatchException) {
-                Debug.Assert(false, "The method '" + name + "(" + paramType + ")' is ambiguous in type '" + t + "'");
                 throw new Exception("The method '" + name + "(" + paramType + ")' is ambiguous in type '" + t + "'");
             }
         }
@@ -86,9 +97,29 @@ namespace KhepriBase {
             return Expression.Lambda<Action<C, P>>(block, new ParameterExpression[] { c, p }).Compile();
         }
 
-        public static Action<C,P> RMIFor<C,P>(C channel, P primitives, String name) {
-            MethodInfo f = GetMethod(primitives.GetType(), name);
-            return (f == null) ? null : GenerateRMIFor(channel, primitives, f);
+        static string CanonicalFromReflection(MethodInfo m) {
+            var ret = MethodNameFromType(m.ReturnType);
+            var parms = string.Join(",", m.GetParameters().Select(p => MethodNameFromType(p.ParameterType)));
+            return $"{ret}({parms})";
+        }
+
+        public static Action<C,P> RMIFor<C,P>(C channel, P primitives, String name, String expectedCanonical) where C : Channel {
+            String error;
+            MethodInfo f = TryGetMethod(primitives.GetType(), name, out error);
+            if (f == null) {
+                channel.wInt32(-1);
+                channel.wString(error);
+                channel.Flush();
+                return null;
+            }
+            var actualCanonical = CanonicalFromReflection(f);
+            if (expectedCanonical != actualCanonical) {
+                channel.wInt32(-1);
+                channel.wString($"Signature mismatch for '{name}': Julia expects {expectedCanonical} but C# has {actualCanonical}");
+                channel.Flush();
+                return null;
+            }
+            return GenerateRMIFor(channel, primitives, f);
         }
     }
 }
