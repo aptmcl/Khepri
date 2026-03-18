@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Net.Sockets;
 using UnityEngine;
@@ -17,8 +17,6 @@ namespace KhepriUnity {
         /*
          * We use, as convention, that the name of the reader is 'r' + type
          * and the name of the writer is 'w' + type
-         * For handling errors, we also include the error signaller, which
-         * is 'e' + type.
          * WARNING: This is used by the code generation part
          */
 
@@ -32,7 +30,6 @@ namespace KhepriUnity {
                 wInt32(shapes.Count - 1);
             }
         }
-        public void eGameObject(Exception e) { wInt32(-1); dumpException(e); }
 
         public GameObject[] rGameObjectArray() {
             int length = rInt32();
@@ -48,7 +45,6 @@ namespace KhepriUnity {
                 wGameObject(id);
             }
         }
-        public void eGameObjectArray(Exception e) { wInt32(-1); dumpException(e); }
 
         public Material rMaterial() {
             int value = rInt32();
@@ -60,11 +56,9 @@ namespace KhepriUnity {
             materials.Add(mat);
             wInt32(materials.Count - 1);
         }
-        public void eMaterial(Exception e) { wInt32(-1); dumpException(e); }
 
         public Vector3 rVector3() => new Vector3(rSingle(), rSingle(), rSingle());
         public void wVector3(Vector3 p) { w.Write(p.x); w.Write(p.y); w.Write(p.z); }
-        public void eVector3(Exception e) { eDouble(e); }
 
         public Vector3[] rVector3Array() {
             int length = rInt32();
@@ -80,7 +74,6 @@ namespace KhepriUnity {
                 wVector3(pt);
             }
         }
-        public void eVector3Array(Exception e) => wInt32(-1);
 
         public Vector3[][] rVector3ArrayArray() {
             int length = rInt32();
@@ -96,11 +89,9 @@ namespace KhepriUnity {
                 wVector3Array(pt);
             }
         }
-        public void eVector3ArrayArray(Exception e) => wInt32(-1);
 
         new public Color rColor() => new Color(rSingle(), rSingle(), rSingle());
         public void wColor(Color c) { w.Write(c.r); w.Write(c.g); w.Write(c.b); }
-        new public void eColor(Exception e) { eDouble(e); }
 
         public Quaternion rQuaternion() {
             float m11 = rSingle();
@@ -116,7 +107,7 @@ namespace KhepriUnity {
         }
 
         Quaternion quaternionFromRotationMatrix(
-            float m11, float m12, float m13, 
+            float m11, float m12, float m13,
             float m21, float m22, float m23,
             float m31, float m32, float m33) {
             float X, Y, Z, W;
@@ -155,7 +146,6 @@ namespace KhepriUnity {
             }
             return new Quaternion(X, Y, Z, W);
         }
-        public void eTransform(Exception e) { eVector3(e); }
 
 
         override public void Terminate() {
