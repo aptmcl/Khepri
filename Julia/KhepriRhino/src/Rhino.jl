@@ -36,6 +36,10 @@ parse_signature(::Val{:RH}, sig::T) where {T} = parse_signature(Val(:CS), sig)
 encode(::Val{:RH}, t::Val{T}, c::IO, v) where {T} = encode(Val(:CS), t, c, v)
 decode(::Val{:RH}, t::Val{T}, c::IO) where {T} = decode(Val(:CS), t, c)
 
+# CLR name mapping for signature validation: MatId is a C# using alias for System.Int32
+KhepriBase.clr_name(::Val{:RH}, name::AbstractString) =
+  name == "MatId" ? "Int32" : clr_name(name)
+
 # We need some additional Encoders
 @encode_decode_as(:RH, Val{:Options}, Val{:Dict})
 @encode_decode_as(:RH, Val{:Brep}, Val{:Guid})
