@@ -1,3 +1,5 @@
+using Dates
+
 # Coordinate convention: Revit uses right-handed Z-up, same as Khepri.
 # No axis transforms needed.
 
@@ -181,6 +183,10 @@ parse_signature(::Val{:RVT}, sig::T) where {T} = parse_signature(Val(:CS), sig)
 encode(::Val{:RVT}, t::Val{T}, c::IO, v) where {T} = encode(Val(:CS), t, c, v)
 decode(::Val{:RVT}, t::Val{T}, c::IO) where {T} = decode(Val(:CS), t, c)
 
+# CLR name mapping for signature validation: VXYZ is a C# using alias for Autodesk.Revit.DB.XYZ
+KhepriBase.clr_name(::Val{:RVT}, name::AbstractString) =
+  name == "VXYZ" ? "XYZ" : clr_name(name)
+
 #
 # We need some additional Encoders
 encode(::Val{:RVT}, t::Union{Val{:XYZ},Val{:VXYZ}}, c::IO, p) =
@@ -318,6 +324,8 @@ public Element[] NotInGroup(Element[] elements)
 public string ElementCategoryName(Element element)
 public void ExportFamilyToOBJ(string familyPath, string objPath)
 public void ExportAllFamiliesToOBJ(string folderPath)
+public string[] ExportFamilyToOBJWithMetadata(string familyPath, string objPath)
+public string[][] ExportAllFamiliesToOBJWithMetadata(string folderPath)
 public Element[] DocRoofs()
 public XYZ[] RoofBoundaryVertices(Element element)
 public ElementId RoofLevel(Element element)
@@ -509,6 +517,48 @@ export_family_to_obj(family_path::String, obj_path::String) =
 export export_all_families_to_obj
 export_all_families_to_obj(folder_path::String) =
   @remote(revit, ExportAllFamiliesToOBJ(folder_path))
+
+export export_family_to_obj_with_metadata
+export_family_to_obj_with_metadata(family_path::String, obj_path::String) =
+  @remote(revit, ExportFamilyToOBJWithMetadata(family_path, obj_path))
+
+export export_all_families_to_obj_with_code
+function export_all_families_to_obj_with_code(obj_folder::String, jl_path::String;
+                                               backend_var="THR")
+  metadata_list = @remote(revit, ExportAllFamiliesToOBJWithMetadata(obj_folder))
+  open(jl_path, "w") do io
+    println(io, "# Auto-generated family definitions from Revit export")
+    println(io, "# Generated: $(Dates.now())\n")
+    for meta in metadata_list
+      obj_name, width_s, height_s, category = meta
+      width = parse(Float64, width_s)
+      height = parse(Float64, height_s)
+      var_name = replace(lowercase(obj_name), r"[^a-z0-9_]" => "_")
+      family_fn = revit_category_to_khepri(category)
+
+      if family_fn !== nothing && width > 0 && height > 0
+        w = round(width, digits=3)
+        h = round(height, digits=3)
+        println(io, """$var_name = $family_fn("$obj_name", width=$w, height=$h)""")
+        println(io, """set_backend_family($var_name, $backend_var, obj_family("$obj_name"))\n""")
+      else
+        println(io, """$var_name = obj_family("$obj_name")\n""")
+      end
+    end
+  end
+  jl_path
+end
+
+function revit_category_to_khepri(category)
+  cat = lowercase(category)
+  if contains(cat, "door") || contains(cat, "porta")
+    "door_family"
+  elseif contains(cat, "window") || contains(cat, "janela")
+    "window_family"
+  else
+    nothing
+  end
+end
 
 switch_to_backend(from::Backend, to::RVT) =
     let height = level_height(default_level())
@@ -722,36 +772,113 @@ realize_wall_path(b::RVT, s::Wall, path) =
     end
   end
 
-KhepriBase.realize_wall_openings(b::RVT, w::Wall, w_ref, openings) =
-  begin
-      for opening in openings
-          realize(b, opening)
+# Multi-segment wall support for opening placement.
+# CreateLineWall creates one Revit wall element per pair of consecutive vertices.
+# InsertWindow/InsertDoor position openings at deltaFromStart along a single host
+# element's curve, so we must map the global offset along the full wall path to
+# the correct segment and a local offset within it.
+
+_wall_segment_lengths(path::OpenPolygonalPath) =
+  [distance(path.vertices[i], path.vertices[i+1]) for i in 1:length(path.vertices)-1]
+_wall_segment_lengths(path::ClosedPolygonalPath) =
+  let verts = [path.vertices..., path.vertices[1]]
+    [distance(verts[i], verts[i+1]) for i in 1:length(verts)-1]
+  end
+_wall_segment_lengths(path::RectangularPath) =
+  _wall_segment_lengths(convert(ClosedPolygonalPath, path))
+_wall_segment_lengths(path) = [path_length(path)]
+
+_opening_wall_segment(cum_lengths, global_x) =
+  let n = length(cum_lengths)
+    for i in 1:n
+      if global_x <= cum_lengths[i] || i == n
+        local_x = i == 1 ? global_x : global_x - cum_lengths[i-1]
+        return (i, local_x)
       end
-      w_ref
+    end
   end
 
+_wall_host_and_offset(wall_refs, wall_path, global_x) =
+  if length(wall_refs) == 1
+    (wall_refs[1], global_x)
+  else
+    let seg_lengths = _wall_segment_lengths(wall_path),
+        cum_lengths = cumsum(seg_lengths),
+        (seg_idx, local_x) = _opening_wall_segment(cum_lengths, global_x)
+      (wall_refs[seg_idx], local_x)
+    end
+  end
+
+KhepriBase.realize_wall_openings(b::RVT, w::Wall, w_ref, openings) =
+  if isempty(openings)
+    w_ref
+  else
+    let wall_refs = ref_values(b, w_ref)
+      for opening in openings
+        let rvtf = backend_family(b, opening.family),
+            loc = rvtf.location_transform(opening.family, opening.loc),
+            (host_ref, local_x) = _wall_host_and_offset(wall_refs, w.path, loc.x)
+          if opening isa Window
+            let param_map = rvtf.instance_map,
+                params = keys(param_map)
+              ref!(b, opening,
+                @remote(b, InsertWindow(
+                  local_x, loc.y, host_ref,
+                  family_ref(b, opening.family),
+                  collect(params),
+                  [param_map[param](opening.family) for param in params])))
+            end
+          elseif opening isa Door
+            ref!(b, opening,
+              @remote(b, InsertDoor(
+                local_x, loc.y, host_ref,
+                family_ref(b, opening.family))))
+          end
+        end
+      end
+      w_ref
+    end
+  end
+
+# Accessing ref_values(b, s.wall) may trigger wall realization, which creates
+# this opening via realize_wall_openings and caches it with ref!.
+# Check realized(b, s) after to avoid creating a duplicate.
 realize(b::RVT, s::Window) =
-  let rvtf = backend_family(b, s.family),
-      param_map = rvtf.instance_map,
-      params = keys(param_map),
-      loc = rvtf.location_transform(s.family, s.loc)
-    @remote(b, InsertWindow(
-        loc.x,
-        loc.y,
-        ref_value(b, s.wall),
-        family_ref(b, s.family),
-        collect(params),
-        [param_map[param](s.family) for param in params]))
+  let wall_refs = ref_values(b, s.wall)
+    if realized(b, s)
+      ref_value(b, ref(b, s))
+    else
+      let rvtf = backend_family(b, s.family),
+          param_map = rvtf.instance_map,
+          params = keys(param_map),
+          loc = rvtf.location_transform(s.family, s.loc),
+          (host_ref, local_x) = _wall_host_and_offset(wall_refs, s.wall.path, loc.x)
+        @remote(b, InsertWindow(
+            local_x,
+            loc.y,
+            host_ref,
+            family_ref(b, s.family),
+            collect(params),
+            [param_map[param](s.family) for param in params]))
+      end
+    end
   end
 
 realize(b::RVT, s::Door) =
-  let rvtf = backend_family(b, s.family),
-      loc = rvtf.location_transform(s.family, s.loc)
-    @remote(b, InsertDoor(
-        loc.x,
-        loc.y,
-        ref_value(b, s.wall),
-        family_ref(b, s.family)))
+  let wall_refs = ref_values(b, s.wall)
+    if realized(b, s)
+      ref_value(b, ref(b, s))
+    else
+      let rvtf = backend_family(b, s.family),
+          loc = rvtf.location_transform(s.family, s.loc),
+          (host_ref, local_x) = _wall_host_and_offset(wall_refs, s.wall.path, loc.x)
+        @remote(b, InsertDoor(
+            local_x,
+            loc.y,
+            host_ref,
+            family_ref(b, s.family)))
+      end
+    end
   end
 
 #
