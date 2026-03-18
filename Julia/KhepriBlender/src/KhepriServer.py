@@ -309,8 +309,8 @@ def execute_read_and_repeat(op, conn):
 
 operations = []
 
-def provide_operation(name:str)->int:
-    warn(f"Requested operation |{name}| -> {globals()[name]}")
+def provide_operation(name:str, canonical:str)->int:
+    warn(f"Requested operation |{name}| [{canonical}] -> {globals()[name]}")
     operations.append(generate_rmi(globals()[name]))
     return len(operations) - 1
 
