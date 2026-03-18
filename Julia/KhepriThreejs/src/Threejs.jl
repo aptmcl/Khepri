@@ -82,7 +82,7 @@ encode(ns::Val{:THR}, t::Val{:ArrayInt32}, c::IO, v) =
   end
 
 threejs_api = @remote_api :THR """
-typedFunction("getOperationNamed", [Str], Int32, (name: string) => {
+typedFunction("getOperationNamed", [Str, Str], Int32, (name: string, canonical: string) => {
 typedFunction("delete", [Int32], None, (i: number) =>
 typedFunction("deleteAll", [], None, () => {
 typedFunction("createLayer", [Str], Int32, (name: string) => {
@@ -434,7 +434,11 @@ KhepriBase.b_extruded_surface(b::THR, profile::Region, v, cb, bmat, tmat, smat) 
   end
 
 KhepriBase.b_mesh_obj_fmt(b::THR, obj_name, transform) =
-  @remote(b, meshObjFmt("resources/models/obj/$obj_name/", obj_name, transform))
+  let dir = dirname(obj_name),
+      name = basename(obj_name),
+      path = dir == "" ? "resources/models/obj/" : "resources/models/obj/$dir/"
+    @remote(b, meshObjFmt(path, name, transform))
+  end
 
 ## ─────────────────────────────────────────────────────────────────────
 ##  OBJ/MTL Backend Families — backward compatibility

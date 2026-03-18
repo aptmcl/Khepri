@@ -37427,12 +37427,12 @@ function typedAsyncFunction(name, argTypes, retType, func) {
   };
   return registerOperation(name, tf);
 }
-typedFunction("getOperationNamed", [Str], Int32, (name) => {
+typedFunction("getOperationNamed", [Str, Str], Int32, (name, canonical) => {
   let idx = operationsMap[name];
   if (idx !== void 0) {
     return idx;
   } else {
-    console.error(`Requested non-existent function named '${name}'.`);
+    console.error(`Requested non-existent function named '${name}' with signature ${canonical}.`);
     return -1;
   }
 });
