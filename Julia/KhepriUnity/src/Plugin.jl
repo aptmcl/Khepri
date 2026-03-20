@@ -1,23 +1,22 @@
-export setup_unity, upgrade_plugin
+export setup_unity
 
 const khepri_unity_version = let toml = joinpath(dirname(@__DIR__), "Project.toml")
   VersionNumber(match(r"version\s*=\s*\"([^\"]+)\"", read(toml, String)).captures[1])
 end
 
 const julia_khepri = dirname(@__DIR__)
-const local_plugin = joinpath(julia_khepri, "Plugin")
-const local_version_file = joinpath(local_plugin, "version.txt")
-
 const unity_project_source = joinpath(dirname(dirname(julia_khepri)), "Plugins", "KhepriUnity")
+const unity_plugin_repo = "https://github.com/aptmcl/KhepriUnity.git"
 const unity_copy_excludes = Set([
   "Library", "Logs", "Temp", "obj", ".vs", ".idea",
   "UserSettings", "UIElementsSchema", "SteamVR_SteamVR_khepri", ".git"])
 
 plugin_version(path) = VersionNumber(strip(read(path, String)))
 
-# Subdirectories to copy from Assets/Resources/ into Plugin/Resources/
-# Excludes materials/ (1.3GB) and prefabs/ (242MB) to keep Plugin/ manageable.
-const plugin_resource_dirs = ["Default"]
+ensure_unity_source() =
+  isdir(unity_project_source) ||
+    error("Unity plugin not found at $unity_project_source.\n" *
+          "Clone it with:\n  git clone $unity_plugin_repo \"$unity_project_source\"")
 
 copy_unity_project(src, dest) =
   let skip_extensions = Set([".csproj", ".sln", ".vrmanifest"]),
@@ -37,48 +36,14 @@ copy_unity_project(src, dest) =
   end
 
 #=
-Developer-only: copy plugin files from Plugins/KhepriUnity/Assets/ into Plugin/.
-Run this after recompiling the C# plugin and commit the updated Plugin/ directory.
-
-  upgrade_plugin()
-=#
-upgrade_plugin() =
-  let plugin_src = joinpath(dirname(dirname(julia_khepri)), "Plugins", "KhepriUnity", "Assets"),
-      khepri_src = joinpath(plugin_src, "Khepri"),
-      resources_src = joinpath(plugin_src, "Resources")
-    isdir(khepri_src) || error("Plugin source not found: $khepri_src")
-    mkpath(local_plugin)
-    # Copy Khepri/
-    let dest = joinpath(local_plugin, "Khepri")
-      rm(dest, force=true, recursive=true)
-      cp(khepri_src, dest)
-    end
-    # Copy selected Resources/ subdirectories
-    let dest_resources = joinpath(local_plugin, "Resources")
-      mkpath(dest_resources)
-      for dir in plugin_resource_dirs
-        let src = joinpath(resources_src, dir),
-            dst = joinpath(dest_resources, dir)
-          isdir(src) || (@warn "Resource directory not found, skipping: $src"; continue)
-          rm(dst, force=true, recursive=true)
-          cp(src, dst)
-        end
-      end
-    end
-    # Write version
-    write(local_version_file, string(khepri_unity_version))
-    @info "Plugin updated to $khepri_unity_version"
-  end
-
-#=
 Create a new Unity project with Khepri pre-installed.
 Copies the full Plugins/KhepriUnity/ project, excluding build artifacts.
 
   setup_unity()
 =#
 setup_unity() =
-  let src = unity_project_source
-    isdir(src) || error("Unity project source not found: $src")
+  let _ = ensure_unity_source(),
+      src = unity_project_source
     print("Destination path [$(joinpath(homedir(), "KhepriUnity"))]: ")
     let input = strip(readline()),
         dest = isempty(input) ? joinpath(homedir(), "KhepriUnity") : expanduser(input),
@@ -105,64 +70,43 @@ setup_unity() =
 
 #=
 Deploy the Khepri plugin into an existing Unity project.
-Copies Khepri/ and Resources/ from Plugin/ into the project's Assets/.
-Also copies materials, prefabs, and scenes from Plugins/KhepriUnity/ if available.
+Copies Assets/Khepri/, Assets/Resources/ (Default, materials, prefabs),
+and Assets/Scenes/ from Plugins/KhepriUnity/ into the project.
 
   setup_unity("/path/to/your/unity/project")
 =#
 setup_unity(project_path::AbstractString) =
-  let assets = joinpath(project_path, "Assets"),
+  let _ = ensure_unity_source(),
+      assets_src = joinpath(unity_project_source, "Assets"),
+      assets = joinpath(project_path, "Assets"),
       dest_khepri = joinpath(assets, "Khepri"),
       dest_resources = joinpath(assets, "Resources"),
       dest_version = joinpath(dest_khepri, "version.txt")
     isdir(assets) || error("Not a Unity project (no Assets/ folder): $project_path")
-    isdir(local_plugin) || error("Plugin folder not found at $local_plugin. Run upgrade_plugin() first.")
-    isfile(local_version_file) || error("Plugin version file not found. Run upgrade_plugin() first.")
-    let need_install = !isfile(dest_version) || plugin_version(dest_version) < plugin_version(local_version_file)
+    let need_install = !isfile(dest_version) || plugin_version(dest_version) < khepri_unity_version
       if need_install
-        @info "Installing Khepri Unity plugin v$(plugin_version(local_version_file)) into $project_path..."
-        # Copy Khepri/ (full overwrite)
+        @info "Installing Khepri Unity plugin v$khepri_unity_version into $project_path..."
+        # Copy Khepri/
         rm(dest_khepri, force=true, recursive=true)
-        cp(joinpath(local_plugin, "Khepri"), dest_khepri)
-        cp(local_version_file, joinpath(dest_khepri, "version.txt"))
-        # Merge Resources/ (don't delete user's other resources)
+        cp(joinpath(assets_src, "Khepri"), dest_khepri)
+        write(joinpath(dest_khepri, "version.txt"), string(khepri_unity_version))
+        # Copy Resources/ subdirectories (Default, materials, prefabs)
         mkpath(dest_resources)
-        let src_resources = joinpath(local_plugin, "Resources")
-          for item in readdir(src_resources)
-            let src = joinpath(src_resources, item),
-                dst = joinpath(dest_resources, item)
+        let resources_src = joinpath(assets_src, "Resources")
+          for dir in readdir(resources_src)
+            let src = joinpath(resources_src, dir),
+                dst = joinpath(dest_resources, dir)
               rm(dst, force=true, recursive=true)
               cp(src, dst)
             end
           end
         end
-        # Copy materials, prefabs, and scenes from Plugins/KhepriUnity/ if available
-        let full_src = joinpath(unity_project_source, "Assets")
-          if isdir(full_src)
-            let resources_src = joinpath(full_src, "Resources")
-              for dir in ["materials", "prefabs"]
-                let src = joinpath(resources_src, dir),
-                    dst = joinpath(dest_resources, dir)
-                  if isdir(src)
-                    rm(dst, force=true, recursive=true)
-                    cp(src, dst)
-                    # Copy .meta file too
-                    let meta_src = src * ".meta", meta_dst = dst * ".meta"
-                      isfile(meta_src) && cp(meta_src, meta_dst, force=true)
-                    end
-                  end
-                end
-              end
-            end
-            let scenes_src = joinpath(full_src, "Scenes"),
-                scenes_dst = joinpath(assets, "Scenes")
-              if isdir(scenes_src)
-                rm(scenes_dst, force=true, recursive=true)
-                cp(scenes_src, scenes_dst)
-              end
-            end
-          else
-            @warn "Plugins/KhepriUnity/ not found — materials, prefabs, and scenes not copied. Plugin will still work."
+        # Copy Scenes/
+        let scenes_src = joinpath(assets_src, "Scenes"),
+            scenes_dst = joinpath(assets, "Scenes")
+          if isdir(scenes_src)
+            rm(scenes_dst, force=true, recursive=true)
+            cp(scenes_src, scenes_dst)
           end
         end
         # Ensure com.unity.ai.navigation dependency
