@@ -443,9 +443,17 @@ KhepriBase.b_set_view_size(b::UE, width, height) =
 
 KhepriBase.b_render_and_save_view(b::UE, path::String) =
   let dir = dirname(path),
-      name = first(splitext(basename(path)))
+      name = first(splitext(basename(path))),
+      png_path = endswith(path, ".png") ? path : path * ".png"
     @remote(b, Primitive__RenderView(render_width(), render_height(), name, dir, 0))
-    path
+    # TakeHighResScreenShot is async — wait for the file to appear on disk.
+    # During sleep, UE's game thread is free to tick and render the viewport.
+    for _ in 1:100
+      sleep(0.1)
+      isfile(png_path) && return png_path
+    end
+    @warn "RenderView: screenshot did not appear within timeout" png_path
+    png_path
   end
 
 #=============================================================================
