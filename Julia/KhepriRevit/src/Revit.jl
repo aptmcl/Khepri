@@ -198,7 +198,7 @@ decode(::Val{:RVT}, t::Val{:VXYZ}, c::IO) =
 encode(ns::Val{:RVT}, t::Union{Val{:ElementId},Val{:Element},Val{:Level},Val{:FloorFamily}}, c::IO, v) =
   encode(ns, Val(:long), c, v)
 decode(ns::Val{:RVT}, t::Union{Val{:ElementId},Val{:Element},Val{:Level},Val{:FloorFamily}}, c::IO) =
-  decode_or_error(ns, Val(:long), c, Int64(-1234))
+  decode(ns, Val(:long), c)
 
 @encode_decode_as(:RVT, Val{:Length}, Val{:double})
 @encode_decode_as(:RVT, Val{:object}, Val{:Any})
