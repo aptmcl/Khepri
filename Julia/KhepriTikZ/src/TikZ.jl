@@ -449,7 +449,8 @@ KhepriBase.after_connecting(b::TikZ) =
   end
 
 withTikZXForm(f, b, c, mat) =
-  let out = connection(b)
+  let out = connection(b),
+      mat = mat isa Integer ? nothing : mat  # Ignore void_ref integer values
     if b.view.is_top_view
       if is_world_cs(c.cs) && isnothing(mat)
         f(out, c)
