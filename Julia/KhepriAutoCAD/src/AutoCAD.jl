@@ -263,10 +263,8 @@ public Entity RegionWithHoles(Point3d[][] ptss, bool[] smooths, ObjectId matId)
 public Entity RegionCircleWithHoles(Point3d[] centers, Vector3d[] normals, double[] radii, ObjectId matId)
 public Entity PrismWithHoles(Point3d[][] ptss, bool[] smooths, Vector3d dir, ObjectId matId)
 public void SetLengthUnit(String unit)
-public void SetView(Point3d position, Point3d target, double lens, bool perspective, string style)
-public void SetViewCamera(Point3d position, Point3d target, double lens)
+public void SetViewCamera(Point3d position, Point3d target, double lens, bool perspective)
 public void SetViewStyle(string style)
-public void View(Point3d position, Point3d target, double lens)
 public void ViewTop()
 public Point3d ViewCamera()
 public Point3d ViewTarget()
@@ -1047,7 +1045,7 @@ KhepriBase.b_table_and_chairs(b::ACAD, c, angle, family) =
 #   @remote(b, BoundingBox(ref_values(shapes)))
 
 KhepriBase.b_set_view(b::ACAD, camera::Loc, target::Loc, lens::Real, aperture::Real) =
-  @remote(b, SetViewCamera(camera, target, lens))
+  @remote(b, SetViewCamera(camera, target, lens, true))
 
 KhepriBase.b_get_view(b::ACAD) =
   @remote(b, ViewCamera()), @remote(b, ViewTarget()), @remote(b, ViewLens())
