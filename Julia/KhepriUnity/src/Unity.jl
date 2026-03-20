@@ -175,7 +175,8 @@ KhepriBase.before_connecting(b::Unity) =
   @info """
   Connecting to Unity on port $(b.port)...
   If Unity is not running with Khepri, use:
-    setup_unity("/path/to/your/unity/project")
+    setup_unity()                              # Create new project
+    setup_unity("/path/to/your/unity/project") # Install into existing project
   Then open the project in Unity and click 'Start Khepri'.
   """
 KhepriBase.after_connecting(b::Unity) =
