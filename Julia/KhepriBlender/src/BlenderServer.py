@@ -1353,15 +1353,11 @@ def r_Vector(conn)->Vector:
 def w_Vector(e:Vector, conn)->None:
     w_float3((e.x, e.y, e.z), conn)
 
-e_Vector = e_float3
-
 r_List_Vector = partial(r_List, r_Vector)
 w_List_Vector = partial(w_List, w_Vector)
-e_List_Vector = e_List
 
 r_List_List_Vector = partial(r_List, r_List_Vector)
 w_List_List_Vector = partial(w_List, w_List_Vector)
-e_List_List_Vector = e_List
 
 import addon_utils
 

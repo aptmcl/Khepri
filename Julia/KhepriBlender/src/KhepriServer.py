@@ -243,35 +243,65 @@ def set_max_repeated(n:int)->int:
     max_repeated = n
     return prev
 
-def read_operation(conn):
-    return r_int(conn)
+class FrameIO:
+    """Proxy that reads from frame data and buffers writes for the response frame."""
+    def __init__(self, frame_data, conn):
+        self._read_buf = frame_data
+        self._read_pos = 0
+        self._write_buf = bytearray()
+        self._conn = conn
 
-def try_read_operation(conn):
-    conn.settimeout(min_wait_time)
-    try:
-        return read_operation(conn)
-    except socket.timeout:
-        return -2
-    finally:
-        conn.settimeout(None)
+    def recv(self, count):
+        end = self._read_pos + count
+        data = self._read_buf[self._read_pos:end]
+        self._read_pos = end
+        return data
 
-def execute_read_and_repeat(op, conn):
+    def sendall(self, data):
+        self._write_buf.extend(data)
+
+    def send(self, data):
+        self._write_buf.extend(data)
+        return len(data)
+
+    def flush_response(self):
+        resp = bytes(self._write_buf)
+        self._conn.sendall(int_struct.pack(len(resp)))
+        self._conn.sendall(resp)
+
+def read_frame(conn):
+    raw_len = recvall(conn, 4)
+    if raw_len is None:
+        return None
+    frame_len = int_struct.unpack(raw_len)[0]
+    frame_data = recvall(conn, frame_len)
+    if frame_data is None:
+        return None
+    frame_io = FrameIO(frame_data, conn)
+    opcode = r_int(frame_io)
+    return (opcode, frame_io)
+
+def execute_read_and_repeat(op, frame_io, conn):
     count = 0
     while True:
         if op == -1:
             return False
-        execute(op, conn)
-        count =+ 1
+        execute(op, frame_io)
+        count += 1
         if count > max_repeated:
             return False
         conn.settimeout(max_wait_time)
         try:
-            op = read_operation(conn)
+            result = read_frame(conn)
+            if result is None:
+                op = -1
+            else:
+                op, frame_io = result
         except socket.timeout:
             break
         finally:
             conn.settimeout(None)
-    return True;
+    return True
 
 
 operations = []
@@ -284,8 +314,9 @@ def provide_operation(name:str, canonical:str)->int:
 # The first operation is the operation that makes operations available
 operations.append(generate_rmi(provide_operation))
 
-def execute(op, conn):
-    operations[op](conn)
+def execute(op, frame_io):
+    operations[op](frame_io)
+    frame_io.flush_response()
 
 def wait_for_connection():
     global current_action
@@ -338,15 +369,19 @@ def accept_client():
 
 def handle_client():
     conn = connection
-    op = try_read_operation(conn)
-    if op == -1:
+    conn.settimeout(min_wait_time)
+    try:
+        result = read_frame(conn)
+    except socket.timeout:
+        return
+    finally:
+        conn.settimeout(None)
+    if result is None:
         warn("Connection terminated.")
         wait_for_connection()
-    elif op == -2:
-        # timeout
-        pass
     else:
-        execute_read_and_repeat(op, conn)
+        op, frame_io = result
+        execute_read_and_repeat(op, frame_io, conn)
 
 ################################################################################
 # Alternatively, instead of starting the socket server on the Python side, 
