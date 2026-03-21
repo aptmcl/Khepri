@@ -94,13 +94,7 @@ upgrade_plugin(; advance_major_version=false, advance_minor_version=true) =
     # 9. Now we do the copy
     cp(bundle_path, local_bundle_path)
     # 10. and we copy the dlls to the local bundle Contents folder
-    local_bundle_contents_path = joinpath(local_bundle_path, "Contents")
-    for dll in khepri_dlls
-      src = joinpath(plugin_folder, dlls_folder, dll)
-      dst = joinpath(local_bundle_contents_path, dll)
-      rm(dst, force=true)
-      cp(src, dst)
-    end
+    copy_plugin_files!(khepri_dlls, joinpath(plugin_folder, dlls_folder), joinpath(local_bundle_path, "Contents"))
   end
 
 #=
@@ -146,30 +140,7 @@ update_plugin() =
     end
   end
 
-checked_plugin = false
-
-check_plugin() =
-  begin
-    global checked_plugin
-    if ! checked_plugin
-      @info("Checking Revit plugin...")
-      for i in 1:10
-        try
-          update_plugin()
-          @info("done.")
-          checked_plugin = true
-          return
-        catch exc
-          if isa(exc, Base.IOError) && i < 10
-            @error("The Revit plugin is outdated! Please, close Revit.")
-            sleep(5)
-          else
-            throw(exc)
-          end
-        end
-      end
-    end
-  end
+check_plugin = make_plugin_checker("Revit", update_plugin)
 
 #
 const revit_template = Parameter(abspath(@__DIR__, "../Plugin/KhepriTemplate.rte"))
