@@ -15,18 +15,9 @@ dlls = ["KhepriBase.dll", "KhepriRhinoceros.rhp"]
 local_plugin = joinpath(dirname(dirname(abspath(@__FILE__))), "Plugin")
 
 upgrade_plugin() =
-  let # 1. The dlls are updated in VisualStudio after compilation of the plugin, and they are stored in the folder.
-      # contained inside the Plugins folder, which has a specific location regarding this file itself
-      plugin_folder = joinpath(dirname(dirname(dirname(dirname(abspath(@__FILE__))))), "Plugins", "KhepriRhinoceros", "KhepriRhinoceros", "bin")
-      # 2. The bundle needs to be copied to the current folder
+  let plugin_folder = joinpath(dirname(dirname(dirname(dirname(abspath(@__FILE__))))), "Plugins", "KhepriRhinoceros", "KhepriRhinoceros", "bin"),
       local_folder = joinpath(julia_khepri, "Plugin")
-      # 3. Now we copy the dlls to the local folder
-      for dll in dlls
-          src = joinpath(plugin_folder, dll)
-          dst = joinpath(local_folder, dll)
-          rm(dst, force=true)
-          cp(src, dst)
-      end
+    copy_plugin_files!(dlls, plugin_folder, local_folder)
   end
 
 ##############################################
@@ -494,15 +485,10 @@ rhino_default_material = RhinoDefaultMaterial
 KhepriBase.b_get_material(b::RH, mat::RhinoDefaultMaterial) =
   b_get_material(b, joinpath(@remote(b, DefaultMaterialsFolder()), mat.name*".rmtl"))
 
-KhepriBase.b_new_material(b::RH, name, base_color, metallic, specular, roughness,
-                           clearcoat, clearcoat_roughness, ior,
-                           transmission, transmission_roughness,
-                           emission_color, emission_strength,
-                           sheen_color, sheen_roughness,
-                           anisotropy, anisotropy_direction,
-                           ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
-                           post_lighting_color,
-                           absorption, micro_thickness, thickness) =
+KhepriBase.b_material(b::RH, name, base_color, metallic, roughness, specular,
+                           ior, transmission, transmission_roughness,
+                           clearcoat, clearcoat_roughness,
+                           emission_color, emission_strength) =
   Guid(@remote(b, new_material(name, convert(RGBA, base_color), specular, roughness)) + 1)
 
 KhepriBase.b_plastic_material(b::RH, name, color, roughness) =
@@ -729,7 +715,7 @@ angular_props = merge(base_props)
 diametric_props = merge(base_props)
 
 KhepriBase.b_labels(b::RH, p, data, mat) =
-  [with(current_layer, material_layer(mat)) do
+  [with(current_layer, layer(mat)) do
     @remote(b, CreateLeaderDimension(txt, p, p+vpol(scale, ϕ), scale, mark, label_props))
    end
    for ((; txt, mat, scale), ϕ, mark)
@@ -739,14 +725,14 @@ KhepriBase.b_labels(b::RH, p, data, mat) =
 
 #
 KhepriBase.b_radii_illustration(b::RH, c, rs, rs_txts, mats, mat) =
-  [with(current_layer, material_layer(mat)) do
+  [with(current_layer, layer(mat)) do
     @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(r, ϕ), c+vpol(0.1, ϕ+pi/2), default_annotation_scale(), "", diametric_props))
    end
    for (r, r_txt, ϕ, mat) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false), mats)]
 
 # Maybe merge the texts when the radii are the same.
 KhepriBase.b_vectors_illustration(b::RH, p, a, rs, rs_txts, mats, mat) =
-  [with(current_layer, material_layer(mat)) do
+  [with(current_layer, layer(mat)) do
     @remote(b, CreateDiametricDimension(r_txt, p, p+vpol(r, a), p+vpol(0.1, a+pi/2), default_annotation_scale(), "", diametric_props))
    end
    for (r, r_txt, mat) in zip(rs, rs_txts, mats)]
@@ -759,7 +745,7 @@ KhepriBase.b_angles_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, m
       idxs = sortperm(as),
       (rs, ss, as, r_txts, s_txts, a_txts) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs])
     for (r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
-      with(current_layer, material_layer(mat)) do
+      with(current_layer, layer(mat)) do
         if !(r ≈ 0.0)
           if !(s ≈ 0.0)
           #  push!(refs, @remote(b, CreateAngularDimension(s_txt, c, ar, 0, s, default_annotation_scale(), 5, no_props)))
@@ -786,7 +772,7 @@ KhepriBase.b_arcs_illustration(b::RH, c, rs, ss, as, r_txts, s_txts, a_txts, mat
       idxs = sortperm(ss),
       (rs, ss, as, r_txts, s_txts, a_txts) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs])
     for (i, r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(1:n, rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
-      with(current_layer, material_layer(mat)) do
+      with(current_layer, layer(mat)) do
         if !(r ≈ 0.0)
           if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
             push!(refs, @remote(b, CreateAngularDimension(s_txt, c, c+vpol(0.8*ar, 0), c+vpol(0.8*ar, s), c+vpol(ar, s/2), default_annotation_scale(), "", angular_props)))
