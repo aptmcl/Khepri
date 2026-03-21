@@ -8,18 +8,9 @@ const khepri_grasshopper_dlls = ["KhepriGrasshopper.gha", "FastColoredTextBox.dl
 const julia_khepri = dirname(dirname(abspath(@__FILE__)))
 
 upgrade_plugin() =
-  let # 1. The dlls are updated in VisualStudio after compilation of the plugin, and they are stored in the folder
-      #    contained inside the Plugins folder, which has a specific location regarding this file itself
-      plugin_folder = joinpath(dirname(dirname(julia_khepri)), "Plugins", "KhepriGrasshopper", "KhepriGrasshopper", "bin")
-      # 2. The bundle needs to be copied to the current folder
+  let plugin_folder = joinpath(dirname(dirname(julia_khepri)), "Plugins", "KhepriGrasshopper", "KhepriGrasshopper", "bin"),
       local_folder = joinpath(julia_khepri, "Plugin")
-      # 3. Now we copy the dlls to the local folder
-      for dll in khepri_grasshopper_dlls
-          src = joinpath(plugin_folder, dll)
-          dst = joinpath(local_folder, dll)
-          rm(dst, force=true)
-          cp(src, dst)
-      end
+    copy_plugin_files!(khepri_grasshopper_dlls, plugin_folder, local_folder)
   end
 
 #
