@@ -30,9 +30,9 @@ tikz_draw(out::IO, filled=false) =
 tikz_number(out::IO, x::Real) =
   isinteger(x) ?
     print(out, x) :
-    (abs(x) < 0.0001 ?
+    (abs(x) < 0.001 ?
       print(out, 0) :
-      print(out, round(x*10000.0)/10000.0))
+      print(out, round(x*1000.0)/1000.0))
 
 tikz_number_string(x::Real) =
   sprint(tikz_number, x)
@@ -404,6 +404,7 @@ tikz_set_view_top(out::IO, options) =
   mixin(io)
   view::View = top_view()
   triangles::Vector{Any} = Any[]
+  used_shades::Set{Int} = Set{Int}()
 end
 
 const tikz = TikZ(view=top_view())
@@ -574,8 +575,8 @@ paint_trig(b::TikZ, (p1, p2, p3, mat)) =
       io = connection(b),
       v = rotate_vector(b.view.target - b.view.camera, vz(1), pi/4),
       α = round(Int, angle_between(n, v)/pi*100)
-    #if α > 0.5
-    print(io, "\\fill[white!$(α)!black] ")
+    push!(b.used_shades, α)
+    print(io, "\\fill[s$(α)] ")
     #print(io, "\\fill[gray, opacity=$α] ")
     tikz_3d_coord(io, p1)
     print(io, "--")
@@ -810,6 +811,15 @@ To generate the actual TikZ code, we need two different things:
 
 gen_tex_document(b) =
   let out = connection(b)
+    # Generate tikzpicture content to a temporary buffer so we know which shades are used
+    empty!(b.used_shades)
+    saved_io = b.io
+    content_buf = IOBuffer()
+    b.io = content_buf
+    gen_tikz_picture(b)
+    b.io = saved_io
+    content = String(take!(content_buf))
+    # Now write the full document with only the shades actually used
     println(out, raw"\documentclass{standalone}")
     println(out, raw"\usepackage{tikz,tikz-3dplot}")
     println(out, raw"\usetikzlibrary{perspective,patterns}")
@@ -817,14 +827,13 @@ gen_tex_document(b) =
     println(out, raw"\usetikzlibrary{shapes,fit}")
     println(out, raw"\usetikzlibrary{hobby}")
     println(out, raw"\usetikzlibrary{arrows.meta}")
-    #println(out, raw"\usepackage{pgfplots}")
-    #println(out, raw"\pgfplotsset{compat=1.17}")
-    #println(out, raw"\usepackage{tikz-3dplot}")
     println(out, raw"\begin{document}")
-    #println(out, raw"\tikzset{illustration/.style={ultra thin,blue!50}}")
     println(out, raw"\tikzset{illustration/.style={very thin}}")
     println(out, raw"\tikzset{dimension/.style={very thin,lightgray}}")
-    gen_tikz_picture(b)
+    for i in sort!(collect(b.used_shades))
+      println(out, "\\definecolor{s$(i)}{gray}{$(round(i/100, digits=2))}")
+    end
+    print(out, content)
     println(out, raw"\end{document}")
   end
 

@@ -41,9 +41,9 @@ end
       KhepriTikZ.tikz_number(io, 5.0)
       @test String(take!(io)) == "5.0"
 
-      # Test decimal formatting
+      # Test decimal formatting (3 decimal places)
       KhepriTikZ.tikz_number(io, 3.14159)
-      @test String(take!(io)) == "3.1416"
+      @test String(take!(io)) == "3.142"
 
       # Test small numbers become 0
       KhepriTikZ.tikz_number(io, 0.00001)
@@ -262,7 +262,10 @@ end
         backend(tikz)
       end,
       compare = text_compare,
-      skip = [:csg]
+      skip = [:csg],
+      # These tests generate millions of triangles that exceed TeX's capacity
+      skip_tests = ["abacus", "arvores3D", "cidadeEspacial",
+                     "abrigoEsfericoTubos", "corrimaoCaracol"]
     )
   end
 
