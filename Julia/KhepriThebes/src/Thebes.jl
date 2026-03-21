@@ -138,7 +138,7 @@ end
 # - Nothing -> use default color
 # - RGBA -> use directly
 # - RGB -> convert to RGBA
-# - Any type with a base_color field (e.g., StandardMaterial) -> extract base_color
+# - Any type with a base_color field (e.g., PbrMaterial) -> extract base_color
 # - Other (e.g., Int void_ref) -> nothing (triggers fallback to fill_color)
 function extract_color(mat)
   if isnothing(mat)
@@ -148,7 +148,7 @@ function extract_color(mat)
   elseif mat isa RGB
     RGBA(red(mat), green(mat), blue(mat), 1.0)
   elseif hasfield(typeof(mat), :base_color)
-    # StandardMaterial and similar proxies have base_color
+    # PbrMaterial and similar proxies have base_color
     mat.base_color
   else
     nothing
@@ -183,15 +183,7 @@ function apply_stroke_color!(b::TBS, mat)
 end
 
 # Material creation — Thebes represents materials as RGBA colors
-KhepriBase.b_new_material(b::TBS, name, base_color, metallic, specular, roughness,
-                          clearcoat, clearcoat_roughness, ior,
-                          transmission, transmission_roughness,
-                          emission_color, emission_strength,
-                          sheen_color, sheen_roughness,
-                          anisotropy, anisotropy_direction,
-                          ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
-                          post_lighting_color,
-                          absorption, micro_thickness, thickness) =
+KhepriBase.b_material(b::TBS, name, base_color, metallic, roughness, specular) =
   isnothing(base_color) ? nothing : extract_color(base_color)
 
 KhepriBase.b_plastic_material(b::TBS, name, color, roughness) = extract_color(color)
@@ -217,11 +209,11 @@ const thebes_default_material_colors = Dict{String, RGBA}(
 )
 const thebes_default_material_color = rgba(0.7, 0.7, 0.7, 1.0)
 
-# Override b_material for Thebes: when a MaterialInLayer has no
+# Override b_layer_material for Thebes: when a MaterialInLayer has no
 # backend-specific data (spec is nothing), derive the color from the
 # layer name.  This ensures BIM elements are visible without requiring
 # explicit backend material configuration.
-KhepriBase.b_material(b::TBS, layer, spec) =
+KhepriBase.b_layer_material(b::TBS, layer, spec) =
   if isnothing(spec)
     layer isa BasicLayer ?
       get(thebes_default_material_colors, layer.name, thebes_default_material_color) :

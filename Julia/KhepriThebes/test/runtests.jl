@@ -163,7 +163,7 @@ using Test
 
     @testset "extract_color from object with base_color" begin
       # Create a simple struct to test base_color extraction
-      # This mimics how standard_material works
+      # This mimics how pbr_material works
       struct TestMaterial
         base_color::RGBA
       end
