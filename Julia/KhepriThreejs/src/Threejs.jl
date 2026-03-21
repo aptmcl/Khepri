@@ -117,7 +117,7 @@ typedFunction("surfaceGrid", [[[Point3d]], Bool, Bool, Bool, Bool, MatId], Id, (
 typedFunction("extrudedSurface", [Matrix4x4, [Point2d], Bool, [[Point2d]], [Bool], Vector3d, MatId], Id, (m: THREE.Matrix4, ps: THREE.Vector2[], _smooth: boolean, qss: THREE.Vector2[][], _smoothHoles: boolean, v: THREE.Vector3, mat: THREE.Material) => {
 typedFunction("meshObjFmt", [Str, Str, Matrix4x4], Id, (path: string, name: string, m: THREE.Matrix4) => {
 typedFunction("MeshPhysicalMaterial", [Dict], MatId, (params: { [key: string]: any }) =>
-typedFunction("MeshStandardMaterial", [Dict], MatId, (params: { [key: string]: any }) =>
+typedFunction("MeshPbrMaterial", [Dict], MatId, (params: { [key: string]: any }) =>
 typedFunction("MeshPhongMaterial", [Dict], MatId, (params: { [key: string]: any }) =>
 typedFunction("MeshLambertMaterial", [Dict], MatId, (params: { [key: string]: any }) =>
 typedFunction("LineBasicMaterial", [Dict], MatId, (params: { [key: string]: any }) =>
