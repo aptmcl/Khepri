@@ -542,19 +542,14 @@ KhepriBase.has_boolean_ops(::Type{POVRay}) = HasBooleanOps{false}()
 
 const povray = POVRay()
 
-KhepriBase.b_new_material(b::POVRay, name,
+KhepriBase.b_material(b::POVRay, name,
 						              base_color,
-						              metallic, specular, roughness,
-	                        clearcoat, clearcoat_roughness,
+						              metallic, roughness, specular,
 						              ior,
 						              transmission, transmission_roughness,
+	                        clearcoat, clearcoat_roughness,
 	                        emission_color,
-						              emission_strength,
-						              sheen_color, sheen_roughness,
-						              anisotropy, anisotropy_direction,
-						              ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
-						              post_lighting_color,
-						              absorption, micro_thickness, thickness) =
+						              emission_strength) =
   povray_material(name,
     red=Float64(red(base_color)), green=Float64(green(base_color)), blue=Float64(blue(base_color)),
     specularity=Float64(specular), roughness=Float64(roughness),

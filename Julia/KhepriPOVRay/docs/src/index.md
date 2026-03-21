@@ -63,7 +63,7 @@ Requires POV-Ray installed on the system.
 ### Backend-Specific Materials
 
 ```julia
-mat = standard_material(
+mat = material(
   base_color=rgba(0.5, 0.3, 0.2, 1),
   data=BackendParameter(
     POVRay => povray_include("woods.inc", "texture", "T_Wood10")))
