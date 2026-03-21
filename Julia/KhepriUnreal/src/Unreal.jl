@@ -65,7 +65,7 @@ decode(::Val{:UE}, t::Val{:FVector}, c::IO) =
 
 unreal_api = @remote_api :UE """
 public AActor Primitive::Sphere(FVector center, float radius)
-public AActor Primitive::Box(FVector pos, FVector vx, FVector vy, FVector size)
+public AActor Primitive::Box(FVector pos, FVector vx, FVector vy, float dx, float dy, float dz)
 public AActor Primitive::RightCuboid(FVector pos, FVector vx, FVector vy, float sx, float sy, float sz, float angle)
 public AActor Primitive::Cylinder(FVector bottom, float radius, FVector top)
 public AActor Primitive::Pyramid(TArray<FVector> ps, FVector q)
@@ -208,6 +208,14 @@ KhepriBase.b_surface_mesh(b::UE, verts, faces, mat) =
     collect(verts),
     [Int32.(collect(f)) for f in faces]))
 
+KhepriBase.b_mesh_obj_fmt(b::UE, obj_name, transform) =
+  let path = obj_file_path(obj_name),
+      (verts, faces) = read_obj_mesh(path),
+      world_verts = transform_obj_vertices(verts, transform),
+      zero_faces = [Int32.(f .- 1) for f in faces]
+    @remote(b, Primitive__SurfaceMesh(world_verts, zero_faces))
+  end
+
 KhepriBase.b_surface_closed_spline(b::UE, ps, mat) =
   @remote(b, Primitive__SurfacePolygon(collect(ps)))
 
@@ -216,7 +224,7 @@ KhepriBase.b_surface_closed_spline(b::UE, ps, mat) =
 ==============================================================================#
 
 KhepriBase.b_box(b::UE, c, dx, dy, dz, mat) =
-  @remote(b, Primitive__Box(c, vx(1, c.cs), vy(1, c.cs), xyz(dx, dy, dz, world_cs)))
+  @remote(b, Primitive__Box(c, vx(1, c.cs), vy(1, c.cs), dx * ue_scale, dy * ue_scale, dz * ue_scale))
 
 KhepriBase.b_sphere(b::UE, c, r, mat) =
   @remote(b, Primitive__Sphere(c, r * ue_scale))
@@ -364,14 +372,10 @@ KhepriBase.b_layer(b::UE, name, active, color) =
 KhepriBase.b_get_material(b::UE, path::AbstractString) =
   @remote(b, Primitive__LoadMaterial(path))
 
-KhepriBase.b_new_material(b::UE, name, base_color, metallic, specular, roughness,
-                           clearcoat, clearcoat_roughness, ior, transmission,
-                           transmission_roughness, emission_color, emission_strength,
-                           sheen_color, sheen_roughness,
-                           anisotropy, anisotropy_direction,
-                           ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
-                           post_lighting_color,
-                           absorption, micro_thickness, thickness) =
+KhepriBase.b_material(b::UE, name, base_color, metallic, roughness, specular,
+                           ior, transmission, transmission_roughness,
+                           clearcoat, clearcoat_roughness,
+                           emission_color, emission_strength) =
   @remote(b, Primitive__CreateMaterial(
     red(base_color), green(base_color), blue(base_color), alpha(base_color),
     metallic, specular, roughness,
@@ -450,7 +454,13 @@ KhepriBase.b_render_and_save_view(b::UE, path::String) =
     # During sleep, UE's game thread is free to tick and render the viewport.
     for _ in 1:100
       sleep(0.1)
-      isfile(png_path) && return png_path
+      if isfile(png_path)
+        # UE captures screenshots twice per request. Wait for the second
+        # capture to finish before returning, so the next test's screenshot
+        # request doesn't race with this one's second capture.
+        sleep(0.5)
+        return png_path
+      end
     end
     @warn "RenderView: screenshot did not appear within timeout" png_path
     png_path

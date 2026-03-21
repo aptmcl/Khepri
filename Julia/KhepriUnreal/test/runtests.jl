@@ -81,7 +81,7 @@ using Test
 
     # Materials
     @test hasmethod(KhepriBase.b_get_material, Tuple{UE, AbstractString})
-    @test hasmethod(KhepriBase.b_new_material, Tuple{UE, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any})
+    @test hasmethod(KhepriBase.b_material, Tuple{UE, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any, Any})
 
     # Highlighting
     @test hasmethod(KhepriBase.b_highlight_refs, Tuple{UE, Vector{Int}})
