@@ -314,15 +314,10 @@ set_default_materials() =
 KhepriBase.b_get_material(b::Unity, path::AbstractString) = (println("Loading material $path");
   @remote(b, LoadMaterial(path)))
 
-KhepriBase.b_new_material(b::Unity, name, base_color, metallic, specular, roughness,
-                          clearcoat, clearcoat_roughness, ior,
-                          transmission, transmission_roughness,
-                          emission_color, emission_strength,
-                          sheen_color, sheen_roughness,
-                          anisotropy, anisotropy_direction,
-                          ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
-                          post_lighting_color,
-                          absorption, micro_thickness, thickness) =
+KhepriBase.b_material(b::Unity, name, base_color, metallic, roughness, specular,
+                          ior, transmission, transmission_roughness,
+                          clearcoat, clearcoat_roughness,
+                          emission_color, emission_strength) =
   @remote(b, CreateMaterial(name, base_color, Float64(alpha(base_color)),
                             metallic, roughness, transmission,
                             emission_color, emission_strength))
@@ -621,7 +616,7 @@ shape_from_ref(r, b::Unity) =
           sphere(@remote(b, SphereCenter(r)), @remote(b, SphereRadius(r)),
                  backend=b, ref=LazyRef(b, UnityNativeRef(r)))
         else
-          @warn "No shapes were previously collected (see in_shape_collection)"
+          @warn "No shapes were previously collected (see is_collecting_shapes)"
           unknown(r, backend=b, ref=LazyRef(b, UnityNativeRef(r), 0, 0))
           #code = @remote(b, ShapeCode(r)),
           #ref = LazyRef(b, UnityNativeRef(r))
