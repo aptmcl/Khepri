@@ -29,8 +29,8 @@ KhepriBase.backend_name(b::FR4DD) = "Frame4DD"
 save_shape!(b::FR4DD, s::TrussNode) = maybe_merged_node(b, s)
 save_shape!(b::FR4DD, s::TrussBar) = maybe_merged_bar(b, s)
 
-# Frame4DD does not need layers
-use_material_as_layer(b::FR4DD) = false
+# Frame4DD does not need layers — skip the layer-switching mechanism
+with_material_as_layer(f::Function, b::FR4DD, m::Material) = f()
 KhepriBase.b_current_layer_ref(b::FR4DD) = nothing
 KhepriBase.b_current_layer_ref(b::FR4DD, layer) = nothing
 

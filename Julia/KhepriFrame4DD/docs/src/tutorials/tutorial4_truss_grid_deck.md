@@ -195,7 +195,7 @@ mkpath(img_dir)
 backend(thebes)
 delete_all_shapes()
 set_view(xyz(15, 15, 10), xyz(4, 3, 0.25))
-green_mat = standard_material(base_color=rgba(0.2, 0.7, 0.2, 1))
+green_mat = material(base_color=rgba(0.2, 0.7, 0.2, 1))
 for nd in frame4dd.truss_node_data
   sphere(nd.loc, 0.08, material=green_mat)
 end
@@ -258,8 +258,8 @@ The deformed deck (red) overlaid on the original structure (green):
 backend(thebes)
 delete_all_shapes()
 set_view(xyz(15, 15, 10), xyz(4, 3, 0.25))
-green_mat = standard_material(base_color=rgba(0.2, 0.7, 0.2, 1))
-red_mat = standard_material(base_color=rgba(0.8, 0.2, 0.2, 1))
+green_mat = material(base_color=rgba(0.2, 0.7, 0.2, 1))
+red_mat = material(base_color=rgba(0.8, 0.2, 0.2, 1))
 disp = node_displacement_function(results, frame4dd)
 factor = 500
 for nd in frame4dd.truss_node_data
