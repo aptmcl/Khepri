@@ -438,7 +438,7 @@ KhepriBase.b_get_material(b::TikZ, layer, spec) =
   
 KhepriBase.b_get_material(b::TikZ, spec::Nothing) = void_ref(b)
 
-KhepriBase.b_new_material(b::TikZ, name, base_color, args...) =
+KhepriBase.b_material(b::TikZ, name, base_color) =
   tikz_color(base_color)
 
 KhepriBase.after_connecting(b::TikZ) =
