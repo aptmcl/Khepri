@@ -408,19 +408,14 @@ asset_base_id:ced25dc0-d461-42f7-aa03-85cb88f671a1 asset_type:material
 b_get_material(blender, "asset_base_id:ced25dc0-d461-42f7-aa03-85cb88f671a1 asset_type:material")
 =#
 
-KhepriBase.b_new_material(b::BLR, name,
+KhepriBase.b_material(b::BLR, name,
 						  base_color,
-						  metallic, specular, roughness,
-	                 	  clearcoat, clearcoat_roughness,
+						  metallic, roughness, specular,
 						  ior,
 						  transmission, transmission_roughness,
-	                 	  emission_color,
-						  emission_strength,
-						  sheen_color, sheen_roughness,
-						  anisotropy, anisotropy_direction,
-						  ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
-						  post_lighting_color,
-						  absorption, micro_thickness, thickness) =
+						  clearcoat, clearcoat_roughness,
+						  emission_color,
+						  emission_strength) =
   @remote(b, new_material(name,
   						  convert(RGBA, base_color),
 						  metallic, specular, roughness,
