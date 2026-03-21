@@ -66,13 +66,7 @@ upgrade_plugin(; advance_major_version=false, advance_minor_version=true, phase=
       # 9. Now we do the copy
       cp(bundle_path, local_khepri_plugin)
       # 10. and we copy the dlls to the local bundle Contents folder
-      local_bundle_contents_path = joinpath(local_khepri_plugin, "Contents")
-      for dll in dlls
-          src = joinpath(plugin_folder, dlls_folder, dll)
-          dst = joinpath(local_bundle_contents_path, dll)
-          rm(dst, force=true)
-          cp(src, dst)
-      end
+      copy_plugin_files!(dlls, joinpath(plugin_folder, dlls_folder), joinpath(local_khepri_plugin, "Contents"))
   end
 
 #=
@@ -124,30 +118,7 @@ update_plugin() =
     end
   end
 
-checked_plugin = false
-
-check_plugin() =
-  begin
-    global checked_plugin
-    if ! checked_plugin
-      @info("Checking AutoCAD plugin...")
-      for i in 1:10
-        try
-          update_plugin()
-          @info("done.")
-          checked_plugin = true
-          return
-        catch exc
-          if isa(exc, Base.IOError) && i < 10
-            @error("The AutoCAD plugin is outdated! Please, close AutoCAD.")
-            sleep(5)
-          else
-            throw(exc)
-          end
-        end
-      end
-    end
-  end
+check_plugin = make_plugin_checker("AutoCAD", update_plugin)
 
 #start_autocad() =
 #  run(`cmd /c cd "$(dirname(autocad_template()))" \&\& $(basename(autocad_template()))`, wait=false)
@@ -675,15 +646,10 @@ KhepriBase.b_get_material(b::ACAD, spec::AbstractString) =
     @remote(b, GetMaterialNamed("Global"))
   end
 
-KhepriBase.b_new_material(b::ACAD, name, base_color, metallic, specular, roughness,
-                           clearcoat, clearcoat_roughness, ior,
-                           transmission, transmission_roughness,
-                           emission_color, emission_strength,
-                           sheen_color, sheen_roughness,
-                           anisotropy, anisotropy_direction,
-                           ambient_occlusion, normal_map, bent_normal, clearcoat_normal,
-                           post_lighting_color,
-                           absorption, micro_thickness, thickness) =
+KhepriBase.b_material(b::ACAD, name, base_color, metallic, roughness, specular,
+                           ior, transmission, transmission_roughness,
+                           clearcoat, clearcoat_roughness,
+                           emission_color, emission_strength) =
   @remote(b, CreateColoredMaterialNamed(name, base_color, specular, transmission))
 
 const MaterialProjection = (InheritProjection=0, Planar=1, Box=2, Cylinder=3, Sphere=4)
@@ -1144,7 +1110,7 @@ vector_props = merge(Dict("Dimatfit"=>Int32(1), "Dimsah"=>true, "Dimtad"=>Int32(
 radii_props = merge(Dict("Dimatfit"=>Int32(1), "Dimsah"=>true, "Dimtad"=>Int32(2)), base_props)
 
 KhepriBase.b_labels(b::ACAD, p, data, mat) =
-  [with(current_layer, material_layer(mat)) do
+  [with(current_layer, layer(mat)) do
     #Impossible to make this work!!!!
     #@remote(b, CreateLeaderDimension(txt, p, p+vpol(default_annotation_scale(), ϕ), default_annotation_scale(), mark, label_props))
     @remote(b, CreateNonLeaderDimension(txt, p, p+vpol(0.2*scale, ϕ), scale, mark, label_props))
@@ -1156,14 +1122,14 @@ KhepriBase.b_labels(b::ACAD, p, data, mat) =
 
 #
 KhepriBase.b_radii_illustration(b::ACAD, c, rs, rs_txts, mats, mat) =
-  [with(current_layer, material_layer(mat)) do
+  [with(current_layer, layer(mat)) do
     @remote(b, CreateDiametricDimension(r_txt, c, c+vpol(r, ϕ), 0.0, default_annotation_scale(), "", "_NONE", radii_props))
    end
    for (r, r_txt, ϕ, mat) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false), mats)]
 
 # Maybe merge the texts when the radii are the same.
 KhepriBase.b_vectors_illustration(b::ACAD, p, a, rs, rs_txts, mats, mat) =
-  [with(current_layer, material_layer(mat)) do
+  [with(current_layer, layer(mat)) do
     @remote(b, CreateDiametricDimension(r_txt, p, p+vpol(r, a), 0.0, default_annotation_scale(), "", "_NONE", vector_props))
    end
    for (r, r_txt, mat) in zip(rs, rs_txts, mats)]
@@ -1178,7 +1144,7 @@ KhepriBase.b_angles_illustration(b::ACAD, c, rs, ss, as, r_txts, s_txts, a_txts,
       idxs = sortperm(as),
       (rs, ss, as, r_txts, s_txts, a_txts, mats) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs], mats[idxs])
     for (r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
-      with(current_layer, material_layer(mat)) do
+      with(current_layer, layer(mat)) do
         if !(r ≈ 0.0)
           if !(s ≈ 0.0)
             let arrows = s > 0 ? ("_NONE", "",) : ("", "_NONE")
@@ -1213,7 +1179,7 @@ KhepriBase.b_arcs_illustration(b::ACAD, c, rs, ss, as, r_txts, s_txts, a_txts, m
       idxs = sortperm(ss),
       (rs, ss, as, r_txts, s_txts, a_txts, mats) = (rs[idxs], ss[idxs], as[idxs], r_txts[idxs], s_txts[idxs], a_txts[idxs], mats[idxs])
     for (i, r, ar, s, a, r_txt, s_txt, a_txt, mat) in zip(1:n, rs, ars, ss, as, r_txts, s_txts, a_txts, mats)
-      with(current_layer, material_layer(mat)) do
+      with(current_layer, layer(mat)) do
         if !(r ≈ 0.0)
           if !(s ≈ 0.0) && ((i == 1) || !(s ≈ ss[i-1] + as[i-1]))
             let arrows = s > 0 ? ("_NONE", "",) : ("", "_NONE")
