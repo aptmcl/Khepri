@@ -1,5 +1,8 @@
 export unity, fast_unity,
-       unity_material_family
+       unity_material_family,
+       unity_concept_mode, unity_analysis_mode,
+       unity_showcase_mode, unity_advanced_mode,
+       unity_enter_player_mode, unity_exit_player_mode
 
 # Coordinate convention: Unity uses left-handed Y-up.
 # Khepri uses right-handed Z-up. The Y-Z swap is done in encode/decode
@@ -73,7 +76,7 @@ public void Rotate(GameObject s, Vector3 p, Vector3 n, float a)
 public GameObject SurfaceFromGrid(int m, int n, Vector3[] pts, bool closedM, bool closedN, int level)
 public GameObject LoadResource(String name)
 public Material LoadMaterial(String name)
-public Material CreateMaterial(String name, Color baseColor, float alpha, float metallic, float roughness, float transmission, Color emissionColor, float emissionStrength)
+public Material CreateMaterial(String name, Color baseColor, float alpha, float metallic, float specular, float roughness, float ior, float transmission, float transmissionRoughness, float clearcoat, float clearcoatRoughness, Color emissionColor, float emissionStrength)
 public Material CurrentMaterial()
 public void SetCurrentMaterial(Material material)
 public GameObject InstantiateResource(GameObject family, Vector3 pos, Vector3 vx, Vector3 vy, float scale)
@@ -107,21 +110,14 @@ public ObjectId[] GetPoint(string prompt)
 public ObjectId[] GetCurve(string prompt)
 public ObjectId[] GetSurface(string prompt)
 public ObjectId[] GetSolid(string prompt)
-public ObjectId[] GetShape(string prompt)
-public long GetHandleFromShape(Entity e)
-public ObjectId GetShapeFromHandle(long h)
-public void RegisterForChanges(ObjectId id)
-public void UnregisterForChanges(ObjectId id)
-public ObjectId[] ChangedShape()
-public void DetectCancel()
-public void UndetectCancel()
-public bool WasCanceled()
-public ObjectId[] GetAllShapes()
-public ObjectId[] GetAllShapesInLayer(ObjectId layerId)
+public void GetShape(string prompt)
+public void GetShapes(string prompt)
 public void SetResolution(int width, int height)
 public void ViewSize(int width, int height)
 public void ScreenShot(String path)
 public void SelectGameObjects(GameObject[] objs)
+public void DeselectGameObjects(GameObject[] objs)
+public void DeselectAllGameObjects()
 public void StartSelectingGameObject()
 public void StartSelectingGameObjects()
 public bool EndedSelectingGameObjects()
@@ -130,6 +126,11 @@ public void SetSun(float altitude, float azimuth)
 public String ShapeType(GameObject s)
 public Vector3 SphereCenter(GameObject s)
 public float SphereRadius(GameObject s)
+public Vector3 BoxPosition(GameObject s)
+public Vector3 BoxDimensions(GameObject s)
+public Vector3 CylinderBottom(GameObject s)
+public Vector3 CylinderTop(GameObject s)
+public float CylinderRadius(GameObject s)
 public void SetSimAgentSize(float radius, float height)
 public void SetSimHSF(float relaxationTime, float maxSpeedCoef, float V, float sigma, float U, float R, float c, float phi)
 public void SetSimNone()
@@ -152,6 +153,11 @@ public void SetSimRandSeed(int seed)
 public void SetNavMeshArea(GameObject obj, int area)
 public void SetTag(GameObject obj, String tag)
 public void RunSimulation(float maxTime)
+public void SetMode(int mode)
+public void ConfigurePlayer(float flySpeed, float walkSpeed, float lookSpeed, float gravityMultiplier, float maxFallSpeed, float radius)
+public void ConfigureHighlighting(int mode, float r, float g, float b, float width)
+public void EnterPlayerMode()
+public void ExitPlayerMode()
 """
 
 #= These depend on the editor
@@ -311,30 +317,38 @@ set_default_materials() =
     set_material(Unity, material_grass, "Default/Materials/Grass")
   end
 
-KhepriBase.b_get_material(b::Unity, path::AbstractString) = (println("Loading material $path");
-  @remote(b, LoadMaterial(path)))
+KhepriBase.b_get_material(b::Unity, path::AbstractString) =
+  @remote(b, LoadMaterial(path))
 
 KhepriBase.b_material(b::Unity, name, base_color, metallic, roughness, specular,
                           ior, transmission, transmission_roughness,
                           clearcoat, clearcoat_roughness,
                           emission_color, emission_strength) =
   @remote(b, CreateMaterial(name, base_color, Float64(alpha(base_color)),
-                            metallic, roughness, transmission,
+                            metallic, specular, roughness,
+                            ior, transmission, transmission_roughness,
+                            clearcoat, clearcoat_roughness,
                             emission_color, emission_strength))
 
 KhepriBase.b_plastic_material(b::Unity, name, color, roughness) =
   @remote(b, CreateMaterial(name, color, Float64(alpha(color)),
-                            0.0, roughness, 0.0,
+                            0.0, 0.5, roughness,
+                            1.5, 0.0, 0.0,
+                            0.0, 0.0,
                             rgb(0,0,0), 0.0))
 
 KhepriBase.b_metal_material(b::Unity, name, color, roughness, ior) =
   @remote(b, CreateMaterial(name, color, Float64(alpha(color)),
-                            1.0, roughness, 0.0,
+                            1.0, 0.5, roughness,
+                            ior, 0.0, 0.0,
+                            0.0, 0.0,
                             rgb(0,0,0), 0.0))
 
 KhepriBase.b_glass_material(b::Unity, name, color, roughness, ior) =
   @remote(b, CreateMaterial(name, color, Float64(alpha(color)),
-                            0.0, roughness, 0.8,
+                            0.0, 0.5, roughness,
+                            ior, 0.8, 0.0,
+                            0.0, 0.0,
                             rgb(0,0,0), 0.0))
 
 fast_unity() =
@@ -349,8 +363,15 @@ slow_unity() =
     @remote(unity, SetApplyColliders(true))
   end
 
-realize(b::Unity, s::Text) =
-  @remote(b, Text(s.str, s.corner, vz(-1, s.corner.cs), vy(1, s.corner.cs), "Fonts/Inconsolata-Regular", s.height))
+unity_concept_mode(b=top_backend()) = @remote(b, SetMode(0))
+unity_analysis_mode(b=top_backend()) = @remote(b, SetMode(1))
+unity_showcase_mode(b=top_backend()) = @remote(b, SetMode(2))
+unity_advanced_mode(b=top_backend()) = @remote(b, SetMode(3))
+unity_enter_player_mode(b=top_backend()) = @remote(b, EnterPlayerMode())
+unity_exit_player_mode(b=top_backend()) = @remote(b, ExitPlayerMode())
+
+KhepriBase.b_text(b::Unity, str, p, size, mat) =
+  @remote(b, Text(str, p, vz(-1, p.cs), vy(1, p.cs), "Fonts/Inconsolata-Regular", size))
 
 KhepriBase.b_right_cuboid(b::Unity, cb, width, height, h, mat) =
   isnothing(mat) ?
@@ -605,29 +626,30 @@ backend_spotlight(b::Unity, loc::Loc, dir::Vec, hotspot::Real, falloff::Real) =
 
 backend_ieslight(b::Unity, file::String, loc::Loc, dir::Vec, alpha::Real, beta::Real, gamma::Real) =
     @remote(b, IESLight(file, loc, loc + dir, vxyz(alpha, beta, gamma)))
+=#
 
 # User Selection
 
-shape_from_ref(r, b::Unity) =
-  let idx = findfirst(s -> r in ref_values(b, s), collected_shapes())
-    if isnothing(idx)
-      let kind = @remote(b, ShapeType(r))
-        if kind == "Sphere"
-          sphere(@remote(b, SphereCenter(r)), @remote(b, SphereRadius(r)),
-                 backend=b, ref=LazyRef(b, UnityNativeRef(r)))
-        else
-          @warn "No shapes were previously collected (see is_collecting_shapes)"
-          unknown(r, backend=b, ref=LazyRef(b, UnityNativeRef(r), 0, 0))
-          #code = @remote(b, ShapeCode(r)),
-          #ref = LazyRef(b, UnityNativeRef(r))
-          #error("Unknown shape with code $(code)")
-        end
+KhepriBase.b_shape_from_ref(b::Unity, r) =
+  get_or_create_shape_from_ref_value(b, r)
+
+KhepriBase.b_create_shape_from_ref_value(b::Unity, r) =
+  let kind = @remote(b, ShapeType(r))
+    if kind == "Sphere"
+      sphere(@remote(b, SphereCenter(r)), @remote(b, SphereRadius(r)))
+    elseif kind == "Box"
+      let d = @remote(b, BoxDimensions(r))
+        box(@remote(b, BoxPosition(r)), d.x, d.y, d.z)
+      end
+    elseif kind == "Cylinder"
+      let bot = @remote(b, CylinderBottom(r)),
+          top = @remote(b, CylinderTop(r))
+        cylinder(bot, @remote(b, CylinderRadius(r)), top)
       end
     else
-      collected_shapes()[idx]
+      unknown(r)
     end
   end
-=#
 
 #render exposure: [-3, +3] -> [-6, 21]
 convert_render_exposure(b::Unity, v::Real) = -4.05*v + 8.8
@@ -643,11 +665,14 @@ render_view(path::String, b::Unity) =
       path
     end
 
-highlight_shape(s::Shape, b::Unity) =
-    @remote(b, SelectGameObjects(ref_values(b, s)))
+KhepriBase.b_highlight_refs(b::Unity, rs::Vector{UnityId}) =
+  @remote(b, SelectGameObjects(rs))
 
-highlight_shapes(ss::Shapes, b::Unity) =
-    @remote(b, SelectGameObjects(ref_values(b, ss)))
+KhepriBase.b_unhighlight_refs(b::Unity, rs::Vector{UnityId}) =
+  @remote(b, DeselectGameObjects(rs))
+
+KhepriBase.b_unhighlight_all_refs(b::Unity) =
+  @remote(b, DeselectAllGameObjects())
 
 
 KhepriBase.b_select_position(b::Unity, prompt) =
@@ -663,26 +688,26 @@ KhepriBase.b_select_position(b::Unity, prompt) =
     end
   end
 
-selected_game_objects(b) =
-  begin
-    while ! @remote(b, EndedSelectingGameObjects())
-      sleep(0.1)
-    end
-    @remote(b, SelectedGameObjectsIds(true))
+# Deferred selection: GetShape/GetShapes are void RPCs that start selection;
+# the result (int[] encoded as length + ids) is sent by SceneLoad when
+# the user finishes clicking, similar to RunSimulation.
+read_selected_ids(conn) =
+  let n = read(conn, Int32)
+    Int32[read(conn, Int32) for _ in 1:n]
   end
 
 KhepriBase.b_select_shape(b::Unity, prompt::String) =
   select_one_with_prompt(prompt, b, (c, prompt) ->
     begin
-      @remote(b, StartSelectingGameObject())
-      selected_game_objects(b)
+      @remote(b, GetShape(prompt))
+      read_selected_ids(c)
     end)
 
 KhepriBase.b_select_shapes(b::Unity, prompt::String) =
   select_many_with_prompt(prompt, b, (c, prompt) ->
     begin
-      @remote(b, StartSelectingGameObjects())
-      selected_game_objects(b)
+      @remote(b, GetShapes(prompt))
+      read_selected_ids(c)
     end)
 
     #=
