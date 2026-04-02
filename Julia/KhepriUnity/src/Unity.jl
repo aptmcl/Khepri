@@ -546,6 +546,8 @@ KhepriBase.b_set_layer_visible(b::Unity, layer, visible) =
   @remote(b, SetActive(layer, visible))
 KhepriBase.b_set_layer_opacity(b::Unity, layer, opacity) =
   @remote(b, SetParentOpacity(layer, convert(Float32, opacity)))
+KhepriBase.b_create_layer_from_ref_value(b::Unity, r) =
+  layer("Default")
 KhepriBase.b_delete_all_shapes_in_layer(b::Unity, layer) =
   @remote(b, DeleteAllInParent(layer))
 
