@@ -374,6 +374,10 @@ unity_exit_player_mode(b=top_backend()) = @remote(b, ExitPlayerMode())
 KhepriBase.b_text(b::Unity, str, p, size, mat) =
   @remote(b, Text(str, p, vz(-1, p.cs), vy(1, p.cs), "Fonts/Inconsolata-Regular", size))
 
+KhepriBase.b_labels(b::Unity, p, data, mat) =
+  [@remote(b, Text(txt, p + vpol(0.2*scale, ϕ), vz(-1, p.cs), vy(1, p.cs), "Fonts/Inconsolata-Regular", scale))
+   for ((; txt, mat, scale), ϕ) in zip(data, division(-π/4, 7π/4, length(data), false))]
+
 KhepriBase.b_right_cuboid(b::Unity, cb, width, height, h, mat) =
   isnothing(mat) ?
     @remote(b, RightCuboid(cb, vz(1, cb.cs), vx(1, cb.cs), height, width, h, 0)) :
