@@ -98,6 +98,7 @@ public GameObject CurrentParent()
 public GameObject SetCurrentParent(GameObject newParent)
 public void SetActive(GameObject obj, bool state)
 public void DeleteAllInParent(GameObject parent)
+public void SetParentOpacity(GameObject parent, float opacity)
 public void SwitchToParent(GameObject newParent)
 public int SetMaxNonInteractiveRequests(int n)
 public void SetNonInteractiveRequests()
@@ -535,19 +536,16 @@ KhepriBase.b_current_layer_ref(b::Unity) =
 KhepriBase.b_current_layer_ref(b::Unity, layer) =
   @remote(b, SetCurrentParent(layer))
 
-KhepriBase.b_layer(b::Unity, name, active, color) =
-  let layer = @remote(b, CreateParent(name, active))
+KhepriBase.b_layer(b::Unity, name, visible, color) =
+  let layer = @remote(b, CreateParent(name, visible))
     @warn "Ignoring color in create_layer for Unity"
     #@remote(b, SetLayerColor(layer, color.r, color.g, color.b))
     layer
   end
-#=
-set_layer_active(layer::UnityLayer, status, b::Unity) =
-  let c = connection(b)
-    @remote(b, SetActive(layer, status))
-    interrupt_processing(c)
-  end
-=#
+KhepriBase.b_set_layer_visible(b::Unity, layer, visible) =
+  @remote(b, SetActive(layer, visible))
+KhepriBase.b_set_layer_opacity(b::Unity, layer, opacity) =
+  @remote(b, SetParentOpacity(layer, convert(Float32, opacity)))
 KhepriBase.b_delete_all_shapes_in_layer(b::Unity, layer) =
   @remote(b, DeleteAllInParent(layer))
 
