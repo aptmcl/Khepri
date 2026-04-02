@@ -187,8 +187,7 @@ KhepriBase.before_connecting(b::Unity) =
   Then open the project in Unity and click 'Start Khepri'.
   """
 KhepriBase.after_connecting(b::Unity) =
-  begin
-  end
+  set_default_materials()
 
 const unity = Unity("Unity", unity_port, unity_api)
 
