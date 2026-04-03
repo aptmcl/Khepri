@@ -1,5 +1,7 @@
 export threejs, threejs_material, THR
-       
+
+import KhepriBase: closed_path_for_height, subtract_wall_paths, collect_ref!
+
 # THR is a subtype of JS
 parse_signature(::Val{:THR}, sig::T) where {T} = parse_signature(Val(:TS), sig)
 encode(::Val{:THR}, t::Val{T}, c::IO, v) where {T} = encode(Val(:TS), t, c, v)
@@ -81,6 +83,14 @@ encode(ns::Val{:THR}, t::Val{:ArrayInt32}, c::IO, v) =
     encode(ns, Val{:int}[], c, a)
   end
 
+# MeshPart: (vertices::Vector{Loc}, indices::Vector{Int32}, material_ref::Int32)
+encode(ns::Val{:THR}, ::Val{:MeshPart}, c::IO, part) =
+  let (vs, idxs, mat) = part
+    encode(ns, Val(:ArrayFloat32), c, vs)
+    encode(ns, Val(:ArrayInt32), c, idxs)
+    encode(ns, Val(:Int32), c, mat)
+  end
+
 threejs_api = @remote_api :THR """
 typedFunction("getOperationNamed", [Str, Str], Int32, (name: string, canonical: string) => {
 typedFunction("delete", [Int32], None, (i: number) =>
@@ -88,6 +98,12 @@ typedFunction("deleteAll", [], None, () => {
 typedFunction("createLayer", [Str], Int32, (name: string) => {
 typedFunction("getCurrentLayer", [], Int32, () => {
 typedFunction("setCurrentLayer", [Int32], None, (idx: number) => {
+typedFunction("setLayerVisible", [Int32, Bool], None, (layer: THREE.Group, visible: boolean) => {
+typedFunction("getLayerName", [Int32], Str, (layer: THREE.Group) => {
+typedFunction("setLayerOpacity", [Int32, Float32], None, (layer: THREE.Group, opacity: number) => {
+typedAsyncFunction("selectShape", [Str], [Int32], (prompt: string, cont: Function) => {
+typedAsyncFunction("selectShapes", [Str], [Int32], (prompt: string, cont: Function) => {
+typedAsyncFunction("selectPosition", [Str], [Point3d], (prompt: string, cont: Function) => {
 typedFunction("addAnnotation", [Point3d, Str], Int32, (p: THREE.Vector3, txt: string) =>
 typedFunction("deleteAnnotation", [Int32], None, (i: number) => 
 typedFunction("guiCreate", [Str, Int32], GUIId, (title: string, kind: number) => {
@@ -127,6 +143,12 @@ typedFunction("setView", [Point3d, Point3d, Float32, Float32], None, (position: 
 typedFunction("stopUpdate", [], None, () => {
 typedFunction("startUpdate", [], None, () => {
 typedAsyncFunction("showKMLCoordinatesFromFile", [], None, (cont: Function) => {
+typedFunction("wall", [[Point3d], [Point3d], Float32, Bool, MatId, MatId, MatId], Id, (rightVs: THREE.Vector3[], leftVs: THREE.Vector3[], height: number, closed: boolean, rightMat: THREE.Material, leftMat: THREE.Material, sideMat: THREE.Material) => {
+typedFunction("stair", [Point3d, Vector3d, Float32, Int32, Float32, Float32, Float32, Bool, MatId, MatId], Id, (basePoint: THREE.Vector3, direction: THREE.Vector3, bottomHeight: number, nSteps: number, riserHeight: number, treadDepth: number, width: number, hasRisers: boolean, treadMat: THREE.Material, riserMat: THREE.Material) => {
+typedFunction("spiralStair", [Point3d, Float32, Float32, Float32, Bool, Float32, Int32, Float32, Float32, MatId], Id, (center: THREE.Vector3, radius: number, startAngle: number, includedAngle: number, clockwise: boolean, bottomHeight: number, nSteps: number, riserHeight: number, width: number, treadMat: THREE.Material) => {
+typedFunction("groupedMesh", [[MeshPart]], Id, (parts: any[]) => {
+typedFunction("wallWithOpenings", [[Point3d], [Point3d], [Point3d], Float32, Bool, [Float32], [Float32], [Float32], [Float32], MatId, MatId, MatId], Id, (rightVs: THREE.Vector3[], leftVs: THREE.Vector3[], centerVs: THREE.Vector3[], height: number, closed: boolean, opStarts: number[], opBaseHeights: number[], opWidths: number[], opHeights: number[], rightMat: THREE.Material, leftMat: THREE.Material, sideMat: THREE.Material) => {
+typedFunction("railing", [[Point3d], Float32, Float32, Float32, Float32, MatId], Id, (pathVs: THREE.Vector3[], baseHeight: number, height: number, postSpacing: number, postRadius: number, mat: THREE.Material) => {
 """
 
 
@@ -201,6 +223,22 @@ KhepriBase.b_get_material(b::THR, f::Function) = f(b)
 KhepriBase.has_boolean_ops(::Type{THR}) = HasBooleanOps{false}()
 
 KhepriBase.void_ref(b::THR) = -1 % Int32
+
+KhepriBase.b_material(b::THR, name, base_color, metallic, roughness, specular,
+                       ior, transmission, transmission_roughness,
+                       clearcoat, clearcoat_roughness,
+                       emission_color, emission_strength) =
+  @remote(b, MeshPhysicalMaterial(
+    (color=convert(RGB, base_color),
+     metalness=metallic,
+     roughness=roughness,
+     ior=ior,
+     transmission=transmission,
+     clearcoat=clearcoat,
+     clearcoatRoughness=clearcoat_roughness,
+     emissive=convert(RGB, emission_color),
+     emissiveIntensity=emission_strength,
+     side=2)))
 
 threejs_material(b, color) =
   @remote(b, MeshLambertMaterial(
@@ -422,15 +460,172 @@ KhepriBase.b_extruded_surface(b::THR, profile::Region, v, cb, bmat, tmat, smat) 
   let outer = outer_path(profile),
       inners = inner_paths(profile),
       vw = in_world(v)
-    iszero(vw.x) && iszero(vw.y) ? # ThreeJS can extrude a surface along Z
-    	@remote(b, extrudedSurface(cb, 
+    if iszero(vw.x) && iszero(vw.y) # Z-axis extrusion: use cb directly
+      @remote(b, extrudedSurface(cb,
                                  path_vertices(outer),
                                  is_smooth_path(outer),
                                  [path_vertices(inner) for inner in inners],
                                  [is_smooth_path(inner) for inner in inners],
                                  v,
-                                 tmat)) : # use the default implementation
-      @invoke b_extruded_surface(b::Backend, profile::Region, v, cb, bmat, tmat, smat)
+                                 tmat))
+    else # Arbitrary direction: rotate CS so extrusion aligns with local Z
+      let cs = cs_from_o_vz(cb, v),
+          naked(p) = xy(p.x, p.y, world_cs),
+          to2D(path) = [naked(in_cs(p, cs)) for p in path_vertices(path)]
+        @remote(b, extrudedSurface(u0(cs),
+                                   to2D(outer),
+                                   is_smooth_path(outer),
+                                   [to2D(inner) for inner in inners],
+                                   [is_smooth_path(inner) for inner in inners],
+                                   vz(norm(v)),
+                                   tmat))
+      end
+    end
+  end
+
+# BIM operations — native implementations to reduce WebSocket traffic
+
+# Geometry helpers for groupedMesh: return (vertices::Vector{Loc}, indices::Vector{Int32}, mat_ref::Int32)
+
+quad_strip_mesh_part(ps, qs, mat) =
+  let n = length(ps),
+      vs = [p for pair in zip(ps, qs) for p in pair],
+      idxs = Int32[idx for i in 0:n-2 for idx in (2i, 2i+2, 2i+1, 2i+2, 2i+3, 2i+1)]
+    (vs, idxs, mat)
+  end
+
+quad_strip_closed_mesh_part(ps, qs, mat) =
+  quad_strip_mesh_part([ps..., ps[1]], [qs..., qs[1]], mat)
+
+polygon_mesh_part(ps, mat) =
+  let idxs = Int32[idx for k in 1:length(ps)-2 for idx in (0, k, k+1)]
+    (collect(ps), idxs, mat)
+  end
+
+strip_mesh_part(path1, path2, mat) =
+  let v1s = path_vertices(path1),
+      v2s = path_vertices(path2)
+    is_closed_path(path1) && is_closed_path(path2) ?
+      quad_strip_closed_mesh_part(v1s, v2s, mat) :
+      quad_strip_mesh_part(v1s, v2s, mat)
+  end
+
+KhepriBase.b_wall_no_openings(b::THR, w_path, w_height, l_thickness, r_thickness, lmat, rmat, smat) =
+  path_length(w_path) < path_tolerance() ? void_ref(b) :
+  let r_vs = path_vertices(offset(w_path, -r_thickness)),
+      l_vs = path_vertices(offset(w_path, l_thickness)),
+      h = Float32(w_height * wall_z_fighting_factor),
+      closed = is_closed_path(w_path)
+    @remote(b, wall(r_vs, l_vs, h, closed,
+                    material_ref(b, rmat), material_ref(b, lmat), material_ref(b, smat)))
+  end
+
+KhepriBase.b_wall_with_openings(b::THR, w_path, w_height, l_thickness, r_thickness, lmat, rmat, smat, openings) =
+  path_length(w_path) < path_tolerance() ? void_ref(b) :
+  let w_paths = subpaths(w_path),
+      r_w_paths = subpaths(offset(w_path, -r_thickness)),
+      l_w_paths = subpaths(offset(w_path, l_thickness)),
+      w_height = w_height * wall_z_fighting_factor,
+      prevlength = 0,
+      smat_ref = material_ref(b, smat),
+      lmat_ref = material_ref(b, lmat),
+      rmat_ref = material_ref(b, rmat),
+      parts = [],
+      refs = new_refs(b)
+    for (w_seg_path, r_w_path, l_w_path) in zip(w_paths, r_w_paths, l_w_paths)
+      let currlength = prevlength + path_length(w_seg_path),
+          c_r_w_path = closed_path_for_height(r_w_path, w_height),
+          c_l_w_path = closed_path_for_height(l_w_path, w_height),
+          r_vs = path_vertices(r_w_path),
+          l_vs = path_vertices(l_w_path),
+          r_top = map(p -> p + vz(w_height), r_vs),
+          l_top = map(p -> p + vz(w_height), l_vs)
+        push!(parts, quad_strip_mesh_part(r_top, l_top, smat_ref))
+        if !is_closed_path(w_path)
+          push!(parts, polygon_mesh_part([r_vs[1], r_top[1], l_top[1], l_vs[1]], smat_ref))
+          push!(parts, polygon_mesh_part([l_vs[end], l_top[end], r_top[end], r_vs[end]], smat_ref))
+        end
+        openings = filter(openings) do op
+          if prevlength <= op.path_position < currlength ||
+             prevlength <= op.path_position + op.width <= currlength
+            let op_height = op.height,
+                op_at_start = op.path_position <= prevlength,
+                op_at_end = op.path_position + op.width >= currlength,
+                op_path = subpath(w_path,
+                                  max(prevlength, op.path_position),
+                                  min(currlength, op.path_position + op.width)),
+                r_op_path = offset(op_path, -r_thickness),
+                l_op_path = offset(op_path,  l_thickness),
+                fixed_r_op_path =
+                  open_polygonal_path([path_start(op_at_start ? r_w_path : r_op_path),
+                                       path_end(op_at_end ? r_w_path : r_op_path)]),
+                fixed_l_op_path =
+                  open_polygonal_path([path_start(op_at_start ? l_w_path : l_op_path),
+                                       path_end(op_at_end ? l_w_path : l_op_path)]),
+                r_op_translated = translate(fixed_r_op_path, vz(op.base_height)),
+                l_op_translated = translate(fixed_l_op_path, vz(op.base_height)),
+                c_r_op_path = closed_path_for_height(r_op_translated, op_height),
+                c_l_op_path = closed_path_for_height(l_op_translated, op_height),
+                r_jacket = op.base_height < path_tolerance() ?
+                  let ps = path_vertices(r_op_translated)
+                    open_polygonal_path([ps[1], ps[1]+vz(op_height), ps[end]+vz(op_height), ps[end]])
+                  end : c_r_op_path,
+                l_jacket = op.base_height < path_tolerance() ?
+                  let ps = path_vertices(l_op_translated)
+                    open_polygonal_path([ps[1], ps[1]+vz(op_height), ps[end]+vz(op_height), ps[end]])
+                  end : c_l_op_path
+              push!(parts, strip_mesh_part(reverse(r_jacket), reverse(l_jacket), smat_ref))
+              c_r_w_path, c_l_w_path = subtract_wall_paths(b, c_r_w_path, c_l_w_path, c_r_op_path, c_l_op_path)
+              !(op.path_position >= prevlength && op.path_position + op.width <= currlength)
+            end
+          else
+            true
+          end
+        end
+        prevlength = currlength
+        collect_ref!(refs, b_surface(b, reverse(c_l_w_path), lmat_ref))
+        collect_ref!(refs, b_surface(b, c_r_w_path, rmat_ref))
+      end
+    end
+    collect_ref!(refs, @remote(b, groupedMesh(parts)))
+    refs
+  end
+
+KhepriBase.b_railing(b::THR, path, level, host, family) =
+  let h = Float32(family.height),
+      base = Float32(level_height(b, level)),
+      mat = material_ref(b, family.material),
+      vs = path_vertices(path)
+    @remote(b, railing(map(in_world, vs), base, h,
+                       Float32(family.post_spacing), Float32(0.025), mat))
+  end
+
+KhepriBase.b_stair(b::THR, base_point, direction, bottom_level, top_level, family) =
+  let bottom_h = level_height(b, bottom_level),
+      top_h = level_height(b, top_level),
+      total_h = top_h - bottom_h,
+      n_steps = Int32(round(total_h / family.riser_height)),
+      riser_h = Float32(total_h / n_steps)
+    @remote(b, stair(in_world(base_point), unitized(direction),
+                     Float32(bottom_h), n_steps, riser_h,
+                     Float32(family.tread_depth), Float32(family.width),
+                     family.has_risers,
+                     material_ref(b, family.tread_material),
+                     material_ref(b, family.riser_material)))
+  end
+
+KhepriBase.b_spiral_stair(b::THR, center, radius, start_angle, included_angle,
+                           clockwise, bottom_level, top_level, family) =
+  let bottom_h = level_height(b, bottom_level),
+      top_h = level_height(b, top_level),
+      total_h = top_h - bottom_h,
+      n_steps = Int32(round(total_h / family.riser_height)),
+      riser_h = Float32(total_h / n_steps)
+    @remote(b, spiralStair(in_world(center), Float32(radius),
+                           Float32(start_angle), Float32(included_angle),
+                           clockwise, Float32(bottom_h), n_steps, riser_h,
+                           Float32(family.width),
+                           material_ref(b, family.tread_material)))
   end
 
 KhepriBase.b_mesh_obj_fmt(b::THR, obj_name, transform) =
@@ -484,11 +679,45 @@ KhepriBase.b_delete_all_shape_refs(b::THR) =
   @remote(b, deleteAll())
 
 # Layers
-KhepriBase.b_layer(b::THR, name, active, color) = @remote(b, createLayer(name))
+KhepriBase.b_layer(b::THR, name, visible, color) = @remote(b, createLayer(name))
 KhepriBase.b_current_layer_ref(b::THR) = @remote(b, getCurrentLayer())
 KhepriBase.b_current_layer_ref(b::THR, layer) = @remote(b, setCurrentLayer(layer))
+KhepriBase.b_create_layer_from_ref_value(b::THR, r) =
+  layer(@remote(b, getLayerName(r)))
+KhepriBase.b_set_layer_visible(b::THR, layer, visible) =
+  @remote(b, setLayerVisible(ref_value(b, layer), visible))
+KhepriBase.b_set_layer_opacity(b::THR, layer, opacity) =
+  @remote(b, setLayerOpacity(ref_value(b, layer), convert(Float32, opacity)))
 KhepriBase.b_delete_all_shapes_in_layer(b::THR, layer) =
   @warn "KhepriThreejs: per-layer shape deletion not supported; use delete_all_shapes() instead"
+
+# Selection
+KhepriBase.b_select_position(b::THR, prompt) =
+  let ans = @remote(b, selectPosition(prompt))
+    length(ans) > 0 ? ans[1] : nothing
+  end
+KhepriBase.b_select_positions(b::THR, prompt) =
+  @remote(b, selectPosition(prompt))
+KhepriBase.b_select_point(b::THR, prompt) =
+  select_one_with_prompt(prompt, b, @get_remote b selectShape)
+KhepriBase.b_select_points(b::THR, prompt) =
+  select_many_with_prompt(prompt, b, @get_remote b selectShapes)
+KhepriBase.b_select_curve(b::THR, prompt) =
+  select_one_with_prompt(prompt, b, @get_remote b selectShape)
+KhepriBase.b_select_curves(b::THR, prompt) =
+  select_many_with_prompt(prompt, b, @get_remote b selectShapes)
+KhepriBase.b_select_surface(b::THR, prompt) =
+  select_one_with_prompt(prompt, b, @get_remote b selectShape)
+KhepriBase.b_select_surfaces(b::THR, prompt) =
+  select_many_with_prompt(prompt, b, @get_remote b selectShapes)
+KhepriBase.b_select_solid(b::THR, prompt) =
+  select_one_with_prompt(prompt, b, @get_remote b selectShape)
+KhepriBase.b_select_solids(b::THR, prompt) =
+  select_many_with_prompt(prompt, b, @get_remote b selectShapes)
+KhepriBase.b_select_shape(b::THR, prompt) =
+  select_one_with_prompt(prompt, b, @get_remote b selectShape)
+KhepriBase.b_select_shapes(b::THR, prompt) =
+  select_many_with_prompt(prompt, b, @get_remote b selectShapes)
 
 ####################################################
 KhepriBase.b_labels(b::THR, p, data, mat) =

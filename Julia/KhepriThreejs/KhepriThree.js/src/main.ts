@@ -669,6 +669,7 @@ const namedLayers: Map<string, THREE.Group> = new Map();
 
 function createLayer(name: string) {
   const layer = new THREE.Group();
+  layer.name = name;
   // Layers ensure Z-up
   layer.rotation.x = -Math.PI*.5;
   scene.add(layer);
@@ -692,6 +693,10 @@ typedFunction("createLayer", [Str], LayerId, (name: string) => {
   return createLayer(name);
 });
 
+typedFunction("getLayerName", [LayerId], Str, (layer: THREE.Group) => {
+  return layer.name;
+});
+
 let currentLayer: THREE.Group = defaultLayer
 
 typedFunction("setCurrentLayer", [LayerId], None, (layer: THREE.Group) => {
@@ -700,6 +705,75 @@ typedFunction("setCurrentLayer", [LayerId], None, (layer: THREE.Group) => {
 
 typedFunction("getCurrentLayer", [], Int32, () => {
   return layers.indexOf(currentLayer);
+});
+
+typedFunction("setLayerVisible", [LayerId, Bool], None, (layer: THREE.Group, visible: boolean) => {
+  layer.visible = visible;
+});
+
+// Per-layer opacity tracking (default 1.0 = fully opaque)
+const layerOpacity: Map<THREE.Group, number> = new Map();
+
+function getLayerOpacity(layer: THREE.Group): number {
+  return layerOpacity.get(layer) ?? 1.0;
+}
+
+function makeGhostMaterial(mat: THREE.Material, opacity: number): THREE.Material {
+  const ghost = mat.clone();
+  ghost.transparent = true;
+  ghost.opacity = opacity;
+  ghost.depthWrite = false;
+  return ghost;
+}
+
+function applyGhostToObject(obj: THREE.Object3D, opacity: number) {
+  if (obj instanceof THREE.Sprite) return;
+  if (obj instanceof THREE.Mesh || obj instanceof THREE.Line || obj instanceof THREE.Points) {
+    if (obj.userData.KhepriOriginalMaterial) {
+      // Already ghosted — dispose old clones, re-clone at new opacity
+      const current = obj.material;
+      if (Array.isArray(current)) current.forEach(m => m.dispose());
+      else current.dispose();
+      const original = obj.userData.KhepriOriginalMaterial;
+      obj.material = Array.isArray(original)
+        ? original.map(m => makeGhostMaterial(m, opacity))
+        : makeGhostMaterial(original, opacity);
+    } else {
+      // First time ghosting — save original
+      obj.userData.KhepriOriginalMaterial = obj.material;
+      const mat = obj.material;
+      obj.material = Array.isArray(mat)
+        ? mat.map(m => makeGhostMaterial(m, opacity))
+        : makeGhostMaterial(mat, opacity);
+    }
+  }
+  obj.children.forEach(child => applyGhostToObject(child, opacity));
+}
+
+function removeGhostFromObject(obj: THREE.Object3D) {
+  if (obj instanceof THREE.Sprite) return;
+  if (obj instanceof THREE.Mesh || obj instanceof THREE.Line || obj instanceof THREE.Points) {
+    const original = obj.userData.KhepriOriginalMaterial;
+    if (original) {
+      const current = obj.material;
+      if (Array.isArray(current)) current.forEach(m => m.dispose());
+      else current.dispose();
+      obj.material = original;
+      delete obj.userData.KhepriOriginalMaterial;
+    }
+  }
+  obj.children.forEach(child => removeGhostFromObject(child));
+}
+
+typedFunction("setLayerOpacity", [LayerId, Float32], None, (layer: THREE.Group, opacity: number) => {
+  layerOpacity.set(layer, opacity);
+  if (opacity <= 0 || opacity >= 1) {
+    // Endpoints: restore original materials (no ghost overhead)
+    layer.children.forEach(child => removeGhostFromObject(child));
+  } else {
+    // Intermediate: apply ghost materials
+    layer.children.forEach(child => applyGhostToObject(child, opacity));
+  }
 });
 
 //////////////////////////////////////////
@@ -714,6 +788,10 @@ function addObject3D(obj: THREE.Object3D) {
   }
   //wireframeCheck(obj);
   currentLayer.add(obj);
+  const opacity = getLayerOpacity(currentLayer);
+  if (opacity > 0 && opacity < 1) {
+    applyGhostToObject(obj, opacity);
+  }
   const object3DId = nextObject3DId++;
   objects.set(object3DId, obj);
   // Store the ID on the object for reverse lookup
@@ -732,6 +810,12 @@ function delObject3D(idx: number) {
     obj.removeFromParent();
     if (obj instanceof THREE.Mesh) {
       obj.geometry.dispose();
+    } else if (obj instanceof THREE.Sprite) {
+      if (obj.material instanceof THREE.SpriteMaterial && obj.material.map) {
+        obj.material.map.dispose();
+      }
+      obj.material.dispose();
+      obj.geometry.dispose();
     }
     objects.delete(idx);
     delete obj.userData.Object3DId;
@@ -744,6 +828,7 @@ function delObject3D(idx: number) {
 function delAllObject3Ds() {
   const count = objects.size;
   objects.forEach((obj, _id) => {
+    removeGhostFromObject(obj);
     obj.removeFromParent();
     if (obj instanceof THREE.Mesh) {
       obj.geometry.dispose();
@@ -752,6 +837,7 @@ function delAllObject3Ds() {
   });
   objects.clear();
   nextObject3DId = 0; // Reset the ID counter
+  layerOpacity.clear();
   return count;
 }
 
@@ -764,6 +850,20 @@ typedFunction("deleteAll", [], None, () => {
 });
 
 const Id = new PrimitiveType("Id", ofSize(4), (io) => getObject3D(io.readInt32()), (io, v) => io.writeInt32(addObject3D(v)));
+
+// Variable-length array of raw Int32 IDs (for selection results)
+const IdArray = new PrimitiveType<number[]>("IdArray",
+  (v) => TypeSize.Int32 + v.length * TypeSize.Int32,
+  (io) => Array.from({length: io.readInt32()}, () => io.readInt32()),
+  (io, v) => { io.writeInt32(v.length); v.forEach(id => io.writeInt32(id)); }
+);
+
+// Variable-length array of Point3d (for position selection results)
+const PointArray = new PrimitiveType<THREE.Vector3[]>("PointArray",
+  (v) => TypeSize.Int32 + v.length * 3 * TypeSize.Float32,
+  (io) => Array.from({length: io.readInt32()}, () => new THREE.Vector3(io.readFloat32(), io.readFloat32(), io.readFloat32())),
+  (io, v) => { io.writeInt32(v.length); v.forEach(p => { io.writeFloat32(p.x); io.writeFloat32(p.y); io.writeFloat32(p.z); }); }
+);
 
 ////////////////////////////////
 const materials: THREE.Material[] = [];
@@ -784,6 +884,10 @@ function delAllMaterials() {
 */
 
 const MatId = new PrimitiveType("MatId", ofSize(4), (io) => getMaterial(io.readInt32()), (io, v) => io.writeInt32(addMaterial(v)));
+
+// Composite type for grouped mesh parts: (vertices, indices, material)
+const MeshPart = new CompositeType("MeshPart", [ArrayFloat32, ArrayInt32, MatId],
+  (args: any[]) => ({ vs: args[0] as Float32Array, idxs: args[1] as Int32Array, mat: args[2] as THREE.Material }));
 
 ////////////////////////////////
 
@@ -1183,10 +1287,10 @@ function addSprite(pos: THREE.Vector3, _title: string, content: string) {
   if (!ctx) return;
 
   // 2. Settings for the "Architectural" look
-  const fontSize = 48;
+  const fontSize = 36;
   const font = "Bold " + fontSize + "px Arial";
   const lineColor = "rgba(0, 0, 0, 1)";
-  const lineWidth = 6;
+  const lineWidth = 4;
   
   // The "Leader" is the angled line. 
   // rise/run determines the angle (e.g., 45 degrees)
@@ -1280,27 +1384,8 @@ function addSprite(pos: THREE.Vector3, _title: string, content: string) {
 }
 
 
-function disposeSprite(sprite: THREE.Sprite) {
-  sprite.removeFromParent();
-  if (sprite.material instanceof THREE.SpriteMaterial && sprite.material.map) {
-    sprite.material.map.dispose();
-  }
-  sprite.material.dispose();
-  sprite.geometry.dispose();
-}
-function delSprite(idx: number) {
-  const sprite = sprites[idx];
-  if (sprite) {
-    disposeSprite(sprite);
-    (sprites as any[])[idx] = null;
-  }
-  return idx;
-}
 function delAllSprites() {
-  const length = sprites.length;
-  sprites.forEach(s => { if (s) disposeSprite(s); });
   sprites.length = 0;
-  return length;
 }
 
 //const SpriteId = new PrimitiveType("SpriteId", 4, (io) => getSprite(io.readInt32()), (io, v) => io.writeInt32(addSprite(v)));
@@ -1353,10 +1438,63 @@ function deselectAll() {
   selected.forEach(e => e.userData.KhepriSelected.visible = false);
   selected = [];
 }
-/*
-function getSelected() {
-  return selected;
-}*/
+// Selection mode for Julia-driven interactive picking
+type SelectionCallback = ((result: any) => void) | null;
+let selectionCallback: SelectionCallback = null;
+let selectionMode: 'none' | 'shape' | 'shapes' | 'position' = 'none';
+let pendingSelections: number[] = [];
+
+function findKhepriObject(obj: THREE.Object3D): THREE.Object3D | null {
+  let current: THREE.Object3D | null = obj;
+  while (current) {
+    if (current.userData.Object3DId !== undefined) return current;
+    current = current.parent;
+  }
+  return null;
+}
+
+function finishSelection() {
+  if (selectionCallback) {
+    const cb = selectionCallback;
+    const ids = [...pendingSelections];
+    selectionCallback = null;
+    selectionMode = 'none';
+    pendingSelections = [];
+    cb(ids);
+  }
+}
+
+function cancelSelection() {
+  if (selectionCallback) {
+    const cb = selectionCallback;
+    selectionCallback = null;
+    selectionMode = 'none';
+    pendingSelections = [];
+    deselectAll();
+    cb([]);
+  }
+}
+
+window.addEventListener('keydown', (event: KeyboardEvent) => {
+  if (selectionMode === 'shapes') {
+    if (event.key === 'Enter') {
+      finishSelection();
+    } else if (event.key === 'Escape') {
+      cancelSelection();
+    }
+  } else if (selectionMode === 'shape' || selectionMode === 'position') {
+    if (event.key === 'Escape') {
+      cancelSelection();
+    }
+  } else if (selectionMode === 'none' && (event.key === 'Delete' || event.key === 'Backspace') && selected.length > 0) {
+    selected.forEach(obj => {
+      const khepriObj = findKhepriObject(obj);
+      const id = khepriObj?.userData.Object3DId;
+      if (id !== undefined) delObject3D(id);
+    });
+    selected = [];
+  }
+});
 
 ////////////////////////////////
 
@@ -1495,8 +1633,11 @@ typedFunction("gridHelper", [Int32, Int32, RGB, RGB], None,
 ///////////////////////
 // The graphical stuff
 
-typedFunction("addAnnotation", [Point3d, Str], Int32, (p: THREE.Vector3, txt: string) => addSprite(p, "", txt));
-typedFunction("deleteAnnotation", [Int32], None, (i: number) => delSprite(i));
+typedFunction("addAnnotation", [Point3d, Str], Id, (p: THREE.Vector3, txt: string) => {
+  const idx = addSprite(p, "", txt)!;
+  return sprites[idx];
+});
+typedFunction("deleteAnnotation", [Int32], None, (i: number) => delObject3D(i));
 
 
 //typedFunction("addAnnotation", [Point3d, Str], Id, (p, txt) => newAnnotation(p, "", txt));
@@ -1640,7 +1781,290 @@ function quadStripFlatGeometry(ps: THREE.Vector3[], qs: THREE.Vector3[]): THREE.
   return geometry;
 }
 
-typedFunction("surfaceGrid", [[[Point3d]], Bool, Bool, Bool, Bool, MatId], Id, (points: THREE.Vector3[][], uClosed: boolean, vClosed: boolean, uSmooth: boolean, vSmooth: boolean, mat: THREE.Material) => {    
+// BIM helpers
+
+function quadMesh(vs: THREE.Vector3[], mat: THREE.Material): THREE.Mesh {
+  const geo = new THREE.BufferGeometry();
+  const arr = new Float32Array(vs.flatMap(v => [v.x, v.y, v.z]));
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+  geo.setIndex([0, 1, 2, 0, 2, 3]);
+  return new THREE.Mesh(geo, mat);
+}
+
+function finishGroup(group: THREE.Group): THREE.Group {
+  group.children.forEach(c => {
+    if (c instanceof THREE.Mesh) {
+      c.geometry.computeVertexNormals();
+      c.castShadow = true;
+      c.receiveShadow = true;
+    }
+  });
+  return group;
+}
+
+typedFunction("wall", [[Point3d], [Point3d], Float32, Bool, MatId, MatId, MatId], Id,
+  (rightVs: THREE.Vector3[], leftVs: THREE.Vector3[], height: number, closed: boolean,
+   rightMat: THREE.Material, leftMat: THREE.Material, sideMat: THREE.Material) => {
+    const group = new THREE.Group();
+    const addZ = (v: THREE.Vector3) => new THREE.Vector3(v.x, v.y, v.z + height);
+    const rightTop = rightVs.map(addZ);
+    const leftTop = leftVs.map(addZ);
+    const wrap = closed
+      ? (vs: THREE.Vector3[]) => [...vs, vs[0]]
+      : (vs: THREE.Vector3[]) => vs;
+    group.add(new THREE.Mesh(quadStripFlatGeometry(wrap(rightVs), wrap(rightTop)), rightMat));
+    group.add(new THREE.Mesh(quadStripFlatGeometry(wrap(leftTop), wrap(leftVs)), leftMat));
+    group.add(new THREE.Mesh(quadStripFlatGeometry(wrap(rightTop), wrap(leftTop)), sideMat));
+    group.add(new THREE.Mesh(quadStripFlatGeometry(wrap(leftVs), wrap(rightVs)), sideMat));
+    if (!closed) {
+      const n = rightVs.length - 1;
+      group.add(quadMesh([rightVs[0], rightTop[0], leftTop[0], leftVs[0]], sideMat));
+      group.add(quadMesh([leftVs[n], leftTop[n], rightTop[n], rightVs[n]], sideMat));
+    }
+    return finishGroup(group);
+  });
+
+typedFunction("wallWithOpenings",
+  [[Point3d], [Point3d], [Point3d], Float32, Bool,
+   [Float32], [Float32], [Float32], [Float32],
+   MatId, MatId, MatId], Id,
+  (rightVs: THREE.Vector3[], leftVs: THREE.Vector3[], centerVs: THREE.Vector3[],
+   height: number, closed: boolean,
+   opStarts: number[], opBaseHeights: number[], opWidths: number[], opHeights: number[],
+   rightMat: THREE.Material, leftMat: THREE.Material, sideMat: THREE.Material) => {
+    const group = new THREE.Group();
+    const addZ = (v: THREE.Vector3) => new THREE.Vector3(v.x, v.y, v.z + height);
+    const rightTop = rightVs.map(addZ);
+    const leftTop = leftVs.map(addZ);
+    const wrap = closed ? (vs: THREE.Vector3[]) => [...vs, vs[0]] : (vs: THREE.Vector3[]) => vs;
+    // Top strip
+    group.add(new THREE.Mesh(quadStripFlatGeometry(wrap(rightTop), wrap(leftTop)), sideMat));
+    // End caps
+    if (!closed) {
+      const n = rightVs.length - 1;
+      group.add(quadMesh([rightVs[0], rightTop[0], leftTop[0], leftVs[0]], sideMat));
+      group.add(quadMesh([leftVs[n], leftTop[n], rightTop[n], rightVs[n]], sideMat));
+    }
+    // Cumulative path lengths
+    function pathLengths(vs: THREE.Vector3[]): number[] {
+      const lens = [0];
+      for (let i = 1; i < vs.length; i++)
+        lens.push(lens[i - 1] + vs[i].distanceTo(vs[i - 1]));
+      return lens;
+    }
+    function pointAtLength(vs: THREE.Vector3[], lens: number[], d: number): THREE.Vector3 {
+      if (d <= 0) return vs[0].clone();
+      if (d >= lens[lens.length - 1]) return vs[vs.length - 1].clone();
+      for (let i = 1; i < lens.length; i++) {
+        if (d <= lens[i]) {
+          const t = (d - lens[i - 1]) / (lens[i] - lens[i - 1]);
+          return new THREE.Vector3().lerpVectors(vs[i - 1], vs[i], t);
+        }
+      }
+      return vs[vs.length - 1].clone();
+    }
+    // Map a distance along the center path to the corresponding distance along an offset path.
+    // Both paths have the same number of vertices; the mapping is linear per segment.
+    function mapCenterToOffset(d: number, cLens: number[], oLens: number[]): number {
+      if (d <= 0) return 0;
+      const cTotal = cLens[cLens.length - 1];
+      if (d >= cTotal) return oLens[oLens.length - 1];
+      for (let i = 1; i < cLens.length; i++) {
+        if (d <= cLens[i]) {
+          const cSegLen = cLens[i] - cLens[i - 1];
+          const t = cSegLen > 0 ? (d - cLens[i - 1]) / cSegLen : 0;
+          return oLens[i - 1] + t * (oLens[i] - oLens[i - 1]);
+        }
+      }
+      return oLens[oLens.length - 1];
+    }
+    const cLens = pathLengths(centerVs);
+    const rLens = pathLengths(rightVs);
+    const lLens = pathLengths(leftVs);
+    // Build opening data with mapped distances
+    type OpFace = {start: number, end: number, baseH: number, topH: number};
+    const rOps: OpFace[] = [];
+    const lOps: OpFace[] = [];
+    for (let i = 0; i < opStarts.length; i++) {
+      const cStart = opStarts[i];
+      const cEnd = cStart + opWidths[i];
+      const baseH = opBaseHeights[i];
+      const topH = baseH + opHeights[i];
+      rOps.push({ start: mapCenterToOffset(cStart, cLens, rLens),
+                   end:   mapCenterToOffset(cEnd, cLens, rLens), baseH, topH });
+      lOps.push({ start: mapCenterToOffset(cStart, cLens, lLens),
+                   end:   mapCenterToOffset(cEnd, cLens, lLens), baseH, topH });
+    }
+    // Build jackets for each opening
+    for (let i = 0; i < opStarts.length; i++) {
+      const rStart = pointAtLength(rightVs, rLens, rOps[i].start);
+      const rEnd   = pointAtLength(rightVs, rLens, rOps[i].end);
+      const lStart = pointAtLength(leftVs, lLens, lOps[i].start);
+      const lEnd   = pointAtLength(leftVs, lLens, lOps[i].end);
+      const bh = rOps[i].baseH, th = rOps[i].topH;
+      // Top lintel
+      group.add(quadMesh([
+        new THREE.Vector3(rStart.x, rStart.y, rStart.z + th),
+        new THREE.Vector3(rEnd.x, rEnd.y, rEnd.z + th),
+        new THREE.Vector3(lEnd.x, lEnd.y, lEnd.z + th),
+        new THREE.Vector3(lStart.x, lStart.y, lStart.z + th)], sideMat));
+      // Left jamb
+      group.add(quadMesh([
+        new THREE.Vector3(rStart.x, rStart.y, rStart.z + bh),
+        new THREE.Vector3(rStart.x, rStart.y, rStart.z + th),
+        new THREE.Vector3(lStart.x, lStart.y, lStart.z + th),
+        new THREE.Vector3(lStart.x, lStart.y, lStart.z + bh)], sideMat));
+      // Right jamb
+      group.add(quadMesh([
+        new THREE.Vector3(lEnd.x, lEnd.y, lEnd.z + bh),
+        new THREE.Vector3(lEnd.x, lEnd.y, lEnd.z + th),
+        new THREE.Vector3(rEnd.x, rEnd.y, rEnd.z + th),
+        new THREE.Vector3(rEnd.x, rEnd.y, rEnd.z + bh)], sideMat));
+      // Sill (only for elevated openings)
+      if (bh > 0.001) {
+        group.add(quadMesh([
+          new THREE.Vector3(lStart.x, lStart.y, lStart.z + bh),
+          new THREE.Vector3(lEnd.x, lEnd.y, lEnd.z + bh),
+          new THREE.Vector3(rEnd.x, rEnd.y, rEnd.z + bh),
+          new THREE.Vector3(rStart.x, rStart.y, rStart.z + bh)], sideMat));
+      }
+    }
+    // Build face with holes using 2D projection + ShapeUtils.triangulateShape
+    function buildFaceWithHoles(
+      vs: THREE.Vector3[], lens: number[], ops: OpFace[],
+      mat: THREE.Material, flipNormal: boolean
+    ) {
+      const totalLen = lens[lens.length - 1];
+      // Outer boundary: always CCW for triangulateShape
+      const outer2d = [
+        new THREE.Vector2(0, 0),
+        new THREE.Vector2(totalLen, 0),
+        new THREE.Vector2(totalLen, height),
+        new THREE.Vector2(0, height)
+      ];
+      // Holes: always CW (opposite of outer) for triangulateShape
+      const holes2d: THREE.Vector2[][] = [];
+      for (const op of ops) {
+        holes2d.push([
+          new THREE.Vector2(op.start, op.baseH),
+          new THREE.Vector2(op.start, op.topH),
+          new THREE.Vector2(op.end, op.topH),
+          new THREE.Vector2(op.end, op.baseH)
+        ]);
+      }
+      const faces = THREE.ShapeUtils.triangulateShape(outer2d, holes2d);
+      const all2d = [...outer2d];
+      holes2d.forEach(h => all2d.push(...h));
+      const verts = new Float32Array(all2d.length * 3);
+      let k = 0;
+      for (const p2 of all2d) {
+        const pt3 = pointAtLength(vs, lens, p2.x);
+        pt3.z += p2.y;
+        verts[k++] = pt3.x; verts[k++] = pt3.y; verts[k++] = pt3.z;
+      }
+      // Flatten triangle indices; flip winding for back-face normals
+      const idxs: number[] = [];
+      for (const [a, b, c] of faces) {
+        if (flipNormal) { idxs.push(a, c, b); }
+        else            { idxs.push(a, b, c); }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+      geo.setIndex(idxs);
+      group.add(new THREE.Mesh(geo, mat));
+    }
+    // Right face with holes (opening positions mapped to right-path distances)
+    buildFaceWithHoles(rightVs, rLens, rOps, rightMat, false);
+    // Left face with holes (opening positions mapped to left-path distances)
+    buildFaceWithHoles(leftVs, lLens, lOps, leftMat, true);
+    return finishGroup(group);
+  });
+
+typedFunction("railing",
+  [[Point3d], Float32, Float32, Float32, Float32, MatId], Id,
+  (pathVs: THREE.Vector3[], baseHeight: number, height: number,
+   postSpacing: number, postRadius: number, mat: THREE.Material) => {
+    const group = new THREE.Group();
+    // Compute post locations at equal spacing along the path
+    const lens = [0];
+    for (let i = 1; i < pathVs.length; i++)
+      lens.push(lens[i - 1] + pathVs[i].distanceTo(pathVs[i - 1]));
+    const totalLen = lens[lens.length - 1];
+    const nPosts = Math.max(2, Math.ceil(totalLen / postSpacing) + 1);
+    // Rail: extruded rectangle along elevated path
+    const railSize = 0.05;
+    const railVerts: number[] = [];
+    const railIdxs: number[] = [];
+    // Build rail as a quad strip tube along the path
+    function pointAtLen(d: number): THREE.Vector3 {
+      if (d <= 0) return pathVs[0].clone();
+      if (d >= totalLen) return pathVs[pathVs.length - 1].clone();
+      for (let i = 1; i < lens.length; i++) {
+        if (d <= lens[i]) {
+          const t = (d - lens[i - 1]) / (lens[i] - lens[i - 1]);
+          return new THREE.Vector3().lerpVectors(pathVs[i - 1], pathVs[i], t);
+        }
+      }
+      return pathVs[pathVs.length - 1].clone();
+    }
+    function dirAtLen(d: number): THREE.Vector3 {
+      const eps = 0.001;
+      const a = pointAtLen(Math.max(0, d - eps));
+      const b = pointAtLen(Math.min(totalLen, d + eps));
+      return b.clone().sub(a).normalize();
+    }
+    // Rail cross-section: 4 corners relative to center
+    const up = new THREE.Vector3(0, 0, 1);
+    const nSamples = pathVs.length;
+    const sampleLens = lens;
+    for (let i = 0; i < nSamples; i++) {
+      const p = pathVs[i].clone();
+      p.z += baseHeight + height;
+      const dir = dirAtLen(sampleLens[i]);
+      const right = new THREE.Vector3().crossVectors(dir, up).normalize().multiplyScalar(railSize / 2);
+      const upV = new THREE.Vector3(0, 0, railSize / 2);
+      // 4 corners: top-right, top-left, bottom-left, bottom-right
+      const tr = p.clone().add(right).add(upV);
+      const tl = p.clone().sub(right).add(upV);
+      const bl = p.clone().sub(right).sub(upV);
+      const br = p.clone().add(right).sub(upV);
+      railVerts.push(tr.x, tr.y, tr.z, tl.x, tl.y, tl.z, bl.x, bl.y, bl.z, br.x, br.y, br.z);
+      if (i > 0) {
+        const prev = (i - 1) * 4;
+        const curr = i * 4;
+        // Connect 4 faces between previous and current cross-sections
+        for (let f = 0; f < 4; f++) {
+          const f2 = (f + 1) % 4;
+          railIdxs.push(prev + f, curr + f, curr + f2, prev + f, curr + f2, prev + f2);
+        }
+      }
+    }
+    if (railVerts.length > 0) {
+      const railGeo = new THREE.BufferGeometry();
+      railGeo.setAttribute('position', new THREE.Float32BufferAttribute(railVerts, 3));
+      railGeo.setIndex(railIdxs);
+      railGeo.computeVertexNormals();
+      const railMesh = new THREE.Mesh(railGeo, mat);
+      railMesh.castShadow = true; railMesh.receiveShadow = true;
+      group.add(railMesh);
+    }
+    // Posts: cylinders at equal spacing
+    for (let i = 0; i < nPosts; i++) {
+      const d = totalLen * i / (nPosts - 1);
+      const p = pointAtLen(d);
+      p.z += baseHeight;
+      const cylGeo = new THREE.CylinderGeometry(postRadius, postRadius, height, 8);
+      // CylinderGeometry is Y-up, we need Z-up
+      cylGeo.rotateX(Math.PI / 2);
+      cylGeo.translate(p.x, p.y, p.z + height / 2);
+      const cylMesh = new THREE.Mesh(cylGeo, mat);
+      cylMesh.castShadow = true; cylMesh.receiveShadow = true;
+      group.add(cylMesh);
+    }
+    return finishGroup(group);
+  });
+
+typedFunction("surfaceGrid", [[[Point3d]], Bool, Bool, Bool, Bool, MatId], Id, (points: THREE.Vector3[][], uClosed: boolean, vClosed: boolean, uSmooth: boolean, vSmooth: boolean, mat: THREE.Material) => {
   return new THREE.Mesh((uSmooth && vSmooth) ?
                           createSmoothSurface(points, uClosed, vClosed) :
                           uSmooth ?
@@ -1813,6 +2237,114 @@ typedFunction("extrudedSurface", [Matrix4x4, [Point2d], Bool, [[Point2d]], [Bool
         bevelEnabled: false
       };
     return withTransform(m, new THREE.Mesh(new THREE.ExtrudeGeometry(profile, extrudeSettings), mat));
+  });
+
+typedFunction("stair",
+  [Point3d, Vector3d, Float32, Int32, Float32, Float32, Float32, Bool, MatId, MatId], Id,
+  (basePoint: THREE.Vector3, direction: THREE.Vector3, bottomHeight: number,
+   nSteps: number, riserHeight: number, treadDepth: number, width: number,
+   hasRisers: boolean, treadMat: THREE.Material, riserMat: THREE.Material) => {
+    const group = new THREE.Group();
+    const dir = direction.clone().normalize();
+    const up = new THREE.Vector3(0, 0, 1);
+    const perp = new THREE.Vector3().crossVectors(up, dir);
+    const treadVerts: number[] = [];
+    const treadIdxs: number[] = [];
+    const riserVerts: number[] = [];
+    const riserIdxs: number[] = [];
+    let treadBase = 0;
+    let riserBase = 0;
+    for (let i = 0; i < nSteps; i++) {
+      const stepZ = bottomHeight + (i + 1) * riserHeight;
+      const stepStart = basePoint.clone().addScaledVector(dir, i * treadDepth);
+      const stepEnd = stepStart.clone().addScaledVector(dir, treadDepth);
+      // Tread: 4 vertices
+      const t0 = stepStart.clone().addScaledVector(perp, width / 2).setZ(stepZ);
+      const t1 = stepStart.clone().addScaledVector(perp, -width / 2).setZ(stepZ);
+      const t2 = stepEnd.clone().addScaledVector(perp, -width / 2).setZ(stepZ);
+      const t3 = stepEnd.clone().addScaledVector(perp, width / 2).setZ(stepZ);
+      treadVerts.push(t0.x, t0.y, t0.z, t1.x, t1.y, t1.z, t2.x, t2.y, t2.z, t3.x, t3.y, t3.z);
+      treadIdxs.push(treadBase, treadBase + 1, treadBase + 2, treadBase, treadBase + 2, treadBase + 3);
+      treadBase += 4;
+      if (hasRisers) {
+        const rZ = bottomHeight + i * riserHeight;
+        const r0 = stepStart.clone().addScaledVector(perp, width / 2).setZ(rZ);
+        const r1 = stepStart.clone().addScaledVector(perp, -width / 2).setZ(rZ);
+        const r2 = stepStart.clone().addScaledVector(perp, -width / 2).setZ(stepZ);
+        const r3 = stepStart.clone().addScaledVector(perp, width / 2).setZ(stepZ);
+        riserVerts.push(r0.x, r0.y, r0.z, r1.x, r1.y, r1.z, r2.x, r2.y, r2.z, r3.x, r3.y, r3.z);
+        riserIdxs.push(riserBase, riserBase + 1, riserBase + 2, riserBase, riserBase + 2, riserBase + 3);
+        riserBase += 4;
+      }
+    }
+    const treadGeo = new THREE.BufferGeometry();
+    treadGeo.setAttribute('position', new THREE.Float32BufferAttribute(treadVerts, 3));
+    treadGeo.setIndex(treadIdxs);
+    treadGeo.computeVertexNormals();
+    const treadMesh = new THREE.Mesh(treadGeo, treadMat);
+    treadMesh.castShadow = true; treadMesh.receiveShadow = true;
+    group.add(treadMesh);
+    if (hasRisers && riserVerts.length > 0) {
+      const riserGeo = new THREE.BufferGeometry();
+      riserGeo.setAttribute('position', new THREE.Float32BufferAttribute(riserVerts, 3));
+      riserGeo.setIndex(riserIdxs);
+      riserGeo.computeVertexNormals();
+      const riserMesh = new THREE.Mesh(riserGeo, riserMat);
+      riserMesh.castShadow = true; riserMesh.receiveShadow = true;
+      group.add(riserMesh);
+    }
+    return group;
+  });
+
+typedFunction("spiralStair",
+  [Point3d, Float32, Float32, Float32, Bool, Float32, Int32, Float32, Float32, MatId], Id,
+  (center: THREE.Vector3, radius: number, startAngle: number, includedAngle: number,
+   clockwise: boolean, bottomHeight: number, nSteps: number, riserHeight: number,
+   width: number, treadMat: THREE.Material) => {
+    const group = new THREE.Group();
+    const sign = clockwise ? -1 : 1;
+    const angleStep = sign * includedAngle / nSteps;
+    const rInner = radius - width / 2;
+    const rOuter = radius + width / 2;
+    const verts: number[] = [];
+    const idxs: number[] = [];
+    let base = 0;
+    for (let i = 0; i < nSteps; i++) {
+      const a0 = startAngle + i * angleStep;
+      const a1 = startAngle + (i + 1) * angleStep;
+      const z = bottomHeight + (i + 1) * riserHeight;
+      const p0 = new THREE.Vector3(center.x + rInner * Math.cos(a0), center.y + rInner * Math.sin(a0), z);
+      const p1 = new THREE.Vector3(center.x + rOuter * Math.cos(a0), center.y + rOuter * Math.sin(a0), z);
+      const p2 = new THREE.Vector3(center.x + rOuter * Math.cos(a1), center.y + rOuter * Math.sin(a1), z);
+      const p3 = new THREE.Vector3(center.x + rInner * Math.cos(a1), center.y + rInner * Math.sin(a1), z);
+      verts.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, p3.x, p3.y, p3.z);
+      idxs.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      base += 4;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geo.setIndex(idxs);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, treadMat);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    group.add(mesh);
+    return group;
+  });
+
+typedFunction("groupedMesh", [[MeshPart]], Id,
+  (parts: {vs: Float32Array, idxs: Int32Array, mat: THREE.Material}[]) => {
+    const group = new THREE.Group();
+    for (const {vs, idxs, mat} of parts) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(vs, 3));
+      geo.setIndex(Array.from(idxs));
+      geo.computeVertexNormals();
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+    }
+    return group;
   });
 
 typedFunction("meshObjFmt", [Str, Str, Matrix4x4], Id, (path: string, name: string, m: THREE.Matrix4) => {
@@ -2011,6 +2543,29 @@ typedAsyncFunction("showKMLCoordinatesFromFile", [], None, (cont: Function) => {
         } */
   })})});
 
+function enterSelectionMode(mode: 'shape' | 'shapes' | 'position', cont: Function) {
+  if (selectionCallback) cancelSelection();
+  deselectAll();
+  pendingSelections = [];
+  selectionMode = mode;
+  selectionCallback = (result: any) => cont(result);
+}
+
+typedAsyncFunction("selectShape", [Str], IdArray, (prompt: string, cont: Function) => {
+  console.log(prompt);
+  enterSelectionMode('shape', cont);
+});
+
+typedAsyncFunction("selectShapes", [Str], IdArray, (prompt: string, cont: Function) => {
+  console.log(prompt);
+  enterSelectionMode('shapes', cont);
+});
+
+typedAsyncFunction("selectPosition", [Str], PointArray, (prompt: string, cont: Function) => {
+  console.log(prompt);
+  enterSelectionMode('position', cont);
+});
+
 /*
 
     private handleFileSelect(event: Event): void {
@@ -2078,6 +2633,10 @@ function establishConnection(handler: (evt: MessageEvent) => void) {
   connection.onmessage = handler;
   connection.onclose = function (evt) {
     console.log("onclose:", evt);
+    selectionMode = 'none';
+    selectionCallback = null;
+    pendingSelections = [];
+    deselectAll();
   }
   return connection;
 }
@@ -2200,16 +2759,53 @@ function onMouseClick(event: MouseEvent) {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
-  // We can't use the meshes array because as we delete stuff, the array slots become undefined
-  const intersects = raycaster.intersectObjects(scene.children);
+  const intersects = raycaster.intersectObjects(scene.children, true);
+  if (selectionMode === 'position') {
+    if (intersects.length > 0 && intersects[0].object != grid) {
+      const point = intersects[0].point;
+      // Convert from Three.js Y-up to Khepri Z-up
+      const cb = selectionCallback;
+      selectionCallback = null;
+      selectionMode = 'none';
+      if (cb) cb([new THREE.Vector3(point.x, -point.z, point.y)]);
+    }
+    return;
+  }
+  if (selectionMode === 'shape') {
+    if (intersects.length > 0) {
+      const khepriObj = findKhepriObject(intersects[0].object);
+      if (khepriObj && khepriObj.userData.Object3DId !== undefined) {
+        deselectAll();
+        select(khepriObj as THREE.Mesh);
+        const cb = selectionCallback;
+        selectionCallback = null;
+        selectionMode = 'none';
+        if (cb) cb([khepriObj.userData.Object3DId]);
+      }
+    }
+    return;
+  }
+  if (selectionMode === 'shapes') {
+    if (intersects.length > 0) {
+      const khepriObj = findKhepriObject(intersects[0].object);
+      if (khepriObj && khepriObj.userData.Object3DId !== undefined) {
+        const id = khepriObj.userData.Object3DId;
+        if (!pendingSelections.includes(id)) {
+          pendingSelections.push(id);
+          select(khepriObj as THREE.Mesh);
+        }
+      }
+    }
+    return;
+  }
+  // Default browsing mode
   if (intersects.length > 0) {
-    //console.log(intersects)
-    const obj = intersects[0].object;
+    const khepriObj = findKhepriObject(intersects[0].object);
     if (!event.shiftKey) {
       deselectAll();
     }
-    if (obj != grid) {
-      select(obj as THREE.Mesh);
+    if (khepriObj) {
+      select(khepriObj as THREE.Mesh);
     }
   } else {
     deselectAll();

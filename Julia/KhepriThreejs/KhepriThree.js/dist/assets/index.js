@@ -37465,6 +37465,7 @@ let update = true;
 const namedLayers = /* @__PURE__ */ new Map();
 function createLayer(name) {
   const layer = new Group();
+  layer.name = name;
   layer.rotation.x = -Math.PI * 0.5;
   scene.add(layer);
   namedLayers.set(name, layer);
@@ -37482,12 +37483,68 @@ const LayerId = new PrimitiveType("LayerId", ofSize(4), (io) => getLayer(io.read
 typedFunction("createLayer", [Str], LayerId, (name) => {
   return createLayer(name);
 });
+typedFunction("getLayerName", [LayerId], Str, (layer) => {
+  return layer.name;
+});
 let currentLayer = defaultLayer;
 typedFunction("setCurrentLayer", [LayerId], None, (layer) => {
   currentLayer = layer;
 });
 typedFunction("getCurrentLayer", [], Int32, () => {
   return layers.indexOf(currentLayer);
+});
+typedFunction("setLayerVisible", [LayerId, Bool], None, (layer, visible) => {
+  layer.visible = visible;
+});
+const layerOpacity = /* @__PURE__ */ new Map();
+function getLayerOpacity(layer) {
+  return layerOpacity.get(layer) ?? 1;
+}
+function makeGhostMaterial(mat, opacity) {
+  const ghost = mat.clone();
+  ghost.transparent = true;
+  ghost.opacity = opacity;
+  ghost.depthWrite = false;
+  return ghost;
+}
+function applyGhostToObject(obj, opacity) {
+  if (obj instanceof Sprite) return;
+  if (obj instanceof Mesh || obj instanceof Line || obj instanceof Points) {
+    if (obj.userData.KhepriOriginalMaterial) {
+      const current = obj.material;
+      if (Array.isArray(current)) current.forEach((m2) => m2.dispose());
+      else current.dispose();
+      const original = obj.userData.KhepriOriginalMaterial;
+      obj.material = Array.isArray(original) ? original.map((m2) => makeGhostMaterial(m2, opacity)) : makeGhostMaterial(original, opacity);
+    } else {
+      obj.userData.KhepriOriginalMaterial = obj.material;
+      const mat = obj.material;
+      obj.material = Array.isArray(mat) ? mat.map((m2) => makeGhostMaterial(m2, opacity)) : makeGhostMaterial(mat, opacity);
+    }
+  }
+  obj.children.forEach((child) => applyGhostToObject(child, opacity));
+}
+function removeGhostFromObject(obj) {
+  if (obj instanceof Sprite) return;
+  if (obj instanceof Mesh || obj instanceof Line || obj instanceof Points) {
+    const original = obj.userData.KhepriOriginalMaterial;
+    if (original) {
+      const current = obj.material;
+      if (Array.isArray(current)) current.forEach((m2) => m2.dispose());
+      else current.dispose();
+      obj.material = original;
+      delete obj.userData.KhepriOriginalMaterial;
+    }
+  }
+  obj.children.forEach((child) => removeGhostFromObject(child));
+}
+typedFunction("setLayerOpacity", [LayerId, Float32], None, (layer, opacity) => {
+  layerOpacity.set(layer, opacity);
+  if (opacity <= 0 || opacity >= 1) {
+    layer.children.forEach((child) => removeGhostFromObject(child));
+  } else {
+    layer.children.forEach((child) => applyGhostToObject(child, opacity));
+  }
 });
 const objects = /* @__PURE__ */ new Map();
 let nextObject3DId = 0;
@@ -37498,6 +37555,10 @@ function addObject3D(obj) {
     obj.geometry.computeVertexNormals();
   }
   currentLayer.add(obj);
+  const opacity = getLayerOpacity(currentLayer);
+  if (opacity > 0 && opacity < 1) {
+    applyGhostToObject(obj, opacity);
+  }
   const object3DId = nextObject3DId++;
   objects.set(object3DId, obj);
   obj.userData.Object3DId = object3DId;
@@ -37513,6 +37574,12 @@ function delObject3D(idx) {
     obj.removeFromParent();
     if (obj instanceof Mesh) {
       obj.geometry.dispose();
+    } else if (obj instanceof Sprite) {
+      if (obj.material instanceof SpriteMaterial && obj.material.map) {
+        obj.material.map.dispose();
+      }
+      obj.material.dispose();
+      obj.geometry.dispose();
     }
     objects.delete(idx);
     delete obj.userData.Object3DId;
@@ -37524,6 +37591,7 @@ function delObject3D(idx) {
 function delAllObject3Ds() {
   const count = objects.size;
   objects.forEach((obj, _id2) => {
+    removeGhostFromObject(obj);
     obj.removeFromParent();
     if (obj instanceof Mesh) {
       obj.geometry.dispose();
@@ -37532,6 +37600,7 @@ function delAllObject3Ds() {
   });
   objects.clear();
   nextObject3DId = 0;
+  layerOpacity.clear();
   return count;
 }
 typedFunction("delete", [Int32], None, (i2) => delObject3D(i2));
@@ -37540,6 +37609,28 @@ typedFunction("deleteAll", [], None, () => {
   delAllSprites();
 });
 const Id = new PrimitiveType("Id", ofSize(4), (io) => getObject3D(io.readInt32()), (io, v2) => io.writeInt32(addObject3D(v2)));
+const IdArray = new PrimitiveType(
+  "IdArray",
+  (v2) => 4 + v2.length * 4,
+  (io) => Array.from({ length: io.readInt32() }, () => io.readInt32()),
+  (io, v2) => {
+    io.writeInt32(v2.length);
+    v2.forEach((id) => io.writeInt32(id));
+  }
+);
+const PointArray = new PrimitiveType(
+  "PointArray",
+  (v2) => 4 + v2.length * 3 * 4,
+  (io) => Array.from({ length: io.readInt32() }, () => new Vector3(io.readFloat32(), io.readFloat32(), io.readFloat32())),
+  (io, v2) => {
+    io.writeInt32(v2.length);
+    v2.forEach((p2) => {
+      io.writeFloat32(p2.x);
+      io.writeFloat32(p2.y);
+      io.writeFloat32(p2.z);
+    });
+  }
+);
 const materials = [];
 function addMaterial(obj) {
   return materials.push(obj) - 1;
@@ -37548,6 +37639,11 @@ function getMaterial(idx) {
   return idx == -1 ? defaultMaterial : materials[idx];
 }
 const MatId = new PrimitiveType("MatId", ofSize(4), (io) => getMaterial(io.readInt32()), (io, v2) => io.writeInt32(addMaterial(v2)));
+const MeshPart = new CompositeType(
+  "MeshPart",
+  [ArrayFloat32, ArrayInt32, MatId],
+  (args) => ({ vs: args[0], idxs: args[1], mat: args[2] })
+);
 const sprites = [];
 function addSprite(pos, _title, content) {
   const canvas = document.createElement("canvas");
@@ -37555,10 +37651,10 @@ function addSprite(pos, _title, content) {
   canvas.height = 512;
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
-  const fontSize = 48;
+  const fontSize = 36;
   const font = "Bold " + fontSize + "px Arial";
   const lineColor = "rgba(0, 0, 0, 1)";
-  const lineWidth = 6;
+  const lineWidth = 4;
   const leaderRun = 50;
   const leaderRise = 50;
   const pivotX = 40;
@@ -37609,29 +37705,8 @@ function addSprite(pos, _title, content) {
   currentLayer.add(sprite);
   return sprites.push(sprite) - 1;
 }
-function disposeSprite(sprite) {
-  sprite.removeFromParent();
-  if (sprite.material instanceof SpriteMaterial && sprite.material.map) {
-    sprite.material.map.dispose();
-  }
-  sprite.material.dispose();
-  sprite.geometry.dispose();
-}
-function delSprite(idx) {
-  const sprite = sprites[idx];
-  if (sprite) {
-    disposeSprite(sprite);
-    sprites[idx] = null;
-  }
-  return idx;
-}
 function delAllSprites() {
-  const length = sprites.length;
-  sprites.forEach((s2) => {
-    if (s2) disposeSprite(s2);
-  });
   sprites.length = 0;
-  return length;
 }
 let selected = [];
 function select(obj) {
@@ -37648,6 +37723,57 @@ function deselectAll() {
   selected.forEach((e2) => e2.userData.KhepriSelected.visible = false);
   selected = [];
 }
+let selectionCallback = null;
+let selectionMode = "none";
+let pendingSelections = [];
+function findKhepriObject(obj) {
+  let current = obj;
+  while (current) {
+    if (current.userData.Object3DId !== void 0) return current;
+    current = current.parent;
+  }
+  return null;
+}
+function finishSelection() {
+  if (selectionCallback) {
+    const cb = selectionCallback;
+    const ids = [...pendingSelections];
+    selectionCallback = null;
+    selectionMode = "none";
+    pendingSelections = [];
+    cb(ids);
+  }
+}
+function cancelSelection() {
+  if (selectionCallback) {
+    const cb = selectionCallback;
+    selectionCallback = null;
+    selectionMode = "none";
+    pendingSelections = [];
+    deselectAll();
+    cb([]);
+  }
+}
+window.addEventListener("keydown", (event) => {
+  if (selectionMode === "shapes") {
+    if (event.key === "Enter") {
+      finishSelection();
+    } else if (event.key === "Escape") {
+      cancelSelection();
+    }
+  } else if (selectionMode === "shape" || selectionMode === "position") {
+    if (event.key === "Escape") {
+      cancelSelection();
+    }
+  } else if (selectionMode === "none" && (event.key === "Delete" || event.key === "Backspace") && selected.length > 0) {
+    selected.forEach((obj) => {
+      const khepriObj = findKhepriObject(obj);
+      const id = khepriObj == null ? void 0 : khepriObj.userData.Object3DId;
+      if (id !== void 0) delObject3D(id);
+    });
+    selected = [];
+  }
+});
 const guis = [];
 function addGUI(obj) {
   return guis.push(obj) - 1;
@@ -37749,8 +37875,11 @@ typedFunction(
     currentLayer.add(grid);
   }
 );
-typedFunction("addAnnotation", [Point3d, Str], Int32, (p2, txt) => addSprite(p2, "", txt));
-typedFunction("deleteAnnotation", [Int32], None, (i2) => delSprite(i2));
+typedFunction("addAnnotation", [Point3d, Str], Id, (p2, txt) => {
+  const idx = addSprite(p2, "", txt);
+  return sprites[idx];
+});
+typedFunction("deleteAnnotation", [Int32], None, (i2) => delObject3D(i2));
 typedFunction("points", [[Point3d], MatId], Id, (vs, mat) => {
   return new Points(new BufferGeometry().setFromPoints(vs), mat);
 });
@@ -37905,6 +38034,286 @@ function quadStripFlatGeometry(ps, qs) {
   geometry.setIndex(indices);
   return geometry;
 }
+function quadMesh(vs, mat) {
+  const geo = new BufferGeometry();
+  const arr = new Float32Array(vs.flatMap((v2) => [v2.x, v2.y, v2.z]));
+  geo.setAttribute("position", new Float32BufferAttribute(arr, 3));
+  geo.setIndex([0, 1, 2, 0, 2, 3]);
+  return new Mesh(geo, mat);
+}
+function finishGroup(group) {
+  group.children.forEach((c3) => {
+    if (c3 instanceof Mesh) {
+      c3.geometry.computeVertexNormals();
+      c3.castShadow = true;
+      c3.receiveShadow = true;
+    }
+  });
+  return group;
+}
+typedFunction(
+  "wall",
+  [[Point3d], [Point3d], Float32, Bool, MatId, MatId, MatId],
+  Id,
+  (rightVs, leftVs, height, closed, rightMat, leftMat, sideMat) => {
+    const group = new Group();
+    const addZ = (v2) => new Vector3(v2.x, v2.y, v2.z + height);
+    const rightTop = rightVs.map(addZ);
+    const leftTop = leftVs.map(addZ);
+    const wrap = closed ? (vs) => [...vs, vs[0]] : (vs) => vs;
+    group.add(new Mesh(quadStripFlatGeometry(wrap(rightVs), wrap(rightTop)), rightMat));
+    group.add(new Mesh(quadStripFlatGeometry(wrap(leftTop), wrap(leftVs)), leftMat));
+    group.add(new Mesh(quadStripFlatGeometry(wrap(rightTop), wrap(leftTop)), sideMat));
+    group.add(new Mesh(quadStripFlatGeometry(wrap(leftVs), wrap(rightVs)), sideMat));
+    if (!closed) {
+      const n2 = rightVs.length - 1;
+      group.add(quadMesh([rightVs[0], rightTop[0], leftTop[0], leftVs[0]], sideMat));
+      group.add(quadMesh([leftVs[n2], leftTop[n2], rightTop[n2], rightVs[n2]], sideMat));
+    }
+    return finishGroup(group);
+  }
+);
+typedFunction(
+  "wallWithOpenings",
+  [
+    [Point3d],
+    [Point3d],
+    [Point3d],
+    Float32,
+    Bool,
+    [Float32],
+    [Float32],
+    [Float32],
+    [Float32],
+    MatId,
+    MatId,
+    MatId
+  ],
+  Id,
+  (rightVs, leftVs, centerVs, height, closed, opStarts, opBaseHeights, opWidths, opHeights, rightMat, leftMat, sideMat) => {
+    const group = new Group();
+    const addZ = (v2) => new Vector3(v2.x, v2.y, v2.z + height);
+    const rightTop = rightVs.map(addZ);
+    const leftTop = leftVs.map(addZ);
+    const wrap = closed ? (vs) => [...vs, vs[0]] : (vs) => vs;
+    group.add(new Mesh(quadStripFlatGeometry(wrap(rightTop), wrap(leftTop)), sideMat));
+    if (!closed) {
+      const n2 = rightVs.length - 1;
+      group.add(quadMesh([rightVs[0], rightTop[0], leftTop[0], leftVs[0]], sideMat));
+      group.add(quadMesh([leftVs[n2], leftTop[n2], rightTop[n2], rightVs[n2]], sideMat));
+    }
+    function pathLengths(vs) {
+      const lens = [0];
+      for (let i2 = 1; i2 < vs.length; i2++)
+        lens.push(lens[i2 - 1] + vs[i2].distanceTo(vs[i2 - 1]));
+      return lens;
+    }
+    function pointAtLength(vs, lens, d3) {
+      if (d3 <= 0) return vs[0].clone();
+      if (d3 >= lens[lens.length - 1]) return vs[vs.length - 1].clone();
+      for (let i2 = 1; i2 < lens.length; i2++) {
+        if (d3 <= lens[i2]) {
+          const t3 = (d3 - lens[i2 - 1]) / (lens[i2] - lens[i2 - 1]);
+          return new Vector3().lerpVectors(vs[i2 - 1], vs[i2], t3);
+        }
+      }
+      return vs[vs.length - 1].clone();
+    }
+    function mapCenterToOffset(d3, cLens2, oLens) {
+      if (d3 <= 0) return 0;
+      const cTotal = cLens2[cLens2.length - 1];
+      if (d3 >= cTotal) return oLens[oLens.length - 1];
+      for (let i2 = 1; i2 < cLens2.length; i2++) {
+        if (d3 <= cLens2[i2]) {
+          const cSegLen = cLens2[i2] - cLens2[i2 - 1];
+          const t3 = cSegLen > 0 ? (d3 - cLens2[i2 - 1]) / cSegLen : 0;
+          return oLens[i2 - 1] + t3 * (oLens[i2] - oLens[i2 - 1]);
+        }
+      }
+      return oLens[oLens.length - 1];
+    }
+    const cLens = pathLengths(centerVs);
+    const rLens = pathLengths(rightVs);
+    const lLens = pathLengths(leftVs);
+    const rOps = [];
+    const lOps = [];
+    for (let i2 = 0; i2 < opStarts.length; i2++) {
+      const cStart = opStarts[i2];
+      const cEnd = cStart + opWidths[i2];
+      const baseH = opBaseHeights[i2];
+      const topH = baseH + opHeights[i2];
+      rOps.push({
+        start: mapCenterToOffset(cStart, cLens, rLens),
+        end: mapCenterToOffset(cEnd, cLens, rLens),
+        baseH,
+        topH
+      });
+      lOps.push({
+        start: mapCenterToOffset(cStart, cLens, lLens),
+        end: mapCenterToOffset(cEnd, cLens, lLens),
+        baseH,
+        topH
+      });
+    }
+    for (let i2 = 0; i2 < opStarts.length; i2++) {
+      const rStart = pointAtLength(rightVs, rLens, rOps[i2].start);
+      const rEnd = pointAtLength(rightVs, rLens, rOps[i2].end);
+      const lStart = pointAtLength(leftVs, lLens, lOps[i2].start);
+      const lEnd = pointAtLength(leftVs, lLens, lOps[i2].end);
+      const bh = rOps[i2].baseH, th = rOps[i2].topH;
+      group.add(quadMesh([
+        new Vector3(rStart.x, rStart.y, rStart.z + th),
+        new Vector3(rEnd.x, rEnd.y, rEnd.z + th),
+        new Vector3(lEnd.x, lEnd.y, lEnd.z + th),
+        new Vector3(lStart.x, lStart.y, lStart.z + th)
+      ], sideMat));
+      group.add(quadMesh([
+        new Vector3(rStart.x, rStart.y, rStart.z + bh),
+        new Vector3(rStart.x, rStart.y, rStart.z + th),
+        new Vector3(lStart.x, lStart.y, lStart.z + th),
+        new Vector3(lStart.x, lStart.y, lStart.z + bh)
+      ], sideMat));
+      group.add(quadMesh([
+        new Vector3(lEnd.x, lEnd.y, lEnd.z + bh),
+        new Vector3(lEnd.x, lEnd.y, lEnd.z + th),
+        new Vector3(rEnd.x, rEnd.y, rEnd.z + th),
+        new Vector3(rEnd.x, rEnd.y, rEnd.z + bh)
+      ], sideMat));
+      if (bh > 1e-3) {
+        group.add(quadMesh([
+          new Vector3(lStart.x, lStart.y, lStart.z + bh),
+          new Vector3(lEnd.x, lEnd.y, lEnd.z + bh),
+          new Vector3(rEnd.x, rEnd.y, rEnd.z + bh),
+          new Vector3(rStart.x, rStart.y, rStart.z + bh)
+        ], sideMat));
+      }
+    }
+    function buildFaceWithHoles(vs, lens, ops, mat, flipNormal) {
+      const totalLen = lens[lens.length - 1];
+      const outer2d = [
+        new Vector2(0, 0),
+        new Vector2(totalLen, 0),
+        new Vector2(totalLen, height),
+        new Vector2(0, height)
+      ];
+      const holes2d = [];
+      for (const op of ops) {
+        holes2d.push([
+          new Vector2(op.start, op.baseH),
+          new Vector2(op.start, op.topH),
+          new Vector2(op.end, op.topH),
+          new Vector2(op.end, op.baseH)
+        ]);
+      }
+      const faces = ShapeUtils.triangulateShape(outer2d, holes2d);
+      const all2d = [...outer2d];
+      holes2d.forEach((h3) => all2d.push(...h3));
+      const verts = new Float32Array(all2d.length * 3);
+      let k = 0;
+      for (const p2 of all2d) {
+        const pt3 = pointAtLength(vs, lens, p2.x);
+        pt3.z += p2.y;
+        verts[k++] = pt3.x;
+        verts[k++] = pt3.y;
+        verts[k++] = pt3.z;
+      }
+      const idxs = [];
+      for (const [a2, b2, c3] of faces) {
+        if (flipNormal) {
+          idxs.push(a2, c3, b2);
+        } else {
+          idxs.push(a2, b2, c3);
+        }
+      }
+      const geo = new BufferGeometry();
+      geo.setAttribute("position", new Float32BufferAttribute(verts, 3));
+      geo.setIndex(idxs);
+      group.add(new Mesh(geo, mat));
+    }
+    buildFaceWithHoles(rightVs, rLens, rOps, rightMat, false);
+    buildFaceWithHoles(leftVs, lLens, lOps, leftMat, true);
+    return finishGroup(group);
+  }
+);
+typedFunction(
+  "railing",
+  [[Point3d], Float32, Float32, Float32, Float32, MatId],
+  Id,
+  (pathVs, baseHeight, height, postSpacing, postRadius, mat) => {
+    const group = new Group();
+    const lens = [0];
+    for (let i2 = 1; i2 < pathVs.length; i2++)
+      lens.push(lens[i2 - 1] + pathVs[i2].distanceTo(pathVs[i2 - 1]));
+    const totalLen = lens[lens.length - 1];
+    const nPosts = Math.max(2, Math.ceil(totalLen / postSpacing) + 1);
+    const railSize = 0.05;
+    const railVerts = [];
+    const railIdxs = [];
+    function pointAtLen(d3) {
+      if (d3 <= 0) return pathVs[0].clone();
+      if (d3 >= totalLen) return pathVs[pathVs.length - 1].clone();
+      for (let i2 = 1; i2 < lens.length; i2++) {
+        if (d3 <= lens[i2]) {
+          const t3 = (d3 - lens[i2 - 1]) / (lens[i2] - lens[i2 - 1]);
+          return new Vector3().lerpVectors(pathVs[i2 - 1], pathVs[i2], t3);
+        }
+      }
+      return pathVs[pathVs.length - 1].clone();
+    }
+    function dirAtLen(d3) {
+      const eps = 1e-3;
+      const a2 = pointAtLen(Math.max(0, d3 - eps));
+      const b2 = pointAtLen(Math.min(totalLen, d3 + eps));
+      return b2.clone().sub(a2).normalize();
+    }
+    const up = new Vector3(0, 0, 1);
+    const nSamples = pathVs.length;
+    const sampleLens = lens;
+    for (let i2 = 0; i2 < nSamples; i2++) {
+      const p2 = pathVs[i2].clone();
+      p2.z += baseHeight + height;
+      const dir = dirAtLen(sampleLens[i2]);
+      const right = new Vector3().crossVectors(dir, up).normalize().multiplyScalar(railSize / 2);
+      const upV = new Vector3(0, 0, railSize / 2);
+      const tr = p2.clone().add(right).add(upV);
+      const tl = p2.clone().sub(right).add(upV);
+      const bl = p2.clone().sub(right).sub(upV);
+      const br = p2.clone().add(right).sub(upV);
+      railVerts.push(tr.x, tr.y, tr.z, tl.x, tl.y, tl.z, bl.x, bl.y, bl.z, br.x, br.y, br.z);
+      if (i2 > 0) {
+        const prev = (i2 - 1) * 4;
+        const curr = i2 * 4;
+        for (let f2 = 0; f2 < 4; f2++) {
+          const f22 = (f2 + 1) % 4;
+          railIdxs.push(prev + f2, curr + f2, curr + f22, prev + f2, curr + f22, prev + f22);
+        }
+      }
+    }
+    if (railVerts.length > 0) {
+      const railGeo = new BufferGeometry();
+      railGeo.setAttribute("position", new Float32BufferAttribute(railVerts, 3));
+      railGeo.setIndex(railIdxs);
+      railGeo.computeVertexNormals();
+      const railMesh = new Mesh(railGeo, mat);
+      railMesh.castShadow = true;
+      railMesh.receiveShadow = true;
+      group.add(railMesh);
+    }
+    for (let i2 = 0; i2 < nPosts; i2++) {
+      const d3 = totalLen * i2 / (nPosts - 1);
+      const p2 = pointAtLen(d3);
+      p2.z += baseHeight;
+      const cylGeo = new CylinderGeometry(postRadius, postRadius, height, 8);
+      cylGeo.rotateX(Math.PI / 2);
+      cylGeo.translate(p2.x, p2.y, p2.z + height / 2);
+      const cylMesh = new Mesh(cylGeo, mat);
+      cylMesh.castShadow = true;
+      cylMesh.receiveShadow = true;
+      group.add(cylMesh);
+    }
+    return finishGroup(group);
+  }
+);
 typedFunction("surfaceGrid", [[[Point3d]], Bool, Bool, Bool, Bool, MatId], Id, (points, uClosed, vClosed, uSmooth, vSmooth, mat) => {
   return new Mesh(
     uSmooth && vSmooth ? createSmoothSurface(points, uClosed, vClosed) : uSmooth ? createUSmoothVFlatSurface(points, uClosed, vClosed) : vSmooth ? createUFlatVSmoothSurface(points, uClosed, vClosed) : createFlatSurface(points, uClosed, vClosed),
@@ -38078,6 +38487,119 @@ typedFunction(
     return withTransform(m2, new Mesh(new ExtrudeGeometry(profile, extrudeSettings), mat));
   }
 );
+typedFunction(
+  "stair",
+  [Point3d, Vector3d, Float32, Int32, Float32, Float32, Float32, Bool, MatId, MatId],
+  Id,
+  (basePoint, direction, bottomHeight, nSteps, riserHeight, treadDepth, width, hasRisers, treadMat, riserMat) => {
+    const group = new Group();
+    const dir = direction.clone().normalize();
+    const up = new Vector3(0, 0, 1);
+    const perp = new Vector3().crossVectors(up, dir);
+    const treadVerts = [];
+    const treadIdxs = [];
+    const riserVerts = [];
+    const riserIdxs = [];
+    let treadBase = 0;
+    let riserBase = 0;
+    for (let i2 = 0; i2 < nSteps; i2++) {
+      const stepZ = bottomHeight + (i2 + 1) * riserHeight;
+      const stepStart = basePoint.clone().addScaledVector(dir, i2 * treadDepth);
+      const stepEnd = stepStart.clone().addScaledVector(dir, treadDepth);
+      const t0 = stepStart.clone().addScaledVector(perp, width / 2).setZ(stepZ);
+      const t1 = stepStart.clone().addScaledVector(perp, -width / 2).setZ(stepZ);
+      const t22 = stepEnd.clone().addScaledVector(perp, -width / 2).setZ(stepZ);
+      const t3 = stepEnd.clone().addScaledVector(perp, width / 2).setZ(stepZ);
+      treadVerts.push(t0.x, t0.y, t0.z, t1.x, t1.y, t1.z, t22.x, t22.y, t22.z, t3.x, t3.y, t3.z);
+      treadIdxs.push(treadBase, treadBase + 1, treadBase + 2, treadBase, treadBase + 2, treadBase + 3);
+      treadBase += 4;
+      if (hasRisers) {
+        const rZ = bottomHeight + i2 * riserHeight;
+        const r0 = stepStart.clone().addScaledVector(perp, width / 2).setZ(rZ);
+        const r1 = stepStart.clone().addScaledVector(perp, -width / 2).setZ(rZ);
+        const r2 = stepStart.clone().addScaledVector(perp, -width / 2).setZ(stepZ);
+        const r3 = stepStart.clone().addScaledVector(perp, width / 2).setZ(stepZ);
+        riserVerts.push(r0.x, r0.y, r0.z, r1.x, r1.y, r1.z, r2.x, r2.y, r2.z, r3.x, r3.y, r3.z);
+        riserIdxs.push(riserBase, riserBase + 1, riserBase + 2, riserBase, riserBase + 2, riserBase + 3);
+        riserBase += 4;
+      }
+    }
+    const treadGeo = new BufferGeometry();
+    treadGeo.setAttribute("position", new Float32BufferAttribute(treadVerts, 3));
+    treadGeo.setIndex(treadIdxs);
+    treadGeo.computeVertexNormals();
+    const treadMesh = new Mesh(treadGeo, treadMat);
+    treadMesh.castShadow = true;
+    treadMesh.receiveShadow = true;
+    group.add(treadMesh);
+    if (hasRisers && riserVerts.length > 0) {
+      const riserGeo = new BufferGeometry();
+      riserGeo.setAttribute("position", new Float32BufferAttribute(riserVerts, 3));
+      riserGeo.setIndex(riserIdxs);
+      riserGeo.computeVertexNormals();
+      const riserMesh = new Mesh(riserGeo, riserMat);
+      riserMesh.castShadow = true;
+      riserMesh.receiveShadow = true;
+      group.add(riserMesh);
+    }
+    return group;
+  }
+);
+typedFunction(
+  "spiralStair",
+  [Point3d, Float32, Float32, Float32, Bool, Float32, Int32, Float32, Float32, MatId],
+  Id,
+  (center, radius, startAngle, includedAngle, clockwise, bottomHeight, nSteps, riserHeight, width, treadMat) => {
+    const group = new Group();
+    const sign2 = clockwise ? -1 : 1;
+    const angleStep = sign2 * includedAngle / nSteps;
+    const rInner = radius - width / 2;
+    const rOuter = radius + width / 2;
+    const verts = [];
+    const idxs = [];
+    let base = 0;
+    for (let i2 = 0; i2 < nSteps; i2++) {
+      const a0 = startAngle + i2 * angleStep;
+      const a1 = startAngle + (i2 + 1) * angleStep;
+      const z = bottomHeight + (i2 + 1) * riserHeight;
+      const p0 = new Vector3(center.x + rInner * Math.cos(a0), center.y + rInner * Math.sin(a0), z);
+      const p1 = new Vector3(center.x + rOuter * Math.cos(a0), center.y + rOuter * Math.sin(a0), z);
+      const p2 = new Vector3(center.x + rOuter * Math.cos(a1), center.y + rOuter * Math.sin(a1), z);
+      const p3 = new Vector3(center.x + rInner * Math.cos(a1), center.y + rInner * Math.sin(a1), z);
+      verts.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, p3.x, p3.y, p3.z);
+      idxs.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      base += 4;
+    }
+    const geo = new BufferGeometry();
+    geo.setAttribute("position", new Float32BufferAttribute(verts, 3));
+    geo.setIndex(idxs);
+    geo.computeVertexNormals();
+    const mesh = new Mesh(geo, treadMat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    return group;
+  }
+);
+typedFunction(
+  "groupedMesh",
+  [[MeshPart]],
+  Id,
+  (parts) => {
+    const group = new Group();
+    for (const { vs, idxs, mat } of parts) {
+      const geo = new BufferGeometry();
+      geo.setAttribute("position", new Float32BufferAttribute(vs, 3));
+      geo.setIndex(Array.from(idxs));
+      geo.computeVertexNormals();
+      const mesh = new Mesh(geo, mat);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+    }
+    return group;
+  }
+);
 typedFunction("meshObjFmt", [Str, Str, Matrix4x4], Id, (path, name, m2) => {
   const parent = new Object3D();
   new MTLLoader().setPath(path).loadAsync(`${name}.mtl`).then((materials2) => {
@@ -38172,6 +38694,25 @@ typedAsyncFunction("showKMLCoordinatesFromFile", [], None, (cont) => {
     });
   });
 });
+function enterSelectionMode(mode, cont) {
+  if (selectionCallback) cancelSelection();
+  deselectAll();
+  pendingSelections = [];
+  selectionMode = mode;
+  selectionCallback = (result) => cont(result);
+}
+typedAsyncFunction("selectShape", [Str], IdArray, (prompt, cont) => {
+  console.log(prompt);
+  enterSelectionMode("shape", cont);
+});
+typedAsyncFunction("selectShapes", [Str], IdArray, (prompt, cont) => {
+  console.log(prompt);
+  enterSelectionMode("shapes", cont);
+});
+typedAsyncFunction("selectPosition", [Str], PointArray, (prompt, cont) => {
+  console.log(prompt);
+  enterSelectionMode("position", cont);
+});
 function establishConnection(handler) {
   const url = `${location.protocol == "https:" ? "wss" : "ws"}://${location.host}/threejs`;
   const connection2 = new WebSocket(url);
@@ -38179,6 +38720,10 @@ function establishConnection(handler) {
   connection2.onmessage = handler;
   connection2.onclose = function(evt) {
     console.log("onclose:", evt);
+    selectionMode = "none";
+    selectionCallback = null;
+    pendingSelections = [];
+    deselectAll();
   };
   return connection2;
 }
@@ -38215,14 +38760,51 @@ function onMouseClick(event) {
   mouse.x = event.clientX / window.innerWidth * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
-  const intersects2 = raycaster.intersectObjects(scene.children);
+  const intersects2 = raycaster.intersectObjects(scene.children, true);
+  if (selectionMode === "position") {
+    if (intersects2.length > 0 && intersects2[0].object != grid) {
+      const point = intersects2[0].point;
+      const cb = selectionCallback;
+      selectionCallback = null;
+      selectionMode = "none";
+      if (cb) cb([new Vector3(point.x, -point.z, point.y)]);
+    }
+    return;
+  }
+  if (selectionMode === "shape") {
+    if (intersects2.length > 0) {
+      const khepriObj = findKhepriObject(intersects2[0].object);
+      if (khepriObj && khepriObj.userData.Object3DId !== void 0) {
+        deselectAll();
+        select(khepriObj);
+        const cb = selectionCallback;
+        selectionCallback = null;
+        selectionMode = "none";
+        if (cb) cb([khepriObj.userData.Object3DId]);
+      }
+    }
+    return;
+  }
+  if (selectionMode === "shapes") {
+    if (intersects2.length > 0) {
+      const khepriObj = findKhepriObject(intersects2[0].object);
+      if (khepriObj && khepriObj.userData.Object3DId !== void 0) {
+        const id = khepriObj.userData.Object3DId;
+        if (!pendingSelections.includes(id)) {
+          pendingSelections.push(id);
+          select(khepriObj);
+        }
+      }
+    }
+    return;
+  }
   if (intersects2.length > 0) {
-    const obj = intersects2[0].object;
+    const khepriObj = findKhepriObject(intersects2[0].object);
     if (!event.shiftKey) {
       deselectAll();
     }
-    if (obj != grid) {
-      select(obj);
+    if (khepriObj) {
+      select(khepriObj);
     }
   } else {
     deselectAll();
