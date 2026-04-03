@@ -17,6 +17,7 @@ decode(::Val{:Unity}, t::Val{T}, c::IO) where {T} = decode(Val(:CS), t, c)
 @encode_decode_as(:Unity, Val{:GameObject}, Val{:size})
 @encode_decode_as(:Unity, Val{:Material}, Val{:size})
 @encode_decode_as(:Unity, Val{:Color}, Val{:RGB})
+@encode_decode_as(:Unity, Val{:Goal_}, Val{:int})
 
 encode(::Val{:Unity}, t::Val{:Vector3}, c::IO, p) =
   encode(Val(:CS), Val(:float3), c, raw_point(p)[[1,3,2]])
@@ -83,7 +84,7 @@ public GameObject InstantiateResource(GameObject family, Vector3 pos, Vector3 vx
 public GameObject InstantiateBIMElement(GameObject family, Vector3 pos, float angle)
 public GameObject Window(Vector3 position, Quaternion rotation, float dx, float dy, float dz)
 public GameObject Shelf(Vector3 position, int rowLength, int lineLength, float cellWidth, float cellHeight, float cellDepth)
-public GameObject Slab(Vector3[] contour, Vector3[][] holes, float h, Material material)
+public GameObject Slab(Vector3[] contour, bool smoothContour, Vector3[][] holes, bool[] smoothHoles, float h, Material material)
 public GameObject BeamRectSection(Vector3 position, Vector3 vx, Vector3 vy, float dx, float dy, float dz, float angle, Material material)
 public GameObject BeamCircSection(Vector3 bot, float radius, Vector3 top, Material material)
 public GameObject Panel(Vector3[] pts, Vector3 n, Material material)
@@ -139,10 +140,10 @@ public void SetVelGaussHSF(float mean, float stdDev, float min, float max)
 public void SetVelUniformHSF(float min, float max)
 public void SetVelHSF(float vel)
 public int CreateSimGoal(Vector3 pos, Vector3 scale, float rot)
-public void CreateSimAgent(Vector3 pos, float rot, int rgb, int[] goalIDs)
-public void SpawnAgentsRect(int count, Vector3 center, float dx, float dz, float rot, int rgb, int[] goalIDs)
-public void SpawnAgentsEllipse(int count, Vector3 center, float dx, float dz, float rot, int rgb, int[] goalIDs)
-public void SpawnAgentsPolygon(int count, float h, int rgb, int[] goalIDs, Vector3[] vertices)
+public void CreateSimAgent(Vector3 pos, float rot, int rgb, Goal_[] goals)
+public void SpawnAgentsRect(int count, Vector3 center, float dx, float dz, float rot, int rgb, Goal_[] goals)
+public void SpawnAgentsEllipse(int count, Vector3 center, float dx, float dz, float rot, int rgb, Goal_[] goals)
+public void SpawnAgentsPolygon(int count, float h, int rgb, Goal_[] goals, Vector3[] vertices)
 public void StartSimulation(float maxTime)
 public void SetSimulationSpeed(float speed)
 public bool IsSimulationFinished()
@@ -552,7 +553,7 @@ KhepriBase.b_set_layer_opacity(b::Unity, layer, opacity) =
 KhepriBase.b_create_layer_from_ref_value(b::Unity, r) =
   layer("Default")
 KhepriBase.b_delete_all_shapes_in_layer(b::Unity, layer) =
-  @remote(b, DeleteAllInParent(layer))
+  @remote(b, DeleteAllInParent(ref_value(b, layer)))
 
 switch_to_layer(b::Unity, layer) =
   @remote(b, SwitchToParent(layer))
@@ -783,16 +784,16 @@ KhepriBase.b_create_sim_goal(b::Unity, pos, scale, rot) =
   @remote(b, CreateSimGoal(pos, scale, rot))
 
 KhepriBase.b_create_sim_agent(b::Unity, pos, rot, goal_ids, color) =
-  @remote(b, CreateSimAgent(pos, rot, color, Int32.(goal_ids)))
+  @remote(b, CreateSimAgent(pos, rot, color, goal_ids))
 
 KhepriBase.b_spawn_agents_rect(b::Unity, count, center, dx, dz, rot, goal_ids, color) =
-  @remote(b, SpawnAgentsRect(count, center, dx, dz, rot, color, Int32.(goal_ids)))
+  @remote(b, SpawnAgentsRect(count, center, dx, dz, rot, color, goal_ids))
 
 KhepriBase.b_spawn_agents_ellipse(b::Unity, count, center, dx, dz, rot, goal_ids, color) =
-  @remote(b, SpawnAgentsEllipse(count, center, dx, dz, rot, color, Int32.(goal_ids)))
+  @remote(b, SpawnAgentsEllipse(count, center, dx, dz, rot, color, goal_ids))
 
 KhepriBase.b_spawn_agents_polygon(b::Unity, count, h, vertices, goal_ids, color) =
-  @remote(b, SpawnAgentsPolygon(count, h, color, Int32.(goal_ids), vertices))
+  @remote(b, SpawnAgentsPolygon(count, h, color, goal_ids, vertices))
 
 # Simulation control
 KhepriBase.b_start_simulation(b::Unity, max_time) =
