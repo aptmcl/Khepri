@@ -1750,13 +1750,13 @@ def show_vertices(shape):
             view.Redraw();
         }
 
-        public Guid CreateLayer(String name, bool active, Color color) {
+        public Guid CreateLayer(String name, bool visible, Color color) {
             int idx = doc.Layers.FindByFullPath(name, -1);
             if (idx == -1) { // Not found
                 idx = doc.Layers.Add(name, color);
             }
             Layer layer = doc.Layers[idx];
-            layer.IsVisible = active;
+            layer.IsVisible = visible;
             return layer.Id;
         }
         public Guid CurrentLayer() {
@@ -1764,13 +1764,43 @@ def show_vertices(shape):
         }
         public void SetCurrentLayer(Guid id) =>
             doc.Layers.SetCurrentLayerIndex(doc.Layers.Find(id, true, -1), true);
-        public void SetLayerActive(Guid id, bool active) =>
-             doc.Layers[doc.Layers.Find(id, true, -1)].IsVisible = active;
+        public void SetLayerVisible(Guid id, bool visible) =>
+             doc.Layers[doc.Layers.Find(id, true, -1)].IsVisible = visible;
+        public void SetLayerTransparency(Guid layerId, double opacity) {
+            int layerIndex = doc.Layers.Find(layerId, true, -1);
+            if (layerIndex < 0) return;
+            var objects = doc.Objects.FindByLayer(doc.Layers[layerIndex]);
+            foreach (var obj in objects) {
+                var attrs = obj.Attributes;
+                if (opacity > 0 && opacity < 1) {
+                    // Save original material source if not already saved
+                    if (!attrs.UserDictionary.ContainsKey("KhepriOrigMaterialSource"))
+                        attrs.UserDictionary.Set("KhepriOrigMaterialSource", (int)attrs.MaterialSource);
+                    // Create a semi-transparent material from the object's current material
+                    Material mat = new Material(obj.GetMaterial(true));
+                    mat.Transparency = 1.0 - opacity;
+                    mat.CommitChanges();
+                    RenderMaterial rmat = RenderMaterial.CreateBasicMaterial(mat);
+                    doc.RenderMaterials.Add(rmat);
+                    doc.Objects.ModifyRenderMaterial(obj.Id, rmat);
+                    attrs.MaterialSource = ObjectMaterialSource.MaterialFromObject;
+                    obj.CommitChanges();
+                } else {
+                    // Restore original material source
+                    if (attrs.UserDictionary.TryGetInteger("KhepriOrigMaterialSource", out int origSource)) {
+                        attrs.MaterialSource = (ObjectMaterialSource)origSource;
+                        attrs.UserDictionary.Remove("KhepriOrigMaterialSource");
+                        obj.CommitChanges();
+                    }
+                }
+            }
+            doc.Views.Redraw();
+        }
         public string LayerName(Guid id) =>
             doc.Layers[doc.Layers.Find(id, true, -1)].Name;
         public Color LayerColor(Guid id) =>
             doc.Layers[doc.Layers.Find(id, true, -1)].Color;
-        public bool LayerActive(Guid id) =>
+        public bool LayerVisible(Guid id) =>
             doc.Layers[doc.Layers.Find(id, true, -1)].IsVisible;
 
         public void SetLayerMaterial(Guid layerId, int materialIndex) {

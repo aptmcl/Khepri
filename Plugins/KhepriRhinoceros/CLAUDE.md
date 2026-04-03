@@ -43,7 +43,7 @@ The Julia frontend connects via TCP to `127.0.0.1:12000`. The protocol uses a cu
 - **Curve/Surface queries**: `CurveDomain`, `CurveLength`, `CurveFrameAt`, `SurfaceDomain`, `SurfaceFrameAt`, `Thicken`
 - **Materials**: `CreateMaterial`, `CreateColorMaterial`, `LoadRenderMaterialFromPath`, `SetMaterial` — uses `MatId` (alias for `int`) indexing into `renderMaterials` list
 - **Rendering**: `Render`, `SaveView`, `SetView`, `View`, `ViewCamera`, `ViewTarget`, `RenderLoadHEnvironment`, `SunLight`, `PointLight`
-- **Layers**: `CreateLayer`, `CurrentLayer`, `SetCurrentLayer`, `SetLayerActive`, `DeleteAllInLayer`
+- **Layers**: `CreateLayer`, `CurrentLayer`, `SetCurrentLayer`, `SetLayerVisible`, `DeleteAllInLayer`
 - **BIM furniture**: `BaseRectangularTable`, `BaseChair`, `CreateRectangularTableFamily`, `CreateChairFamily`, `BaseRectangularTableAndChairs` — uses Rhino instance definitions
 - **Illustrations**: `CreateLeaderDimension`, `CreateDiametricDimension`, `CreateAngularDimension`
 - **Grasshopper**: `EnableGrasshopperSolver`, `DisableGrasshopperSolver`, `RunGrasshopperSolver`
