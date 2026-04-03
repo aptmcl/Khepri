@@ -6,6 +6,12 @@ using System.Drawing;
 using System.Text;
 
 namespace KhepriBase {
+    /// <summary>
+    /// Binary framing and serialization layer over TCP. Handles length-prefixed frames
+    /// (Int32 length + payload) and typed value serialization, but knows nothing about
+    /// RPC semantics — the OK/NOTOK status byte and operation dispatch belong to the
+    /// application layer (RMIFy/Processor).
+    /// </summary>
     public class Channel : IDisposable {
         NetworkStream stream;
         public BinaryReader r;
@@ -15,6 +21,9 @@ namespace KhepriBase {
         // Storage for operations made available. The starting one is the operation that makes other operations available
         public int DebugMode;
         public bool FastMode;
+        BinaryReader savedReader;
+        BinaryWriter savedWriter;
+        MemoryStream writeFrameStream;
 
         public Channel(NetworkStream stream) {
             this.stream = stream;
@@ -36,6 +45,7 @@ namespace KhepriBase {
             if (disposing) {
                 r.Dispose();
                 w.Dispose();
+                writeFrameStream?.Dispose();
                 levels.Clear();
                 families.Clear();
             }
@@ -46,6 +56,41 @@ namespace KhepriBase {
 
         public void Flush() => w.Flush();
         public void SetReadTimeout(int t) => stream.ReadTimeout = t;
+
+        // Reads a length-prefixed frame from the network into memory, then redirects
+        // r/w to in-memory streams so the operation handler reads from the buffered
+        // request and writes to a buffered response. The original network reader/writer
+        // are saved for EndFrame to restore.
+        public bool BeginFrame() {
+            int frameLen;
+            try {
+                frameLen = r.ReadInt32();
+            } catch (EndOfStreamException) {
+                return false;
+            }
+            byte[] frameData = r.ReadBytes(frameLen);
+            savedReader = r;
+            savedWriter = w;
+            r = new BinaryReader(new MemoryStream(frameData), Encoding.UTF8);
+            if (writeFrameStream == null)
+                writeFrameStream = new MemoryStream();
+            else
+                writeFrameStream.SetLength(0);
+            w = new BinaryWriter(writeFrameStream, Encoding.UTF8);
+            return true;
+        }
+
+        // Restores network reader/writer, then writes the buffered response as a
+        // length-prefixed frame (Int32 length + payload) back to the network stream.
+        public void EndFrame() {
+            w.Flush();
+            byte[] responseData = writeFrameStream.ToArray();
+            r = savedReader;
+            w = savedWriter;
+            w.Write(responseData.Length);
+            w.Write(responseData);
+            w.Flush();
+        }
 
         /*
          * We use, as convention, that the name of the reader is 'r' + type
@@ -83,6 +128,8 @@ namespace KhepriBase {
         public Guid rGuid() => new Guid(r.ReadBytes(16));
         public void wGuid(Guid g) => w.Write(g.ToByteArray());
 
+        // The type-code byte enables self-describing serialization for heterogeneous
+        // collections (Options dictionaries, mixed arrays).
         public object rObject() => rObject(rByte());
 
         public virtual object rObject(byte code) {
@@ -109,159 +156,7 @@ namespace KhepriBase {
             return dict;
         }
 
-        public Boolean[] rBooleanArray() {
-            int length = rInt32();
-            var elems = new Boolean[length];
-            for (int i = 0; i < length; i++) {
-                elems[i] = rBoolean();
-            }
-            return elems;
-        }
-        public void wBooleanArray(Boolean[] elems) {
-            wInt32(elems.Length);
-            foreach (var elem in elems) {
-                wBoolean(elem);
-            }
-        }
-        public short[] rInt16Array() {
-            int length = rInt32();
-            var elems = new short[length];
-            for (int i = 0; i < length; i++) {
-                elems[i] = rInt16();
-            }
-            return elems;
-        }
-        public void wInt16Array(short[] elems) {
-            wInt32(elems.Length);
-            foreach (var elem in elems) {
-                wInt16(elem);
-            }
-        }
-        public int[] rInt32Array() {
-            int length = rInt32();
-            var elems = new int[length];
-            for (int i = 0; i < length; i++) {
-                elems[i] = rInt32();
-            }
-            return elems;
-        }
-        public void wInt32Array(int[] elems) {
-            wInt32(elems.Length);
-            foreach (var elem in elems) {
-                wInt32(elem);
-            }
-        }
-        public long[] rInt64Array() {
-            int length = rInt32();
-            var elems = new long[length];
-            for (int i = 0; i < length; i++) {
-                elems[i] = rInt64();
-            }
-            return elems;
-        }
-        public void wInt64Array(long[] elems) {
-            wInt32(elems.Length);
-            foreach (var elem in elems) {
-                wInt64(elem);
-            }
-        }
 
-        public float[] rSingleArray() {
-            int length = rInt32();
-            var elems = new float[length];
-            for (int i = 0; i < length; i++) {
-                elems[i] = rSingle();
-            }
-            return elems;
-        }
-        public void wSingleArray(float[] elems) {
-            wInt32(elems.Length);
-            foreach (var elem in elems) {
-                wSingle(elem);
-            }
-        }
-        public double[] rDoubleArray() {
-            int length = rInt32();
-            var elems = new double[length];
-            for (int i = 0; i < length; i++) {
-                elems[i] = rDouble();
-            }
-            return elems;
-        }
-        public void wDoubleArray(double[] elems) {
-            wInt32(elems.Length);
-            foreach (var elem in elems) {
-                wDouble(elem);
-            }
-        }
-
-        public string[] rStringArray() {
-            int length = rInt32();
-            string[] strs = new string[length];
-            for (int i = 0; i < length; i++) {
-                strs[i] = rString();
-            }
-            return strs;
-        }
-        public void wStringArray(string[] strs) {
-            wInt32(strs.Length);
-            foreach (var str in strs) {
-                wString(str);
-            }
-        }
-
-        public object[] rObjectArray() {
-            int length = rInt32();
-            object[] os = new object[length];
-            for (int i = 0; i < length; i++) {
-                os[i] = rObject();
-            }
-            return os;
-        }
-
-        public Guid[] rGuidArray() {
-            int length = rInt32();
-            Guid[] gs = new Guid[length];
-            for (int i = 0; i < length; i++) {
-                gs[i] = rGuid();
-            }
-            return gs;
-        }
-        public void wGuidArray(Guid[] gs) {
-            wInt32(gs.Length);
-            foreach (var g in gs) {
-                wGuid(g);
-            }
-        }
-
-        public short[][] rInt16ArrayArray() {
-            int length = rInt32();
-            short[][] ptss = new short[length][];
-            for (int i = 0; i < length; i++) {
-                ptss[i] = rInt16Array();
-            }
-            return ptss;
-        }
-        public void wInt16ArrayArray(short[][] ptss) {
-            wInt32(ptss.Length);
-            foreach (var pt in ptss) {
-                wInt16Array(pt);
-            }
-        }
-        public int[][] rInt32ArrayArray() {
-            int length = rInt32();
-            int[][] ptss = new int[length][];
-            for (int i = 0; i < length; i++) {
-                ptss[i] = rInt32Array();
-            }
-            return ptss;
-        }
-        public void wInt32ArrayArray(int[][] ptss) {
-            wInt32(ptss.Length);
-            foreach (var pt in ptss) {
-                wInt32Array(pt);
-            }
-        }
 
         public Color rColor() => Color.FromArgb(rByte(), rByte(), rByte(), rByte());
         public void wColor(Color c) {
@@ -271,7 +166,8 @@ namespace KhepriBase {
         public DateTime rDateTime() => new DateTime(rInt64(), DateTimeKind.Local);
         public void wDateTime(DateTime dt) => wInt64(dt.Ticks);
 
-        // BIM
+        // BIM families and levels are registered by index during a session — each side
+        // maintains a list and exchanges indices rather than full objects on every call.
         public BIMLevel rBIMLevel() => levels[rInt32()];
         public void wBIMLevel(BIMLevel l) { levels.Add(l); wInt32(levels.Count - 1); }
 

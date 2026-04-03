@@ -6,6 +6,13 @@ using System.Net.Sockets;
 using System.IO;
 
 namespace KhepriBase {
+    /// <summary>
+    /// Main RPC dispatch loop. Maintains a list of operation handlers (compiled delegates
+    /// from RMIFy). Operation 0 is always ProvideOperation — the bootstrap mechanism that
+    /// registers new operations. Each frame from Julia contains an Int32 opcode followed by
+    /// serialized arguments; the Processor reads the opcode, dispatches to the corresponding
+    /// handler, and the handler writes the response into the frame.
+    /// </summary>
     public class Processor<C,P> where C : Channel where P : Primitives {
         public C channel { get; set; }
         public P primitives { get; set; }
@@ -27,6 +34,10 @@ namespace KhepriBase {
             };
         }
 
+        // Lazy registration protocol: Julia calls opcode 0 with the method name and
+        // expected canonical signature. RMIFor finds, validates, and compiles the method.
+        // On success, the new handler is appended and its index (new opcode) is returned.
+        // On failure, RMIFor writes the NOTOK error directly.
         public void ProvideOperation(C c, P p) {
             var name = c.rString();
             var expectedCanonical = c.rString();
@@ -39,20 +50,9 @@ namespace KhepriBase {
             // Error already written by RMIFor (with NOTOK prefix) when action is null
         }
 
-        public void CleanChannel(C c) {
-            //Clean the channel
-            c.SetReadTimeout(minWaitTime);
-            try {
-                for (;;) { c.rByte(); }
-            } catch (IOException) {
-                // Done cleaning
-            } finally {
-                c.SetReadTimeout(-1);
-            }
-        }
-
         public int ReadOperation() {
             try {
+                if (!channel.BeginFrame()) return -1;
                 return channel.rInt32();
             } catch (EndOfStreamException) {
                 return -1;
@@ -61,7 +61,7 @@ namespace KhepriBase {
 
         public virtual void Execute(int op) {
             operations[op](channel, primitives);
-            channel.Flush();
+            channel.EndFrame();
         }
 
         public bool ReadAndExecute() {
@@ -82,6 +82,10 @@ namespace KhepriBase {
             }
         }
 
+        // Batching optimization: after executing one operation, attempts to read the next
+        // with a short timeout. If more frames arrive within the window, keeps executing
+        // without returning control to the host application's message loop. This reduces
+        // per-call overhead for burst sequences of RPC calls.
         public virtual bool ExecuteReadAndRepeat(int op) {
             int count = 0;
             while (true) {
