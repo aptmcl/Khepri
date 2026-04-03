@@ -22,7 +22,7 @@ namespace KhepriAutoCAD {
 
         public override void Execute(int op) {
             sync.Invoke(operations[op], new object[] { channel, primitives });
-            channel.Flush();
+            channel.EndFrame();
         }
 
         public override bool ExecuteReadAndRepeat(int op) {
@@ -47,7 +47,7 @@ namespace KhepriAutoCAD {
                             } else {
                                 while (!doc.Editor.IsQuiescent) { Thread.Sleep(10); }
                                 operations[op](channel, primitives);
-                                channel.Flush();
+                                channel.EndFrame();
                                 count++;
                                 if (count > MaxRepeated) {
                                     break;

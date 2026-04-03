@@ -125,43 +125,6 @@ namespace KhepriAutoCAD {
 
         }
 
-        public void SetView(Point3d position, Point3d target, double lens, bool perspective, string style) {
-            CommitAndStartTransaction();
-            Database db = doc.Database;
-            Editor ed = doc.Editor;
-            const double DIAG35MM = 42.0;
-            double projectionPlaneDistance = (target - position).Length;
-            double aspectRatio = 1.0;
-                ViewTable viewTable = tr.GetObject(db.ViewTableId, OpenMode.ForWrite) as ViewTable;
-                ViewportTable vpTbl = tr.GetObject(db.ViewportTableId, OpenMode.ForRead) as ViewportTable;
-                ViewportTableRecord viewportTableRec = tr.GetObject(vpTbl["*Active"], OpenMode.ForRead) as ViewportTableRecord;
-                DBDictionary styleDict = tr.GetObject(db.VisualStyleDictionaryId, OpenMode.ForRead) as DBDictionary;
-                aspectRatio = (viewportTableRec.Width / viewportTableRec.Height);
-                double fieldHeight =
-                        (projectionPlaneDistance * DIAG35MM) /
-                        (lens * Math.Sqrt(1.0 + aspectRatio * aspectRatio));
-                double fieldWidth = aspectRatio * fieldHeight;
-                using (ViewTableRecord vtr = new ViewTableRecord()) {
-                    vtr.BackClipEnabled = false;
-                    vtr.BackClipDistance = 0.0;
-                    vtr.CenterPoint = Point2d.Origin;
-                    vtr.FrontClipAtEye = false;
-                    vtr.FrontClipEnabled = false;
-                    vtr.FrontClipDistance = projectionPlaneDistance;
-                    vtr.LensLength = lens;
-                    vtr.PerspectiveEnabled = perspective;
-                    vtr.VisualStyleId = styleDict.GetAt(style);
-                    vtr.Target = target;
-                    vtr.ViewTwist = 0.0;
-                    vtr.ViewDirection = position - target;
-                    vtr.Width = fieldWidth;
-                    vtr.Height = fieldHeight;
-                    ed.SetCurrentView(vtr);
-                    ed.Regen();
-                }
-            CommitAndStartOpenCloseTransaction();
-        }
-
         public void SetViewCamera(Point3d position, Point3d target, double lens, bool perspective) {
             CommitAndStartTransaction();
             Database db = doc.Database;
@@ -195,7 +158,7 @@ namespace KhepriAutoCAD {
                 }
             CommitAndStartOpenCloseTransaction();
         }
-        public void SetViewCamera(Point3d position, Point3d target, double lens) => SetViewCamera(position, target, lens, true);
+
         public void SetViewStyle(string style) {
             CommitAndStartTransaction();
             Database db = doc.Database;
@@ -210,7 +173,6 @@ namespace KhepriAutoCAD {
                 ed.Regen();
             CommitAndStartOpenCloseTransaction();
         }
-        public void View(Point3d position, Point3d target, double lens) => SetViewCamera(position, target, lens);
         public void ViewTop() => SetViewCamera(new Point3d(0.0, 0.0, 1.0), Point3d.Origin, 50.0, false);
         public Point3d ViewCamera() {
                 ViewTableRecord view = doc.Editor.GetCurrentView();
@@ -1404,7 +1366,7 @@ namespace KhepriAutoCAD {
             acad.ZoomExtents();
         }
 
-        public ObjectId CreateLayer(string name, bool active, Color color, byte transparency) {
+        public ObjectId CreateLayer(string name, bool visible, Color color, byte transparency) {
             CommitAndStartTransaction();
             LayerTable lt = (LayerTable)tr.GetObject(doc.Database.LayerTableId, OpenMode.ForRead);
             ObjectId id;
@@ -1417,7 +1379,7 @@ namespace KhepriAutoCAD {
                 lt.UpgradeOpen();
                 id = lt.Add(layer);
                 tr.AddNewlyCreatedDBObject(layer, true);
-                layer.IsOff = !active;
+                layer.IsOff = !visible;
                 layer.Transparency = new Transparency(transparency);
             }
             CommitAndStartOpenCloseTransaction();
@@ -1444,11 +1406,17 @@ namespace KhepriAutoCAD {
             doc.Database.Clayer = id;
             CommitAndStartOpenCloseTransaction();
         }
-        public void SetLayerActive(ObjectId id, bool active) {
+        public void SetLayerVisible(ObjectId id, bool visible) {
             CommitAndStartTransaction();
             LayerTable lt = (LayerTable)tr.GetObject(doc.Database.LayerTableId, OpenMode.ForRead);
             LayerTableRecord layer = tr.GetObject(id, OpenMode.ForWrite) as LayerTableRecord;
-            layer.IsOff = !active;
+            layer.IsOff = !visible;
+            CommitAndStartOpenCloseTransaction();
+        }
+        public void SetLayerTransparency(ObjectId id, byte alpha) {
+            CommitAndStartTransaction();
+            LayerTableRecord layer = tr.GetObject(id, OpenMode.ForWrite) as LayerTableRecord;
+            layer.Transparency = new Transparency(alpha);
             CommitAndStartOpenCloseTransaction();
         }
         public string LayerName(ObjectId id) {
@@ -1459,7 +1427,7 @@ namespace KhepriAutoCAD {
             LayerTableRecord layer = tr.GetObject(id, OpenMode.ForRead) as LayerTableRecord;
             return layer.Color;
         }
-        public bool LayerActive(ObjectId id) {
+        public bool LayerVisible(ObjectId id) {
             LayerTableRecord layer = tr.GetObject(id, OpenMode.ForRead) as LayerTableRecord;
             return !layer.IsOff;
         }
