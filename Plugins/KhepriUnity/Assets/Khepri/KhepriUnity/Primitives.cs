@@ -595,9 +595,11 @@ namespace KhepriUnity {
         public void SetParentOpacity(GameObject parent, float opacity) {
             var renderers = parent.GetComponentsInChildren<Renderer>();
             if (opacity <= 0f || opacity >= 1f) {
-                // Restore original materials
+                // Restore original materials and destroy ghost copies
                 foreach (var renderer in renderers) {
                     if (opacityOriginalMaterials.TryGetValue(renderer, out Material[] originals)) {
+                        foreach (var mat in renderer.sharedMaterials)
+                            if (mat != null) UnityEngine.Object.Destroy(mat);
                         renderer.sharedMaterials = originals;
                         opacityOriginalMaterials.Remove(renderer);
                     }
@@ -608,8 +610,12 @@ namespace KhepriUnity {
                     Material[] currentMats = renderer.sharedMaterials;
                     if (!opacityOriginalMaterials.ContainsKey(renderer))
                         opacityOriginalMaterials[renderer] = currentMats;
-                    else
+                    else {
+                        // Destroy previous ghost materials before creating new ones
+                        foreach (var mat in renderer.sharedMaterials)
+                            if (mat != null) UnityEngine.Object.Destroy(mat);
                         currentMats = opacityOriginalMaterials[renderer];
+                    }
                     Material[] ghostMats = new Material[currentMats.Length];
                     for (int i = 0; i < currentMats.Length; i++) {
                         Material ghost = new Material(currentMats[i]);
