@@ -41,17 +41,15 @@ namespace KhepriUnity {
         private List<Agent_> pendingDestruction = new List<Agent_>();
 
         private void Awake() {
-            if (instance == null)
-            {
-                instance = this;
-                navMeshSurface = GetComponent<NavMeshSurface>();
-                _cachedPath = new NavMeshPath();
-                _distanceCache = new Dictionary<(Vector3, int), (float, float)>();
-            }
-            else if (instance != this)
+            if (instance != null && instance != this)
             {
                 Destroy(gameObject);
+                return;
             }
+            instance = this;
+            navMeshSurface = GetComponent<NavMeshSurface>();
+            _cachedPath = new NavMeshPath();
+            _distanceCache = new Dictionary<(Vector3, int), (float, float)>();
         }
 
         private void FixedUpdate()

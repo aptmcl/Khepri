@@ -106,26 +106,30 @@ namespace KhepriUnity {
             float dx, float dz, // width and length
             float rot, // in degrees TODO: overload with radians
             int rgb,
-            int[] goalsIDs)
+            Goal_[] goals)
         {
-            List<Goal_> goals = goalsIDs.Select(id => SystemManager.goalsList[id]).ToList();
             Matrix4x4 m = Matrix4x4.identity;
             m.SetTRS(new Vector3(cx, cy, cz), Quaternion.Euler(0, rot, 0), new Vector3(dx, 0, dz)); // The matrix that performs the transformation, rotation and scaling of the points
 
             int agentsCount = 0;
-            while (agentsCount < numAgents)
+            int attempts = 0;
+            int maxAttempts = numAgents * 1000;
+            while (agentsCount < numAgents && attempts < maxAttempts)
             {
+                attempts++;
                 float x = UnityEngine.Random.Range(-0.5f, 0.5f);
                 float z = UnityEngine.Random.Range(-0.5f, 0.5f);
-                
+
                 Vector3 pos = m.MultiplyPoint3x4(new Vector3(x, 0, z)); // Position in the real world
-                
+
                 if (SystemManager.instance.IsPosAvailable(pos, agentRadius))
                 {
-                    CreateAgent(pos.x, pos.y, pos.z, UnityEngine.Random.Range(0, 360.0f), rgb, goals);
+                    CreateAgent(pos.x, pos.y, pos.z, UnityEngine.Random.Range(0, 360.0f), rgb, goals.ToList());
                     ++agentsCount;
                 }
             }
+            if (agentsCount < numAgents)
+                Debug.LogWarning($"SpawnAgentsRect: placed {agentsCount}/{numAgents} agents after {maxAttempts} attempts");
         }
 
         public static void SpawnAgentsEllipse(
@@ -134,52 +138,60 @@ namespace KhepriUnity {
             float dx, float dz, // major and minor radius
             float rot, // in degrees TODO: overload with radians
             int rgb,
-            int[] goalsIDs)
+            Goal_[] goals)
         {
-            List<Goal_> goals = goalsIDs.Select(id => SystemManager.goalsList[id]).ToList();
             Matrix4x4 m = Matrix4x4.identity;
             m.SetTRS(new Vector3(cx, cy, cz), Quaternion.Euler(0, rot, 0), new Vector3(dx, 0, dz)); // The matrix that performs the transformation, rotation and scaling of the points
-            
+
             int agentsCount = 0;
-            while (agentsCount < numAgents)
+            int attempts = 0;
+            int maxAttempts = numAgents * 1000;
+            while (agentsCount < numAgents && attempts < maxAttempts)
             {
+                attempts++;
                 float x = UnityEngine.Random.Range(-0.5f, 0.5f);
                 float z = UnityEngine.Random.Range(-0.5f, 0.5f);
-                
+
                 Vector3 pos = m.MultiplyPoint3x4(new Vector3(x, 0, z)); // Position in the real world
-                
+
                 if ((x * x + z * z <= 0.25f) && SystemManager.instance.IsPosAvailable(pos, agentRadius))
                 {
-                    CreateAgent(pos.x, pos.y, pos.z, UnityEngine.Random.Range(0, 360.0f), rgb, goals);
+                    CreateAgent(pos.x, pos.y, pos.z, UnityEngine.Random.Range(0, 360.0f), rgb, goals.ToList());
                     ++agentsCount;
                 }
             }
+            if (agentsCount < numAgents)
+                Debug.LogWarning($"SpawnAgentsEllipse: placed {agentsCount}/{numAgents} agents after {maxAttempts} attempts");
         }
 
         public static void SpawnAgentsPolygon(
             int numAgents,
             float cy,
             int rgb,
-            int[] goalsIDs,
+            Goal_[] goals,
             Vector2[] polygonVertices)
         {
-            List<Goal_> goals = goalsIDs.Select(id => SystemManager.goalsList[id]).ToList();
             var (p, width, height) = Intersections.BoundingBox(polygonVertices);
-            
+
             int agentsCount = 0;
-            while (agentsCount < numAgents)
+            int attempts = 0;
+            int maxAttempts = numAgents * 1000;
+            while (agentsCount < numAgents && attempts < maxAttempts)
             {
+                attempts++;
                 Vector3 pos = new Vector3(p.x + UnityEngine.Random.Range(0f, 1f) * width, cy,
                                           p.y + UnityEngine.Random.Range(0f, 1f) * height);
-                
+
                 if (Intersections.PointOnPolygon(new Vector2(pos.x, pos.z), polygonVertices) &&
                     SystemManager.instance.IsPointOnNavMesh(pos) &&
                     SystemManager.instance.IsPosAvailable(pos, agentRadius))
                 {
-                    CreateAgent(pos.x, pos.y, pos.z, UnityEngine.Random.Range(0, 360.0f), rgb, goals);
+                    CreateAgent(pos.x, pos.y, pos.z, UnityEngine.Random.Range(0, 360.0f), rgb, goals.ToList());
                     ++agentsCount;
                 }
             }
+            if (agentsCount < numAgents)
+                Debug.LogWarning($"SpawnAgentsPolygon: placed {agentsCount}/{numAgents} agents after {maxAttempts} attempts");
         }
 
         // Architecture Functions ----------------------------------------------------------------------------------------------------------

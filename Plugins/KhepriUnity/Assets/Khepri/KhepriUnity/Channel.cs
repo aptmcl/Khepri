@@ -31,21 +31,6 @@ namespace KhepriUnity {
             }
         }
 
-        public GameObject[] rGameObjectArray() {
-            int length = rInt32();
-            GameObject[] objs = new GameObject[length];
-            for (int i = 0; i < length; i++) {
-                objs[i] = rGameObject();
-            }
-            return objs;
-        }
-        public void wGameObjectArray(GameObject[] ids) {
-            wInt32(ids.Length);
-            foreach (var id in ids) {
-                wGameObject(id);
-            }
-        }
-
         public Material rMaterial() {
             int value = rInt32();
             return value < 0 ?
@@ -57,38 +42,11 @@ namespace KhepriUnity {
             wInt32(materials.Count - 1);
         }
 
+        public Goal_ rGoal_() => SystemManager.goalsList[rInt32()];
+        public void wGoal_(Goal_ goal) => wInt32(goal.uID);
+
         public Vector3 rVector3() => new Vector3(rSingle(), rSingle(), rSingle());
         public void wVector3(Vector3 p) { w.Write(p.x); w.Write(p.y); w.Write(p.z); }
-
-        public Vector3[] rVector3Array() {
-            int length = rInt32();
-            Vector3[] pts = new Vector3[length];
-            for (int i = 0; i < length; i++) {
-                pts[i] = rVector3();
-            }
-            return pts;
-        }
-        public void wVector3Array(Vector3[] pts) {
-            wInt32(pts.Length);
-            foreach (var pt in pts) {
-                wVector3(pt);
-            }
-        }
-
-        public Vector3[][] rVector3ArrayArray() {
-            int length = rInt32();
-            Vector3[][] ptss = new Vector3[length][];
-            for (int i = 0; i < length; i++) {
-                ptss[i] = rVector3Array();
-            }
-            return ptss;
-        }
-        public void wVector3ArrayArray(Vector3[][] ptss) {
-            wInt32(ptss.Length);
-            foreach (var pt in ptss) {
-                wVector3Array(pt);
-            }
-        }
 
         new public Color rColor() => new Color(rSingle(), rSingle(), rSingle());
         public void wColor(Color c) { w.Write(c.r); w.Write(c.g); w.Write(c.b); }

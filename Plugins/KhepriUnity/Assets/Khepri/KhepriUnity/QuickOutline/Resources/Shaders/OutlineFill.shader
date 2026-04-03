@@ -1,9 +1,12 @@
-﻿//
+//
 //  OutlineFill.shader
 //  QuickOutline
 //
 //  Created by Chris Nolet on 2/21/18.
-//  Copyright © 2018 Chris Nolet. All rights reserved.
+//  Copyright (c) 2018 Chris Nolet. All rights reserved.
+//
+//  Modified for HDRP: uses user stencil bits 6-7 to avoid
+//  collision with HDRP's reserved stencil bits 0-5.
 //
 
 Shader "Custom/Outline Fill" {
@@ -18,6 +21,7 @@ Shader "Custom/Outline Fill" {
     Tags {
       "Queue" = "Transparent+110"
       "RenderType" = "Transparent"
+      "RenderPipeline" = "HDRenderPipeline"
       "DisableBatching" = "True"
     }
 
@@ -30,15 +34,17 @@ Shader "Custom/Outline Fill" {
       ColorMask RGB
 
       Stencil {
-        Ref 1
+        Ref 64
+        ReadMask 64
         Comp NotEqual
       }
 
-      CGPROGRAM
-      #include "UnityCG.cginc"
-
+      HLSLPROGRAM
       #pragma vertex vert
       #pragma fragment frag
+
+      #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+      #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
 
       struct appdata {
         float4 vertex : POSITION;
@@ -49,12 +55,12 @@ Shader "Custom/Outline Fill" {
 
       struct v2f {
         float4 position : SV_POSITION;
-        fixed4 color : COLOR;
+        float4 color : COLOR;
         UNITY_VERTEX_OUTPUT_STEREO
       };
 
-      uniform fixed4 _OutlineColor;
-      uniform float _OutlineWidth;
+      float4 _OutlineColor;
+      float _OutlineWidth;
 
       v2f vert(appdata input) {
         v2f output;
@@ -63,19 +69,20 @@ Shader "Custom/Outline Fill" {
         UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
         float3 normal = any(input.smoothNormal) ? input.smoothNormal : input.normal;
-        float3 viewPosition = UnityObjectToViewPos(input.vertex);
+        float3 viewPosition = TransformWorldToView(TransformObjectToWorld(input.vertex.xyz));
         float3 viewNormal = normalize(mul((float3x3)UNITY_MATRIX_IT_MV, normal));
 
-        output.position = UnityViewToClipPos(viewPosition + viewNormal * -viewPosition.z * _OutlineWidth / 1000.0);
+        output.position = TransformWorldToHClip(
+          mul(UNITY_MATRIX_I_V, float4(viewPosition + viewNormal * -viewPosition.z * _OutlineWidth / 1000.0, 1.0)).xyz);
         output.color = _OutlineColor;
 
         return output;
       }
 
-      fixed4 frag(v2f input) : SV_Target {
+      float4 frag(v2f input) : SV_Target {
         return input.color;
       }
-      ENDCG
+      ENDHLSL
     }
   }
 }

@@ -57,13 +57,6 @@ public class Khepri : MonoBehaviour {
     [SerializeField] 
     public bool optimized = false;
     
-    // Quality Presets
-    [SerializeField] 
-    public int qualityPresetSelected = 3;
-    public int defaultQualityPresetSelected = 3;
-    [SerializeField] 
-    public int lastQualityPresetSelected = 3;
-
     // Scene Manager
     [SerializeField]
     public string sceneName = "NewScene";
@@ -79,40 +72,13 @@ public class Khepri : MonoBehaviour {
     [SerializeField] 
     public int anisotropicFilteringSelected = 2;
     public int defaultAnisotropicFilteringSelected = 2;
-    [SerializeField] 
-    public int antiAliasingSelected = 1;
-    public int defaultAntiAliasingSelected = 1;
-    [SerializeField] 
+    [SerializeField]
     public bool enableTextureStreaming = true;
     public bool defaultEnableTextureStreaming = true;
     
     // Colliders
     [SerializeField]
     public bool enableColliders = true;
-
-    // Shadows
-    [SerializeField]
-    public bool enableShadows = true;
-    [SerializeField] 
-    public bool shadowSettingsFoldout = false;
-    [SerializeField] 
-    public int shadowDistance = 200;
-    public int defaultShadowDistance = 200;
-    [SerializeField] 
-    public int pixelLightCount = 200;
-    public int defaultPixelLightCount = 200;
-    [SerializeField] 
-    public int shadowResolutionSelected = 2;
-    public int defaultShadowResolutionSelected = 2;
-    [SerializeField] 
-    public int shadowmaskModeSelected = 0;
-    public int defaultShadowmaskModeSelected = 0;
-    [SerializeField] 
-    public int shadowProjectionSelected = 1;
-    public int defaultShadowProjectionSelected = 1;
-    [SerializeField] 
-    public int shadowCascadeSelected = 2;
-    public int defaultShadowCascadeSelected = 2;
 
     // LOD
     [SerializeField]
@@ -190,66 +156,6 @@ public class Khepri : MonoBehaviour {
     [SerializeField]
     public bool enablePointlightsShadows = true;
     public bool defaultEnablePointlightsShadows = true;
-    [SerializeField] 
-    public int giSourceSelected = 0;
-    public int defaultGISourceSelected = 0;
-    [SerializeField]
-    public Color giColor = Color.white;
-    public Color defaultGIColor = Color.white;
-    [SerializeField]
-    public float giIntensityMultiplier = 0.7f;
-    public float defaultGIIntensityMultiplier = 0.7f;
-    [SerializeField] 
-    public int reflectionResolutionSelected = 3;
-    public int defaultReflectionResolutionSelected = 3;
-    [SerializeField]
-    public float reflectionIntensityMultiplier = 0.6f;
-    public float defaultReflectionIntensityMultiplier = 0.6f;
-    [SerializeField] 
-    public int reflectionBounces = 1;
-    public int defaultReflectionBounces = 1;
-
-    // Bake
-    [SerializeField] 
-    public bool lightmapBakeSettingsFoldout = false;
-    [SerializeField] 
-    public int giModeSelected = 0;
-    public int defaultGIModeSelected = 0;
-    [SerializeField] 
-    public bool realTimePointLight = true;
-    public bool defaultRealTimePointLight = true;
-    [SerializeField] 
-    public int lightmapperSelected = 0;
-    public int defaultLightmapperSelected = 0;
-    [SerializeField] 
-    public int lightmapDirectSamples = 32;
-    public int defaultLightmapDirectSamples = 32;
-    [SerializeField] 
-    public int lightmapIndirectSamples = 512;
-    public int defaultLightmapIndirectSamples = 512;
-    [SerializeField] 
-    public int lightmapEnvironmentSamples = 256;
-    public int defaultLightmapEnvironmentSamples = 256;
-    [SerializeField] 
-    public int bouncesSelected = 2;
-    public int defaultBouncesSelected = 2;
-    [SerializeField] 
-    public float lightmapResolution = 10;
-    public float defaultLightmapResolution = 10;
-    [SerializeField] 
-    public int lightmapSizeSelected = 3;
-    public int defaultLightmapSizeSelected = 3;
-    [SerializeField] 
-    public bool compressLightmap = true;
-    public bool defaultCompressLightmap = true;
-    [SerializeField] 
-    public bool ambientOcclusion = true;
-    public bool defaultAmbientOcclusion = true;
-
-    [SerializeField] 
-    public bool occlusionBakeSettingsFoldout = false;
-    public bool enableOcclusionVisualization = false;
-    
     // Player
     [SerializeField] 
     public bool playerSettingsFoldout = false;
@@ -276,17 +182,11 @@ public class Khepri : MonoBehaviour {
     public float defaultPlayerMaxFallSpeed = -6f;
     
     // Selection
-    [SerializeField] 
-    public bool selectionSettingsFoldout = false;
     [SerializeField]
-    public int highlightModeSelected = 0;
-    public int defaultHighlightModeSelected = 0;
+    public bool selectionSettingsFoldout = false;
     [SerializeField]
     public Color highlightColor = new Color(1,0.45f,0);
     public Color defaultHighlightColor = new Color(1,0.45f,0);
-    [SerializeField] 
-    public float highlightWidth = 4;
-    public float defaultHighlightWidth = 4;
 
     // Navigation Controls
     [SerializeField] 

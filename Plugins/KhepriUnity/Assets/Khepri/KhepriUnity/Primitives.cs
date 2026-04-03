@@ -19,6 +19,8 @@ namespace KhepriUnity {
 #endif
 
         public static Primitives Instance { get; private set; }
+        public static bool requestEnterPlayMode = false;
+        public static bool requestExitPlayMode = false;
 
         GameObject currentParent;
         List<GameObject> parents;
@@ -26,15 +28,15 @@ namespace KhepriUnity {
         public List<GameObject> SelectedGameObjects { get; set; }
         public bool InSelectionProcess { get; set; }
         public bool SelectingManyGameObjects { get; set; }
-        Dictionary<GameObject, Outline> highlightedCache;
-        Outline.Mode highlightMode;
+        Dictionary<Renderer, Material[]> highlightedCache;
         Color highlightColor;
-        float highlightWidth;
+        Material highlightMaterial;
 
         Transform playerTransform;
         Camera mainCamera;
         Material currentMaterial;
         public Material DefaultMaterial { get; }
+        Dictionary<Renderer, Material> materialCache;
 
         bool applyMaterials;
         bool applyColliders;
@@ -56,17 +58,16 @@ namespace KhepriUnity {
             this.parents = new List<GameObject> { mainObject };
             this.SelectedGameObjects = new List<GameObject>();
             this.InSelectionProcess = false;
-            this.highlightedCache = new Dictionary<GameObject, Outline>();
-            this.highlightMode = Outline.Mode.OutlineAll;
+            this.highlightedCache = new Dictionary<Renderer, Material[]>();
             this.highlightColor = new Color(1, 0.45f, 0);
-            this.highlightWidth = KhepriConstants.DEFAULT_HIGHLIGHT_WIDTH;
+            this.highlightMaterial = CreateHighlightMaterial(highlightColor);
             this.mainCamera = Camera.main;
             var player = GameObject.FindWithTag("Player");
             this.playerTransform = player != null ? player.transform : null;
             if (playerTransform == null) {
                 Debug.LogWarning("Primitives: Player not found. View operations may be unavailable.");
             }
-            this.DefaultMaterial = new Material(Shader.Find("Standard")) {
+            this.DefaultMaterial = new Material(Shader.Find("HDRP/Lit")) {
                 enableInstancing = true
             };
             this.currentMaterial = DefaultMaterial;
@@ -80,6 +81,7 @@ namespace KhepriUnity {
             this.makeStatic = true;
             this.enableMergeParent = false;
             this.lightsCache = new Dictionary<GameObject, Light>();
+            this.materialCache = new Dictionary<Renderer, Material>();
             this.lodLevels = new LODLevel[] {
                 new LODLevel(0.5f, 1f) {
                     CombineMeshes = false,
@@ -132,7 +134,15 @@ namespace KhepriUnity {
             return prevParent;
         }
 
-        public void SetApplyMaterials(bool apply) => applyMaterials = apply;
+        public void SetApplyMaterials(bool apply) {
+            if (apply != applyMaterials) {
+                applyMaterials = apply;
+                foreach (var kvp in materialCache) {
+                    if (kvp.Key != null)
+                        kvp.Key.sharedMaterial = apply ? kvp.Value : DefaultMaterial;
+                }
+            }
+        }
         public void SetApplyColliders(bool apply) => applyColliders = apply;
         public void SetApplyLOD(bool apply) => applyLOD = apply;
         public void SetLODLevels(LODLevel[] lodLevels) => this.lodLevels = lodLevels;
@@ -192,31 +202,32 @@ namespace KhepriUnity {
 
         private void UpdateEnablePointLightsShadow() {
             FindPointLights();
-            // Shadow settings disabled for build compatibility
+            foreach (var light in lightsCache.Values) {
+                light.shadows = enablePointlightShadows ? LightShadows.Hard : LightShadows.None;
+            }
         }
 
         public void MakeStaticGameObjects(bool val) {
             makeStatic = val;
         }
 
-        public void SetHighlightMode(Outline.Mode mode) {
-            highlightMode = mode;
-            UpdateHighlights();
+        private Material CreateHighlightMaterial(Color color) {
+            Material mat = new Material(Shader.Find("HDRP/Unlit"));
+            mat.name = "__highlight__";
+            mat.enableInstancing = true;
+            mat.SetColor("_UnlitColor", color);
+            mat.SetColor("_EmissiveColor", color * 5f);
+            return mat;
         }
+
         public void SetHighlightColor(Color color) {
             highlightColor = color;
-            UpdateHighlights();
-        }
-        public void SetHighlightWidth(float width) {
-            highlightWidth = width;
-            UpdateHighlights();
-        }
-        private void UpdateHighlights() {
-            foreach (var outline in highlightedCache.Values) {
-                if (outline != null) {
-                    outline.OutlineMode = highlightMode;
-                    outline.OutlineColor = highlightColor;
-                    outline.OutlineWidth = highlightWidth;
+            highlightMaterial = CreateHighlightMaterial(color);
+            foreach (var kvp in highlightedCache) {
+                if (kvp.Key != null) {
+                    Material[] hlMats = new Material[kvp.Value.Length];
+                    for (int i = 0; i < hlMats.Length; i++) hlMats[i] = highlightMaterial;
+                    kvp.Key.sharedMaterials = hlMats;
                 }
             }
         }
@@ -226,6 +237,43 @@ namespace KhepriUnity {
                 sun = GameObject.FindWithTag("Sun");
             }
             sun.transform.rotation = Quaternion.Euler(altitude, azimuth, 0);
+        }
+
+        public void EnterPlayerMode() { requestEnterPlayMode = true; }
+        public void ExitPlayerMode() { requestExitPlayMode = true; }
+
+        public void SetMode(int mode) {
+            bool materials, lod, pointlightShadows;
+            switch (mode) {
+                case 0: // Concept
+                    materials = false; lod = false; pointlightShadows = false;
+                    break;
+                case 1: // Analysis
+                    materials = true; lod = true; pointlightShadows = false;
+                    break;
+                case 2: // Showcase
+                    materials = true; lod = true; pointlightShadows = true;
+                    break;
+                default: // Advanced — no changes
+                    return;
+            }
+            SetApplyMaterials(materials);
+            SetApplyLOD(lod);
+            SetEnablePointLightsShadow(pointlightShadows);
+        }
+
+        public void ConfigurePlayer(float flySpeed, float walkSpeed, float lookSpeed, float gravityMultiplier, float maxFallSpeed, float radius) {
+            var player = GameObject.FindWithTag("Player");
+            if (player != null) {
+                var movement = player.GetComponent<Movement>();
+                if (movement != null) {
+                    movement.UpdateMovementSettings(flySpeed, walkSpeed, lookSpeed, gravityMultiplier, maxFallSpeed, radius);
+                }
+            }
+        }
+
+        public void ConfigureHighlighting(int mode, float r, float g, float b, float width) {
+            SetHighlightColor(new Color(r, g, b));
         }
 
         #endregion
@@ -298,11 +346,8 @@ namespace KhepriUnity {
 
         public GameObject ApplyMaterial(GameObject obj, Material material) {
             Renderer renderer = obj.GetComponent<Renderer>();
-            if (applyMaterials) {
-                renderer.sharedMaterial = material;
-            } else {
-                renderer.sharedMaterial = DefaultMaterial;
-            }
+            materialCache[renderer] = material;
+            renderer.sharedMaterial = applyMaterials ? material : DefaultMaterial;
             return obj;
         }
 
@@ -517,7 +562,7 @@ namespace KhepriUnity {
 
         // Sets a color on the layer
         public GameObject SetLayerColor(GameObject layer, Color color) {
-            Material mat = new Material(Shader.Find("Diffuse"));
+            Material mat = new Material(Shader.Find("HDRP/Unlit"));
             mat.color = color;
             mat.name = "__layer_color__";
 
@@ -545,12 +590,52 @@ namespace KhepriUnity {
             return layer;
         }
 
+        Dictionary<Renderer, Material[]> opacityOriginalMaterials = new Dictionary<Renderer, Material[]>();
+
+        public void SetParentOpacity(GameObject parent, float opacity) {
+            var renderers = parent.GetComponentsInChildren<Renderer>();
+            if (opacity <= 0f || opacity >= 1f) {
+                // Restore original materials
+                foreach (var renderer in renderers) {
+                    if (opacityOriginalMaterials.TryGetValue(renderer, out Material[] originals)) {
+                        renderer.sharedMaterials = originals;
+                        opacityOriginalMaterials.Remove(renderer);
+                    }
+                }
+            } else {
+                // Apply ghost materials
+                foreach (var renderer in renderers) {
+                    Material[] currentMats = renderer.sharedMaterials;
+                    if (!opacityOriginalMaterials.ContainsKey(renderer))
+                        opacityOriginalMaterials[renderer] = currentMats;
+                    else
+                        currentMats = opacityOriginalMaterials[renderer];
+                    Material[] ghostMats = new Material[currentMats.Length];
+                    for (int i = 0; i < currentMats.Length; i++) {
+                        Material ghost = new Material(currentMats[i]);
+                        Color c = ghost.GetColor("_BaseColor");
+                        ghost.SetColor("_BaseColor", new Color(c.r, c.g, c.b, opacity));
+                        ghost.SetFloat("_SurfaceType", 1);
+                        ghost.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                        ghost.renderQueue = 3000;
+                        ghostMats[i] = ghost;
+                    }
+                    renderer.sharedMaterials = ghostMats;
+                }
+            }
+        }
+
         // ||||||||||||||||||||||||||| Delete |||||||||||||||||||||||||||
+        private void RemoveFromCaches(GameObject obj) {
+            lightsCache.Remove(obj);
+            Renderer r = obj.GetComponent<Renderer>();
+            if (r != null) highlightedCache.Remove(r);
+        }
+
         public void DeleteMany(GameObject[] objs) {
             int count = objs.Length;
             for (int i = 0; i < count; i++) {
-                lightsCache.Remove(objs[i]);
-                highlightedCache.Remove(objs[i]);
+                RemoveFromCaches(objs[i]);
                 GameObject.DestroyImmediate(objs[i]);
             }
         }
@@ -559,8 +644,7 @@ namespace KhepriUnity {
             int count = parent.transform.childCount;
             for (int i = 0; i < count; i++) {
                 GameObject child = parent.transform.GetChild(0).gameObject;
-                lightsCache.Remove(child);
-                highlightedCache.Remove(child);
+                RemoveFromCaches(child);
                 GameObject.DestroyImmediate(child);
             }
         }
@@ -661,32 +745,31 @@ namespace KhepriUnity {
         public GameObject LoadResource(String name) => Resources.Load<GameObject>(name);
 
         public Material CreateMaterial(String name, Color baseColor, float alpha,
-                                       float metallic, float roughness,
-                                       float transmission,
+                                       float metallic, float specular, float roughness,
+                                       float ior, float transmission, float transmissionRoughness,
+                                       float clearcoat, float clearcoatRoughness,
                                        Color emissionColor, float emissionStrength) {
-            Material mat = new Material(Shader.Find("Standard"));
+            Material mat = new Material(Shader.Find("HDRP/Lit"));
             mat.name = name;
             mat.enableInstancing = true;
             Color color = new Color(baseColor.r, baseColor.g, baseColor.b, alpha);
-            mat.SetColor("_Color", color);
+            mat.SetColor("_BaseColor", color);
             mat.SetFloat("_Metallic", metallic);
-            mat.SetFloat("_Glossiness", 1.0f - roughness);
+            mat.SetFloat("_Smoothness", 1.0f - roughness);
+            mat.SetFloat("_Ior", ior > 0 ? ior : 1.5f);
             if (transmission > 0 || alpha < 1.0f) {
-                float effectiveAlpha = transmission > 0 ? 1.0f - transmission : alpha;
-                mat.SetColor("_Color", new Color(baseColor.r, baseColor.g, baseColor.b, effectiveAlpha));
-                mat.SetFloat("_Mode", 3);
-                mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
-                mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-                mat.SetInt("_ZWrite", 0);
-                mat.DisableKeyword("_ALPHATEST_ON");
-                mat.DisableKeyword("_ALPHABLEND_ON");
-                mat.EnableKeyword("_ALPHAPREMULTIPLY_ON");
+                mat.SetFloat("_SurfaceType", 1);
+                mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                mat.SetFloat("_TransmittanceMask", transmission);
                 mat.renderQueue = 3000;
             }
+            if (clearcoat > 0) {
+                mat.SetFloat("_CoatMask", clearcoat);
+                mat.SetFloat("_CoatSmoothness", 1.0f - clearcoatRoughness);
+            }
             if (emissionStrength > 0 && (emissionColor.r > 0 || emissionColor.g > 0 || emissionColor.b > 0)) {
-                mat.EnableKeyword("_EMISSION");
+                mat.SetColor("_EmissiveColor", emissionColor * emissionStrength);
                 mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
-                mat.SetColor("_EmissionColor", emissionColor * emissionStrength);
             }
             return mat;
         }
@@ -907,6 +990,25 @@ namespace KhepriUnity {
             SphereWithMaterial(center, radius, currentMaterial);
         public Vector3 SphereCenter(GameObject s) => s.transform.localPosition;
         public float SphereRadius(GameObject s) => s.transform.localScale.x / 2;
+
+        public Vector3 BoxPosition(GameObject s) {
+            Quaternion rot = s.transform.localRotation;
+            Vector3 scale = s.transform.localScale;
+            return s.transform.localPosition - rot * new Vector3(scale.x / 2, scale.y / 2, scale.z / 2);
+        }
+        public Vector3 BoxDimensions(GameObject s) => s.transform.localScale;
+
+        public Vector3 CylinderBottom(GameObject s) {
+            float halfHeight = s.transform.localScale.y;
+            Vector3 axis = s.transform.localRotation * Vector3.up;
+            return s.transform.localPosition - axis * halfHeight;
+        }
+        public Vector3 CylinderTop(GameObject s) {
+            float halfHeight = s.transform.localScale.y;
+            Vector3 axis = s.transform.localRotation * Vector3.up;
+            return s.transform.localPosition + axis * halfHeight;
+        }
+        public float CylinderRadius(GameObject s) => s.transform.localScale.x / 2;
 
         public GameObject CylinderNamed(String name, Vector3 bottom, float radius, Vector3 top, Material material) {
             GameObject s = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
@@ -1238,26 +1340,36 @@ namespace KhepriUnity {
 
         // ||||||||||||||||||||||||||| Object selection |||||||||||||||||||||||||||
         public void SelectGameObjects(GameObject[] objs) {
-            // Deselect all currently highlighted objects
-            foreach (var outline in highlightedCache.Values) {
-                if (outline != null)
-                    outline.enabled = false;
+            DeselectAllGameObjects();
+            foreach (GameObject obj in objs) {
+                foreach (Renderer renderer in obj.GetComponentsInChildren<Renderer>()) {
+                    if (!highlightedCache.ContainsKey(renderer)) {
+                        highlightedCache[renderer] = renderer.sharedMaterials;
+                        Material[] hlMats = new Material[renderer.sharedMaterials.Length];
+                        for (int i = 0; i < hlMats.Length; i++) hlMats[i] = highlightMaterial;
+                        renderer.sharedMaterials = hlMats;
+                    }
+                }
+            }
+        }
+
+        public void DeselectGameObjects(GameObject[] objs) {
+            foreach (GameObject obj in objs) {
+                foreach (Renderer renderer in obj.GetComponentsInChildren<Renderer>()) {
+                    if (highlightedCache.TryGetValue(renderer, out Material[] saved)) {
+                        renderer.sharedMaterials = saved;
+                        highlightedCache.Remove(renderer);
+                    }
+                }
+            }
+        }
+
+        public void DeselectAllGameObjects() {
+            foreach (var kvp in highlightedCache) {
+                if (kvp.Key != null)
+                    kvp.Key.sharedMaterials = kvp.Value;
             }
             highlightedCache.Clear();
-
-            // Select new objects
-            foreach (GameObject obj in objs) {
-                Outline outline = obj.GetComponent<Outline>();
-                if (outline == null) {
-                    outline = obj.AddComponent<Outline>();
-                }
-
-                highlightedCache[obj] = outline;
-                outline.OutlineMode = highlightMode;
-                outline.OutlineColor = highlightColor;
-                outline.OutlineWidth = highlightWidth;
-                outline.enabled = true;
-            }
         }
 
         public void StartSelectingGameObject() {
@@ -1282,7 +1394,7 @@ namespace KhepriUnity {
             if (idx >= 0) {
                 return idx;
             } else {
-                if (obj.transform == null) {
+                if (obj.transform.parent == null) {
                     return -1;
                 } else {
                     return IndexedSelfOrParent(obj.transform.parent.gameObject, objs);
@@ -1290,21 +1402,18 @@ namespace KhepriUnity {
             }
         }
 
+        int FindOrAddShape(GameObject obj, List<GameObject> shapes) {
+            int idx = IndexedSelfOrParent(obj, shapes);
+            if (idx >= 0) return idx;
+            // Object not tracked (e.g., created before reconnection) — add it now
+            shapes.Add(obj);
+            return shapes.Count - 1;
+        }
+
         public int SelectedGameObjectId(bool existing) {
             if (SelectedGameObjects.Count > 0) {
                 List<GameObject> shapes = processor.channel.shapes;
-                GameObject obj = SelectedGameObjects[0];
-                if (existing) {
-                    int idx = IndexedSelfOrParent(obj, shapes);
-                    if (idx >= 0) {
-                        return idx;
-                    } else {
-                        return -2;
-                    }
-                } else {
-                    shapes.Add(obj);
-                    return shapes.Count - 1;
-                }
+                return FindOrAddShape(SelectedGameObjects[0], shapes);
             } else {
                 return -2;
             }
@@ -1313,15 +1422,7 @@ namespace KhepriUnity {
             List<int> idxs = new List<int>();
             List<GameObject> shapes = processor.channel.shapes;
             foreach (GameObject obj in SelectedGameObjects) {
-                if (existing) {
-                    int idx = IndexedSelfOrParent(obj, shapes);
-                    if (idx >= 0) {
-                        idxs.Add(idx);
-                    }
-                } else {
-                    shapes.Add(obj);
-                    idxs.Add(shapes.Count - 1);
-                }
+                idxs.Add(FindOrAddShape(obj, shapes));
             }
             return idxs.ToArray();
         }
@@ -1339,7 +1440,9 @@ namespace KhepriUnity {
             // SystemManager.Awake() finds it via GetComponent.
             var go = new GameObject("SimulationManager");
             go.AddComponent<Unity.AI.Navigation.NavMeshSurface>();
-            go.AddComponent<SystemManager>();
+            var sm = go.AddComponent<SystemManager>();
+            // Awake() may be deferred, so set instance explicitly
+            SystemManager.instance = sm;
 
             // Agent template (inactive so OnEnable doesn't fire on the template)
             var agentTemplate = new GameObject("AgentTemplate");
@@ -1370,7 +1473,7 @@ namespace KhepriUnity {
             visualCollider.isTrigger = true;
             visualCollider.radius = 3.0f;
             visualCollider.height = 1.7f;
-            SystemManager.instance.agent = agentTemplate;
+            sm.agent = agentTemplate;
 
             // Goal template (inactive)
             var goalTemplate = new GameObject("GoalTemplate");
@@ -1378,7 +1481,7 @@ namespace KhepriUnity {
             var goalCollider = goalTemplate.AddComponent<BoxCollider>();
             goalCollider.isTrigger = true;
             goalTemplate.AddComponent<Goal_>();
-            SystemManager.instance.goal = goalTemplate;
+            sm.goal = goalTemplate;
         }
 
         // Agent size configuration — updates the agent template and NavMesh baking settings.
@@ -1433,21 +1536,21 @@ namespace KhepriUnity {
         }
 
         // Agent creation
-        public void CreateSimAgent(Vector3 pos, float rot, int rgb, List<Goal_> goals) {
+        public void CreateSimAgent(Vector3 pos, float rot, int rgb, Goal_[] goals) {
             EnsureSimulationManager();
-            SystemLib.CreateAgent(pos.x, pos.y, pos.z, rot, rgb, goals);
+            SystemLib.CreateAgent(pos.x, pos.y, pos.z, rot, rgb, goals.ToList());
         }
-        public void SpawnAgentsRect(int count, Vector3 center, float dx, float dz, float rot, int rgb, int[] goalIDs) {
+        public void SpawnAgentsRect(int count, Vector3 center, float dx, float dz, float rot, int rgb, Goal_[] goals) {
             EnsureSimulationManager();
-            SystemLib.SpawnAgentsRect(count, center.x, center.y, center.z, dx, dz, rot, rgb, goalIDs);
+            SystemLib.SpawnAgentsRect(count, center.x, center.y, center.z, dx, dz, rot, rgb, goals);
         }
-        public void SpawnAgentsEllipse(int count, Vector3 center, float dx, float dz, float rot, int rgb, int[] goalIDs) {
+        public void SpawnAgentsEllipse(int count, Vector3 center, float dx, float dz, float rot, int rgb, Goal_[] goals) {
             EnsureSimulationManager();
-            SystemLib.SpawnAgentsEllipse(count, center.x, center.y, center.z, dx, dz, rot, rgb, goalIDs);
+            SystemLib.SpawnAgentsEllipse(count, center.x, center.y, center.z, dx, dz, rot, rgb, goals);
         }
-        public void SpawnAgentsPolygon(int count, float h, int rgb, int[] goalIDs, Vector3[] vertices) {
+        public void SpawnAgentsPolygon(int count, float h, int rgb, Goal_[] goals, Vector3[] vertices) {
             EnsureSimulationManager();
-            SystemLib.SpawnAgentsPolygon(count, h, rgb, goalIDs,
+            SystemLib.SpawnAgentsPolygon(count, h, rgb, goals,
                 System.Array.ConvertAll(vertices, v => new Vector2(v.x, v.z)));
         }
 
@@ -1472,6 +1575,24 @@ namespace KhepriUnity {
             SystemLib.UpdateNavMesh();
         }
         public void SetSimRandSeed(int seed) => UnityEngine.Random.InitState(seed);
+
+        // Blocking selection: starts selection; the result is sent later
+        // by SceneLoad when the user clicks (deferred response).
+        public bool selectionPending = false;
+        public void GetShape(String prompt) {
+            Debug.Log(prompt);
+            SelectedGameObjects.Clear();
+            InSelectionProcess = true;
+            SelectingManyGameObjects = false;
+            selectionPending = true;
+        }
+        public void GetShapes(String prompt) {
+            Debug.Log(prompt);
+            SelectedGameObjects.Clear();
+            InSelectionProcess = true;
+            SelectingManyGameObjects = true;
+            selectionPending = true;
+        }
 
         // Blocking simulation: starts the sim; the result is sent later
         // by SceneLoad when the simulation finishes (deferred response).

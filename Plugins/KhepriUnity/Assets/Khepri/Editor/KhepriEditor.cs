@@ -6,11 +6,37 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityMeshSimplifier;
 
+// Persistent polling — runs regardless of inspector visibility
+[InitializeOnLoad]
+public static class KhepriEditorPoller {
+    private static Khepri cachedKhepri;
+
+    static KhepriEditorPoller() {
+        EditorApplication.update += Poll;
+    }
+
+    static void Poll() {
+        // Drive the serve loop continuously (MonoBehaviour.Update only fires on events in edit mode)
+        if (cachedKhepri == null)
+            cachedKhepri = UnityEngine.Object.FindAnyObjectByType<Khepri>();
+        cachedKhepri?.sceneLoad?.Update();
+
+        if (KhepriUnity.Primitives.Instance == null) return;
+        if (KhepriUnity.Primitives.requestEnterPlayMode) {
+            KhepriUnity.Primitives.requestEnterPlayMode = false;
+            EditorApplication.EnterPlaymode();
+        }
+        if (KhepriUnity.Primitives.requestExitPlayMode) {
+            KhepriUnity.Primitives.requestExitPlayMode = false;
+            EditorApplication.ExitPlaymode();
+        }
+    }
+}
+
 // TODO tooltips in GUIContent
 [CustomEditor(typeof(Khepri))]
 public class KhepriEditor : Editor {
     private static Khepri khepri; // Serializable container for data
-    private bool hideAdvancedSettings = true; // On playmode, the advance settings might slightly impact performance
 
     #region GUI Styles
     private GUIStyle greenBoldFont;
@@ -55,12 +81,6 @@ public class KhepriEditor : Editor {
     private GUIContent resetSceneButtonText = new GUIContent("Reset Scene");
     private GUIContent saveCurrentSceneButtonText = new GUIContent("Save Current Scene");
     private GUIContent openSceneButtonText = new GUIContent("Open Scene");
-    // Advanced Settings
-    private GUIContent hideAdvancedSettingsText = new GUIContent("Hide Advanced Settings",
-        "On playmode, advanced settings might slight impact performance. Uncheck to show the advanced settings.");
-    // Quality Presets
-    private GUIContent qualityPresetsText = new GUIContent("Quality Presets");
-    private string[] optionsQualityPresets = {"Concept", "Analysis", "Showcase", "Advanced"};
     // Optimization Settings
     private GUIContent optimizationSettingsText = new GUIContent("Optimization Settings",
         "Optimizes scene for navigation but might take a while to process.");
@@ -78,27 +98,8 @@ public class KhepriEditor : Editor {
     private GUIContent textureQualityText = new GUIContent("Texture Quality");
     private string[] optionsAnisotropicFiltering = {"Disabled", "Per Texture", "Forced On"};
     private GUIContent anisotropicText = new GUIContent("Anisotropic Textures");
-    private string[] optionsAntiAliasing = {"Disabled", "2x Multi Sampling", "4x Multi Sampling", "8x Multi Sampling"};
-    private GUIContent aliasingText = new GUIContent("Anti Aliasing");
     private GUIContent textureStreamingText = new GUIContent("Texture Streaming");
     private GUIContent defaultMaterialButtonText = new GUIContent("Default Material Settings",
-        "Return all settings to default settings.");
-    // Shadows
-    private GUIContent enableShadowsText = new GUIContent("Enable Shadows", 
-        "This heavily impacts performance.");
-    private GUIContent shadowSettingsText = new GUIContent("Shadow Settings", "Advanced settings.");
-    private GUIContent shadowDistanceText = new GUIContent("Shadow Distance");
-    private GUIContent pixelLightCountText = new GUIContent("Pixel Light Count");
-    private string[] optionsShadowResolution =
-        {"Low Resolution", "Medium Resolution", "High Resolution", "Very High Resolution"};
-    private GUIContent shadowResolutionText = new GUIContent("Shadow Resolution");
-    private string[] optionsShadowmaskMode = {"Shadowmask", "Distance Shadowmask"};
-    private GUIContent shadowMaskText = new GUIContent("Shadowmask Mode");
-    private string[] optionsShadowProjection = {"Close Fit", "Stable Fit"};
-    private GUIContent shadowProjectionText = new GUIContent("Shadow Projection");
-    private string[] optionsShadowCascade = {"No Cascade", "Two Cascades", "Four Cascades"};
-    private GUIContent shadowCascadeText = new GUIContent("Shadow Cascades");
-    private GUIContent defaultShadowButtonText = new GUIContent("Default Shadow Settings",
         "Return all settings to default settings.");
     // LOD
     private GUIContent enableLODText = new GUIContent("Enable Level of Detail", 
@@ -137,52 +138,7 @@ public class KhepriEditor : Editor {
     private GUIContent sceneIlluminationSettingsText = new GUIContent("Scene Illumination Settings");
     private GUIContent enablePointlightText = new GUIContent("Enable Pointlights");
     private GUIContent enablePointlightShadowText = new GUIContent("Enable Pointlights Shadow");
-    private GUIContent ambientIlluminationText = new GUIContent("Ambient Illumination");
-    private string[] optionsGISource = {"Skybox", "Flat Color"};
-    private GUIContent GISourceText = new GUIContent("Source");
-    private GUIContent GIColorText = new GUIContent("Color");
-    private GUIContent GIIntensityMultiplierText = new GUIContent("Intensity Multiplier");
-    private GUIContent ambientReflectionsText = new GUIContent("Ambient Illumination Reflection");
-    private string[] optionsGIResolution = {"16", "32", "64", "128", "256", "512", "1024", "2048"};
-    private GUIContent GIResolutionText = new GUIContent("Resolution");
-    private GUIContent GIReflectionIntensityMultiplierText = new GUIContent("Intensity Multiplier");
-    private GUIContent GIReflectionBouncesText = new GUIContent("Bounces");
     private GUIContent defaultIlluminationButtonText = new GUIContent("Default Illumination Settings");
-    // Bake Settings
-    private GUIContent bakeSettingsText = new GUIContent("Bake Settings");
-    // Lightmap Settings
-    private GUIContent lightmapBakeSettingsText = new GUIContent("Lightmap Bake Settings", 
-        "Lightmaps are precalculated light textures. This increases runtime performance but only works on static objects.");
-    private string[] optionsGIBake = {"Realtime", "Baked"};
-    private GUIContent illuminationModeText = new GUIContent("Illumination Mode", "Affects Global Illumination.");
-    private GUIContent bakedPointlightsText = new GUIContent("Baked Pointlight");
-    private GUIContent bakedDirectionalLightText = new GUIContent("Baked Directional Light", "Non dynamic sunlight.");
-    private string[] optionsLightmapper = {"Progressive CPU", "Progressive GPU"};
-    private GUIContent lightmapperText = new GUIContent("Lightmapper");
-    private GUIContent directSamplesText = new GUIContent("Direct Samples");
-    private GUIContent indirectSamplesText = new GUIContent("Indirect Samples");
-    private GUIContent environmentSamplesText = new GUIContent("Environment Samples");
-    private string[] optionsBounces = {"None", "1", "2", "3", "4"};
-    private GUIContent bouncesText = new GUIContent("Bounces");
-    private GUIContent lightmapResolutionText = new GUIContent("Lightmap Resolution");
-    private string[] optionsLightmapSize = {"32", "64", "128", "256", "512", "1024", "2048", "4096"};
-    private GUIContent lightmapSizeText = new GUIContent("Lightmap Size");
-    private GUIContent compressLightmapText = new GUIContent("Compress Lightmap");
-    private GUIContent ambientOcclusionText = new GUIContent("Ambient Occlusion");
-    private GUIContent bakeIlluminationButtonText = new GUIContent("Bake Illumination");
-    private GUIContent stopbakingButtonText = new GUIContent("Cancel Illumination Baking");
-    private GUIContent bakedStatusOKText = new GUIContent("Light data is currently baked in this scene.");
-    private GUIContent clearBakeDataButtonText = new GUIContent("Clear Bake Data");
-    private GUIContent bakedStatsNOKText = new GUIContent("No light data baked in this scene.");
-    private GUIContent defaultLightmapBakeButtonText = new GUIContent("Default Lightmap Bake Settings");
-    // Occlusion Culling
-    private GUIContent occlusionBakeSettingsText = new GUIContent("Occlusion Bake Settings");
-    private GUIContent bakeOcclusionButtonText = new GUIContent("Bake Occlusion");
-    private GUIContent stopOcclusionBakingButtonText = new GUIContent("Cancel Occlusion Baking");
-    private GUIContent occlusionBakedStatusOKText = new GUIContent("Occlusion data is currently baked in this scene.");
-    private GUIContent visualizeOcclusionText = new GUIContent("Visualize Occlusion Culling");
-    private GUIContent clearOcclusionDataButtonText = new GUIContent("Clear Occlusion Data");
-    private GUIContent occlusionBakedStatusNOKText = new GUIContent("No occlusion data baked in this scene.");
     // Player Settings
     private GUIContent playerSettingsText = new GUIContent("Player");
     private GUIContent playerSettings2Text = new GUIContent("Player Settings");
@@ -196,14 +152,7 @@ public class KhepriEditor : Editor {
     private GUIContent defaultPlayerButtonText = new GUIContent("Default Player Settings");
     // Selection Settings
     private GUIContent selectionSettingsText = new GUIContent("Selection Settings");
-    private string[] optionsHighlightMode = {"OutlineAll",
-        "OutlineVisible",
-        "OutlineHidden",
-        "OutlineAndSilhouette",
-        "SilhouetteOnly"};
-    private GUIContent highlightModeText = new GUIContent("Highlight Mode");
     private GUIContent highlightColorText = new GUIContent("Highlight Color");
-    private GUIContent highlightWidthText = new GUIContent("Highlight Width");
     private GUIContent defaultSelectionText = new GUIContent("Default Selection Settings");
     // Navigation
     private GUIContent navigationSettingsText = new GUIContent("Navigation", "Navigation controls.");
@@ -280,157 +229,31 @@ public class KhepriEditor : Editor {
         //GenerateNavigateUI();
         GenerateKhepriButtonsUI();
 
-        GenerateQualityPresetsUI();
+        GenerateOptimizeUI();
+        GenerateSaveResetSceneUI();
 
-        if (khepri.qualityPresetSelected == 0) { // Concept
-            if (EditorApplication.isPlaying) {
-                hideAdvancedSettings = EditorGUILayout.Toggle(hideAdvancedSettingsText, hideAdvancedSettings);
-            }
+        // Toggles
+        GUILayout.Space(10);
+        GUILayout.Label(togglesText, EditorStyles.boldLabel);
+        GenerateEnableMaterialsUI();
+        GenerateEnableLODUI();
+        GenerateEnableCollidersUI();
 
-            if (!EditorApplication.isPlaying || (EditorApplication.isPlaying && !hideAdvancedSettings)) {
-                // Toggles
-                GUILayout.Space(10);
-                GUILayout.Label(togglesText, EditorStyles.boldLabel);
-                GenerateEnableMaterialsUI();
-                GenerateEnableShadowsUI();
-                GenerateEnableLODUI();
-                GenerateEnableCollidersUI();
+        // Illumination
+        GUILayout.Space(10);
+        GUILayout.Label(illuminationSettingsText, EditorStyles.boldLabel);
+        GenerateDayNightUI();
+        GenerateIlluminationUI();
 
-                // Illumination
-                GUILayout.Space(10);
-                GUILayout.Label(illuminationSettingsText, EditorStyles.boldLabel);
-                GenerateDayNightUI();
-                GenerateIlluminationUI();
+        // Player Settings
+        GUILayout.Space(10);
+        GUILayout.Label(playerSettingsText, EditorStyles.boldLabel);
+        GeneratePlayerUI();
+        GenerateSelectionUI();
 
-                // Player Settings
-                GUILayout.Space(10);
-                GUILayout.Label(playerSettingsText, EditorStyles.boldLabel);
-                GeneratePlayerUI();
-                GenerateSelectionUI();
-
-                GUILayout.Space(10);
-                GUILayout.Label(navigationSettingsText, EditorStyles.boldLabel);
-                GenerateNavigationUI();
-            }
-        }
-
-        else if (khepri.qualityPresetSelected == 1) { // Analysis
-            GenerateOptimizeUI();
-            
-            if (EditorApplication.isPlaying) {
-                hideAdvancedSettings = EditorGUILayout.Toggle(hideAdvancedSettingsText, hideAdvancedSettings);
-            }
-
-            if (!EditorApplication.isPlaying || (EditorApplication.isPlaying && !hideAdvancedSettings)) {
-                // Toggles
-                GUILayout.Space(10);
-                GUILayout.Label(togglesText, EditorStyles.boldLabel);
-                GenerateEnableMaterialsUI();
-                GenerateEnableShadowsUI();
-                GenerateEnableLODUI();
-                GenerateEnableCollidersUI();
-
-                // Illumination
-                GUILayout.Space(10);
-                GUILayout.Label(illuminationSettingsText, EditorStyles.boldLabel);
-                GenerateDayNightUI();
-                GenerateIlluminationUI();
-
-                // Player Settings
-                GUILayout.Space(10);
-                GUILayout.Label(playerSettingsText, EditorStyles.boldLabel);
-                GeneratePlayerUI();
-                GenerateSelectionUI();
-
-                GUILayout.Space(10);
-                GUILayout.Label(navigationSettingsText, EditorStyles.boldLabel);
-                GenerateNavigationUI();
-            }
-        }
-        
-        else if (khepri.qualityPresetSelected == 2) { // Presentation
-            GenerateOptimizeUI();
-            
-            if (EditorApplication.isPlaying) {
-                hideAdvancedSettings = EditorGUILayout.Toggle(hideAdvancedSettingsText, hideAdvancedSettings);
-            }
-
-            if (!EditorApplication.isPlaying || (EditorApplication.isPlaying && !hideAdvancedSettings)) {
-                GenerateSaveResetSceneUI();
-
-                // Toggles
-                GUILayout.Space(10);
-                GUILayout.Label(togglesText, EditorStyles.boldLabel);
-                GenerateEnableMaterialsUI();
-                GenerateEnableShadowsUI();
-                GenerateEnableLODUI();
-                GenerateEnableCollidersUI();
-
-                // Illumination
-                GUILayout.Space(10);
-                GUILayout.Label(illuminationSettingsText, EditorStyles.boldLabel);
-                GenerateDayNightUI();
-                GenerateIlluminationUI();
-
-                // Bake
-                GUILayout.Space(10);
-                GUILayout.Label(bakeSettingsText, EditorStyles.boldLabel);
-                GenerateLightmapBakeUI();
-                GenerateOcclusionBakeUI();
-
-                // Player Settings
-                GUILayout.Space(10);
-                GUILayout.Label(playerSettingsText, EditorStyles.boldLabel);
-                GeneratePlayerUI();
-                GenerateSelectionUI();
-
-                GUILayout.Space(10);
-                GUILayout.Label(navigationSettingsText, EditorStyles.boldLabel);
-                GenerateNavigationUI();
-            }
-        }
-
-        else if (khepri.qualityPresetSelected == 3) { // Advanced
-            GenerateOptimizeUI();
-            
-            if (EditorApplication.isPlaying) {
-                hideAdvancedSettings = EditorGUILayout.Toggle(hideAdvancedSettingsText, hideAdvancedSettings);
-            }
-
-            if (!EditorApplication.isPlaying || (EditorApplication.isPlaying && !hideAdvancedSettings)) {
-                GenerateSaveResetSceneUI();
-
-                // Toggles
-                GUILayout.Space(10);
-                GUILayout.Label(togglesText, EditorStyles.boldLabel);
-                GenerateEnableMaterialsUI();
-                GenerateEnableShadowsUI();
-                GenerateEnableLODUI();
-                GenerateEnableCollidersUI();
-
-                // Illumination
-                GUILayout.Space(10);
-                GUILayout.Label(illuminationSettingsText, EditorStyles.boldLabel);
-                GenerateDayNightUI();
-                GenerateIlluminationUI();
-
-                // Bake
-                GUILayout.Space(10);
-                GUILayout.Label(bakeSettingsText, EditorStyles.boldLabel);
-                GenerateLightmapBakeUI();
-                GenerateOcclusionBakeUI();
-
-                // Player Settings
-                GUILayout.Space(10);
-                GUILayout.Label(playerSettingsText, EditorStyles.boldLabel);
-                GeneratePlayerUI();
-                GenerateSelectionUI();
-
-                GUILayout.Space(10);
-                GUILayout.Label(navigationSettingsText, EditorStyles.boldLabel);
-                GenerateNavigationUI();
-            }
-        }
+        GUILayout.Space(10);
+        GUILayout.Label(navigationSettingsText, EditorStyles.boldLabel);
+        GenerateNavigationUI();
     }
     
     #region UI Generations and Handler Methods
@@ -572,7 +395,7 @@ public class KhepriEditor : Editor {
     static bool StartKhepri()
     {
         SceneLoad.visualizing = false;
-        bool? success = khepri.sceneLoad?.StartServer();
+        bool? success = khepri.sceneLoad?.StartKhepri();
         if (success != true) // this can either be false (if starting the server failed) or null (if sceneload wasn't initialized properly)
             return false;
 
@@ -583,7 +406,7 @@ public class KhepriEditor : Editor {
     static void StopKhepri()
     {
         if (khepri.isKhepriRunning) {
-            khepri.sceneLoad?.StopServer();
+            khepri.sceneLoad?.StopKhepri();
             khepri.isKhepriRunning = false;
             EditorApplication.update -= khepri.sceneLoad.Update;
         }
@@ -627,33 +450,29 @@ public class KhepriEditor : Editor {
         }
         EditorGUI.EndDisabledGroup();
 
-        // Start Khepri without navigation (Only available on Showcase and Advanced quality Preset)
-        if (khepri.qualityPresetSelected == 2 || khepri.qualityPresetSelected == 3) {
-            EditorGUI.BeginDisabledGroup(khepri.khepriWithNavigation);
-            khepri.startKhepriNoNavigationToggle = GUILayout.Toggle(khepri.isKhepriRunning, new GUIContent(khepri.startKhepriNoNavigationLogo, startStopKhepriNoNavigationTooltip), buttonStyle2);
-            if (khepri.startKhepriNoNavigationToggle != khepri.isKhepriRunning) {
-                if (khepri.isKhepriRunning) {
-                    StopKhepri();
-                    khepri.khepriWithoutNavigation = false;
-                }
-                else {
-                    if (StartKhepri())
-                        khepri.khepriWithoutNavigation = true;
-                }
+        // Start Khepri without navigation
+        EditorGUI.BeginDisabledGroup(khepri.khepriWithNavigation);
+        khepri.startKhepriNoNavigationToggle = GUILayout.Toggle(khepri.isKhepriRunning, new GUIContent(khepri.startKhepriNoNavigationLogo, startStopKhepriNoNavigationTooltip), buttonStyle2);
+        if (khepri.startKhepriNoNavigationToggle != khepri.isKhepriRunning) {
+            if (khepri.isKhepriRunning) {
+                StopKhepri();
+                khepri.khepriWithoutNavigation = false;
             }
-            EditorGUI.EndDisabledGroup();
+            else {
+                if (StartKhepri())
+                    khepri.khepriWithoutNavigation = true;
+            }
         }
+        EditorGUI.EndDisabledGroup();
 
-        // Start navigation (Only available on Showcase and Advanced quality Preset)
-        if (khepri.qualityPresetSelected == 2 || khepri.qualityPresetSelected == 3) {
-            khepri.startNavigationToogle = GUILayout.Toggle(EditorApplication.isPlaying,
-                new GUIContent(khepri.startNavigationLogo, startNavigationTooltip), buttonStyle3);
-            if (khepri.startNavigationToogle != EditorApplication.isPlaying) {
-                if (!EditorApplication.isPlaying)
-                    EditorApplication.EnterPlaymode();
-                else
-                    EditorApplication.ExitPlaymode();
-            }
+        // Start navigation
+        khepri.startNavigationToogle = GUILayout.Toggle(EditorApplication.isPlaying,
+            new GUIContent(khepri.startNavigationLogo, startNavigationTooltip), buttonStyle3);
+        if (khepri.startNavigationToogle != EditorApplication.isPlaying) {
+            if (!EditorApplication.isPlaying)
+                EditorApplication.EnterPlaymode();
+            else
+                EditorApplication.ExitPlaymode();
         }
 
         GUILayout.FlexibleSpace();
@@ -697,58 +516,24 @@ public class KhepriEditor : Editor {
         EditorGUI.EndDisabledGroup();
         EditorGUI.EndDisabledGroup();
     }
-    void GenerateQualityPresetsUI() {
-        GUILayout.Space(10);
-        GUILayout.Label(qualityPresetsText, EditorStyles.boldLabel);
-        //EditorGUI.BeginDisabledGroup(true);
-        //GUILayout.Label("WORK IN PROGRESS!!!!!", EditorStyles.boldLabel);
-        GUILayout.BeginVertical("Box");
-        khepri.qualityPresetSelected = GUILayout.SelectionGrid(khepri.qualityPresetSelected, optionsQualityPresets, 1, GUILayout.MinWidth(200), GUILayout.MinHeight(100));
-        GUILayout.EndVertical();
-
-        if (khepri.qualityPresetSelected != khepri.lastQualityPresetSelected) {
-            ResetSettings();
-            switch (khepri.qualityPresetSelected) {
-                case 0:
-                    khepri.enableLOD = false;
-                    khepri.enableMaterials = false;
-                    khepri.enablePointlightsShadows = false;
-                    break;
-                case 1:
-                    khepri.enableLOD = true;
-                    khepri.enableMaterials = true;
-                    khepri.enablePointlightsShadows = false;
-                    break;
-                case 2:
-                    khepri.enableLOD = true;
-                    khepri.enableMaterials = true;
-                    khepri.enablePointlightsShadows = true;
-                    break;
-                case 3:
-                    break;
-            }
-            UpdateSettings();
-            khepri.lastQualityPresetSelected = khepri.qualityPresetSelected;
-        }
-
-        //EditorGUI.EndDisabledGroup();
-    }
     void GenerateOptimizeUI() {
         GUILayout.Space(10);
         GUILayout.Label(optimizationSettingsText, EditorStyles.boldLabel);
+        EditorGUI.BeginChangeCheck();
         if (!khepri.optimized)
             khepri.enableMeshCombine = GUILayout.Toggle(khepri.enableMeshCombine, combineButtonText);
         if (GUILayout.Button(optimizeButtonText)) {
             khepri.sceneLoad?.primitives.OptimizeParent();
             khepri.optimized = true;
         }
-
-        HandleOptimize();
+        if (EditorGUI.EndChangeCheck())
+            HandleOptimize();
     }
     static void HandleOptimize() {
         khepri.sceneLoad?.primitives.SetEnableMergeParent(khepri.enableMeshCombine);
     }
     void GenerateEnableMaterialsUI() {
+        EditorGUI.BeginChangeCheck();
         khepri.enableMaterials = EditorGUILayout.Toggle(enableMaterialsText, khepri.enableMaterials);
         EditorGUI.BeginDisabledGroup(!khepri.enableMaterials);
         GUILayout.BeginVertical("HelpBox");
@@ -760,9 +545,6 @@ public class KhepriEditor : Editor {
             // Anisotropic Filtering
             khepri.anisotropicFilteringSelected = EditorGUILayout.Popup(anisotropicText,
                 khepri.anisotropicFilteringSelected, optionsAnisotropicFiltering);
-            // Anti Aliasing
-            khepri.antiAliasingSelected =
-                EditorGUILayout.Popup(aliasingText, khepri.antiAliasingSelected, optionsAntiAliasing);
             // Texture Streaming
             khepri.enableTextureStreaming =
                 EditorGUILayout.Toggle(textureStreamingText, khepri.enableTextureStreaming);
@@ -775,7 +557,8 @@ public class KhepriEditor : Editor {
         EditorGUI.EndDisabledGroup();
         GUILayout.EndVertical();
 
-        HandleEnableMaterials();
+        if (EditorGUI.EndChangeCheck())
+            HandleEnableMaterials();
     }
     static void HandleEnableMaterials() {
         khepri.sceneLoad?.primitives.SetApplyMaterials(khepri.enableMaterials);
@@ -790,8 +573,6 @@ public class KhepriEditor : Editor {
             else
                 filtering = AnisotropicFiltering.ForceEnable;
             QualitySettings.anisotropicFiltering = filtering;
-            
-            QualitySettings.antiAliasing = khepri.antiAliasingSelected < 3? khepri.antiAliasingSelected * 2 : 8; // HACK 0 for option 0, 2 for option 1, 4 for option 2 and 8 for option 3
 
             QualitySettings.streamingMipmapsActive = khepri.enableTextureStreaming;
         }
@@ -803,84 +584,10 @@ public class KhepriEditor : Editor {
     void ResetEnableMaterials() {
         khepri.textureQualitySelected = khepri.defaultTextureQualitySelected;
         khepri.anisotropicFilteringSelected = khepri.defaultAnisotropicFilteringSelected;
-        khepri.antiAliasingSelected = khepri.defaultAntiAliasingSelected;
         khepri.enableTextureStreaming = khepri.defaultEnableTextureStreaming;
     }
-    void GenerateEnableShadowsUI() {
-        khepri.enableShadows = EditorGUILayout.Toggle(enableShadowsText, khepri.enableShadows);
-
-        EditorGUI.BeginDisabledGroup(!khepri.enableShadows);
-        GUILayout.BeginVertical("HelpBox");
-        khepri.shadowSettingsFoldout = EditorGUILayout.Foldout(khepri.shadowSettingsFoldout, shadowSettingsText, foldoutStyle);
-        if (khepri.shadowSettingsFoldout && khepri.enableShadows) {
-            // Shadow Distance
-            khepri.shadowDistance = EditorGUILayout.IntField(shadowDistanceText, khepri.shadowDistance);
-            // Pixel Light Count
-            khepri.pixelLightCount = EditorGUILayout.IntField(pixelLightCountText, khepri.pixelLightCount);
-            // Shadow Resolution
-            khepri.shadowResolutionSelected = EditorGUILayout.Popup(shadowResolutionText,
-                khepri.shadowResolutionSelected, optionsShadowResolution);
-            // Shadowmask Mode
-            khepri.shadowmaskModeSelected = EditorGUILayout.Popup(shadowMaskText, khepri.shadowmaskModeSelected,
-                optionsShadowmaskMode);
-            // Shadow Projection
-            khepri.shadowProjectionSelected = EditorGUILayout.Popup(shadowProjectionText, khepri.shadowProjectionSelected,
-                optionsShadowProjection);
-            // Shadow Cascade
-            khepri.shadowCascadeSelected = EditorGUILayout.Popup(shadowCascadeText, khepri.shadowCascadeSelected,
-                optionsShadowCascade);
-
-            if (GUILayout.Button(defaultShadowButtonText)) {
-                ResetEnableShadows();
-            }
-        }
-
-        GUILayout.EndVertical();
-        EditorGUI.EndDisabledGroup();
-
-        HandleEnableShadows();
-    }
-    static void HandleEnableShadows() {
-        QualitySettings.shadows = khepri.enableShadows ? ShadowQuality.All : ShadowQuality.Disable;
-        QualitySettings.shadowDistance = khepri.shadowDistance;
-        QualitySettings.pixelLightCount = khepri.pixelLightCount;
-
-        ShadowResolution shadowResolution;
-        if (khepri.shadowResolutionSelected == 0)
-            shadowResolution = ShadowResolution.Low;
-        else if (khepri.shadowResolutionSelected == 1)
-            shadowResolution = ShadowResolution.Medium;
-        else if (khepri.shadowResolutionSelected == 2)
-            shadowResolution = ShadowResolution.High;
-        else
-            shadowResolution = ShadowResolution.VeryHigh;
-        QualitySettings.shadowResolution = shadowResolution;
-
-        ShadowmaskMode shadowmaskMode;
-        if (khepri.shadowmaskModeSelected == 0)
-            shadowmaskMode = ShadowmaskMode.Shadowmask;
-        else
-            shadowmaskMode = ShadowmaskMode.DistanceShadowmask;
-        QualitySettings.shadowmaskMode = shadowmaskMode;
-        
-        ShadowProjection shadowProjection;
-        if (khepri.shadowProjectionSelected == 0)
-            shadowProjection = ShadowProjection.CloseFit;
-        else
-            shadowProjection = ShadowProjection.StableFit;
-        QualitySettings.shadowProjection = shadowProjection;
-
-        QualitySettings.shadowCascades = khepri.shadowCascadeSelected * 2;
-    }
-    void ResetEnableShadows() {
-        khepri.shadowDistance = khepri.defaultShadowDistance;
-        khepri.pixelLightCount = khepri.defaultPixelLightCount;
-        khepri.shadowResolutionSelected = khepri.defaultShadowResolutionSelected;
-        khepri.shadowmaskModeSelected = khepri.defaultShadowmaskModeSelected;
-        khepri.shadowProjectionSelected = khepri.defaultShadowProjectionSelected;
-        khepri.shadowCascadeSelected = khepri.defaultShadowCascadeSelected;
-    }
     void GenerateEnableLODUI() {
+        EditorGUI.BeginChangeCheck();
         khepri.enableLOD = EditorGUILayout.Toggle(enableLODText, khepri.enableLOD);
 
         EditorGUI.BeginDisabledGroup(!khepri.enableLOD);
@@ -948,7 +655,8 @@ public class KhepriEditor : Editor {
         GUILayout.EndVertical();
         EditorGUI.EndDisabledGroup();
 
-        HandleEnableLOD();
+        if (EditorGUI.EndChangeCheck())
+            HandleEnableLOD();
     }
     void GenerateLevelUI(int index) {
         EditorGUILayout.BeginVertical(EditorStyles.helpBox);
@@ -1028,6 +736,7 @@ public class KhepriEditor : Editor {
         khepri.sceneLoad?.primitives.SetApplyColliders(khepri.enableColliders);
     }
     void GenerateDayNightUI() {
+        EditorGUI.BeginChangeCheck();
         GUILayout.BeginVertical("HelpBox");
         khepri.dayNightSettingsFoldout = EditorGUILayout.Foldout(khepri.dayNightSettingsFoldout,
             dayNightSettingsText, foldoutStyle);
@@ -1064,7 +773,8 @@ public class KhepriEditor : Editor {
             EditorGUI.EndDisabledGroup();
         }
         GUILayout.EndVertical();
-        HandleDayNight();
+        if (EditorGUI.EndChangeCheck())
+            HandleDayNight();
     }
     static void HandleDayNight() {
         if (khepri.directionalLight != null)
@@ -1090,241 +800,36 @@ public class KhepriEditor : Editor {
         khepri.sunY = khepri.defaultSunY;
     }
     void GenerateIlluminationUI() {
+        EditorGUI.BeginChangeCheck();
         GUILayout.BeginVertical("HelpBox");
-        khepri.sceneIlluminationSettingsFoldout = EditorGUILayout.Foldout(khepri.sceneIlluminationSettingsFoldout, 
+        khepri.sceneIlluminationSettingsFoldout = EditorGUILayout.Foldout(khepri.sceneIlluminationSettingsFoldout,
             sceneIlluminationSettingsText, foldoutStyle);
         if (khepri.sceneIlluminationSettingsFoldout) {
             // Pointlights
             khepri.enablePointlights = EditorGUILayout.Toggle(enablePointlightText, khepri.enablePointlights);
             // Pointlights Shadow
             khepri.enablePointlightsShadows = EditorGUILayout.Toggle(enablePointlightShadowText, khepri.enablePointlightsShadows);
-            // Global Illumination Source
-            GUILayout.Label(ambientIlluminationText, EditorStyles.boldLabel);
-            khepri.giSourceSelected = EditorGUILayout.Popup(GISourceText, khepri.giSourceSelected,
-                optionsGISource);
-            if (khepri.giSourceSelected == 1) {
-                khepri.giColor = EditorGUILayout.ColorField(GIColorText, khepri.giColor);
-            }
-            else {
-                khepri.giIntensityMultiplier = EditorGUILayout.Slider(GIIntensityMultiplierText,
-                    khepri.giIntensityMultiplier, 0f, 1f);
-            }
-            GUILayout.Label(ambientReflectionsText, EditorStyles.boldLabel);
-            // Global Illumination Reflection Resolution 
-            khepri.reflectionResolutionSelected = EditorGUILayout.Popup(GIResolutionText, khepri.reflectionResolutionSelected,
-                optionsGIResolution);
-            // Reflection Intensity Multiplier
-            khepri.reflectionIntensityMultiplier = EditorGUILayout.Slider(GIReflectionIntensityMultiplierText,
-                khepri.reflectionIntensityMultiplier, 0f, 1f);
-            // Reflection Bounces
-            khepri.reflectionBounces = (int) EditorGUILayout.Slider(GIReflectionBouncesText,
-                khepri.reflectionBounces, 1f, 5f);
 
             if (GUILayout.Button(defaultIlluminationButtonText)) {
                 ResetIllumination();
             }
         }
         GUILayout.EndVertical();
-        HandleIllumination();
+        if (EditorGUI.EndChangeCheck())
+            HandleIllumination();
     }
     static void HandleIllumination() {
         khepri.sceneLoad?.primitives.SetEnableLights(khepri.enablePointlights);
         khepri.sceneLoad?.primitives.SetEnablePointLightsShadow(khepri.enablePointlightsShadows);
-
-        RenderSettings.ambientMode = khepri.giSourceSelected == 0 ? AmbientMode.Skybox : AmbientMode.Flat;
-        RenderSettings.ambientSkyColor = khepri.giColor;
-        RenderSettings.ambientIntensity = khepri.giIntensityMultiplier;
-        int[] GIResolutions = {16, 32, 64, 128, 256, 512, 1024, 2048};
-        RenderSettings.defaultReflectionResolution = GIResolutions[khepri.reflectionResolutionSelected];
-        RenderSettings.reflectionIntensity = khepri.reflectionIntensityMultiplier;
-        RenderSettings.reflectionBounces = khepri.reflectionBounces;
+        // RenderSettings.ambient*/reflection* APIs are non-functional under HDRP.
+        // Ambient and reflection settings are managed through HDRP Volume profiles.
     }
     void ResetIllumination() {
         khepri.enablePointlights = khepri.defaultEnablePointlights;
         khepri.enablePointlightsShadows = khepri.defaultEnablePointlightsShadows;
-        khepri.giIntensityMultiplier = khepri.defaultGIIntensityMultiplier;
-        khepri.giSourceSelected = khepri.defaultGISourceSelected;
-        khepri.giColor = khepri.defaultGIColor;
-        khepri.reflectionResolutionSelected = khepri.defaultReflectionResolutionSelected;
-        khepri.reflectionIntensityMultiplier = khepri.defaultReflectionIntensityMultiplier;
-        khepri.reflectionBounces = khepri.defaultReflectionBounces;
-    }
-    void GenerateLightmapBakeUI() {
-        GUILayout.BeginVertical("HelpBox");
-        khepri.lightmapBakeSettingsFoldout = EditorGUILayout.Foldout(khepri.lightmapBakeSettingsFoldout, lightmapBakeSettingsText, foldoutStyle);
-        if (khepri.lightmapBakeSettingsFoldout) {
-            EditorGUILayout.HelpBox("Experimental: Lightmap baking is not fully functional in the current version. These settings may not produce expected results.", MessageType.Warning);
-            EditorGUI.BeginDisabledGroup(EditorApplication.isPlaying);
-            EditorGUI.BeginDisabledGroup(khepri.isKhepriRunning);
-            // Global Illumination Bake
-            khepri.giModeSelected = EditorGUILayout.Popup(illuminationModeText, khepri.giModeSelected,
-                optionsGIBake);
-
-            EditorGUI.BeginDisabledGroup(khepri.giModeSelected == 0);
-            // Realtime or baked pointlights and directional lights
-            khepri.realTimePointLight = !EditorGUILayout.Toggle(bakedPointlightsText, !khepri.realTimePointLight);
-             khepri.realTimeDirectionalLight = !EditorGUILayout.Toggle(bakedDirectionalLightText, !khepri.realTimeDirectionalLight);
-            // Lightmapper type
-            khepri.lightmapperSelected = EditorGUILayout.Popup(lightmapperText, khepri.lightmapperSelected,
-                optionsLightmapper);
-            // Lightmapper Direct Samples
-            khepri.lightmapDirectSamples = EditorGUILayout.IntField(directSamplesText, khepri.lightmapDirectSamples);
-            // Lightmapper Indirect Samples
-            khepri.lightmapIndirectSamples = EditorGUILayout.IntField(indirectSamplesText, khepri.lightmapIndirectSamples);
-            // Lightmapper Environment Samples (API removed in Unity 2020+)
-            EditorGUI.BeginDisabledGroup(true);
-            khepri.lightmapEnvironmentSamples = EditorGUILayout.IntField(environmentSamplesText, khepri.lightmapEnvironmentSamples);
-            EditorGUI.EndDisabledGroup();
-            // Bounces
-            khepri.bouncesSelected = EditorGUILayout.Popup(bouncesText, khepri.bouncesSelected,
-                optionsBounces);
-            // Lightmap Resolution
-            khepri.lightmapResolution = EditorGUILayout.FloatField(lightmapResolutionText, khepri.lightmapResolution);
-            // Lightmap Size
-            khepri.lightmapSizeSelected = EditorGUILayout.Popup(lightmapSizeText, khepri.lightmapSizeSelected,
-                optionsLightmapSize);
-            // Compress Lightmap
-            khepri.compressLightmap = EditorGUILayout.Toggle(compressLightmapText, khepri.compressLightmap);
-            // Ambient Occlusion
-            khepri.ambientOcclusion = EditorGUILayout.Toggle(ambientOcclusionText, khepri.ambientOcclusion);
-
-            if (!Lightmapping.isRunning) {
-                if (GUILayout.Button(bakeIlluminationButtonText)) {
-                    Lightmapping.ClearDiskCache();
-                    Lightmapping.ClearLightingDataAsset();
-                    Lightmapping.Clear();
-                    Lightmapping.BakeAsync();
-                }
-            }
-            else {
-                if (GUILayout.Button(stopbakingButtonText)) {
-                    Lightmapping.Cancel();
-                    Lightmapping.ClearDiskCache();
-                    Lightmapping.ClearLightingDataAsset();
-                    Lightmapping.Clear();
-                }
-                GUILayout.Label(String.Format("Progress: {0:0.00}", Lightmapping.buildProgress * 100)); // TODO BETTER PROGRESS BAR
-            }
-
-            LightingDataAsset lightingDataAsset = Lightmapping.lightingDataAsset;
-            if (lightingDataAsset != null) {
-                GUILayout.Label(bakedStatusOKText);
-                if (GUILayout.Button(clearBakeDataButtonText)) {
-                    Lightmapping.ClearDiskCache();
-                    Lightmapping.ClearLightingDataAsset();
-                    Lightmapping.Clear();
-                }
-            }
-            else {
-                GUILayout.Label(bakedStatsNOKText);
-            }
-            EditorGUI.EndDisabledGroup();
-            EditorGUI.EndDisabledGroup();
-            EditorGUI.EndDisabledGroup();
-            
-            if (GUILayout.Button(defaultLightmapBakeButtonText)) {
-                ResetLightmapBake();
-            }
-        }
-        GUILayout.EndVertical();
-
-        HandleLightmapBake();
-    }
-    static void HandleLightmapBake() {
-        if (khepri.giModeSelected == 0) {
-            Lightmapping.bakedGI = false;
-            Lightmapping.realtimeGI = false;
-        }
-        else {
-            Lightmapping.bakedGI = true;
-        }
-
-        khepri.sceneLoad?.primitives.SetBakedLights(!khepri.realTimePointLight);
-
-        if (khepri.directionalLight != null)
-            khepri.directionalLight.lightmapBakeType = khepri.realTimeDirectionalLight
-                ? LightmapBakeType.Realtime
-                : LightmapBakeType.Baked;
-
-        if (Lightmapping.TryGetLightingSettings(out var ls)) {
-            if (khepri.giModeSelected != 0)
-                ls.mixedBakeMode = MixedLightingMode.Shadowmask;
-
-            ls.lightmapper = khepri.lightmapperSelected == 0
-                ? LightingSettings.Lightmapper.ProgressiveCPU
-                : LightingSettings.Lightmapper.ProgressiveGPU;
-
-            ls.directSampleCount = khepri.lightmapDirectSamples;
-            ls.indirectSampleCount = khepri.lightmapIndirectSamples;
-
-            ls.maxBounces = khepri.bouncesSelected;
-            ls.lightmapResolution = khepri.lightmapResolution;
-
-            int[] optionsLightmapSize = {32, 64, 128, 256, 512, 1024, 2048, 4096};
-            ls.lightmapMaxSize = optionsLightmapSize[khepri.lightmapSizeSelected];
-
-            ls.compressLightmaps = khepri.compressLightmap;
-            ls.ao = khepri.ambientOcclusion;
-        }
-    }
-    void ResetLightmapBake() {
-        khepri.giModeSelected = khepri.defaultGIModeSelected;
-        khepri.realTimePointLight = khepri.defaultRealTimePointLight;
-        khepri.lightmapperSelected = khepri.defaultLightmapperSelected;
-        khepri.lightmapDirectSamples = khepri.defaultLightmapDirectSamples;
-        khepri.lightmapIndirectSamples = khepri.defaultLightmapIndirectSamples;
-        khepri.lightmapEnvironmentSamples = khepri.defaultLightmapEnvironmentSamples;
-        khepri.bouncesSelected = khepri.defaultBouncesSelected;
-        khepri.lightmapResolution = khepri.defaultLightmapResolution;
-        khepri.lightmapSizeSelected = khepri.defaultLightmapSizeSelected;
-        khepri.compressLightmap = khepri.defaultCompressLightmap;
-        khepri.ambientOcclusion = khepri.defaultAmbientOcclusion;
-    }
-    void GenerateOcclusionBakeUI() {
-        GUILayout.BeginVertical("HelpBox");
-        khepri.occlusionBakeSettingsFoldout = EditorGUILayout.Foldout(khepri.occlusionBakeSettingsFoldout, occlusionBakeSettingsText, foldoutStyle);
-        if (khepri.occlusionBakeSettingsFoldout) {
-            EditorGUI.BeginDisabledGroup(EditorApplication.isPlaying);
-            EditorGUI.BeginDisabledGroup(khepri.isKhepriRunning);
-
-            int umbraDataSize = StaticOcclusionCulling.umbraDataSize;
-            if (!StaticOcclusionCulling.isRunning) {
-                if (GUILayout.Button(bakeOcclusionButtonText)) {
-                    StaticOcclusionCulling.Clear();
-                    StaticOcclusionCulling.GenerateInBackground();
-                    // TODO PROGRESS BAR
-                }
-            }
-            else {
-                if (GUILayout.Button(stopOcclusionBakingButtonText)) {
-                    StaticOcclusionCulling.Cancel();
-                    StaticOcclusionCulling.Clear();
-                }
-            }
-
-            if (umbraDataSize != 0) {
-                GUILayout.Label(occlusionBakedStatusOKText);
-                khepri.enableOcclusionVisualization = GUILayout.Toggle(khepri.enableOcclusionVisualization,
-                    visualizeOcclusionText);
-
-                if (GUILayout.Button(clearOcclusionDataButtonText)) {
-                    StaticOcclusionCulling.Clear();
-                }
-            }
-            else {
-                GUILayout.Label(occlusionBakedStatusNOKText);
-            }
-            
-            EditorGUI.EndDisabledGroup();
-            EditorGUI.EndDisabledGroup();
-        }
-        GUILayout.EndVertical();
-        HandleOcclusionBake();
-    }
-    static void HandleOcclusionBake() {
-        StaticOcclusionCullingVisualization.showOcclusionCulling = khepri.enableOcclusionVisualization;
     }
     void GeneratePlayerUI() {
+        EditorGUI.BeginChangeCheck();
         GUILayout.BeginVertical("HelpBox");
         khepri.playerSettingsFoldout = EditorGUILayout.Foldout(khepri.playerSettingsFoldout, playerSettings2Text, foldoutStyle);
         if (khepri.playerSettingsFoldout) {
@@ -1341,8 +846,9 @@ public class KhepriEditor : Editor {
             }
         }
         GUILayout.EndVertical();
-        
-        HandlePlayer();
+
+        if (EditorGUI.EndChangeCheck())
+            HandlePlayer();
     }
     static void HandlePlayer() {
         var player = GameObject.FindWithTag("Player");
@@ -1365,32 +871,26 @@ public class KhepriEditor : Editor {
         khepri.playerMaxFallSpeed = khepri.defaultPlayerMaxFallSpeed;
     }
     void GenerateSelectionUI() {
+        EditorGUI.BeginChangeCheck();
         GUILayout.BeginVertical("HelpBox");
         khepri.selectionSettingsFoldout = EditorGUILayout.Foldout(khepri.selectionSettingsFoldout, selectionSettingsText, foldoutStyle);
         if (khepri.selectionSettingsFoldout) {
-            khepri.highlightModeSelected = EditorGUILayout.Popup(highlightModeText, khepri.highlightModeSelected,
-                optionsHighlightMode);
-
             khepri.highlightColor = EditorGUILayout.ColorField(highlightColorText, khepri.highlightColor);
-            khepri.highlightWidth = EditorGUILayout.Slider(highlightWidthText, khepri.highlightWidth, 0, 10);
 
             if (GUILayout.Button(defaultSelectionText)) {
                 ResetSelection();
             }
         }
 
-        HandleSelection();
         GUILayout.EndVertical();
+        if (EditorGUI.EndChangeCheck())
+            HandleSelection();
     }
     static void HandleSelection() {
-        khepri.sceneLoad?.primitives.SetHighlightMode((Outline.Mode) khepri.highlightModeSelected);
         khepri.sceneLoad?.primitives.SetHighlightColor(khepri.highlightColor);
-        khepri.sceneLoad?.primitives.SetHighlightWidth(khepri.highlightWidth);
     }
     void ResetSelection() {
-        khepri.highlightModeSelected = khepri.defaultHighlightModeSelected;
         khepri.highlightColor = khepri.defaultHighlightColor;
-        khepri.highlightWidth = khepri.defaultHighlightWidth;
     }
     void GenerateNavigationUI() {
         GUILayout.BeginVertical("HelpBox");
@@ -1425,25 +925,18 @@ public class KhepriEditor : Editor {
         HandleEnableLOD();
         HandleEnableCollider();
         HandleEnableMaterials();
-        HandleLightmapBake();
         HandleIllumination();
         HandleOptimize();
         HandlePlayer();
         HandleSelection();
         HandleDayNight();
-        HandleLightmapBake();
-        HandleOcclusionBake();
-        HandleEnableShadows();
     }
     void ResetSettings() {
         khepri.materialSettingsFoldout = false;
-        khepri.shadowSettingsFoldout = false;
         khepri.dayNightSettingsFoldout = false;
         khepri.sceneIlluminationSettingsFoldout = false;
         khepri.lodSettingsFoldout = false;
         khepri.simplificationFoldout = false;
-        khepri.lightmapBakeSettingsFoldout = false;
-        khepri.occlusionBakeSettingsFoldout = false;
         khepri.playerSettingsFoldout = false;
         khepri.navigationControlsFoldout = false;
         khepri.selectionSettingsFoldout = false;
@@ -1452,15 +945,11 @@ public class KhepriEditor : Editor {
 
         khepri.enableMaterials = true;
         ResetEnableMaterials();
-        khepri.enableShadows = true;
-        ResetEnableShadows();
         khepri.enableLOD = false;
         ResetEnableLOD();
         khepri.enableColliders = true;
-        khepri.enableOcclusionVisualization = false;
         ResetDayNight();
         ResetIllumination();
-        ResetLightmapBake();
         ResetPlayer();
         ResetSelection();
     }

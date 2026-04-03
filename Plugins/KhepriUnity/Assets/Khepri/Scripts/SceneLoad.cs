@@ -2,13 +2,14 @@
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading.Tasks;
 using KhepriUnity;
 using UnityEngine;
 using static KhepriUnity.KhepriConstants;
 
 using UnityProcessor = KhepriUnity.Processor<KhepriUnity.Channel, KhepriUnity.Primitives>;
 
-public enum State { StartingServer, WaitingConnections, WaitingCommands, Simulating, Visualizing }
+public enum State { StartingServer, WaitingConnections, Connecting, WaitingCommands, Selecting, Simulating, Visualizing }
 
 public class SceneLoad {
 
@@ -26,6 +27,11 @@ public class SceneLoad {
     private static bool I_am_the_server = false;
     public State currentState = I_am_the_server ? State.StartingServer : State.WaitingConnections;
 
+    // Async connection state
+    private Task connectTask;
+    private float lastConnectAttempt = -999f;
+    private const float CONNECT_RETRY_DELAY = 3f; // seconds between attempts
+
     public SceneLoad() {
         mainObject = GameObject.Find("MainObject");
         if (mainObject == null) {
@@ -35,31 +41,26 @@ public class SceneLoad {
         primitives = new Primitives(mainObject);
     }
 
-    public TcpClient StartClient() {
-        IPAddress remoteAddr = IPAddress.Parse(DEFAULT_SERVER_ADDRESS);
-        IPEndPoint serverEndPoint = new IPEndPoint(remoteAddr, DEFAULT_CLIENT_PORT);
-        client = new TcpClient();
-        client.Connect(serverEndPoint);
-        return client;
-    }
-
-    public bool StartServer() {
-        try {
-            if (server == null) {
-                IPAddress localAddr = IPAddress.Parse(DEFAULT_SERVER_ADDRESS);
-                server = new TcpListener(localAddr, DEFAULT_SERVER_PORT);
-            } else {
-                server.Stop();
+    public bool StartKhepri() {
+        Disconnect();
+        if (I_am_the_server) {
+            try {
+                if (server == null) {
+                    IPAddress localAddr = IPAddress.Parse(DEFAULT_SERVER_ADDRESS);
+                    server = new TcpListener(localAddr, DEFAULT_SERVER_PORT);
+                } else {
+                    server.Stop();
+                }
+                server.Start();
+            } catch (Exception e) {
+                WriteMessage(e.ToString() + "\n");
+                WriteMessage("Couldn't start server\n");
+                return false;
             }
-            server.Start();
-            currentState = State.WaitingConnections;
-            return true;
-
-        } catch (Exception e) {
-            WriteMessage(e.ToString() + "\n");
-            WriteMessage("Couldn't start server\n");
-            return false;
         }
+        lastConnectAttempt = -999f;
+        currentState = State.WaitingConnections;
+        return true;
     }
 
     public void Disconnect() {
@@ -67,12 +68,17 @@ public class SceneLoad {
         catch (Exception e) { WriteMessage("Error disposing channel: " + e.Message + "\n"); }
         channel = null;
         processor = null;
+        connectTask = null;
+        // Shutdown the socket before closing to send FIN immediately,
+        // unblocking any pending read on the Julia side.
+        try { client?.Client?.Shutdown(SocketShutdown.Both); }
+        catch (Exception) { }
         try { client?.Close(); }
         catch (Exception e) { WriteMessage("Error closing client: " + e.Message + "\n"); }
         client = null;
     }
 
-    public void StopServer() {
+    public void StopKhepri() {
         Disconnect();
         if (server != null) {
             try { server.Stop(); }
@@ -88,25 +94,69 @@ public class SceneLoad {
             currentState = State.WaitingCommands;
             return;
         }
+        if (I_am_the_server) {
+            // Server mode: non-blocking accept
+            if (!server.Pending())
+                return;
+            try {
+                client = server.AcceptTcpClient();
+                channel = new Channel(client.GetStream());
+                processor = new UnityProcessor(channel, primitives);
+                primitives.SetProcessor(processor);
+                WriteMessage("Connection established\n");
+                currentState = State.WaitingCommands;
+            } catch (Exception e) {
+                WriteMessage(e.ToString() + "\n");
+                processor = null;
+            }
+        } else {
+            // Client mode: start async connect with retry delay
+            float now = Time.realtimeSinceStartup;
+            if (now - lastConnectAttempt < CONNECT_RETRY_DELAY)
+                return;
+            lastConnectAttempt = now;
+            try {
+                client = new TcpClient();
+                IPAddress remoteAddr = IPAddress.Parse(DEFAULT_SERVER_ADDRESS);
+                connectTask = client.ConnectAsync(remoteAddr, DEFAULT_CLIENT_PORT);
+                currentState = State.Connecting;
+                WriteMessage("Connecting to Julia...\n");
+            } catch (Exception e) {
+                WriteMessage("Connect error: " + e.Message + "\n");
+                try { client?.Close(); } catch { }
+                client = null;
+            }
+        }
+    }
+
+    private void PollConnect() {
+        if (connectTask == null) {
+            currentState = State.WaitingConnections;
+            return;
+        }
+        if (!connectTask.IsCompleted)
+            return;
+        if (connectTask.IsFaulted || !client.Connected) {
+            WriteMessage("Connection failed, retrying in " + CONNECT_RETRY_DELAY + "s...\n");
+            connectTask = null;
+            try { client?.Close(); } catch { }
+            client = null;
+            currentState = State.WaitingConnections;
+            return;
+        }
+        // Connected successfully
         try {
-            WriteMessage("Waiting for connections\n");
-            channel = new Channel((I_am_the_server ? server.AcceptTcpClient() : StartClient()).GetStream());
+            connectTask = null;
+            channel = new Channel(client.GetStream());
             processor = new UnityProcessor(channel, primitives);
             primitives.SetProcessor(processor);
-            if (!I_am_the_server) {
-                channel.wString("Unity");
-            }
+            channel.wString("Unity");
             WriteMessage("Connection established\n");
             currentState = State.WaitingCommands;
-        } catch (IOException) {
-            currentState = State.WaitingConnections;
-            processor = null;
-            WriteMessage("Disconnecting\n");
         } catch (Exception e) {
+            WriteMessage("Post-connect error: " + e.Message + "\n");
+            Disconnect();
             currentState = State.WaitingConnections;
-            processor = null;
-            WriteMessage(e.ToString() + "\n");
-            WriteMessage("Terminating connection\n");
         }
     }
 
@@ -117,28 +167,55 @@ public class SceneLoad {
     public bool Serve() {
         switch (currentState) {
             case State.StartingServer:
-                StartServer();
+                StartKhepri();
                 return true;
             case State.WaitingConnections:
                 WaitForConnections();
                 return true;
+            case State.Connecting:
+                PollConnect();
+                return true;
             case State.WaitingCommands:
-                int op = processor.TryReadOperation();
-                switch (op) {
-                    case -2: //Timeout
-                        return true;
-                    case -1: //EOF
-                        currentState = State.WaitingConnections;
-                        processor = null;
-                        WriteMessage("Disconnecting from client\n");
-                        return false;
-                    default:
-                        processor.ExecuteReadAndRepeat(op);
-                        if (primitives.simulationPending) {
-                            currentState = State.Simulating;
-                        }
-                        return true;
+                if (processor == null) {
+                    currentState = State.WaitingConnections;
+                    return false;
                 }
+                try {
+                    int op = processor.TryReadOperation();
+                    switch (op) {
+                        case -2: //Timeout
+                            return true;
+                        case -1: //EOF
+                            Disconnect();
+                            currentState = State.WaitingConnections;
+                            WriteMessage("Disconnected from Julia\n");
+                            return false;
+                        default:
+                            processor.ExecuteReadAndRepeat(op);
+                            if (primitives.selectionPending) {
+                                currentState = State.Selecting;
+                            } else if (primitives.simulationPending) {
+                                currentState = State.Simulating;
+                            }
+                            return true;
+                    }
+                } catch (Exception) {
+                    Disconnect();
+                    currentState = State.WaitingConnections;
+                    WriteMessage("Connection to Julia lost, reconnecting...\n");
+                    return false;
+                }
+            case State.Selecting:
+                if (!primitives.InSelectionProcess) {
+                    int[] ids = primitives.SelectedGameObjectsIds(true);
+                    channel.wInt32(ids.Length);
+                    foreach (int id in ids)
+                        channel.wInt32(id);
+                    channel.Flush();
+                    primitives.selectionPending = false;
+                    currentState = State.WaitingCommands;
+                }
+                return true;
             case State.Simulating:
                 if (SystemManager.isFinished) {
                     channel.wSingle(SimMetrics.GetEvacuationTime());
@@ -168,7 +245,7 @@ public class SceneLoad {
     }
 
     public void OnDestroy() {
-        StopServer();
+        StopKhepri();
     }
     
     /*    [RuntimeInitializeOnLoadMethod]
