@@ -23,48 +23,6 @@ namespace KhepriRhinoceros {
         public Vector3d rVector3d() => new Vector3d(rDouble(), rDouble(), rDouble());
         public void wVector3d(Vector3d p) { w.Write(p.X); w.Write(p.Y); w.Write(p.Z); }
 
-        public Point3d[] rPoint3dArray() {
-            int length = rInt32();
-            Point3d[] pts = new Point3d[length];
-            for (int i = 0; i < length; i++) {
-                pts[i] = rPoint3d();
-            }
-            return pts;
-        }
-        public void wPoint3dArray(Point3d[] pts) {
-            wInt32(pts.Length);
-            foreach (var pt in pts) {
-                wPoint3d(pt);
-            }
-        }
-        public Vector3d[] rVector3dArray() {
-            int length = rInt32();
-            Vector3d[] pts = new Vector3d[length];
-            for (int i = 0; i < length; i++) {
-                pts[i] = rVector3d();
-            }
-            return pts;
-        }
-        public void wVector3dArray(Vector3d[] pts) {
-            wInt32(pts.Length);
-            foreach (var pt in pts) {
-                wVector3d(pt);
-            }
-        }
-        public Point3d[][] rPoint3dArrayArray() {
-            int length = rInt32();
-            Point3d[][] ptss = new Point3d[length][];
-            for (int i = 0; i < length; i++) {
-                ptss[i] = rPoint3dArray();
-            }
-            return ptss;
-        }
-        public void wPoint3dArrayArray(Point3d[][] ptss) {
-            wInt32(ptss.Length);
-            foreach (var pt in ptss) {
-                wPoint3dArray(pt);
-            }
-        }
 
         public Plane rPlane() => new Plane(rPoint3d(), rVector3d(), rVector3d());
         public void wPlane(Plane pl) { wPoint3d(pl.Origin); wVector3d(pl.XAxis); wVector3d(pl.YAxis); }
@@ -72,13 +30,6 @@ namespace KhepriRhinoceros {
         public RhinoObject rRhinoObject() => doc.Objects.Find(rGuid());
         public void wRhinoObject(RhinoObject obj) => wGuid(obj.Id);
 
-        public RhinoObject[] rRhinoObjectArray() => rGuidArray().Select(doc.Objects.Find).ToArray();
-        public void wRhinoObjectArray(RhinoObject[] objs) => wGuidArray(objs.Select(obj => obj.Id).ToArray());
-
-        //        public RhinoObject rRhinoObject() => doc.Objects.Find(rGuid());
-
         public void wBrep(Brep brep) => wGuid(doc.Objects.AddBrep(brep));
-
-        public void wBrepArray(Brep[] breps) => wGuidArray(breps.Select(doc.Objects.AddBrep).ToArray());
     }
 }
