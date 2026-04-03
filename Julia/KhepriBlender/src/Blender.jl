@@ -127,7 +127,9 @@ decode(ns::Val{:BLR}, t::Val{:Frame3d}, c::IO) =
       decode(ns, Val(:Vector3d), c)))
 
 blender_api = @remote_api :BLR """
-def find_or_create_collection(name:str, active:bool, color:RGBA)->str:
+def find_or_create_collection(name:str, visible:bool, color:RGBA)->str:
+def set_collection_visible(name:str, visible:bool)->None:
+def set_collection_opacity(name:str, opacity:float)->None:
 def get_current_collection()->str:
 def set_current_collection(name:str)->None:
 def delete_all_shapes_in_collection(name:str)->None:
@@ -463,12 +465,18 @@ Default families
 export blender_family_materials
 blender_family_materials(m1, m2=m1, m3=m2, m4=m3) = (materials=(m1, m2, m3, m4), )
 
-KhepriBase.b_layer(b::BLR, name, active, color) =
-  @remote(b, find_or_create_collection(name, active, color))
+KhepriBase.b_layer(b::BLR, name, visible, color) =
+  @remote(b, find_or_create_collection(name, visible, color))
+KhepriBase.b_set_layer_visible(b::BLR, layer, visible) =
+  @remote(b, set_collection_visible(layer, visible))
+KhepriBase.b_set_layer_opacity(b::BLR, layer, opacity) =
+  @remote(b, set_collection_opacity(layer, Float64(opacity)))
 KhepriBase.b_current_layer_ref(b::BLR) =
   @remote(b, get_current_collection())
 KhepriBase.b_current_layer_ref(b::BLR, layer) =
   @remote(b, set_current_collection(layer))
+KhepriBase.b_create_layer_from_ref_value(b::BLR, r) =
+  layer(r)
 KhepriBase.b_all_shapes_in_layer(b::BLR, layer) =
   @remote(b, all_shapes_in_collection(layer))
 KhepriBase.b_delete_all_shapes_in_layer(b::BLR, layer) =

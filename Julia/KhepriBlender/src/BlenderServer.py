@@ -358,12 +358,53 @@ def add_bm_uvs(mesh, bm):
 # We should be using Ints for layers!
 # HACK!!! Missing color!!!!!
 current_collection = C.collection
-def find_or_create_collection(name:str, active:bool, color:RGBA)->str:
+def find_or_create_collection(name:str, visible:bool, color:RGBA)->str:
     if name not in D.collections:
         collection = D.collections.new(name)
-        collection.hide_viewport = not active
+        collection.hide_viewport = not visible
         C.scene.collection.children.link(collection)
     return name
+
+def set_collection_visible(name:str, visible:bool)->None:
+    D.collections[name].hide_viewport = not visible
+
+def set_collection_opacity(name:str, opacity:float)->None:
+    collection = D.collections[name]
+    for obj in collection.objects:
+        if not hasattr(obj, 'material_slots'):
+            continue
+        if opacity <= 0 or opacity >= 1:
+            # Restore originals
+            if '_khepri_orig_mats' in obj:
+                orig_names = obj['_khepri_orig_mats']
+                for i, slot in enumerate(obj.material_slots):
+                    if i < len(orig_names) and orig_names[i] in D.materials:
+                        slot.material = D.materials[orig_names[i]]
+                del obj['_khepri_orig_mats']
+        else:
+            # Save originals and apply ghost
+            if '_khepri_orig_mats' not in obj:
+                obj['_khepri_orig_mats'] = [slot.material.name if slot.material else '' for slot in obj.material_slots]
+            orig_names = obj['_khepri_orig_mats']
+            for i, slot in enumerate(obj.material_slots):
+                orig_name = orig_names[i] if i < len(orig_names) else ''
+                orig_mat = D.materials.get(orig_name)
+                if orig_mat is None:
+                    continue
+                ghost_name = orig_name + '__khepri_ghost__'
+                ghost = D.materials.get(ghost_name)
+                if ghost is None:
+                    ghost = orig_mat.copy()
+                    ghost.name = ghost_name
+                ghost.use_backface_culling = False
+                if ghost.use_nodes and ghost.node_tree:
+                    for node in ghost.node_tree.nodes:
+                        if node.type == 'BSDF_PRINCIPLED':
+                            node.inputs['Alpha'].default_value = opacity
+                            break
+                ghost.blend_method = 'BLEND'
+                ghost.shadow_method = 'CLIP'
+                slot.material = ghost
 
 def get_current_collection()->str:
     return current_collection.name
