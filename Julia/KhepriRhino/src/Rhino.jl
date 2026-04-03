@@ -146,13 +146,14 @@ public Guid Chair(Point3d c, double angle, int family)
 public GeometryBase[] BaseRectangularTableAndChairs(int tableFamily, int chairFamily, double tableLength, double tableWidth, int chairsOnTop, int chairsOnBottom, int chairsOnRight, int chairsOnLeft, double spacing)
 public int CreateRectangularTableAndChairsFamily(int tableFamily, int chairFamily, double tableLength, double tableWidth, int chairsOnTop, int chairsOnBottom, int chairsOnRight, int chairsOnLeft, double spacing)
 public Guid TableAndChairs(Point3d c, double angle, int family)
-public Guid CreateLayer(String name, bool active, Color color)
+public Guid CreateLayer(String name, bool visible, Color color)
 public Guid CurrentLayer()
 public void SetCurrentLayer(Guid id)
-public void SetLayerActive(Guid id, bool active)
+public void SetLayerVisible(Guid id, bool visible)
+public void SetLayerTransparency(Guid layerId, double opacity)
 public String LayerName(Guid id)
 public Color LayerColor(Guid id)
-public bool LayerActive(Guid id)
+public bool LayerVisible(Guid id)
 public Guid ShapeLayer(RhinoObject objId)
 public void SetShapeLayer(RhinoObject objId, Guid layerId)
 public void SetLayerMaterial(Guid layerId, int materialIndex)
@@ -865,8 +866,8 @@ KhepriBase.b_current_layer_ref(b::RH) =
 KhepriBase.b_current_layer_ref(b::RH, layer) =
   @remote(b, SetCurrentLayer(layer))
 
-KhepriBase.b_layer(b::RH, name, active, color) =
-  @remote(b, CreateLayer(name, true, color))
+KhepriBase.b_layer(b::RH, name, visible, color) =
+  @remote(b, CreateLayer(name, visible, color))
 
 KhepriBase.b_delete_all_shapes_in_layer(b::RH, layer) =
   @remote(b, DeleteAllInLayer(layer))
@@ -874,11 +875,16 @@ KhepriBase.b_delete_all_shapes_in_layer(b::RH, layer) =
 KhepriBase.b_set_layer_material(b::RH, layer_ref, mat_ref) =
   @remote(b, SetLayerMaterial(layer_ref, mat_ref))
 
+KhepriBase.b_set_layer_visible(b::RH, layer, visible) =
+  @remote(b, SetLayerVisible(layer, visible))
+KhepriBase.b_set_layer_opacity(b::RH, layer, opacity) =
+  @remote(b, SetLayerTransparency(layer, Float64(opacity)))
+
 KhepriBase.b_create_layer_from_ref_value(b::RH, r) =
   let name = @remote(b, LayerName(r)),
       c = @remote(b, LayerColor(r)),
-      active = @remote(b, LayerActive(r))
-    layer(name, active, rgb(c.r, c.g, c.b))
+      visible = @remote(b, LayerVisible(r))
+    layer(name, visible, rgb(c.r, c.g, c.b))
   end
 
 KhepriBase.b_create_shape_from_ref_value(b::RH, r) =
@@ -1018,15 +1024,16 @@ abstract type RhinoFamily <: Family end
 
 struct RhinoLayerFamily <: RhinoFamily
   name::String
+  visible::Bool
   color::RGB
   ref::IdDict{Backend, Any}
 end
 
-rhino_layer_family(name, color::RGB=rgb(1,1,1)) =
-  RhinoLayerFamily(name, color, IdDict{Backend, Any}())
+rhino_layer_family(name, color::RGB=rgb(1,1,1); visible::Bool=true) =
+  RhinoLayerFamily(name, visible, color, IdDict{Backend, Any}())
 
 backend_get_family_ref(b::RH, f::Family, af::RhinoLayerFamily) =
-  backend_create_layer(b, af.name, true, af.color)
+  b_layer(b, af.name, af.visible, af.color)
 
 KhepriBase.b_realistic_sky(b::RH, date, latitude, longitude, elevation, meridian, turbidity, sun) =
   @remote(b, SunLight(date, latitude, longitude, meridian, turbidity, true))
