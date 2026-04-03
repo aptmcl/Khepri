@@ -94,9 +94,9 @@ update_plugin() =
     # Do we have the bundle folder?
     isdir(autocad_khepri_plugin) || mkpath(autocad_khepri_plugin)
     isdir(autocad_khepri_plugin_dll_folder) || mkpath(autocad_khepri_plugin_dll_folder)
-    # Must we upgrade?
-    need_upgrade = ! isfile(autocad_path_xml) || autocad_version(autocad_path_xml) < autocad_version(local_path_xml)
-    if need_upgrade
+    # Must we update?
+    need_update = ! isfile(autocad_path_xml) || autocad_version(autocad_path_xml) < autocad_version(local_path_xml)
+    if need_update
       # remove first to avoid loosing the local file
       #isfile(autocad_path_xml) && rm(autocad_path_xml)
       cp(local_path_xml, autocad_path_xml, force=true)
@@ -115,6 +115,8 @@ update_plugin() =
       We fix that here:
       =#
       chmod(autocad_template(), 0o755) # Read, write, and Execute
+    else
+      @info "AutoCAD plugin is up to date. No update needed."
     end
   end
 
@@ -309,14 +311,16 @@ public void Rotate(ObjectId id, Point3d p, Vector3d n, double a)
 public ObjectId Mirror(ObjectId id, Point3d p, Vector3d n, bool copy)
 public Point3d[] BoundingBox(ObjectId[] ids)
 public void ZoomExtents()
-public ObjectId CreateLayer(string name, bool active, Color color, byte transparency)
+public ObjectId CreateLayer(string name, bool visible, Color color, byte transparency)
 public void SetLayerColor(ObjectId id, Color color, byte transparency)
 public void SetShapeColor(ObjectId id, Color color)
 public ObjectId CurrentLayer()
 public void SetCurrentLayer(ObjectId id)
 public string LayerName(ObjectId id)
 public Color LayerColor(ObjectId id)
-public bool LayerActive(ObjectId id)
+public bool LayerVisible(ObjectId id)
+public void SetLayerVisible(ObjectId id, bool visible)
+public void SetLayerTransparency(ObjectId id, byte alpha)
 public ObjectId ShapeLayer(ObjectId objId)
 public void SetShapeLayer(ObjectId objId, ObjectId layerId)
 public void SetLayerMaterial(ObjectId layerId, ObjectId materialId)
@@ -1209,8 +1213,8 @@ KhepriBase.b_current_layer_ref(b::ACAD) =
 KhepriBase.b_current_layer_ref(b::ACAD, layer) =
   @remote(b, SetCurrentLayer(layer))
 
-KhepriBase.b_layer(b::ACAD, name, active, color) =
-    @remote(b, CreateLayer(name, true, color, round(UInt8, alpha(color)*255)))
+KhepriBase.b_layer(b::ACAD, name, visible, color) =
+    @remote(b, CreateLayer(name, visible, color, round(UInt8, alpha(color)*255)))
 
 KhepriBase.b_delete_all_shapes_in_layer(b::ACAD, layer) =
   @remote(b, DeleteAllInLayer(layer))
@@ -1218,10 +1222,15 @@ KhepriBase.b_delete_all_shapes_in_layer(b::ACAD, layer) =
 KhepriBase.b_set_layer_material(b::ACAD, layer_ref, mat_ref) =
   @remote(b, SetLayerMaterial(layer_ref, mat_ref))
 
+KhepriBase.b_set_layer_visible(b::ACAD, layer, visible) =
+  @remote(b, SetLayerVisible(ref_value(b, layer), visible))
+KhepriBase.b_set_layer_opacity(b::ACAD, layer, opacity) =
+  @remote(b, SetLayerTransparency(ref_value(b, layer), round(UInt8, opacity * 255)))
+
 switch_to_layer(to, b::ACAD) =
     if to != from
-      set_layer_active(to, true)
-      set_layer_active(from, false)
+      set_layer_visible(to, true)
+      set_layer_visible(from, false)
       current_layer(to)
     end
 
@@ -1326,8 +1335,8 @@ KhepriBase.b_create_shape_from_ref_value(b::ACAD, r) =
 KhepriBase.b_create_layer_from_ref_value(b::ACAD, r) =
   let name = @remote(b, LayerName(r)),
       c = @remote(b, LayerColor(r)),
-      active = @remote(b, LayerActive(r))
-    layer(name, active, rgb(c.r, c.g, c.b))
+      visible = @remote(b, LayerVisible(r))
+    layer(name, visible, rgb(c.r, c.g, c.b))
   end
 
 #=
