@@ -112,6 +112,9 @@ public int Primitive::EnableUpdate()
 public UMaterial Primitive::CreateMaterial(float r, float g, float b, float a, float metallic, float specular, float roughness, float emissiveR, float emissiveG, float emissiveB, float emissionStrength)
 public UMaterial Primitive::CreatePBRMaterial(float r, float g, float b, float a, float metallic, float specular, float roughness, float emissiveR, float emissiveG, float emissiveB, float emissionStrength, float ior, float transmission, float transmissionRoughness, float clearcoat, float clearcoatRoughness)
 public AActor Primitive::CreateParent(String name)
+public int Primitive::SetParentVisible(AActor parent, int visible)
+public int Primitive::SetParentOpacity(AActor parent, float opacity)
+public int Primitive::DeleteAllInParent(AActor parent)
 public int Primitive::HighlightRefs(TArray<AActor> actors)
 public int Primitive::UnhighlightRefs(TArray<AActor> actors)
 public int Primitive::UnhighlightAllRefs()
@@ -287,7 +290,9 @@ unreal_material_family(name, pairs...) =
   UEMaterialFamily(name, IdDict{Backend, Any}())
 
 backend_get_family_ref(b::UE, f::Family, uf::UEMaterialFamily) =
-  @remote(b, Primitive__LoadMaterial(uf.name))
+  get!(uf.ref, b) do
+    @remote(b, Primitive__LoadMaterial(uf.name))
+  end
 
 struct UEResourceFamily <: UEFamily
   name::String
@@ -299,7 +304,9 @@ unreal_resource_family(name, pairs...) =
   UEResourceFamily(name, Dict(pairs...), IdDict{Backend, Any}())
 
 backend_get_family_ref(b::UE, f::Family, uf::UEResourceFamily) =
-  @remote(b, Primitive__LoadResource(uf.name))
+  get!(uf.ref, b) do
+    @remote(b, Primitive__LoadResource(uf.name))
+  end
 
 #=============================================================================
  BIM Operations
@@ -353,7 +360,7 @@ realize(b::UE, s::Block) =
 realize(b::UE, s::BlockInstance) =
   @remote(b, Primitive__CreateBlockInstance(
     ref_value(b, s.block),
-    s.loc, vx(1, s.loc.cs), vz(1, s.loc.cs), s.scale))
+    s.loc, vx(1, s.loc.cs), vy(1, s.loc.cs), s.scale))
 
 #=============================================================================
  Layers (Parent Hierarchy)
@@ -365,11 +372,21 @@ KhepriBase.b_current_layer_ref(b::UE) =
 KhepriBase.b_current_layer_ref(b::UE, layer) =
   @remote(b, Primitive__SetCurrentParent(layer))
 
-KhepriBase.b_layer(b::UE, name, active, color) =
+KhepriBase.b_layer(b::UE, name, visible, color) =
   let layer = @remote(b, Primitive__CreateParent(name))
-    @warn "Ignoring color and active in create_layer for Unreal"
+    if !visible
+      @remote(b, Primitive__SetParentVisible(layer, 0))
+    end
     layer
   end
+
+KhepriBase.b_set_layer_visible(b::UE, layer, visible) =
+  @remote(b, Primitive__SetParentVisible(layer, visible ? 1 : 0))
+KhepriBase.b_set_layer_opacity(b::UE, layer, opacity) =
+  @remote(b, Primitive__SetParentOpacity(layer, convert(Float32, opacity)))
+
+KhepriBase.b_delete_all_shapes_in_layer(b::UE, layer) =
+  @remote(b, Primitive__DeleteAllInParent(layer))
 
 #=============================================================================
  Materials
@@ -444,9 +461,10 @@ KhepriBase.b_create_shape_from_ref_value(b::UE, r) =
       let bmin = @remote(b, Primitive__BoundingBoxMin(r)),
           bmax = @remote(b, Primitive__BoundingBoxMax(r)),
           center = intermediate_loc(bmin, bmax),
-          dx = bmax.raw_point[1] - bmin.raw_point[1],
-          dz = bmax.raw_point[3] - bmin.raw_point[3],
-          radius = dx / 2,
+          dx = bmax.x - bmin.x,
+          dy = bmax.y - bmin.y,
+          dz = bmax.z - bmin.z,
+          radius = max(dx, dy) / 2,
           height = dz
         cylinder(center - vz(height/2), radius, height)
       end
