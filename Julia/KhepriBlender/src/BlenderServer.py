@@ -968,7 +968,7 @@ def spotlight(p:Point3d, v:Vector3d, size:float, blend:float, energy:float, colo
     return id
 
 def ieslight(p:Point3d, v:Vector3d, ies_file_path:str, energy:float)->Id:
-    id, light = baselight(p, 'POINT', energy, color)
+    id, light = baselight(p, 'POINT', energy, (1.0, 1.0, 1.0))
     light.data.use_nodes = True
     nodes = light.data.node_tree.nodes
     nodes.clear()

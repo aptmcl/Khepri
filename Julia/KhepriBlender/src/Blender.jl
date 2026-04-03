@@ -455,7 +455,7 @@ KhepriBase.b_spotlight(b::BLR, loc, dir, hotspot, falloff, energy, color) =
   @remote(b, spotlight(loc, dir, hotspot, falloff, energy, color))
 
 KhepriBase.b_ieslight(b::BLR, file, loc, dir, alpha, beta, gamma) =
-  @remote(b, IESLight(file, loc, dir, alpha))
+  @remote(b, ieslight(loc, dir, file, 1000.0))
 
 #=
 
