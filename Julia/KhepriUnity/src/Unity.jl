@@ -19,10 +19,18 @@ decode(::Val{:Unity}, t::Val{T}, c::IO) where {T} = decode(Val(:CS), t, c)
 @encode_decode_as(:Unity, Val{:Color}, Val{:RGB})
 @encode_decode_as(:Unity, Val{:Goal_}, Val{:int})
 
-encode(::Val{:Unity}, t::Val{:Vector3}, c::IO, p) =
-  encode(Val(:CS), Val(:float3), c, raw_point(p)[[1,3,2]])
-decode(::Val{:Unity}, t::Val{:Vector3}, c::IO) =
-  xyz(decode(Val(:CS), Val(:float3), c)[[1,3,2]]..., world_cs)
+encode(::Val{:Unity}, ::Val{:Vector3}, c::IO, p) =
+  let r = world_raw(p)
+    write(c, Float32(r[1]))  # X
+    write(c, Float32(r[3]))  # Z → Unity Y
+    write(c, Float32(r[2]))  # Y → Unity Z
+  end
+decode(::Val{:Unity}, ::Val{:Vector3}, c::IO) =
+  let x = Float64(read(c, Float32)),
+      y = Float64(read(c, Float32)),
+      z = Float64(read(c, Float32))
+    xyz(x, z, y, world_cs)  # Unity Y → Z, Unity Z → Y
+  end
 
 #=
 encode_Quaternion(c::IO, pv::Union{XYZ, VXYZ}) =
