@@ -39,14 +39,18 @@ end
 # ue_scale converts meters (Khepri) → centimeters (Unreal) for scalar distances
 const ue_scale = 100.0
 
-encode(::Val{:UE}, t::Val{:FVector}, c::IO, p) =
-  let (x, y, z) = raw_point(p)
-    encode(Val(:CPP), Val(:float3), c, (y * ue_scale, x * ue_scale, z * ue_scale))
+encode(::Val{:UE}, ::Val{:FVector}, c::IO, p) =
+  let r = world_raw(p)
+    write(c, Float32(r[2] * ue_scale))  # Y → Unreal X
+    write(c, Float32(r[1] * ue_scale))  # X → Unreal Y
+    write(c, Float32(r[3] * ue_scale))  # Z → Unreal Z
   end
 
-decode(::Val{:UE}, t::Val{:FVector}, c::IO) =
-  let (y, x, z) = decode(Val(:CPP), Val(:float3), c)
-    xyz(x / ue_scale, y / ue_scale, z / ue_scale, world_cs)
+decode(::Val{:UE}, ::Val{:FVector}, c::IO) =
+  let uy = Float64(read(c, Float32)),
+      ux = Float64(read(c, Float32)),
+      uz = Float64(read(c, Float32))
+    xyz(ux / ue_scale, uy / ue_scale, uz / ue_scale, world_cs)
   end
 
 # Additional type mappings
