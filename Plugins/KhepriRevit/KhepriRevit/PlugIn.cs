@@ -53,10 +53,12 @@ namespace KhepriRevit {
                 //WriteMessage("Waiting for connections\n");
                 while (true)
                 {
+                    var client = server.AcceptTcpClient();
+                    client.NoDelay = true;
                     RevitProcessor processor =
                         new RevitProcessor(
                             thisUIapp,
-                            new Channel(thisUIapp, server.AcceptTcpClient().GetStream()),
+                            new Channel(thisUIapp, client.GetStream(), client.Client),
                             new Primitives(thisUIapp))
                         ;
                     HandleClient(c, evt, processor);

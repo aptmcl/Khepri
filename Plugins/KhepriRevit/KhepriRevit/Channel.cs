@@ -12,7 +12,7 @@ namespace KhepriRevit {
     public class Channel : KhepriBase.Channel {
         public UIApplication uiApp;
 
-        public Channel(UIApplication uiApp, NetworkStream stream) : base(stream) {
+        public Channel(UIApplication uiApp, NetworkStream stream, System.Net.Sockets.Socket socket) : base(stream, socket) {
             this.uiApp = uiApp;
         }
 
