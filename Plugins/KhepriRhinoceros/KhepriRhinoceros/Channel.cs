@@ -13,7 +13,7 @@ namespace KhepriRhinoceros {
 
         RhinoDoc doc;
 
-        public Channel(NetworkStream stream, RhinoDoc doc) : base(stream) {
+        public Channel(NetworkStream stream, System.Net.Sockets.Socket socket, RhinoDoc doc) : base(stream, socket) {
             this.doc = doc;
         }
 

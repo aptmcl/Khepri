@@ -69,7 +69,9 @@ namespace KhepriRhinoceros {
 
         public void AcceptClient() {
             if (server.Pending()) {
-                processor = new Processor<Channel, Primitives>(new Channel(server.AcceptTcpClient().GetStream(), doc), new Primitives(doc));
+                var client = server.AcceptTcpClient();
+                client.NoDelay = true;
+                processor = new Processor<Channel, Primitives>(new Channel(client.GetStream(), client.Client, doc), new Primitives(doc));
                 RhinoApp.WriteLine("Connection established");
                 currentAction = HandleClient;
             }
