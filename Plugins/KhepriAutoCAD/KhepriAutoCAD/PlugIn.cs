@@ -42,10 +42,12 @@ namespace KhepriAutoCAD {
                 server.Start();
                 WriteMessage("Waiting for connections\n");
                 while (true) {
+                    var client = server.AcceptTcpClient();
+                    client.NoDelay = true;
                     Processor processor =
                         new Processor(
                             syncCtrl,
-                            new Channel(server.AcceptTcpClient().GetStream()),
+                            new Channel(client.GetStream(), client.Client),
                             new Primitives());
                     WriteMessage("Connection established\n");
                     Thread thread = new Thread(() => HandleClient(processor));
