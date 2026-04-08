@@ -5,8 +5,8 @@
 //  Created by Chris Nolet on 2/21/18.
 //  Copyright (c) 2018 Chris Nolet. All rights reserved.
 //
-//  Modified for HDRP: uses user stencil bits 6-7 to avoid
-//  collision with HDRP's reserved stencil bits 0-5.
+//  Modified for URP: uses user stencil bit 6 to avoid
+//  collision with URP's reserved stencil bits 0-3.
 //
 
 Shader "Custom/Outline Mask" {
@@ -18,7 +18,7 @@ Shader "Custom/Outline Mask" {
     Tags {
       "Queue" = "Transparent+100"
       "RenderType" = "Transparent"
-      "RenderPipeline" = "HDRenderPipeline"
+      "RenderPipeline" = "UniversalPipeline"
     }
 
     Pass {

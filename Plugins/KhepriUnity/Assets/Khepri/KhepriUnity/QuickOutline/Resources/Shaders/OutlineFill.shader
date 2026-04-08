@@ -5,8 +5,8 @@
 //  Created by Chris Nolet on 2/21/18.
 //  Copyright (c) 2018 Chris Nolet. All rights reserved.
 //
-//  Modified for HDRP: uses user stencil bits 6-7 to avoid
-//  collision with HDRP's reserved stencil bits 0-5.
+//  Modified for URP: uses user stencil bit 6 to avoid
+//  collision with URP's reserved stencil bits 0-3.
 //
 
 Shader "Custom/Outline Fill" {
@@ -21,7 +21,7 @@ Shader "Custom/Outline Fill" {
     Tags {
       "Queue" = "Transparent+110"
       "RenderType" = "Transparent"
-      "RenderPipeline" = "HDRenderPipeline"
+      "RenderPipeline" = "UniversalPipeline"
       "DisableBatching" = "True"
     }
 
@@ -43,8 +43,7 @@ Shader "Custom/Outline Fill" {
       #pragma vertex vert
       #pragma fragment frag
 
-      #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
-      #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
+      #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
       struct appdata {
         float4 vertex : POSITION;

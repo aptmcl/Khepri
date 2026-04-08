@@ -201,25 +201,30 @@ public class Khepri : MonoBehaviour {
         //AML EditorApplication.update += Focus;
         sceneLoad = new SceneLoad();
 
-        khepriLogo = new Texture2D(1300,1000);
-        khepriLogo.LoadImage( File.ReadAllBytes(Directory.GetCurrentDirectory() + "/Assets/Khepri/Editor/" + khepriLogoFilename));
-        khepriLogo.Apply();
-        
-        startKhepriLogo = new Texture2D(350,350);
-        startKhepriLogo.LoadImage( File.ReadAllBytes(Directory.GetCurrentDirectory() + "/Assets/Khepri/Editor/" + startKhepriLogoFilename));
-        startKhepriLogo.Apply();
-            
-        startKhepriNoNavigationLogo = new Texture2D(350,350);
-        startKhepriNoNavigationLogo.LoadImage( File.ReadAllBytes(Directory.GetCurrentDirectory() + "/Assets/Khepri/Editor/" + startKhepriNoNavigationLogoFilename));
-        startKhepriNoNavigationLogo.Apply();
-        
-        startNavigationLogo = new Texture2D(350,350);
-        startNavigationLogo.LoadImage( File.ReadAllBytes(Directory.GetCurrentDirectory() + "/Assets/Khepri/Editor/" + startNavigationLogoFilename));
-        startNavigationLogo.Apply();
-        
-        pauseSocketLogo = new Texture2D(350, 350);
-        pauseSocketLogo.LoadImage( File.ReadAllBytes(Directory.GetCurrentDirectory() + "/Assets/Khepri/Editor/" + pauseSocketLogoFilename));
-        pauseSocketLogo.Apply();
+        try {
+            string editorPath = Directory.GetCurrentDirectory() + "/Assets/Khepri/Editor/";
+            khepriLogo = new Texture2D(1300,1000);
+            khepriLogo.LoadImage( File.ReadAllBytes(editorPath + khepriLogoFilename));
+            khepriLogo.Apply();
+
+            startKhepriLogo = new Texture2D(350,350);
+            startKhepriLogo.LoadImage( File.ReadAllBytes(editorPath + startKhepriLogoFilename));
+            startKhepriLogo.Apply();
+
+            startKhepriNoNavigationLogo = new Texture2D(350,350);
+            startKhepriNoNavigationLogo.LoadImage( File.ReadAllBytes(editorPath + startKhepriNoNavigationLogoFilename));
+            startKhepriNoNavigationLogo.Apply();
+
+            startNavigationLogo = new Texture2D(350,350);
+            startNavigationLogo.LoadImage( File.ReadAllBytes(editorPath + startNavigationLogoFilename));
+            startNavigationLogo.Apply();
+
+            pauseSocketLogo = new Texture2D(350, 350);
+            pauseSocketLogo.LoadImage( File.ReadAllBytes(editorPath + pauseSocketLogoFilename));
+            pauseSocketLogo.Apply();
+        } catch (System.IO.DirectoryNotFoundException) {
+            Debug.LogWarning("Khepri: Editor logo files not found (expected in builds). UI logos will be unavailable.");
+        }
 
         var sun = GameObject.FindWithTag("Sun");
         if (sun != null) {

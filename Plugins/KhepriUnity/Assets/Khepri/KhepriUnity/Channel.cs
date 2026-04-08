@@ -9,7 +9,7 @@ namespace KhepriUnity {
         public List<Material> materials;
         private bool _disposed = false;
 
-        public Channel(NetworkStream stream) : base(stream) {
+        public Channel(NetworkStream stream, System.Net.Sockets.Socket socket) : base(stream, socket) {
             this.shapes = new List<GameObject>();
             this.materials = new List<Material>();
         }

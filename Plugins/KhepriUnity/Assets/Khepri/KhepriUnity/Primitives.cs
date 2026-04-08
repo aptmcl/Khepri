@@ -53,6 +53,11 @@ namespace KhepriUnity {
 
         Processor<Channel, Primitives> processor;
 
+        static Material SafeCreateMaterial(string shaderName) {
+            var shader = Shader.Find(shaderName);
+            return shader != null ? new Material(shader) : null;
+        }
+
         public Primitives(GameObject mainObject) {
             this.currentParent = mainObject;
             this.parents = new List<GameObject> { mainObject };
@@ -67,9 +72,8 @@ namespace KhepriUnity {
             if (playerTransform == null) {
                 Debug.LogWarning("Primitives: Player not found. View operations may be unavailable.");
             }
-            this.DefaultMaterial = new Material(Shader.Find("HDRP/Lit")) {
-                enableInstancing = true
-            };
+            this.DefaultMaterial = SafeCreateMaterial("Universal Render Pipeline/Lit");
+            if (DefaultMaterial != null) DefaultMaterial.enableInstancing = true;
             this.currentMaterial = DefaultMaterial;
             this.applyMaterials = true;
             this.applyColliders = true;
@@ -135,12 +139,11 @@ namespace KhepriUnity {
         }
 
         public void SetApplyMaterials(bool apply) {
-            if (apply != applyMaterials) {
-                applyMaterials = apply;
-                foreach (var kvp in materialCache) {
-                    if (kvp.Key != null)
-                        kvp.Key.sharedMaterial = apply ? kvp.Value : DefaultMaterial;
-                }
+            if (apply == applyMaterials) return;
+            applyMaterials = apply;
+            foreach (var kvp in materialCache) {
+                if (kvp.Key != null && kvp.Value != null)
+                    kvp.Key.sharedMaterial = apply ? kvp.Value : DefaultMaterial;
             }
         }
         public void SetApplyColliders(bool apply) => applyColliders = apply;
@@ -212,17 +215,20 @@ namespace KhepriUnity {
         }
 
         private Material CreateHighlightMaterial(Color color) {
-            Material mat = new Material(Shader.Find("HDRP/Unlit"));
+            Material mat = SafeCreateMaterial("Universal Render Pipeline/Unlit");
+            if (mat == null) return null;
             mat.name = "__highlight__";
             mat.enableInstancing = true;
-            mat.SetColor("_UnlitColor", color);
-            mat.SetColor("_EmissiveColor", color * 5f);
+            mat.SetColor("_BaseColor", color);
+            mat.SetColor("_EmissionColor", color * 5f);
+            mat.EnableKeyword("_EMISSION");
             return mat;
         }
 
         public void SetHighlightColor(Color color) {
             highlightColor = color;
             highlightMaterial = CreateHighlightMaterial(color);
+            if (highlightMaterial == null) return;
             foreach (var kvp in highlightedCache) {
                 if (kvp.Key != null) {
                     Material[] hlMats = new Material[kvp.Value.Length];
@@ -336,6 +342,9 @@ namespace KhepriUnity {
             Mesh mesh = g.GetComponent<MeshFilter>()?.sharedMesh;
             if (mesh == null || mesh.vertexCount < KhepriConstants.MIN_MESH_VERTICES_FOR_LOD)
                 return g;
+            Renderer renderer = g.GetComponent<Renderer>();
+            if (renderer == null || renderer.sharedMaterial == null)
+                return g;
 
             LODGenerator.GenerateLODGroup(g, lodLevels, true, lodSimplificationOptions);
             return g;
@@ -346,8 +355,10 @@ namespace KhepriUnity {
 
         public GameObject ApplyMaterial(GameObject obj, Material material) {
             Renderer renderer = obj.GetComponent<Renderer>();
+            if (renderer == null) return obj;
             materialCache[renderer] = material;
-            renderer.sharedMaterial = applyMaterials ? material : DefaultMaterial;
+            if (material != null || DefaultMaterial != null)
+                renderer.sharedMaterial = applyMaterials ? material : DefaultMaterial;
             return obj;
         }
 
@@ -562,8 +573,9 @@ namespace KhepriUnity {
 
         // Sets a color on the layer
         public GameObject SetLayerColor(GameObject layer, Color color) {
-            Material mat = new Material(Shader.Find("HDRP/Unlit"));
-            mat.color = color;
+            Material mat = SafeCreateMaterial("Universal Render Pipeline/Unlit");
+            if (mat == null) return layer;
+            mat.SetColor("_BaseColor", color);
             mat.name = "__layer_color__";
 
             var renderers = layer.GetComponentsInChildren<Renderer>();
@@ -621,9 +633,7 @@ namespace KhepriUnity {
                         Material ghost = new Material(currentMats[i]);
                         Color c = ghost.GetColor("_BaseColor");
                         ghost.SetColor("_BaseColor", new Color(c.r, c.g, c.b, opacity));
-                        ghost.SetFloat("_SurfaceType", 1);
-                        ghost.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-                        ghost.renderQueue = 3000;
+                        SetupTransparency(ghost);
                         ghostMats[i] = ghost;
                     }
                     renderer.sharedMaterials = ghostMats;
@@ -745,36 +755,46 @@ namespace KhepriUnity {
         public void SetInteractiveRequests() => SetMaxNonInteractiveRequests(0);
 
         // ||||||||||||||||||||||||||| Resources |||||||||||||||||||||||||||
-        public Material LoadMaterial(String name) => EnsureNonNull(Resources.Load<Material>(name));
+        public Material LoadMaterial(String name) => Resources.Load<Material>(name);
         public void SetCurrentMaterial(Material material) => currentMaterial = material;
         public Material CurrentMaterial() => currentMaterial;
         public GameObject LoadResource(String name) => Resources.Load<GameObject>(name);
+
+        private static void SetupTransparency(Material mat) {
+            mat.SetFloat("_Surface", 1);
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.SetFloat("_Blend", 0);
+            mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            mat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            mat.SetFloat("_ZWrite", 0);
+            mat.EnableKeyword("_ALPHABLEND_ON");
+            mat.renderQueue = 3000;
+        }
 
         public Material CreateMaterial(String name, Color baseColor, float alpha,
                                        float metallic, float specular, float roughness,
                                        float ior, float transmission, float transmissionRoughness,
                                        float clearcoat, float clearcoatRoughness,
                                        Color emissionColor, float emissionStrength) {
-            Material mat = new Material(Shader.Find("HDRP/Lit"));
+            Material mat = SafeCreateMaterial("Universal Render Pipeline/Lit");
+            if (mat == null) return null;
             mat.name = name;
             mat.enableInstancing = true;
             Color color = new Color(baseColor.r, baseColor.g, baseColor.b, alpha);
             mat.SetColor("_BaseColor", color);
             mat.SetFloat("_Metallic", metallic);
             mat.SetFloat("_Smoothness", 1.0f - roughness);
-            mat.SetFloat("_Ior", ior > 0 ? ior : 1.5f);
             if (transmission > 0 || alpha < 1.0f) {
-                mat.SetFloat("_SurfaceType", 1);
-                mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-                mat.SetFloat("_TransmittanceMask", transmission);
-                mat.renderQueue = 3000;
+                SetupTransparency(mat);
             }
             if (clearcoat > 0) {
-                mat.SetFloat("_CoatMask", clearcoat);
-                mat.SetFloat("_CoatSmoothness", 1.0f - clearcoatRoughness);
+                mat.SetFloat("_ClearCoat", 1);
+                mat.SetFloat("_ClearCoatSmoothness", 1.0f - clearcoatRoughness);
+                mat.EnableKeyword("_CLEARCOAT");
             }
             if (emissionStrength > 0 && (emissionColor.r > 0 || emissionColor.g > 0 || emissionColor.b > 0)) {
-                mat.SetColor("_EmissiveColor", emissionColor * emissionStrength);
+                mat.SetColor("_EmissionColor", emissionColor * emissionStrength);
+                mat.EnableKeyword("_EMISSION");
                 mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
             }
             return mat;

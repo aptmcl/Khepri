@@ -100,7 +100,8 @@ public class SceneLoad {
                 return;
             try {
                 client = server.AcceptTcpClient();
-                channel = new Channel(client.GetStream());
+                client.NoDelay = true;
+                channel = new Channel(client.GetStream(), client.Client);
                 processor = new UnityProcessor(channel, primitives);
                 primitives.SetProcessor(processor);
                 WriteMessage("Connection established\n");
@@ -147,7 +148,8 @@ public class SceneLoad {
         // Connected successfully
         try {
             connectTask = null;
-            channel = new Channel(client.GetStream());
+            client.NoDelay = true;
+            channel = new Channel(client.GetStream(), client.Client);
             processor = new UnityProcessor(channel, primitives);
             primitives.SetProcessor(processor);
             channel.wString("Unity");

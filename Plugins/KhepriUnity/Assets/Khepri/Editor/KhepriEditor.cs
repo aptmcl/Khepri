@@ -821,8 +821,8 @@ public class KhepriEditor : Editor {
     static void HandleIllumination() {
         khepri.sceneLoad?.primitives.SetEnableLights(khepri.enablePointlights);
         khepri.sceneLoad?.primitives.SetEnablePointLightsShadow(khepri.enablePointlightsShadows);
-        // RenderSettings.ambient*/reflection* APIs are non-functional under HDRP.
-        // Ambient and reflection settings are managed through HDRP Volume profiles.
+        // RenderSettings.ambient*/reflection* APIs are non-functional under URP with a custom pipeline.
+        // Ambient and reflection settings are managed through URP Volume profiles.
     }
     void ResetIllumination() {
         khepri.enablePointlights = khepri.defaultEnablePointlights;
