@@ -14,6 +14,7 @@ namespace KhepriBase {
     /// </summary>
     public class Channel : IDisposable {
         NetworkStream stream;
+        System.Net.Sockets.Socket socket;
         public BinaryReader r;
         public BinaryWriter w;
         public List<BIMLevel> levels;
@@ -25,8 +26,11 @@ namespace KhepriBase {
         BinaryWriter savedWriter;
         MemoryStream writeFrameStream;
 
-        public Channel(NetworkStream stream) {
+        public Channel(NetworkStream stream) : this(stream, null) { }
+
+        public Channel(NetworkStream stream, System.Net.Sockets.Socket socket) {
             this.stream = stream;
+            this.socket = socket;
             this.r = new BinaryReader(stream, Encoding.UTF8);
             this.w = new BinaryWriter(stream, Encoding.UTF8);
             this.levels = new List<BIMLevel>();
@@ -56,6 +60,13 @@ namespace KhepriBase {
 
         public void Flush() => w.Flush();
         public void SetReadTimeout(int t) => stream.ReadTimeout = t;
+        public bool DataAvailable => stream.DataAvailable;
+        // Poll for readable data without touching the stream state.
+        // microSeconds: max wait time; returns true if data (or EOF) is ready to read.
+        public bool PollRead(int microSeconds) =>
+            socket != null
+                ? socket.Poll(microSeconds, System.Net.Sockets.SelectMode.SelectRead)
+                : stream.DataAvailable;
 
         // Reads a length-prefixed frame from the network into memory, then redirects
         // r/w to in-memory streams so the operation handler reads from the buffered

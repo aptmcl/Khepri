@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -71,21 +71,20 @@ namespace KhepriBase {
             return true; //FIXME
         }
 
+        // Uses Socket.Poll + DataAvailable instead of NetworkStream.ReadTimeout,
+        // which is broken on Mono/Linux (corrupts stream state on timeout).
         public int TryReadOperation() {
-            channel.SetReadTimeout(minWaitTime);
-            try {
-                return ReadOperation();
-            } catch (IOException) {
-                return -2; //timeout
-            } finally {
-                channel.SetReadTimeout(-1);
-            }
+            if (!channel.PollRead(minWaitTime * 1000))
+                return -2;
+            if (!channel.DataAvailable)
+                return -2;
+            return ReadOperation();
         }
 
-        // Batching optimization: after executing one operation, attempts to read the next
-        // with a short timeout. If more frames arrive within the window, keeps executing
-        // without returning control to the host application's message loop. This reduces
-        // per-call overhead for burst sequences of RPC calls.
+        // Batching optimization: after executing one operation, checks if more data
+        // is immediately available and keeps executing without returning control to
+        // the host application's message loop. This reduces per-call overhead for
+        // burst sequences of RPC calls.
         public virtual bool ExecuteReadAndRepeat(int op) {
             int count = 0;
             while (true) {
@@ -97,14 +96,10 @@ namespace KhepriBase {
                 if (count > MaxRepeated) {
                     return false;
                 }
-                channel.SetReadTimeout(maxWaitTime);
-                try {
-                    op = ReadOperation();
-                } catch (IOException) {
+                if (!channel.DataAvailable) {
                     break;
-                } finally {
-                    channel.SetReadTimeout(-1);
                 }
+                op = ReadOperation();
             }
             return true;
         }
