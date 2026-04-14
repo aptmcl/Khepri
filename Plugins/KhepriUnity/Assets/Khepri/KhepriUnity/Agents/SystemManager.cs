@@ -236,8 +236,7 @@ namespace KhepriUnity {
             {
                 isActive = true;
             }
-            //isFinished = false; // TODO ver com o antónio
-            //timeOut = false;
+            isFinished = false;
             timeOut = false;
             SimMetrics.ResetMetrics();
             simTime = 0f;

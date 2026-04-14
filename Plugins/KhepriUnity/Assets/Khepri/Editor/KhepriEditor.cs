@@ -21,6 +21,10 @@ public static class KhepriEditorPoller {
             cachedKhepri = UnityEngine.Object.FindAnyObjectByType<Khepri>();
         cachedKhepri?.sceneLoad?.Update();
 
+        // Keep the editor ticking even when idle/unfocused so Julia RPC doesn't stall
+        if (cachedKhepri != null && cachedKhepri.isKhepriRunning)
+            EditorApplication.QueuePlayerLoopUpdate();
+
         if (KhepriUnity.Primitives.Instance == null) return;
         if (KhepriUnity.Primitives.requestEnterPlayMode) {
             KhepriUnity.Primitives.requestEnterPlayMode = false;
@@ -400,7 +404,6 @@ public class KhepriEditor : Editor {
             return false;
 
         khepri.isKhepriRunning = true;
-        EditorApplication.update += khepri.sceneLoad.Update;
         return true;
     }
     static void StopKhepri()
@@ -408,7 +411,6 @@ public class KhepriEditor : Editor {
         if (khepri.isKhepriRunning) {
             khepri.sceneLoad?.StopKhepri();
             khepri.isKhepriRunning = false;
-            EditorApplication.update -= khepri.sceneLoad.Update;
         }
     }
     
