@@ -5,6 +5,7 @@
 # require a running AutoCAD instance with the Khepri plugin.
 
 using KhepriAutoCAD
+using KhepriBase: SocketBackend
 using Test
 
 @testset "KhepriAutoCAD.jl" begin
