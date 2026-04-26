@@ -6,6 +6,7 @@
 
 using KhepriRevit
 using KhepriBase
+using KhepriBase: SocketBackend
 using Test
 
 @testset "KhepriRevit.jl" begin
