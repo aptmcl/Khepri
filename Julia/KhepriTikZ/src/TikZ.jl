@@ -778,7 +778,7 @@ sort_illustrations!(b::TikZ) =
   # WHERE IS PARTITION????
   let illustrations = filter(is_illustration, b.shapes),
       non_illustrations = filter(s->! is_illustration(s), b.shapes)
-    b.shapes = Shape[non_illustrations..., illustrations...]
+    b.shapes = KhepriBase.Proxy[non_illustrations..., illustrations...]
   end
 
 # For extra non-portable stuff
