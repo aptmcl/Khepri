@@ -1,4 +1,6 @@
 using KhepriFrame4DD
+using KhepriBase
+using KhepriBase: truss_node_family_element, truss_bar_family_element
 using Test
 
 @testset "KhepriFrame4DD.jl" begin
