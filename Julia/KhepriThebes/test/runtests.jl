@@ -253,6 +253,20 @@ using Test
     include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
     using .VisualTests
 
+    #=
+    Some scenes produce non-deterministic SVG output between runs (path
+    ordering varies — likely due to dict-iteration order or Z-sort tie-
+    breaking on coplanar faces). They pass once a golden is captured but
+    fail subsequent runs even with no code change. Skip them under
+    text_compare; revisit when Thebes either canonicalises path output or
+    when this test framework supports a pixel/perceptual comparator.
+    =#
+    nondeterministic_skip = [
+      "florCirculosExtrudidos",
+      "abrigoEsfericoTubos",
+      "predioSinusoidal",
+      "corrimaoCaracol",
+    ]
     run_visual_tests(thebes,
       golden_dir = joinpath(@__DIR__, "golden"),
       reset! = () -> begin
@@ -261,7 +275,8 @@ using Test
         backend(thebes)
       end,
       compare = text_compare,
-      skip = [:csg]
+      skip = [:csg],
+      skip_tests = nondeterministic_skip,
     )
   end
 
