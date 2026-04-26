@@ -6,6 +6,7 @@
 
 using KhepriUnity
 using KhepriBase
+using KhepriBase: SocketBackend
 using Test
 
 @testset "KhepriUnity.jl" begin
