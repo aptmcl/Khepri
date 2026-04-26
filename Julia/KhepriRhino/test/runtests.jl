@@ -6,6 +6,7 @@
 
 using KhepriRhino
 using KhepriBase
+using KhepriBase: SocketBackend
 using Test
 
 @testset "KhepriRhino.jl" begin
