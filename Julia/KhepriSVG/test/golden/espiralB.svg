@@ -1,0 +1,354 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="-10.5 -10.5 61 61">
+<defs>
+</defs>
+<g stroke-width="0.032">
+<path d="M 0,-10 A 10,10 0 0,0 -10,0" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,0 0,-10" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,0 -10,0" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M -10,0 A 9,9 0 0,0 -1,9" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-1,0 -10,0" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-1,0 -1,9" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M -1,9 A 8.1,8.1 0 0,0 7.1,0.9" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-1,0.9 -1,9" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-1,0.9 7.1,0.9" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 7.1,0.9 A 7.29,7.29 0 0,0 -0.19,-6.39" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.19,0.9 7.1,0.9" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.19,0.9 -0.19,-6.39" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M -0.19,-6.39 A 6.561,6.561 0 0,0 -6.751,0.171" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.19,0.171 -0.19,-6.39" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.19,0.171 -6.751,0.171" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M -6.751,0.171 A 5.905,5.905 0 0,0 -0.846,6.076" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.846,0.171 -6.751,0.171" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.846,0.171 -0.846,6.076" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M -0.846,6.076 A 5.314,5.314 0 0,0 4.468,0.761" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.846,0.761 -0.846,6.076" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.846,0.761 4.468,0.761" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 4.468,0.761 A 4.783,4.783 0 0,0 -0.315,-4.021" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.315,0.761 4.468,0.761" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.315,0.761 -0.315,-4.021" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M -0.315,-4.021 A 4.305,4.305 0 0,0 -4.619,0.283" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.315,0.283 -0.315,-4.021" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.315,0.283 -4.619,0.283" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M -4.619,0.283 A 3.874,3.874 0 0,0 -0.745,4.157" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.745,0.283 -4.619,0.283" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.745,0.283 -0.745,4.157" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M -0.745,4.157 A 3.487,3.487 0 0,0 2.742,0.671" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.745,0.671 -0.745,4.157" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.745,0.671 2.742,0.671" style="fill:none;stroke:rgb(0,0,0)"/>
+<circle cx="2.742" cy="0.671" r="0.03" style="fill:rgb(0,0,0);stroke:none"/>
+<polyline points="-0.396,0.671 2.742,0.671" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="-0.396,0.671 2.742,0.671" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 20,-10 A 10,10 0 0,0 10,0" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="20,0 20,-10" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="20,0 10,0" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 10,0 A 7,7 0 0,0 17,7" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="17,0 10,0" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="17,0 17,7" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 17,7 A 4.9,4.9 0 0,0 21.9,2.1" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="17,2.1 17,7" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="17,2.1 21.9,2.1" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 21.9,2.1 A 3.43,3.43 0 0,0 18.47,-1.33" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.47,2.1 21.9,2.1" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.47,2.1 18.47,-1.33" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 18.47,-1.33 A 2.401,2.401 0 0,0 16.069,1.071" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.47,1.071 18.47,-1.33" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.47,1.071 16.069,1.071" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 16.069,1.071 A 1.681,1.681 0 0,0 17.75,2.752" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="17.75,1.071 16.069,1.071" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="17.75,1.071 17.75,2.752" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 17.75,2.752 A 1.176,1.176 0 0,0 18.926,1.575" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="17.75,1.575 17.75,2.752" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="17.75,1.575 18.926,1.575" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 18.926,1.575 A 0.824,0.824 0 0,0 18.103,0.752" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.103,1.575 18.926,1.575" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.103,1.575 18.103,0.752" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 18.103,0.752 A 0.576,0.576 0 0,0 17.526,1.328" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.103,1.328 18.103,0.752" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.103,1.328 17.526,1.328" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 17.526,1.328 A 0.404,0.404 0 0,0 17.93,1.732" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="17.93,1.328 17.526,1.328" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="17.93,1.328 17.93,1.732" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 17.93,1.732 A 0.282,0.282 0 0,0 18.212,1.449" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="17.93,1.449 17.93,1.732" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="17.93,1.449 18.212,1.449" style="fill:none;stroke:rgb(0,0,0)"/>
+<circle cx="18.212" cy="1.449" r="0.03" style="fill:rgb(0,0,0);stroke:none"/>
+<polyline points="18.014,1.449 18.212,1.449" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.014,1.449 18.212,1.449" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 40,-10 A 10,10 0 0,0 30,0" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="40,0 40,-10" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="40,0 30,0" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 30,0 A 5,5 0 0,0 35,5" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="35,0 30,0" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="35,0 35,5" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 35,5 A 2.5,2.5 0 0,0 37.5,2.5" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="35,2.5 35,5" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="35,2.5 37.5,2.5" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 37.5,2.5 A 1.25,1.25 0 0,0 36.25,1.25" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.25,2.5 37.5,2.5" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.25,2.5 36.25,1.25" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 36.25,1.25 A 0.625,0.625 0 0,0 35.625,1.875" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.25,1.875 36.25,1.25" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.25,1.875 35.625,1.875" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 35.625,1.875 A 0.312,0.312 0 0,0 35.938,2.188" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="35.938,1.875 35.625,1.875" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="35.938,1.875 35.938,2.188" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 35.938,2.188 A 0.156,0.156 0 0,0 36.094,2.031" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="35.938,2.031 35.938,2.188" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="35.938,2.031 36.094,2.031" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 36.094,2.031 A 0.078,0.078 0 0,0 36.016,1.953" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.016,2.031 36.094,2.031" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.016,2.031 36.016,1.953" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 36.016,1.953 A 0.039,0.039 0 0,0 35.977,1.992" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.016,1.992 36.016,1.953" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.016,1.992 35.977,1.992" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 35.977,1.992 A 0.02,0.02 0 0,0 35.996,2.012" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="35.996,1.992 35.977,1.992" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="35.996,1.992 35.996,2.012" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 35.996,2.012 A 0.01,0.01 0 0,0 36.006,2.002" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="35.996,2.002 35.996,2.012" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="35.996,2.002 36.006,2.002" style="fill:none;stroke:rgb(0,0,0)"/>
+<circle cx="36.006" cy="2.002" r="0.03" style="fill:rgb(0,0,0);stroke:none"/>
+<polyline points="36.001,2.002 36.006,2.002" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.001,2.002 36.006,2.002" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 0,10 A 10,10 0 0,0 0,30" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,20 0,10" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,20 0,30" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 0,30 A 8,8 0 0,0 0,14" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,22 0,30" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,22 0,14" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 0,14 A 6.4,6.4 0 0,0 0,26.8" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,20.4 0,14" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,20.4 0,26.8" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 0,26.8 A 5.12,5.12 0 0,0 0,16.56" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,21.68 0,26.8" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,21.68 0,16.56" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 0,16.56 A 4.096,4.096 0 0,0 0,24.752" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,20.656 0,16.56" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,20.656 0,24.752" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 0,24.752 A 3.277,3.277 0 0,0 3.277,21.475" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,21.475 0,24.752" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,21.475 3.277,21.475" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 20,10 A 10,10 0 0,0 10,20" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="20,20 20,10" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="20,20 10,20" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 10,20 A 8,8 0 0,0 18,28" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18,20 10,20" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18,20 18,28" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 18,28 A 6.4,6.4 0 0,0 24.4,21.6" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18,21.6 18,28" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18,21.6 24.4,21.6" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 24.4,21.6 A 5.12,5.12 0 0,0 19.28,16.48" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.28,21.6 24.4,21.6" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.28,21.6 19.28,16.48" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 19.28,16.48 A 4.096,4.096 0 0,0 15.184,20.576" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.28,20.576 19.28,16.48" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.28,20.576 15.184,20.576" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 15.184,20.576 A 3.277,3.277 0 0,0 18.461,23.853" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.461,20.576 15.184,20.576" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.461,20.576 18.461,23.853" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 18.461,23.853 A 2.621,2.621 0 0,0 21.082,21.231" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.461,21.231 18.461,23.853" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.461,21.231 21.082,21.231" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 21.082,21.231 A 2.097,2.097 0 0,0 18.985,19.134" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.985,21.231 21.082,21.231" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.985,21.231 18.985,19.134" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 18.985,19.134 A 1.678,1.678 0 0,0 17.307,20.812" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.985,20.812 18.985,19.134" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.985,20.812 17.307,20.812" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 17.307,20.812 A 1.342,1.342 0 0,0 18.65,22.154" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.65,20.812 17.307,20.812" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.65,20.812 18.65,22.154" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 18.65,22.154 A 1.074,1.074 0 0,0 19.723,21.08" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.65,21.08 18.65,22.154" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.65,21.08 19.723,21.08" style="fill:none;stroke:rgb(0,0,0)"/>
+<circle cx="19.723" cy="21.08" r="0.03" style="fill:rgb(0,0,0);stroke:none"/>
+<polyline points="18.864,21.08 19.723,21.08" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.864,21.08 19.723,21.08" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 40,10 A 10,10 0 0,0 32.929,12.929" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="40,20 40,10" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="40,20 32.929,12.929" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 32.929,12.929 A 8,8 0 0,0 30.586,18.586" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="38.586,18.586 32.929,12.929" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="38.586,18.586 30.586,18.586" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 30.586,18.586 A 6.4,6.4 0 0,0 32.46,23.111" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.986,18.586 30.586,18.586" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.986,18.586 32.46,23.111" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 32.46,23.111 A 5.12,5.12 0 0,0 36.081,24.611" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.081,19.491 32.46,23.111" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.081,19.491 36.081,24.611" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 36.081,24.611 A 4.096,4.096 0 0,0 38.977,23.411" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.081,20.515 36.081,24.611" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.081,20.515 38.977,23.411" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 38.977,23.411 A 3.277,3.277 0 0,0 39.937,21.094" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.66,21.094 38.977,23.411" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="36.66,21.094 39.937,21.094" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 39.937,21.094 A 2.621,2.621 0 0,0 39.169,19.241" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.315,21.094 39.937,21.094" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.315,21.094 39.169,19.241" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 39.169,19.241 A 2.097,2.097 0 0,0 37.686,18.626" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.686,20.723 39.169,19.241" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.686,20.723 37.686,18.626" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 37.686,18.626 A 1.678,1.678 0 0,0 36.5,19.118" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.686,20.304 37.686,18.626" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.686,20.304 36.5,19.118" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 36.5,19.118 A 1.342,1.342 0 0,0 36.107,20.067" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.449,20.067 36.5,19.118" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.449,20.067 36.107,20.067" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 36.107,20.067 A 1.074,1.074 0 0,0 36.421,20.826" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.18,20.067 36.107,20.067" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.18,20.067 36.421,20.826" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 36.421,20.826 A 0.859,0.859 0 0,0 37.028,21.078" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.028,20.219 36.421,20.826" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.028,20.219 37.028,21.078" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 37.028,21.078 A 0.687,0.687 0 0,0 37.514,20.876" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.028,20.39 37.028,21.078" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.028,20.39 37.514,20.876" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 37.514,20.876 A 0.55,0.55 0 0,0 37.675,20.488" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.126,20.488 37.514,20.876" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.126,20.488 37.675,20.488" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 37.675,20.488 A 0.44,0.44 0 0,0 37.547,20.177" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.236,20.488 37.675,20.488" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.236,20.488 37.547,20.177" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 37.547,20.177 A 0.352,0.352 0 0,0 37.298,20.074" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.298,20.425 37.547,20.177" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.298,20.425 37.298,20.074" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 37.298,20.074 A 0.281,0.281 0 0,0 37.099,20.156" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.298,20.355 37.298,20.074" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.298,20.355 37.099,20.156" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 37.099,20.156 A 0.225,0.225 0 0,0 37.033,20.315" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.258,20.315 37.099,20.156" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.258,20.315 37.033,20.315" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 37.033,20.315 A 0.18,0.18 0 0,0 37.086,20.443" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.213,20.315 37.033,20.315" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.213,20.315 37.086,20.443" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 37.086,20.443 A 0.144,0.144 0 0,0 37.188,20.485" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.188,20.341 37.086,20.443" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.188,20.341 37.188,20.485" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 37.188,20.485 A 0.115,0.115 0 0,0 37.269,20.451" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.188,20.369 37.188,20.485" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.188,20.369 37.269,20.451" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 37.269,20.451 A 0.092,0.092 0 0,0 37.296,20.386" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.204,20.386 37.269,20.451" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="37.204,20.386 37.296,20.386" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 0,30 A 10,10 0 0,0 0,50" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,40 0,30" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,40 0,50" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 0,50 A 8,8 0 0,0 0,34" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,42 0,50" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,42 0,34" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 0,34 A 6.4,6.4 0 0,0 0,46.8" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,40.4 0,34" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,40.4 0,46.8" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 0,46.8 A 5.12,5.12 0 0,0 0,36.56" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,41.68 0,46.8" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,41.68 0,36.56" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 0,36.56 A 4.096,4.096 0 0,0 0,44.752" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,40.656 0,36.56" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,40.656 0,44.752" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 0,44.752 A 3.277,3.277 0 0,0 3.277,41.475" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,41.475 0,44.752" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="0,41.475 3.277,41.475" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 20,30 A 10,10 0 0,0 10,40" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="20,40 20,30" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="20,40 10,40" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 10,40 A 8.944,8.944 0 0,0 18.944,48.944" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.944,40 10,40" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.944,40 18.944,48.944" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 18.944,48.944 A 8,8 0 0,0 26.944,40.944" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.944,40.944 18.944,48.944" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="18.944,40.944 26.944,40.944" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 26.944,40.944 A 7.155,7.155 0 0,0 19.789,33.789" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.789,40.944 26.944,40.944" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.789,40.944 19.789,33.789" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 19.789,33.789 A 6.4,6.4 0 0,0 13.389,40.189" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.789,40.189 19.789,33.789" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.789,40.189 13.389,40.189" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 13.389,40.189 A 5.724,5.724 0 0,0 19.113,45.913" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.113,40.189 13.389,40.189" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.113,40.189 19.113,45.913" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 19.113,45.913 A 5.12,5.12 0 0,0 24.233,40.793" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.113,40.793 19.113,45.913" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.113,40.793 24.233,40.793" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 24.233,40.793 A 4.579,4.579 0 0,0 19.654,36.214" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.654,40.793 24.233,40.793" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.654,40.793 19.654,36.214" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 19.654,36.214 A 4.096,4.096 0 0,0 15.558,40.31" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.654,40.31 19.654,36.214" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.654,40.31 15.558,40.31" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 15.558,40.31 A 3.664,3.664 0 0,0 19.221,43.973" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.221,40.31 15.558,40.31" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.221,40.31 19.221,43.973" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 19.221,43.973 A 3.277,3.277 0 0,0 22.498,40.696" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.221,40.696 19.221,43.973" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.221,40.696 22.498,40.696" style="fill:none;stroke:rgb(0,0,0)"/>
+<circle cx="22.498" cy="40.696" r="0.03" style="fill:rgb(0,0,0);stroke:none"/>
+<polyline points="19.567,40.696 22.498,40.696" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="19.567,40.696 22.498,40.696" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 40,30 A 10,10 0 0,0 32.929,32.929" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="40,40 40,30" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="40,40 32.929,32.929" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 32.929,32.929 A 9.457,9.457 0 0,0 30.159,39.616" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.616,39.616 32.929,32.929" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.616,39.616 30.159,39.616" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 30.159,39.616 A 8.944,8.944 0 0,0 32.779,45.941" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.103,39.616 30.159,39.616" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.103,39.616 32.779,45.941" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 32.779,45.941 A 8.459,8.459 0 0,0 38.76,48.418" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="38.76,39.959 32.779,45.941" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="38.76,39.959 38.76,48.418" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 38.76,48.418 A 8,8 0 0,0 44.417,46.075" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="38.76,40.418 38.76,48.418" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="38.76,40.418 44.417,46.075" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 44.417,46.075 A 7.566,7.566 0 0,0 46.633,40.725" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.067,40.725 44.417,46.075" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.067,40.725 46.633,40.725" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 46.633,40.725 A 7.155,7.155 0 0,0 44.537,35.666" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.477,40.725 46.633,40.725" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.477,40.725 44.537,35.666" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 44.537,35.666 A 6.767,6.767 0 0,0 39.752,33.684" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.752,40.451 44.537,35.666" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.752,40.451 39.752,33.684" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 39.752,33.684 A 6.4,6.4 0 0,0 35.227,35.558" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.752,40.084 39.752,33.684" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.752,40.084 35.227,35.558" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 35.227,35.558 A 6.053,6.053 0 0,0 33.454,39.838" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.506,39.838 35.227,35.558" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.506,39.838 33.454,39.838" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 33.454,39.838 A 5.724,5.724 0 0,0 35.13,43.886" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.178,39.838 33.454,39.838" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.178,39.838 35.13,43.886" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 35.13,43.886 A 5.414,5.414 0 0,0 38.958,45.472" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="38.958,40.058 35.13,43.886" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="38.958,40.058 38.958,45.472" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 38.958,45.472 A 5.12,5.12 0 0,0 42.579,43.972" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="38.958,40.352 38.958,45.472" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="38.958,40.352 42.579,43.972" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 42.579,43.972 A 4.842,4.842 0 0,0 43.997,40.548" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.155,40.548 42.579,43.972" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.155,40.548 43.997,40.548" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 43.997,40.548 A 4.579,4.579 0 0,0 42.656,37.31" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.418,40.548 43.997,40.548" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.418,40.548 42.656,37.31" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 42.656,37.31 A 4.331,4.331 0 0,0 39.593,36.041" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.593,40.372 42.656,37.31" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.593,40.372 39.593,36.041" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 39.593,36.041 A 4.096,4.096 0 0,0 36.697,37.241" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.593,40.137 39.593,36.041" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.593,40.137 36.697,37.241" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 36.697,37.241 A 3.874,3.874 0 0,0 35.562,39.98" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.436,39.98 36.697,37.241" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.436,39.98 35.562,39.98" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 35.562,39.98 A 3.664,3.664 0 0,0 36.635,42.571" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.226,39.98 35.562,39.98" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.226,39.98 36.635,42.571" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 36.635,42.571 A 3.465,3.465 0 0,0 39.085,43.585" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.085,40.121 36.635,42.571" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.085,40.121 39.085,43.585" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 39.085,43.585 A 3.277,3.277 0 0,0 41.402,42.626" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.085,40.309 39.085,43.585" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.085,40.309 41.402,42.626" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 41.402,42.626 A 3.099,3.099 0 0,0 42.31,40.434" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.211,40.434 41.402,42.626" style="fill:none;stroke:rgb(0,0,0)"/>
+<polyline points="39.211,40.434 42.31,40.434" style="fill:none;stroke:rgb(0,0,0)"/>
+</g>
+</svg>

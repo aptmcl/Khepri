@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="1.5 -1.5 18 3">
+<defs>
+</defs>
+<g stroke-width="0.009">
+<polygon points="4,0 2.5,-0.866 2.5,0.866" style="fill:none;stroke:rgb(0,0,0)"/>
+<polygon points="7,0 6,-1 5,0 6,1" style="fill:none;stroke:rgb(0,0,0)"/>
+<polygon points="10,0 9.309,-0.951 8.191,-0.588 8.191,0.588 9.309,0.951" style="fill:none;stroke:rgb(0,0,0)"/>
+<polygon points="13,0 12.5,-0.866 11.5,-0.866 11,0 11.5,0.866 12.5,0.866" style="fill:none;stroke:rgb(0,0,0)"/>
+<polygon points="16,0 15.623,-0.782 14.777,-0.975 14.099,-0.434 14.099,0.434 14.777,0.975 15.623,0.782" style="fill:none;stroke:rgb(0,0,0)"/>
+<polygon points="19,0 18.707,-0.707 18,-1 17.293,-0.707 17,0 17.293,0.707 18,1 18.707,0.707" style="fill:none;stroke:rgb(0,0,0)"/>
+</g>
+</svg>

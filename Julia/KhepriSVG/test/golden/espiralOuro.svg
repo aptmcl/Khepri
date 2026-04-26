@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="-214.277 -233.721 481.33 398.918">
+<defs>
+</defs>
+<g stroke-width="0.251">
+<path d="M 40,-1 A 1,1 0 0,0 39,0" style="fill:none;stroke:rgb(0,0,0)"/>
+<rect x="40" y="-1" width="-1" height="1" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 39,0 A 1.618,1.618 0 0,0 40.618,1.618" style="fill:none;stroke:rgb(0,0,0)"/>
+<rect x="40.618" y="1.618" width="-1.618" height="-1.618" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 40.618,1.618 A 2.618,2.618 0 0,0 43.236,-1" style="fill:none;stroke:rgb(0,0,0)"/>
+<rect x="40.618" y="1.618" width="2.618" height="-2.618" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 43.236,-1 A 4.236,4.236 0 0,0 39,-5.236" style="fill:none;stroke:rgb(0,0,0)"/>
+<rect x="39" y="-5.236" width="4.236" height="4.236" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 39,-5.236 A 6.854,6.854 0 0,0 32.147,1.618" style="fill:none;stroke:rgb(0,0,0)"/>
+<rect x="39" y="-5.236" width="-6.854" height="6.854" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 32.147,1.618 A 11.089,11.089 0 0,0 43.236,12.707" style="fill:none;stroke:rgb(0,0,0)"/>
+<rect x="43.236" y="12.707" width="-11.089" height="-11.089" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 43.236,12.707 A 17.942,17.942 0 0,0 61.178,-5.235" style="fill:none;stroke:rgb(0,0,0)"/>
+<rect x="43.236" y="12.707" width="17.942" height="-17.942" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 61.178,-5.235 A 29.03,29.03 0 0,0 32.147,-34.265" style="fill:none;stroke:rgb(0,0,0)"/>
+<rect x="32.147" y="-34.265" width="29.03" height="29.03" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 32.147,-34.265 A 46.971,46.971 0 0,0 -14.823,12.705" style="fill:none;stroke:rgb(0,0,0)"/>
+<rect x="32.147" y="-34.265" width="-46.971" height="46.971" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M -14.823,12.705 A 75.999,75.999 0 0,0 61.175,88.704" style="fill:none;stroke:rgb(0,0,0)"/>
+<rect x="61.175" y="88.704" width="-75.999" height="-75.999" style="fill:none;stroke:rgb(0,0,0)"/>
+<path d="M 61.175,88.704 A 122.966,122.966 0 0,0 184.141,-34.262" style="fill:none;stroke:rgb(0,0,0)"/>
+<rect x="61.175" y="88.704" width="122.966" height="-122.966" style="fill:none;stroke:rgb(0,0,0)"/>
+<circle cx="184.141" cy="-34.262" r="0.03" style="fill:rgb(0,0,0);stroke:none"/>
+<rect x="-14.818" y="-34.262" width="281.371" height="0" style="fill:none;stroke:rgb(0,0,0)"/>
+</g>
+</svg>
