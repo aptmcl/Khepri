@@ -14,7 +14,9 @@ namespace KhepriAutoCAD {
         public List<ObjectId> shapes;
         public List<Material> materials;
 
-        public Channel(NetworkStream stream) : base(stream) {
+        public Channel(NetworkStream stream) : this(stream, null) { }
+
+        public Channel(NetworkStream stream, Socket socket) : base(stream, socket) {
             this.shapes = new List<ObjectId>();
             this.materials = new List<Material>();
         }
