@@ -542,6 +542,13 @@ KhepriBase.b_surface_polygon(b::ACAD, ps, mat) =
   #@remote(b, SurfacePolygon(ps, mat)) because it cretes BSubMesh and we prefer Regions
   @remote(b, SurfaceClosedPolyLine(ps, mat))
 
+# The default b_surface_regular_polygon routes through b_ngon → SubDMesh,
+# which AutoCAD's BooleanOperation cannot cast to Region (eUnableToCast).
+# Route through b_surface_polygon (SurfaceClosedPolyLine → Region) so 2D
+# CSG works on the result.
+KhepriBase.b_surface_regular_polygon(b::ACAD, edges, c, r, angle, inscribed, mat) =
+  b_surface_polygon(b, regular_polygon_vertices(edges, c, r, angle, inscribed), mat)
+
 KhepriBase.b_surface_polygon_with_holes(b::ACAD, ps, qss, mat) =
   @remote(b, RegionWithHoles([ps, qss...], falses(1 + length(qss)), mat))
 
@@ -594,12 +601,13 @@ KhepriBase.b_surface_arc(b::ACAD, c, r, α, Δα, mat) =
         end
     end
 
-realize(b::ACAD, s::SurfaceEllipse) =
-  if s.radius_x > s.radius_y
-    @remote(b, SurfaceEllipse(s.center, vz(1, s.center.cs), vxyz(s.radius_x, 0, 0, s.center.cs), s.radius_y/s.radius_x))
-  else
-    @remote(b, SurfaceEllipse(s.center, vz(1, s.center.cs), vxyz(0, s.radius_y, 0, s.center.cs), s.radius_x/s.radius_y))
-  end
+# Route through b_surface_ellipse so the standard material plumbing carries
+# `mat` into the @remote call. The plugin's SurfaceEllipse signature requires
+# the material id; the previous bespoke `realize` override omitted it.
+KhepriBase.b_surface_ellipse(b::ACAD, c, rx, ry, mat) =
+  rx > ry ?
+    @remote(b, SurfaceEllipse(c, vz(1, c.cs), vxyz(rx, 0, 0, c.cs), ry/rx, mat)) :
+    @remote(b, SurfaceEllipse(c, vz(1, c.cs), vxyz(0, ry, 0, c.cs), rx/ry, mat))
 
 #=
 PrismWithHoles creates a closed Solid3d with a single material applied to
@@ -819,14 +827,33 @@ KhepriBase.b_text(b::ACAD, str, p, size, mat) =
   
 
 KhepriBase.b_right_cuboid(b::ACAD, cb, width, height, h, mat) =
-  @remote(b, CenteredBox(cb, width, height, h))
+  @remote(b, CenteredBox(cb, width, height, h, mat))
 
 KhepriBase.b_extruded_curve(b::ACAD, s::Shape1D, v, cb, mat) =
   acad_extrude(b, s, v, cb, mat)
 KhepriBase.b_extruded_surface(b::ACAD, s::Shape2D, v, cb, mat) =
   acad_extrude(b, s, v, cb, mat)
 
-acad_extrude(b, s, v, cb, mat) = 
+#=
+Region-profile extrusion must reach the plugin's ExtrudeWithMaterial as a
+single Region entity so it routes to Solid3d.CreateExtrudedSolid (producing
+a true solid that boolean ops can consume). The default in
+KhepriBase/Backend.jl decomposes the region into outer/inner curve
+extrusions plus top/bottom surface caps — a multi-entity assembly that
+fails AutoCAD's Surface→Region promotion in BooleanOperation
+(eNonPlanarEntity from Surface.ConvertToRegion).
+=#
+KhepriBase.b_extruded_surface(b::ACAD, profile::Region, v, cb, mat) =
+  let curve_mat = material_ref(b, default_curve_material()),
+      r = b_realize_path(b, profile, curve_mat)
+    @remote(b, ExtrudeWithMaterial(r, v, mat))
+  end
+KhepriBase.b_extruded_surface(b::ACAD, profile::Region, v, cb, bmat, tmat, smat) =
+  b_extruded_surface(b, profile, v, cb, smat)
+KhepriBase.b_extruded_curve(b::ACAD, profile::Region, v, cb, mat) =
+  b_extruded_surface(b, profile, v, cb, mat)
+
+acad_extrude(b, s, v, cb, mat) =
   and_mark_deleted(b,
     map_ref(b, s) do r
       @remote(b, ExtrudeWithMaterial(r, v, mat))
@@ -868,6 +895,14 @@ acad_revolve(b::ACAD, profile::Shape, p, n, start_angle, amplitude, mat) =
       @remote(b, RevolveWithMaterial(r, p, n, start_angle, amplitude, mat))
     end,
     profile)
+# Region profiles realize via b_realize_path (→ b_surface → AutoCAD Region
+# entity), not as a Shape proxy. Skip the and_delete_shape step since there
+# is no proxy to delete.
+acad_revolve(b::ACAD, profile::Region, p, n, start_angle, amplitude, mat) =
+  let curve_mat = material_ref(b, default_curve_material()),
+      r = b_realize_path(b, profile, curve_mat)
+    @remote(b, RevolveWithMaterial(r, p, n, start_angle, amplitude, mat))
+  end
 
 KhepriBase.b_loft_curves(b::ACAD, profiles, rails, ruled, closed, mat) =
   and_delete_shapes(@remote(b, LoftWithMaterial(
@@ -891,6 +926,12 @@ KhepriBase.b_loft_surface_point(b::ACAD, profile, point, mat) =
 
 KhepriBase.b_unite_ref(b::ACAD, r0, r1) =
     @remote(b, Unite(r0, r1))
+
+# AutoCAD's Unite/Subtract/Intersect expect Solid3d operands; for curves we
+# use the plugin's JoinCurves which internally promotes Arc → Polyline so
+# mixed arc/line/spline sequences resolve to a single joined Polyline.
+KhepriBase.b_stroke_unite(b::ACAD, refs, mat) =
+  length(refs) == 1 ? refs[1] : @remote(b, JoinCurves(refs))
 
 KhepriBase.b_intersect_ref(b::ACAD, r0, r1) =
     @remote(b, Intersect(r0, r1))

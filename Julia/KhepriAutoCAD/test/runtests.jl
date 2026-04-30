@@ -78,4 +78,28 @@ using Test
       end
     end
   end
+
+  # Combinatorial stress tests (require running AutoCAD with Khepri plugin on
+  # Windows). Distinct from visual regression: rather than comparing rendered
+  # output, these exercise hundreds of argument combinations per modeling
+  # operation and assert that the backend tolerates them without error. The
+  # produced shapes remain visible in AutoCAD after the run for manual
+  # inspection — each test occupies a unique grid slot.
+  if get(ENV, "KHEPRI_AUTOCAD_STRESS_TESTS", "0") == "1"
+    if !Sys.iswindows()
+      error("AutoCAD stress tests require Windows. Run these tests from a native Windows Julia installation.")
+    end
+    @testset "Stress (AutoCAD)" begin
+      include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "BackendStressTests.jl"))
+      using .BackendStressTests
+
+      run_stress_tests(autocad,
+        reset! = () -> begin
+          delete_all_shapes()
+          backend(autocad)
+        end,
+        verify = :envelope,
+        skip = Symbol[])
+    end
+  end
 end
