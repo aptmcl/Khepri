@@ -592,11 +592,21 @@ realize(b::ACAD, s::SurfaceEllipse) =
     @remote(b, SurfaceEllipse(s.center, vz(1, s.center.cs), vxyz(0, s.radius_y, 0, s.center.cs), s.radius_x/s.radius_y))
   end
 
+#=
+PrismWithHoles creates a closed Solid3d with a single material applied to
+every face. We pick smat for that single material because:
+  - b_extruded_curve(::CircularPath) calls in with bmat=tmat=nothing and only
+    smat carries a real material ref; using tmat there would crash the encoder.
+  - b_extruded_surface separately emits b_surface for top/bottom with bmat/tmat,
+    so the closed solid's caps are visually redundant anyway. The face that
+    matters as "the prism's own material" is the side.
+This matches b_cylinder's convention (passes smat to ExtrudeWithMaterial).
+=#
 KhepriBase.b_generic_prism(b::ACAD, bs, smooth, v, bmat, tmat, smat) =
-  @remote(b, PrismWithHoles([bs], [smooth], v, tmat))
+  @remote(b, PrismWithHoles([bs], [smooth], v, smat))
 
 KhepriBase.b_generic_prism_with_holes(b::ACAD, bs, smooth, bss, smooths, v, bmat, tmat, smat) =
-  @remote(b, PrismWithHoles([bs, bss...], [smooth, smooths...], v, tmat))
+  @remote(b, PrismWithHoles([bs, bss...], [smooth, smooths...], v, smat))
 
 KhepriBase.b_pyramid_frustum(b::ACAD, bs, ts, bmat, tmat, smat) =
   @remote(b, IrregularPyramidFrustum(bs, ts, smat))
