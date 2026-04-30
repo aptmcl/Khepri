@@ -115,6 +115,7 @@ public Plane SurfaceFrameAt(RhinoObject obj, double u, double v)
 public Point3d[] BoundingBox(ObjectId[] ids)
 public Brep Extrusion(RhinoObject obj, Vector3d dir)
 public Brep[] SweepPathProfile(RhinoObject path, RhinoObject profile, double rotation, double scale)
+public Brep Loft(RhinoObject[] profiles, RhinoObject[] rails, bool ruled, bool closed)
 public Guid[] Unite(RhinoObject[]objs)
 public Guid[] Intersect(RhinoObject obj0, RhinoObject obj1)
 public Guid[] Subtract(RhinoObject obj0, RhinoObject obj1)
@@ -414,11 +415,16 @@ KhepriBase.b_mesh_obj_fmt(b::RH, obj_name, transform) =
 KhepriBase.b_solidify(b::RH, refs) = refs
   
 
+# PrismWithHoles creates a closed solid with one material applied to all
+# faces. Use smat (the side material) — bmat/tmat are top/bottom caps that
+# fall through as `nothing` from the default b_extruded_curve(::CircularPath)
+# fallback in KhepriBase, which then crashes the MatId encoder. Matches the
+# AutoCAD convention.
 KhepriBase.b_generic_prism(b::RH, bs, smooth, v, bmat, tmat, smat) =
-	@remote(b, PrismWithHoles([bs], [smooth], v, tmat))
+  @remote(b, PrismWithHoles([bs], [smooth], v, smat))
 
 KhepriBase.b_generic_prism_with_holes(b::RH, bs, smooth, bss, smooths, v, bmat, tmat, smat) =
-  @remote(b, PrismWithHoles([bs, bss...], [smooth, smooths...], v, tmat))
+  @remote(b, PrismWithHoles([bs, bss...], [smooth, smooths...], v, smat))
 
 KhepriBase.b_pyramid_frustum(b::RH, bs, ts, bmat, tmat, smat) =
   @remote(b, IrregularPyramidFrustum(bs, ts, tmat))
@@ -552,6 +558,20 @@ KhepriBase.b_extruded_surface(b::RH, s::Shape2D, v, cb, mat) =
       end,
       s)
 
+# Region-profile extrusion produces a closed Brep (solid) directly from
+# Rhino's Extrusion of a Region entity, instead of the default in
+# KhepriBase/Backend.jl that decomposes outer/inner curves and surface caps
+# (a multi-Brep assembly that downstream CSG cannot consume).
+KhepriBase.b_extruded_surface(b::RH, profile::Region, v, cb, mat) =
+  let curve_mat = material_ref(b, default_curve_material()),
+      r = b_realize_path(b, profile, curve_mat)
+    @remote(b, Extrusion(r, v))
+  end
+KhepriBase.b_extruded_surface(b::RH, profile::Region, v, cb, bmat, tmat, smat) =
+  b_extruded_surface(b, profile, v, cb, smat)
+KhepriBase.b_extruded_curve(b::RH, profile::Region, v, cb, mat) =
+  b_extruded_surface(b, profile, v, cb, mat)
+
 #
 #KhepriBase.b_sweep_curve(b::RH, path::Path, profile::Path, rotation, scale, mat) =
 
@@ -569,6 +589,42 @@ KhepriBase.b_swept_curve(b::RH, path::Shape1D, profile::Shape1D, rotation, scale
 KhepriBase.b_swept_surface(b::RH, path::Shape1D, profile::Shape2D, rotation, scale, mat) =
   rhino_sweep(b, path, profile, rotation, scale, mat)
 
+# Path-typed overload: when the user passes raw Path objects (e.g.,
+# closed_spline_path(...)) instead of constructing Shape1D wrappers, realize
+# the paths first and call the plugin's SweepPathProfile directly. Without
+# this, dispatch falls through to a default that tries `convert(Shape, path)`
+# and fails.
+KhepriBase.b_swept_curve(b::RH, path::Path, profile::Path, rotation, scale, mat) =
+  let curve_mat = material_ref(b, default_curve_material()),
+      path_r = b_realize_path(b, path, curve_mat),
+      profile_r = b_realize_path(b, profile, curve_mat)
+    @remote(b, SweepPathProfile(path_r, profile_r, rotation, scale))
+  end
+
+# Loft-to-point: emit profile + endpoint as cross-sections to Rhino's Loft
+# with ruled=true / closed=false (the apex is a degenerate cross-section).
+# The default b_loft_curve_point in KhepriBase has wrong arity (3 args, no
+# mat) and references an undefined `mat` symbol — broken for any backend
+# called via the high-level `loft(curve, point)`.
+KhepriBase.b_loft_curve_point(b::RH, profile, point, mat) =
+  and_delete_shapes(
+    @remote(b, Loft(vcat(ref_values(b, profile), ref_values(b, point)),
+                    UInt128[], true, false)),
+    [profile, point])
+
+# Surface-to-point loft: Rhino's Loft plugin rejects closed-Brep cross-sections,
+# so realize the surface's boundary path as a curve, loft that to the point.
+# Result is the conical lateral surface (top cap is implicit at the apex; the
+# bottom surface, if needed, is left as the original profile).
+KhepriBase.b_loft_surface_point(b::RH, profile, point, mat) =
+  let curve_mat = material_ref(b, default_curve_material()),
+      boundary_r = b_realize_path(b, shape_path(profile), curve_mat)
+    and_delete_shapes(
+      @remote(b, Loft(vcat([boundary_r], ref_values(b, point)),
+                      UInt128[], true, false)),
+      [profile, point])
+  end
+
 KhepriBase.b_subtract_ref(b::RH, s, r) =
   @remote(b, Subtract(s, r))
 
@@ -577,6 +633,13 @@ KhepriBase.b_intersect_ref(b::RH, s, r) =
 
 KhepriBase.b_unite_refs(b::RH, rs) =
   @remote(b, Unite(rs))
+
+# JoinCurves merges curve refs into a single curve (used by
+# b_stroke(::PathSequence) via b_stroke_unite). Default b_stroke_unite would
+# call b_unite_refs (above) which is a Brep boolean-union and rejects curve
+# inputs.
+KhepriBase.b_stroke_unite(b::RH, refs, mat) =
+  length(refs) == 1 ? refs[1] : @remote(b, JoinCurves(refs))
 
 KhepriBase.b_slice_ref(b::RH, r, p, v) =
   @remote(b, Slice(r, p, v))

@@ -66,4 +66,28 @@ using Test
       )
     end
   end
+
+  # Combinatorial stress tests (require running Rhino with Khepri plugin on
+  # Windows). Distinct from visual regression: rather than comparing rendered
+  # output, these exercise hundreds of argument combinations per modeling
+  # operation and assert that the backend tolerates them without error. The
+  # produced shapes remain visible in Rhino after the run for manual
+  # inspection — each test occupies a unique grid slot.
+  if get(ENV, "KHEPRI_RHINO_STRESS_TESTS", "0") == "1"
+    if !Sys.iswindows()
+      error("Rhino stress tests require Windows. Run these tests from a native Windows Julia installation.")
+    end
+    @testset "Stress (Rhino)" begin
+      include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "BackendStressTests.jl"))
+      using .BackendStressTests
+
+      run_stress_tests(rhino,
+        reset! = () -> begin
+          delete_all_shapes()
+          backend(rhino)
+        end,
+        verify = :envelope,
+        skip = Symbol[])
+    end
+  end
 end
