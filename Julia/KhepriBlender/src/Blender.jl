@@ -188,7 +188,8 @@ def set_render_path(filepath:str)->None:
 def add_render_background(d:float, w:float, mat:MatId)->Id:
 def default_renderer()->None:
 def cycles_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool, exposure:float)->None:
-def freestylesvg_renderer(thickness:float, crease_angle:float)->None:
+def eevee_renderer(samples:int, exposure:float)->None:
+def freestylesvg_renderer(thickness:float, crease_angle:float, sphere_radius:float, kr_derivative_epsilon:float)->None:
 def clay_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool)->None:
 def set_sun(latitude:float, longitude:float, elevation:float, year:int, month:int, day:int, time:float, UTC_zone:float, use_daylight_savings:bool)->None:
 def set_sky(turbidity:float)->None:
@@ -208,7 +209,15 @@ const BLR = SocketBackend{BLRKey, BLRId}
 
 const KhepriServerPath = Parameter(abspath(@__DIR__, "BlenderServer.py"))
 export headless_blender
-const headless_blender = Parameter(false)
+#=
+Why headless defaults differ by OS. Blender's GUI depends on a compositing
+window system (Windows: DWM; macOS: Cocoa; Linux: X11/Wayland). On headless
+Linux and on WSL without WSLg the GUI path fails before it can start the
+Khepri server. On those hosts we default to `--background` mode so the
+plugin works out of the box; a user with a working display can still set
+`headless_blender(false)` to get the interactive viewport back.
+=#
+const headless_blender = Parameter(!Sys.iswindows() && !Sys.isapple())
 const starting_blender = Parameter(false)
 
 export start_blender
@@ -242,20 +251,28 @@ KhepriBase.after_connecting(b::BLR) =
 	starting_blender(false)
   end
 
-set_default_materials() = begin
-	#set_material(BLR, material_basic, )
-	set_material(BLR, material_metal, "asset_base_id:f1774cb0-b679-46b4-879e-e7223e2b4b5f asset_type:material")
-	#set_material(BLR, material_glass, "asset_base_id:ee2c0812-17f5-40d4-992c-68c5a66261d7 asset_type:material")
-	set_material(BLR, material_glass, "asset_base_id:ffa3c281-6184-49d8-b05e-8c6e9fe93e68 asset_type:material")
-	set_material(BLR, material_wood, "asset_base_id:d5097824-d5a1-4b45-ab5b-7b16bdc5a627 asset_type:material")
-	#set_material(BLR, material_concrete, "asset_base_id:0662b3bf-a762-435d-9407-e723afd5eafc asset_type:material")
-	set_material(BLR, material_concrete, "asset_base_id:df1161da-050c-4638-b376-38ced992ec18 asset_type:material")
-	set_material(BLR, material_plaster, "asset_base_id:c674137d-cfae-45f1-824f-e85dc214a3af asset_type:material")
-	#set_material(BLR, material_grass, "asset_base_id:97b171b4-2085-4c25-8793-2bfe65650266 asset_type:material")
-	#set_material(BLR, material_grass, "asset_base_id:7b05be22-6bed-4584-a063-d0e616ddea6a asset_type:material")
-	set_material(BLR, material_grass, "asset_base_id:b4be2338-d838-433b-9f0d-2aa9b97a0a8a asset_type:material")
-	set_material(BLR, material_clay, b -> b_plastic_material(b, "Clay", rgb(0.9, 0.9, 0.9),	1.0))
-end
+#=
+Default material setup.
+
+Why this is a no-op now. KhepriBase defines canonical architectural
+materials (material_basic, material_metal, …) with PBR parameters tuned
+for cross-backend consistency. The generic realization path in Shapes.jl
+— `realize(b::Backend, s::PbrMaterial)` → `b_material(b, name, base_color,
+metallic, roughness, …)` — already dispatches to our `b_material(b::BLR,
+…)` which generates a Principled BSDF via `new_material`. No per-backend
+registration is needed for the canonical set.
+
+This function is retained as an extension hook: a user who wants Blender
+to render `material_wood` from a specific BlenderKit asset instead of a
+procedural PBR can call `set_material(BLR, material_wood, "asset_base_id:…
+asset_type:material")` in their startup script, which short-circuits the
+generic `b_material` path via `b_get_material`. Leaving the stub in place
+means `__init__` code stays the same shape as other Khepri backend
+packages.
+
+See also: Docs/Materials.md, Docs/RenderingStrategy.md (Milestone 6).
+=#
+set_default_materials() = nothing
 
 const blender = BLR("Blender", blender_port, blender_api)
 
@@ -275,8 +292,13 @@ KhepriBase.b_polygon(b::BLR, ps, mat) =
 	@remote(b, line(ps, true, mat))
 
 KhepriBase.b_spline(b::BLR, ps, v1, v2, mat) =
-  # HACK: What about v1, v2
-  @remote(b, bezier(5, ps, false, v1 == false ? [] : [v1, v2], mat))
+  # v1/v2 are end tangents. Both `false` (no tangent specified, the proxy
+  # default) and `nothing` (passed by the b_arc default fallback in
+  # KhepriBase) mean "let Blender compute its own tangents". A `Vec` value
+  # means the user supplied a specific tangent.
+  @remote(b, bezier(5, ps, false,
+                    (v1 isa Vec && v2 isa Vec) ? [v1, v2] : [],
+                    mat))
 
 KhepriBase.b_closed_spline(b::BLR, ps, mat) =
   @remote(b, bezier(5, ps, true, [], mat))
@@ -500,14 +522,43 @@ KhepriBase.b_set_view_top(b::BLR) =
 KhepriBase.b_set_view_size(b::BLR, width, height) =
   @remote(b, set_view_size(width, height))
 
+#=
+Canonical visual_style → Blender renderer mapping.
+
+Each canonical style is served by the Blender engine that best matches its
+intent:
+
+  :realistic  → Cycles path tracer — reference photoreal.
+  :shaded     → Eevee real-time rasteriser — ~10× faster than Cycles with
+                a small loss in GI quality; right default for preview.
+  :arctic     → Clay (Cycles with white matte material + AO pass) — the
+                documentation-ready matte-white look.
+  :technical,
+  :pen,
+  :sketchy    → Freestyle SVG renderer — stroke-based NPR, true line drawing.
+  :wireframe  → Freestyle only (no solid shading), approximates wireframe by
+                showing every edge.
+  :xray,
+  :ghosted    → Fall back to Cycles with transparency (no native mapping in
+                Blender; backend-specific tuning would use the material's
+                alpha channel).
+=#
 const blender_visual_style_renderers = Dict(
-  :shaded => :default,
-  :realistic => :cycles)
+  :shaded     => :eevee,
+  :realistic  => :cycles,
+  :arctic     => :clay,
+  :technical  => :freestyle,
+  :pen        => :freestyle,
+  :sketchy    => :freestyle,
+  :wireframe  => :freestyle,
+  :xray       => :cycles,
+  :ghosted    => :cycles,
+)
 
 KhepriBase.b_view_settings(b::BLR;
     visual_style::Symbol=:_none,
     renderer::Symbol=(visual_style == :_none ? :cycles : get(blender_visual_style_renderers, visual_style) do
-        error("Unsupported visual_style for Blender: $visual_style. Options: :shaded, :realistic (or use renderer= directly)")
+        error("Unsupported visual_style for Blender: $visual_style. Options: $(join(sort(collect(keys(blender_visual_style_renderers))), ", ")) (or use renderer= directly)")
       end),
     samples::Int=1200,
     denoising::Bool=true,
@@ -516,12 +567,18 @@ KhepriBase.b_view_settings(b::BLR;
     exposure::Float64=Float64(render_exposure())) =
   if renderer == :cycles
     @remote(b, cycles_renderer(samples, denoising, motion_blur, transparent, exposure))
+  elseif renderer == :eevee
+    @remote(b, eevee_renderer(samples, exposure))
   elseif renderer == :clay
     @remote(b, clay_renderer(samples, denoising, motion_blur, transparent))
+  elseif renderer == :freestyle
+    # For Freestyle via view_settings, use modest defaults; full control stays
+    # on the explicit render_svg(...) function.
+    @remote(b, freestylesvg_renderer(1.0, 0.0, 1.0, 1e-6))
   elseif renderer == :default
     @remote(b, default_renderer())
   else
-    error("Unknown Blender renderer: $renderer. Options: :cycles, :clay, :default")
+    error("Unknown Blender renderer: $renderer. Options: :cycles, :eevee, :clay, :freestyle, :default")
   end
 
 KhepriBase.b_realistic_sky(b::BLR, altitude, azimuth, turbidity, sun) =
@@ -571,23 +628,84 @@ KhepriBase.b_shape_from_ref(b::BLR, r) = begin
 end
 ##############
 
+#=
+Quality → samples mapping.
+
+Cycles converges with roughly log-linear quality: doubling samples halves the
+variance. Eevee's samples control TAA/temporal accumulation, not ray sampling,
+so the knee is flatter. We use the same "×2^(4q)" dial as KhepriMitsuba to
+keep the user-facing semantics identical across backends.
+
+Floor values keep the dial honest: Cycles below ~128 samples is
+indistinguishably noisy regardless of denoising, and the user wanted a
+"realistic" render. If you genuinely want sub-128 Cycles you can set
+mitsuba_spp directly on the backend (we don't expose a Blender equivalent).
+=#
+blender_samples_for_quality(q::Real, renderer::Symbol) =
+  let base = renderer === :eevee     ? 64 :
+             renderer === :clay      ? 256 :
+             renderer === :freestyle ? 64 :
+             1024,                   # :cycles default
+      floor_samples = renderer === :cycles ? 128 :
+                      renderer === :clay   ? 64 :
+                      1
+    max(floor_samples, round(Int, base * 2.0 ^ (4 * clamp(q, -1.0, 1.0))))
+  end
+
+# Legacy 2-arg method: existing callers keep working.
 KhepriBase.b_render_and_save_view(b::BLR, path::String) =
-  let (camera, target, lens) = @remote(b, get_view())
+  KhepriBase.b_render_and_save_view(b, path, RenderViewOptions())
+
+#=
+3-arg method: dispatch by opts.visual_style.
+
+Camera framing goes through `set_camera_view` on the Blender side, which
+handles both GUI and headless paths. The render-kind handling (:black → HDRI
+with film_transparent; :white → clay with white matte) is preserved from the
+legacy path; new styles supplement rather than replace it. When a style maps
+to :freestyle, we override the image extension to .svg so the user-visible
+filename matches the real output format.
+=#
+KhepriBase.b_render_and_save_view(b::BLR, path::String, opts::RenderViewOptions) =
+  let (camera, target, lens) = @remote(b, get_view()),
+      style = opts.visual_style,
+      renderer = get(blender_visual_style_renderers, style, :cycles),
+      samples = blender_samples_for_quality(opts.quality, renderer),
+      # Freestyle writes SVG; swap extension if the caller gave us a .png path.
+      out_path = renderer === :freestyle ? replace(path, r"\.png$" => ".svg") : path
+    KhepriBase.validate_visual_style(style)
     @remote(b, set_camera_view(camera, target, lens))
-    @remote(b, set_render_size(render_width(), render_height()))
-    @remote(b, set_render_path(path))
-    if render_kind() == :black
+    @remote(b, set_render_size(opts.width, opts.height))
+    @remote(b, set_render_path(out_path))
+    if opts.kind == :black
       @remote(b, set_hdri_background_with_rotation(
         joinpath(@__DIR__, "studio_small_05_4k.exr"),
         11π/6 - (camera - target).ϕ))
-      @remote(b, cycles_renderer(1200, true, false, true, render_exposure()))
-    elseif render_kind() == :white
-      error("Finish this")
+      @remote(b, cycles_renderer(samples, true, false, true, opts.exposure))
+    elseif renderer === :cycles
+      @remote(b, cycles_renderer(samples, true, false, false, opts.exposure))
+    elseif renderer === :eevee
+      @remote(b, eevee_renderer(samples, opts.exposure))
+    elseif renderer === :clay
+      @remote(b, clay_renderer(samples, true, false, false))
+    elseif renderer === :freestyle
+      @remote(b, freestylesvg_renderer(1.0, 0.0, 1.0, 1e-6))
     else
-      @remote(b, cycles_renderer(1200, true, false, true, render_exposure()))
+      @remote(b, default_renderer())
     end
-    PNGFile(path)
+    PNGFile(out_path)
   end
+
+# Fast preview: low-sample Eevee at 640×480.
+KhepriBase.b_shot_view(b::BLR, path::String) =
+  KhepriBase.b_render_and_save_view(b, path,
+    RenderViewOptions(width=640, height=480,
+                      quality=-0.5,
+                      visual_style=:shaded,
+                      kind=render_kind()))
+
+KhepriBase.b_shot_view(b::BLR, path::String, opts::RenderViewOptions) =
+  KhepriBase.b_render_and_save_view(b, path, opts)
 
 export render_svg
 render_svg(b::BLR, path) =
