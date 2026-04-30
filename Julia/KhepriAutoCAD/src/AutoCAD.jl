@@ -67,6 +67,15 @@ upgrade_plugin(; advance_major_version=false, advance_minor_version=true, phase=
       cp(bundle_path, local_khepri_plugin)
       # 10. and we copy the dlls to the local bundle Contents folder
       copy_plugin_files!(dlls, joinpath(plugin_folder, dlls_folder), joinpath(local_khepri_plugin, "Contents"))
+      # 11. Deploy to AutoCAD's plugin directory and reset the checker
+      try
+        update_plugin()
+      catch e
+        isa(e, Base.IOError) ?
+          @warn("Could not deploy plugin (AutoCAD may be running). Close AutoCAD and reconnect.") :
+          rethrow()
+      end
+      global check_plugin = make_plugin_checker("AutoCAD", update_plugin)
   end
 
 #=
