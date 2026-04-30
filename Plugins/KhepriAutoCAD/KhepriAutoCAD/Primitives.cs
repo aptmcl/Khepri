@@ -53,6 +53,10 @@ namespace KhepriAutoCAD {
     class NativeMethods {
         [DllImport("user32.dll")]
         internal static extern IntPtr SendMessage(IntPtr hWnd, uint wMsg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
     }
 
     public class Primitives : KhepriBase.Primitives {
@@ -989,10 +993,28 @@ namespace KhepriAutoCAD {
                 }
         }
 
+        // Pre-translate profile to world origin before letting AutoCAD's
+        // sweep handle alignment. The earlier code did
+        //   Transform(profile, pathFrame)
+        // which works only when the profile is at world origin to begin with;
+        // for profiles constructed in a translated CS (already at the path's
+        // start in world coords), it double-translated. Translating to world
+        // origin first restores the original-precondition assumption.
+        void TranslateProfileToOrigin(Entity profile) {
+            Extents3d bb = profile.GeometricExtents;
+            Point3d c = new Point3d(
+                (bb.MinPoint.X + bb.MaxPoint.X) / 2,
+                (bb.MinPoint.Y + bb.MaxPoint.Y) / 2,
+                (bb.MinPoint.Z + bb.MaxPoint.Z) / 2);
+            profile.TransformBy(Matrix3d.Displacement(Point3d.Origin - c));
+        }
+
         public ObjectId Sweep(ObjectId pathId, ObjectId profileId, double rotation, double scale) {
                 Curve path = tr.GetObject(pathId, OpenMode.ForWrite) as Curve;
                 Frame3d frame = CurveFrameAt(path, CurveDomain(path)[0]);
-                Entity profile = Transform(tr.GetObject(profileId, OpenMode.ForWrite) as Entity, frame);
+                Entity profile = tr.GetObject(profileId, OpenMode.ForWrite) as Entity;
+                TranslateProfileToOrigin(profile);
+                profile = Transform(profile, frame);
                 SweepOptionsBuilder sob = new SweepOptionsBuilder();
                 sob.Align = SweepOptionsAlignOption.NoAlignment;
                 sob.Bank = false;
@@ -1018,7 +1040,9 @@ namespace KhepriAutoCAD {
         public ObjectId SweepWithMaterial(ObjectId pathId, ObjectId profileId, double rotation, double scale, ObjectId matId) {
                 Curve path = tr.GetObject(pathId, OpenMode.ForWrite) as Curve;
                 Frame3d frame = CurveFrameAt(path, CurveDomain(path)[0]);
-                Entity profile = Transform(tr.GetObject(profileId, OpenMode.ForWrite) as Entity, frame);
+                Entity profile = tr.GetObject(profileId, OpenMode.ForWrite) as Entity;
+                TranslateProfileToOrigin(profile);
+                profile = Transform(profile, frame);
                 SweepOptionsBuilder sob = new SweepOptionsBuilder();
                 sob.Align = SweepOptionsAlignOption.NoAlignment;
                 sob.Bank = false;
