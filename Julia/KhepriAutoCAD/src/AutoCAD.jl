@@ -585,7 +585,7 @@ KhepriBase.b_surface_arc(b::ACAD, c, r, α, Δα, mat) =
     elseif Δα == 0
         @remote(b, Point(c + vpol(r, α, c.cs)))
     elseif abs(Δα) >= 2*pi
-        @remote(b, SurfaceCircle(c, vz(1, c.cs), r))
+        @remote(b, SurfaceCircle(c, vz(1, c.cs), r, mat))
     else
         β = α + Δα
         if β > α
