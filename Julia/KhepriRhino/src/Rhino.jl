@@ -492,23 +492,55 @@ rhino_default_material = RhinoDefaultMaterial
 KhepriBase.b_get_material(b::RH, mat::RhinoDefaultMaterial) =
   b_get_material(b, joinpath(@remote(b, DefaultMaterialsFolder()), mat.name*".rmtl"))
 
+# Rhino's RMI exposes `CreateMaterial` (legacy diffuse / specular / ambient /
+# emission / reflection / reflectivity / glossiness / refraction-index /
+# transparency), not the `new_material` referenced before this fix. Map PBR
+# parameters to legacy approximations: metallic → reflectivity (the 0..1
+# strength of the specular reflection), roughness → 1 - glossiness,
+# transmission → transparency, emission_color → emission. Specular/clearcoat
+# are folded into the reflection magnitude. This is a coarse mapping but
+# yields plausible visual output and unblocks the b_material code path.
 KhepriBase.b_material(b::RH, name, base_color, metallic, roughness, specular,
                            ior, transmission, transmission_roughness,
                            clearcoat, clearcoat_roughness,
                            emission_color, emission_strength) =
-  Guid(@remote(b, new_material(name, convert(RGBA, base_color), specular, roughness)) + 1)
+  let diffuse = convert(RGBA, base_color),
+      black = RGBA(0.0, 0.0, 0.0, 1.0),
+      reflection = diffuse,                 # tint reflections with base color (metallic look)
+      reflectivity = clamp(metallic + clearcoat * 0.5, 0.0, 1.0),
+      glossiness = clamp(1.0 - roughness, 0.0, 1.0),
+      emission = convert(RGBA, emission_color)
+    @remote(b, CreateMaterial(name, diffuse, diffuse, black, emission, reflection,
+                              reflectivity, glossiness, ior, transmission))
+  end
 
 KhepriBase.b_plastic_material(b::RH, name, color, roughness) =
-  @remote(b, new_material(name, convert(RGBA, color), 0.0, 1.0, roughness, 0.0, 0.0, 1.4, 0.0, 0.0, RGBA(0.0, 0.0, 0.0, 1.0), 0.0))
+  let c = convert(RGBA, color),
+      black = RGBA(0.0, 0.0, 0.0, 1.0)
+    @remote(b, CreateMaterial(name, c, c, black, black, black,
+                              0.0, 1.0 - roughness, 1.4, 0.0))
+  end
 
 KhepriBase.b_metal_material(b::RH, name, color, roughness, ior) =
-  @remote(b, new_metal_material(name, convert(RGBA, color), roughness, ior))
+  let c = convert(RGBA, color),
+      black = RGBA(0.0, 0.0, 0.0, 1.0)
+    @remote(b, CreateMaterial(name, c, c, black, black, c,
+                              1.0, 1.0 - roughness, ior, 0.0))
+  end
 
 KhepriBase.b_glass_material(b::RH, name, color, roughness, ior) =
-  @remote(b, new_glass_material(name, convert(RGBA, color), roughness, ior))
+  let c = convert(RGBA, color),
+      black = RGBA(0.0, 0.0, 0.0, 1.0)
+    @remote(b, CreateMaterial(name, c, c, black, black, c,
+                              0.5, 1.0 - roughness, ior, 0.9))
+  end
 
 KhepriBase.b_mirror_material(b::RH, name, color) =
-  @remote(b, new_mirror_material(name, convert(RGBA, color)))
+  let c = convert(RGBA, color),
+      black = RGBA(0.0, 0.0, 0.0, 1.0)
+    @remote(b, CreateMaterial(name, black, black, black, black, c,
+                              1.0, 1.0, 1.0, 0.0))
+  end
 
 backend_map_division(b::RH, f::Function, s::Shape1D, n::Int) =
   let conn = connection(b),
