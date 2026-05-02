@@ -927,6 +927,30 @@ KhepriBase.b_loft_surface_point(b::ACAD, profile, point, mat) =
 KhepriBase.b_unite_ref(b::ACAD, r0, r1) =
     @remote(b, Unite(r0, r1))
 
+#=
+For surface unions (`union(surface_circle, surface_circle, ...)`), do NOT
+collapse the operands into a single AutoCAD Region via BoolUnite — keep each
+operand as its own ref (a `Vector{ObjectId}` flowing through the proxy
+machinery). This avoids producing a multi-loop Region entity that
+`Solid3d.CreateExtrudedSolid` rejects with `eInvalidInput` (the .NET API
+exposes neither `AcDbRegion::separateRegions` nor a per-component Brep walk,
+so once the Region is multi-loop there is no clean way to extrude it).
+
+Downstream operations stay correct because they all dispatch through
+`map_ref` (Backend.jl:1028,1045): `subtraction(union(...), mask)` walks each
+ref and subtracts mask from each piece, `extrusion(union(...), h)` extrudes
+each piece independently — the right semantics for a disjoint union of
+surfaces.
+
+Solid unions are unaffected — `b_united_solids` stays on the default path
+(`b_unite_refs` → `b_unite_ref` → AutoCAD `Unite` / BoolUnite), which
+correctly merges Solid3d operands into one solid for further CSG.
+=#
+KhepriBase.b_united_surfaces(b::ACAD, source, mask, mat) =
+  and_mark_deleted(b,
+    vcat(ref_values(b, source), ref_values(b, mask)),
+    [source, mask])
+
 # AutoCAD's Unite/Subtract/Intersect expect Solid3d operands; for curves we
 # use the plugin's JoinCurves which internally promotes Arc → Polyline so
 # mixed arc/line/spline sequences resolve to a single joined Polyline.
