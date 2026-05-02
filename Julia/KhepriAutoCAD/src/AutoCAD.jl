@@ -996,22 +996,41 @@ realize(b::ACAD, s::UnionMirror) =
   end
 =#
 
+#=
+AutoCAD's SurfaceFromGrid (Primitives.cs) builds a SubDMesh and only smooths
+it when level > 0 — both the SubD subdivision count and ConvertToSurface's
+smoothing flags are gated by `level > 0`. Passing 0 in every branch (the
+former code) made smooth_u/smooth_v visually inert.
+
+Level 3 matches the convention of b_ngon / b_quad_strip / b_quad_strip_closed
+in this file: enough subdivision to read as smooth without producing an
+unwieldy NURBS. Lower the value if you want faster, more-faceted output;
+raise it for smoother, heavier surfaces. The all-faceted branch keeps 0
+because no smoothing was requested.
+
+AutoCAD's SubD smoothing applies uniformly to both axes, so to honour
+smoothness along just one direction we slice the grid into 2-wide strips
+along the other and smooth those — the 2-wide direction has only the
+boundary as control points, so its "smoothing" is trivially flat.
+
+See also: SurfaceFromGrid in Plugins/KhepriAutoCAD/.../Primitives.cs.
+=#
 KhepriBase.b_surface_grid(b::ACAD, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
-  let (nu, nv) = size(ptss)
+  let (nu, nv) = size(ptss),
+      smooth_level = 3
     smooth_u && smooth_v ?
-      # Autocad does not allow us to distinguish smoothness along different dimensions
-      @remote(b, SurfaceFromGrid(nu, nv, reshape(permutedims(ptss),:), closed_u, closed_v, 0, mat)) :
+      @remote(b, SurfaceFromGrid(nu, nv, reshape(permutedims(ptss),:), closed_u, closed_v, smooth_level, mat)) :
       (smooth_u ?
-        vcat([@remote(b, SurfaceFromGrid(nu, 2, reshape(permutedims(ptss[:,i:i+1]),:), closed_u, false, 0, mat))
+        vcat([@remote(b, SurfaceFromGrid(nu, 2, reshape(permutedims(ptss[:,i:i+1]),:), closed_u, false, smooth_level, mat))
               for i in 1:nv-1],
              closed_v ?
-               [@remote(b, SurfaceFromGrid(nu, 2, reshape(permutedims(ptss[:,[end,1]]),:), closed_u, false, 0, mat))] :
+               [@remote(b, SurfaceFromGrid(nu, 2, reshape(permutedims(ptss[:,[end,1]]),:), closed_u, false, smooth_level, mat))] :
                []) :
         (smooth_v ?
-          vcat([@remote(b, SurfaceFromGrid(2, nv, reshape(permutedims(ptss[i:i+1,:]),:), false, closed_v, 0, mat))
+          vcat([@remote(b, SurfaceFromGrid(2, nv, reshape(permutedims(ptss[i:i+1,:]),:), false, closed_v, smooth_level, mat))
                 for i in 1:nu-1],
                closed_u ?
-                 [@remote(b, SurfaceFromGrid(2, nv, reshape(permutedims(ptss[[end,1],:]),:), false, closed_v, 0, mat))] :
+                 [@remote(b, SurfaceFromGrid(2, nv, reshape(permutedims(ptss[[end,1],:]),:), false, closed_v, smooth_level, mat))] :
                  []) :
           @remote(b, SurfaceFromGrid(nu, nv, reshape(permutedims(ptss),:), closed_u, closed_v, 0, mat))))
   end
