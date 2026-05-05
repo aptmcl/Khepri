@@ -800,6 +800,56 @@ namespace KhepriUnity {
                 return MakeStatic(solid);
             }
 
+            /*
+            Position the pivot at the geometry's world-space centroid before
+            combining. Khepri encodes vertices as world coordinates (Unity.jl
+            via world_raw(p)), so each part's mesh contains absolute world
+            positions while every part GameObject sits at world (0,0,0). If
+            we leave `solid` at the origin too, MeshCombiner's
+            worldToLocal*localToWorld transform collapses to identity and the
+            combined mesh ends up with local vertices clustered far from
+            mesh-local (0,0,0). Visual rendering still works (pivot at 0 +
+            local vertex == world position), but a convex MeshCollider then
+            cooks a hull whose extent stretches between the pivot and the
+            far-away vertices — the hull "wraps" the world origin. Inertia
+            tensors and Rigidbody centre-of-mass land off the geometry for
+            the same reason.
+
+            By setting solid.transform.position to the renderers' combined
+            world-space bounds.center first, MeshCombiner's worldToLocal now
+            translates the vertices by -centre during combination, leaving
+            the merged mesh centred around its own (0,0,0). The collider
+            hull, the inertia tensor, and any subsequent rotate/scale ops
+            then all reference the geometry's actual middle.
+
+            We aggregate via MeshFilter.sharedMesh.bounds transformed
+            through each renderer's localToWorld, not Renderer.bounds, for
+            two reasons: (1) Renderer.bounds is computed lazily and in
+            batchmode (no rendering frame yet) it can fall back to
+            Bounds.zero — Encapsulate'ing zero into the aggregate forces
+            the AABB to include world origin, which is precisely the
+            "wraps origin" symptom we are trying to fix; (2) Mesh.bounds is
+            recomputed from vertex data by RecalculateBounds() at the time
+            the mesh was authored, so it is correct regardless of
+            rendering state.
+            */
+            Vector3 worldMin = Vector3.positiveInfinity;
+            Vector3 worldMax = Vector3.negativeInfinity;
+            foreach (var r in renderers) {
+                var localBounds = r.GetComponent<MeshFilter>().sharedMesh.bounds;
+                var l2w = r.transform.localToWorldMatrix;
+                for (int i = 0; i < 8; i++) {
+                    Vector3 corner = new Vector3(
+                        (i & 1) == 0 ? localBounds.min.x : localBounds.max.x,
+                        (i & 2) == 0 ? localBounds.min.y : localBounds.max.y,
+                        (i & 4) == 0 ? localBounds.min.z : localBounds.max.z);
+                    Vector3 wc = l2w.MultiplyPoint3x4(corner);
+                    worldMin = Vector3.Min(worldMin, wc);
+                    worldMax = Vector3.Max(worldMax, wc);
+                }
+            }
+            solid.transform.position = (worldMin + worldMax) * 0.5f;
+
             Material[] materials;
             Mesh combined = MeshCombiner.CombineMeshes(solid.transform, renderers.ToArray(), out materials);
 
@@ -1134,6 +1184,7 @@ namespace KhepriUnity {
 
 
         public string ShapeType(GameObject s) => s.name;
+        public Vector3 GameObjectPosition(GameObject s) => s.transform.position;
 
         // ||||||||||||||||||||||||||| Complex Geometry |||||||||||||||||||||||||||
         public GameObject PyramidNamed(String name, Vector3[] ps, Vector3 q, Material material) {
