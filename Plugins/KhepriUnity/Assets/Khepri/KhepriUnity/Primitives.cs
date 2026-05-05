@@ -894,6 +894,11 @@ namespace KhepriUnity {
                 smooth ? CreateTrigMeshSharedVertices(ps, q) : CreateTrigMesh(ps, q);
             s.AddComponent<MeshRenderer>();
             ApplyMaterial(s, material);
+            // NGon is a closed cone (apex + base ring) — a solid, like the
+            // sibling Pyramid/PyramidFrustum/Sphere/Box primitives that all
+            // ApplyCollider. Without this, b_loft_curve_point and any other
+            // path through b_ngon ends up with no collision.
+            ApplyCollider(s);
             return s;
         }
         public GameObject QuadStrip(Vector3[] ps, Vector3[] qs, bool smooth, bool closed, Material material) {
