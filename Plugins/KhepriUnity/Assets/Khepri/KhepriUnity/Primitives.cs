@@ -443,7 +443,12 @@ namespace KhepriUnity {
             Vector3[] vertices = new Vector3[ps.Length * 2];
             Array.Copy(ps, vertices, ps.Length);
             Array.Copy(qs, 0, vertices, ps.Length, qs.Length);
-            int[] triangles = new int[(ps.Length + (closed ? 1 : 0)) * 2 * 3];
+            // ps.Length-1 quads when open, ps.Length when closed (+1 for the
+            // wrap-around quad). Each quad is 2 triangles = 6 indices.
+            // Original `(ps.Length + closed?1:0) * 2 * 3` was off-by-one,
+            // leaving 6 trailing zero indices that produced degenerate
+            // triangles using vertex 0.
+            int[] triangles = new int[((ps.Length - 1) + (closed ? 1 : 0)) * 2 * 3];
             int k = 0;
             for (int i = 0, j = ps.Length; i < ps.Length - 1; i++, j++) {
                 triangles[k++] = j + 1;
@@ -483,7 +488,18 @@ namespace KhepriUnity {
         }
 
         Mesh CreateQuadMesh(Vector3[] ps, Vector3[] qs, bool closed) {
-            Vector3[] vertices = new Vector3[(ps.Length + (closed ? 1 : 0)) * 2 * 3];
+            // ps.Length-1 quads when open, ps.Length when closed. Each
+            // quad emits 6 distinct vertices (no sharing). Original
+            // `(ps.Length + closed?1:0) * 2 * 3` was off-by-one, so the
+            // trailing 6 vertex slots were left as default Vector3(0,0,0)
+            // and the matching trailing 6 triangles indexed into them.
+            // The phantom triangles were degenerate so they didn't render,
+            // but Mesh.RecalculateBounds happily included those (0,0,0)
+            // points — making mesh.bounds extend to the world origin and,
+            // through that, MeshCollider convex hulls "wrap" the origin
+            // even for walls placed far away. Fixed by allocating the
+            // exact number actually written.
+            Vector3[] vertices = new Vector3[((ps.Length - 1) + (closed ? 1 : 0)) * 2 * 3];
             int[] triangles = new int[vertices.Length];
             for (int i = 0; i < triangles.Length; i++) {
                 triangles[i] = triangles.Length - 1 - i;
