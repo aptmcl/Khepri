@@ -114,6 +114,7 @@ public void SetNonInteractiveRequests()
 public void SetInteractiveRequests()
 public GameObject CreateBlockInstance(GameObject block, Vector3 position, Vector3 vx, Vector3 vy, float scale)
 public GameObject CreateBlockFromShapes(String name, GameObject[] objs)
+public GameObject Solidify(GameObject[] parts)
 public GameObject PointLight(Vector3 position, Color color, float range, float intensity)
 public Point3d[] GetPosition(string prompt)
 public ObjectId[] GetPoint(string prompt)
@@ -311,6 +312,29 @@ KhepriBase.b_box(b::Unity, c, dx, dy, dz, mat) =
 
 KhepriBase.b_sphere(b::Unity, c, r, mat) =
 	@remote(b, SphereWithMaterial(c, r, mat))
+
+#=
+Fold a multi-surface emission (wall strips/end caps, slab top+bottom+
+sides, etc.) into a single Unity GameObject with one MeshCollider.
+
+`refs` is whatever `_b_wall_*_impl` and friends accumulate via
+`new_refs(b)` + `collect_ref!`: a `Vector{UnityId}` of raw GameObject
+ids. The C# `Solidify` operation combines those parts' meshes
+(preserving per-material submeshes), attaches a single MeshCollider,
+destroys the originals, and returns the new parent's id. We wrap the
+result in a 1-element vector so callers that expect a refs collection
+(e.g. `realize(b::Unity, w::Wall)`'s NavMesh tagging loop) keep
+working unchanged.
+
+A scalar `void_ref(b)` (returned by zero-length walls in
+`_b_wall_no_openings_impl`) is passed through untouched — there is
+nothing to solidify.
+
+See also: `KhepriBase.b_solidify` default (`Backend.jl`), the wall
+emitters that wrap their returned refs with `b_solidify`.
+=#
+KhepriBase.b_solidify(b::Unity, refs::AbstractVector) =
+  isempty(refs) ? refs : UnityId[@remote(b, Solidify(refs))]
 
 # Materials
 
