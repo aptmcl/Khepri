@@ -740,6 +740,63 @@ namespace KhepriUnity {
             s0.name += " Subtraction";
         }
 
+        /*
+        Why this exists: a wall (or any BIM element produced via the
+        HasBooleanOps{false} path) reaches the backend as a vector of
+        independent surfaces — quad strips for the long faces, surface
+        polygons for end caps and openings. Quad strips don't carry
+        colliders (Trig/Quad/NGon/QuadStrip omit ApplyCollider on
+        purpose, since they are also used as decorative pieces), so a
+        decomposed wall has only patchy collision: agents and raycasts
+        pass straight through the long faces.
+
+        b_solidify in KhepriBase exists precisely to let backends fold
+        a multi-surface emission into a single solid. Solidify is the
+        Unity implementation: it combines the parts' meshes into one
+        (preserving per-material submeshes via MeshCombiner so the
+        right/left/side wall materials still render distinctly),
+        attaches a single MeshCollider built from the combined mesh,
+        and destroys the originals — mirroring the GameObject-shape
+        produced by the boolean Unite/Subtract/Intersect operations
+        above.
+
+        See also: KhepriBase.b_solidify (Backend.jl), the wall
+        emitters _b_wall_no_openings_impl / _b_wall_with_openings_impl
+        which wrap their returned refs with b_solidify.
+        */
+        public GameObject Solidify(GameObject[] parts) {
+            if (parts == null || parts.Length == 0) return null;
+            GameObject solid = new GameObject("Solid");
+            solid.transform.parent = currentParent.transform;
+
+            var renderers = new List<MeshRenderer>(parts.Length);
+            foreach (var p in parts) {
+                if (p == null) continue;
+                var r = p.GetComponent<MeshRenderer>();
+                var mf = p.GetComponent<MeshFilter>();
+                if (r != null && mf != null && mf.sharedMesh != null) {
+                    renderers.Add(r);
+                }
+            }
+
+            if (renderers.Count == 0) {
+                foreach (var p in parts) if (p != null) GameObject.DestroyImmediate(p);
+                return MakeStatic(solid);
+            }
+
+            Material[] materials;
+            Mesh combined = MeshCombiner.CombineMeshes(solid.transform, renderers.ToArray(), out materials);
+
+            solid.AddComponent<MeshFilter>().sharedMesh = combined;
+            solid.AddComponent<MeshRenderer>().sharedMaterials = materials;
+            ApplyCollider(solid, combined);
+
+            foreach (var p in parts) {
+                if (p != null) GameObject.DestroyImmediate(p);
+            }
+            return MakeStatic(solid);
+        }
+
         T EnsureNonNull<T>(T arg) {
             if (arg == null) throw new NullReferenceException();
             return arg;
