@@ -1127,6 +1127,54 @@ namespace KhepriUnity {
         public GameObject RightCuboid(Vector3 position, Vector3 vx, Vector3 vy, float dx, float dy, float dz, float angle) =>
             RightCuboidWithMaterial(position, vx, vy, dx, dy, dz, angle, currentMaterial);
 
+        /*
+        Compound box primitive: a single parent GameObject under which N
+        Unity Cube children are spawned. Each Cube comes with its native
+        BoxCollider, so the parent ends up carrying a "compound" collider
+        composed of axis-oriented boxes — exactly what Physics.ClosestPoint
+        needs (it works on primitive colliders or convex meshes; mesh
+        colliders cooked from non-convex BIM geometry block it).
+
+        Used by the Julia side's wall/slab decomposers to emit walls (with
+        openings), slabs (with rectangular holes) and similar BIM elements
+        as a list of primitive boxes instead of a single Solidify'd
+        non-convex MeshCollider. The parent itself has no MeshFilter or
+        Collider; it acts only as a grouping container so selection,
+        Move/Rotate, NavMesh tagging and DeleteMany behave as if the wall
+        were one shape (mirroring what Solidify produces today).
+
+        Each box's local placement uses centre semantics — `centers[i]` is
+        the box centre in world space, not a corner — because the
+        decomposer naturally produces centres. Unlike Box/RightCuboid
+        which take a corner and offset by half-extents, here we place the
+        cube directly: localPosition = centre, localScale = (dx, dy, dz),
+        localRotation = LookRotation(vxs[i], vys[i]). The (dx, dy, dz)
+        order follows the same Unity-local-axis convention as Box (after
+        the X<->Z swap done on the Julia side), so callers must pass
+        (height, thickness, length) for a wall-segment box whose
+        (vx, vy) = (along, perpendicular).
+
+        See also: KhepriUnity.realize(::Wall) on the Julia side, which
+        builds the per-segment / per-opening box list and calls this RPC.
+        */
+        public GameObject BoxCompound(string name,
+                                      Vector3[] centers, Vector3[] vxs, Vector3[] vys,
+                                      float[] dxs, float[] dys, float[] dzs,
+                                      Material material) {
+            GameObject parent = new GameObject(name);
+            parent.transform.parent = currentParent.transform;
+            int n = centers.Length;
+            for (int i = 0; i < n; i++) {
+                GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                cube.transform.parent = parent.transform;
+                cube.transform.localRotation = Quaternion.LookRotation(vxs[i], vys[i]);
+                cube.transform.localScale = new Vector3(Math.Abs(dxs[i]), Math.Abs(dys[i]), Math.Abs(dzs[i]));
+                cube.transform.localPosition = centers[i];
+                ApplyMaterial(cube, material);
+            }
+            return MakeStatic(parent);
+        }
+
         public GameObject SphereNamed(String name, Vector3 center, float radius, Material material) {
             GameObject s = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             s.name = name;
@@ -1759,6 +1807,22 @@ namespace KhepriUnity {
         }
 
         // NavMesh tagging for standard Khepri geometry
+        /*
+        NavMeshModifier on the parent propagates to children automatically
+        (NavMeshSurface walks the hierarchy when baking), so we only set
+        it on `obj`. The Obstacle tag, by contrast, is read by the agent
+        steering code (Intersections.cs etc.) which iterates Colliders —
+        so for a compound-box BIM element (wall produced by BoxCompound)
+        we must apply the tag to every child carrying a BoxCollider, not
+        just the empty parent. Tagging the parent alone in that case
+        leaves obstacle avoidance with nothing to look at, which the
+        single-shape Solidify path masks because the Solidify'd parent
+        does carry the MeshCollider.
+
+        See also: KhepriUnity.realize(::Wall) which now emits wall
+        compounds via BoxCompound, and Intersections.cs which uses the
+        Obstacle tag for social-force computation.
+        */
         public void SetNavMeshArea(GameObject obj, int area) {
             var modifier = obj.GetComponent<Unity.AI.Navigation.NavMeshModifier>();
             if (modifier == null) modifier = obj.AddComponent<Unity.AI.Navigation.NavMeshModifier>();
@@ -1774,6 +1838,11 @@ namespace KhepriUnity {
             // NotWalkable geometry should repel agents via social forces.
             if (area == 1) {
                 obj.tag = "Obstacle";
+                // Compound colliders: tag every child that carries one
+                // collider so steering iterators see the obstacle.
+                foreach (var child in obj.GetComponentsInChildren<Collider>()) {
+                    if (child.gameObject != obj) child.gameObject.tag = "Obstacle";
+                }
             }
         }
 
