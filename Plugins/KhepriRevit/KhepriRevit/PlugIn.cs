@@ -1,12 +1,12 @@
 using Autodesk.Revit.DB.Events;
 using Autodesk.Revit.UI;
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Threading;
-using System.Windows.Forms;
 using Application = Autodesk.Revit.ApplicationServices.Application;
 
 namespace KhepriRevit {
@@ -20,6 +20,31 @@ namespace KhepriRevit {
         internal static extern bool SetForegroundWindow(IntPtr hWnd);
     }
 
+    /* ExternalEvent handler that runs queued RPC batches on Revit's API thread.
+     *
+     * The control flow between this handler and `WaitForConnections`/`HandleClient`
+     * is intentionally simple: the listener thread reads an opcode, raises the
+     * ExternalEvent, then blocks on `resumeEvt` until Revit's API thread finishes
+     * processing the batch and signals completion. The two threads are coupled
+     * exclusively through `resumeEvt`. If `Execute` ever returns without setting
+     * the event — including after an exception — the listener parks on
+     * `resumeEvt.WaitOne()` forever and the connection appears hung from Julia's
+     * side, even though the underlying socket is still alive.
+     *
+     * That's exactly what happened when an RPC carrying an `object[]` parameter
+     * tripped an `AmbiguousMatchException` inside RMIfy codegen: the exception
+     * propagated out of `ExecuteReadAndRepeat`, the catch block logged it, and
+     * the listener was left waiting on an event no one would ever set.
+     *
+     * The fix is to put the signal in `finally` so it runs on every exit path.
+     * `result` is left at its previous value (true) on exception, which lets the
+     * listener loop continue serving the next request — RMIfy already wrote a
+     * NOTOK frame for caught errors; for codegen errors that escape RMIfy, the
+     * Julia side will surface the failure on its next read.
+     *
+     * See also: `KhepriBase.RMIfy.GetMethod` for the codegen-time lookup that was
+     * the original throw site.
+     */
     public class ClientHandler : IExternalEventHandler {
         public int op;
         public bool result = true;
@@ -29,9 +54,10 @@ namespace KhepriRevit {
         public void Execute(UIApplication uiapp) {
             try {
                 result = processor.ExecuteReadAndRepeat(op);
-                resumeEvt.Set();
             } catch (Exception e) {
                 PlugIn.WriteMessage(e.Message + e.StackTrace);
+            } finally {
+                resumeEvt.Set();
             }
         }
         public string GetName() {
@@ -50,11 +76,12 @@ namespace KhepriRevit {
                 IPAddress localAddr = IPAddress.Parse("127.0.0.1");
                 TcpListener server = new TcpListener(localAddr, port);
                 server.Start();
-                //WriteMessage("Waiting for connections\n");
+                WriteMessage($"WaitForConnections: listening on 127.0.0.1:{port}");
                 while (true)
                 {
                     var client = server.AcceptTcpClient();
                     client.NoDelay = true;
+                    WriteMessage($"WaitForConnections: client accepted from {client.Client.RemoteEndPoint}");
                     RevitProcessor processor =
                         new RevitProcessor(
                             thisUIapp,
@@ -64,7 +91,7 @@ namespace KhepriRevit {
                     HandleClient(c, evt, processor);
                 }
             } catch (Exception e) {
-                WriteMessage(e.ToString() + "\n");
+                WriteMessage($"WaitForConnections: terminated with exception: {e.GetType().Name}: {e.Message}\n{e.StackTrace}");
             }
         }
 
@@ -78,18 +105,31 @@ namespace KhepriRevit {
                     c.resumeEvt.WaitOne();
                     if (!c.result) break;
                 }
-                //WriteMessage("Client disconnected\n");
+                WriteMessage("HandleClient: client disconnected normally");
             } catch (IOException e) {
-                WriteMessage(e.ToString() + "\n");
-                //WriteMessage("Disconneting from client\n");
+                WriteMessage($"HandleClient: IO exception (client likely disconnected): {e.Message}");
             } catch (Exception e) {
-                WriteMessage(e.ToString() + "\n");
-                //WriteMessage("Terminating client\n");
+                WriteMessage($"HandleClient: unexpected exception: {e.GetType().Name}: {e.Message}\n{e.StackTrace}");
             }
         }
 
+        // Logging sink for plugin-side errors and debug messages.
+        // Previously this opened a modal MessageBox, which (a) blocked the Revit UI
+        // thread on every transient socket / family-load error, and (b) hid the actual
+        // error text from the Julia caller (the exception still propagated through the
+        // Channel error frame, but the modal made the failure look like a freeze).
+        // Now we write to Trace and append to a per-session log file under %TEMP%; the
+        // exception still propagates back to Julia via the catch in
+        // ClientHandler.Execute / Processor.ExecuteReadAndRepeat.
         public static void WriteMessage(String msg) {
-            MessageBox.Show(msg);
+            Trace.WriteLine(msg);
+            try {
+                File.AppendAllText(
+                    Path.Combine(Path.GetTempPath(), "KhepriRevit.log"),
+                    $"[{DateTime.Now:O}] {msg}\n");
+            } catch {
+                // logging is best-effort; never let a logging failure mask the original error
+            }
         }
 
         public struct MyLevel {
@@ -103,26 +143,52 @@ namespace KhepriRevit {
         }
 
         public Result OnStartup(UIControlledApplication application) {
-            application.ControlledApplication.DocumentCreated += OnDocumentCreated;
-            application.ControlledApplication.DocumentOpened += OnDocumentOpened;
-            return Result.Succeeded;
-        }
-
-        void OnDocumentOpenedOrCreated(object sender) {
-            if (thisUIapp == null) {
-                Application app = sender as Application;
-                thisUIapp = new UIApplication(app);
-                ClientHandler cli = new ClientHandler();
-                ExternalEvent evt = ExternalEvent.Create(cli);
-                Thread thread = new Thread(() => WaitForConnections(cli, evt));
-                thread.Start();
+            try {
+                WriteMessage($"OnStartup: KhepriRevit plugin loading. Revit={application.ControlledApplication.VersionNumber}, AssemblyLocation={typeof(PlugIn).Assembly.Location}");
+                application.ControlledApplication.DocumentCreated += OnDocumentCreated;
+                application.ControlledApplication.DocumentOpened += OnDocumentOpened;
+                WriteMessage("OnStartup: event handlers registered, returning Result.Succeeded");
+                return Result.Succeeded;
+            } catch (Exception e) {
+                WriteMessage($"OnStartup: exception: {e.GetType().Name}: {e.Message}\n{e.StackTrace}");
+                throw;
             }
         }
 
-        void OnDocumentCreated(object sender, DocumentCreatedEventArgs e) => OnDocumentOpenedOrCreated(sender);
-        void OnDocumentOpened(object sender, DocumentOpenedEventArgs e) => OnDocumentOpenedOrCreated(sender);
+        void OnDocumentOpenedOrCreated(object sender) {
+            try {
+                WriteMessage($"OnDocumentOpenedOrCreated: thisUIapp == null? {thisUIapp == null}");
+                if (thisUIapp == null) {
+                    Application app = sender as Application;
+                    thisUIapp = new UIApplication(app);
+                    WriteMessage("OnDocumentOpenedOrCreated: UIApplication wrapped, creating ClientHandler + ExternalEvent");
+                    ClientHandler cli = new ClientHandler();
+                    ExternalEvent evt = ExternalEvent.Create(cli);
+                    WriteMessage("OnDocumentOpenedOrCreated: starting WaitForConnections thread");
+                    Thread thread = new Thread(() => WaitForConnections(cli, evt));
+                    thread.IsBackground = true;
+                    thread.Start();
+                    WriteMessage("OnDocumentOpenedOrCreated: thread started");
+                } else {
+                    WriteMessage("OnDocumentOpenedOrCreated: already initialized, skipping");
+                }
+            } catch (Exception e) {
+                WriteMessage($"OnDocumentOpenedOrCreated: exception: {e.GetType().Name}: {e.Message}\n{e.StackTrace}");
+                throw;
+            }
+        }
+
+        void OnDocumentCreated(object sender, DocumentCreatedEventArgs e) {
+            WriteMessage($"OnDocumentCreated: doc='{e.Document?.Title}'");
+            OnDocumentOpenedOrCreated(sender);
+        }
+        void OnDocumentOpened(object sender, DocumentOpenedEventArgs e) {
+            WriteMessage($"OnDocumentOpened: doc='{e.Document?.Title}'");
+            OnDocumentOpenedOrCreated(sender);
+        }
 
         public Result OnShutdown(UIControlledApplication application) {
+            WriteMessage("OnShutdown: KhepriRevit plugin unloading");
             return Result.Succeeded;
         }
     }

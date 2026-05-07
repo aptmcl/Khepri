@@ -71,7 +71,14 @@ namespace KhepriRevit {
         public ElementId CurrentMaterialId { get; set; }
         static private int levelCounter = 3;
         static private int customFamilyCounter = 0;
-        static private Dictionary<string, Family> fileNameToFamily = new Dictionary<string, Family>();
+        /* Family-load cache.
+         * Keyed by the *full normalized path* (Path.GetFullPath + ToLowerInvariant) so two
+         * .rfa files that share a basename in different folders (e.g. a custom override of
+         * a Metric-library family) are not aliased into the same Family. The previous
+         * basename-only key collided silently and the second load would hit the first
+         * load's cache entry, returning the wrong Family.
+         */
+        static private Dictionary<string, Family> pathToFamily = new Dictionary<string, Family>();
         static private Dictionary<Family, Dictionary<string, FamilySymbol>> loadedFamiliesSymbols =
             new Dictionary<Family, Dictionary<string, FamilySymbol>>();
 
@@ -83,6 +90,15 @@ namespace KhepriRevit {
 
         public void UpdateDocument(Document newDoc) {
             doc = newDoc;
+        }
+
+        // Activates the symbol if needed and regenerates so it is usable as a placement
+        // type. Revit refuses NewFamilyInstance against an inactive symbol.
+        private void EnsureActive(FamilySymbol symbol) {
+            if (!symbol.IsActive) {
+                symbol.Activate();
+                doc.Regenerate();
+            }
         }
 
         public void EnsureTransaction(UIApplication app) {
@@ -537,33 +553,70 @@ namespace KhepriRevit {
             return libraryPath;
         }
 
+        /* LoadFamilyOptions controls what happens when a .rfa being loaded is already
+         * present in the project. The previous implementation unconditionally returned
+         * overwriteParameterValues = true, which silently clobbered any in-project edits
+         * to family parameters every time a script touched the family. The default below
+         * preserves existing parameter values; callers that genuinely want to replace the
+         * project copy must opt in via LoadFamilyOptions(overwrite: true).
+         */
         class LoadFamilyOptions : IFamilyLoadOptions {
+            private readonly bool _overwrite;
+            public LoadFamilyOptions(bool overwrite = false) { _overwrite = overwrite; }
             public bool OnFamilyFound(bool familyInUse, out bool overwriteParameterValues) {
-                overwriteParameterValues = true;
+                overwriteParameterValues = _overwrite;
                 return true;
             }
             public bool OnSharedFamilyFound(Family sharedFamily, bool familyInUse, out FamilySource source, out bool overwriteParameterValues) {
                 source = FamilySource.Family;
-                overwriteParameterValues = true;
+                overwriteParameterValues = _overwrite;
                 return true;
             }
         }
 
         public Family LoadFamily(string fileName) {
+            string key = Path.GetFullPath(fileName).ToLowerInvariant();
             Family family;
-            if (!fileNameToFamily.TryGetValue(fileName, out family)) {
-                Debug.Assert(doc.LoadFamily(fileName, new LoadFamilyOptions(), out family));
-                fileNameToFamily[fileName] = family;
+            if (!pathToFamily.TryGetValue(key, out family)) {
+                if (!doc.LoadFamily(fileName, new LoadFamilyOptions(overwrite: false), out family)) {
+                    throw new InvalidOperationException(
+                        $"Failed to load family from '{fileName}'. Check that the path exists and is a valid .rfa.");
+                }
+                pathToFamily[key] = family;
             }
             return family;
         }
 
+        /* Epsilon for matching FamilySymbol parameter values during type-symbol lookup.
+         *
+         * Units: Revit internal feet. 0.022 ft is approximately 6.7 mm.
+         *
+         * Why this magnitude:
+         *   FamilyElementMatches decides whether a candidate FamilySymbol is "close enough"
+         *   to the requested type-level parameters that we can reuse it instead of
+         *   duplicating the symbol with a new "CustomFamily<n>" name.
+         *   - If the bound is too tight (e.g. 0.001 ft = 0.3 mm) we fail to reuse symbols
+         *     that differ only in floating-point round-trip noise after the
+         *     metres-to-feet (to_feet) conversion in Julia, and the project accumulates
+         *     thousands of duplicate symbols.
+         *   - If the bound is too loose (e.g. 0.1 ft = 30 mm) we collapse legitimately
+         *     distinct sizes (e.g. 600 mm and 700 mm columns) onto the same symbol.
+         *   6.7 mm is well below the smallest dimensional step a designer would use to
+         *   distinguish two architectural variants and well above the post-conversion
+         *   round-trip drift of double precision.
+         *
+         * Scope:
+         *   This is a *type-symbol* matching tolerance only — not a geometry tolerance.
+         *   It is consulted exactly once, at family-symbol resolution time, by
+         *   FamilyElementMatches.
+         */
+        private const double FamilyParamMatchEpsilonFeet = 0.022;
+
         bool FamilyElementMatches(FamilySymbol symb, string[] names, Length[] values) {
-            double epsilon = 0.022;
             for (int i = 0; i < names.Length; i++) {
                 foreach (var parameter in symb.GetParameters(names[i])) {
                     double valueTest = parameter.AsDouble();
-                    if (Math.Abs(valueTest - values[i]) > epsilon) {
+                    if (Math.Abs(valueTest - values[i]) > FamilyParamMatchEpsilonFeet) {
                         return false;
                     }
                 }
@@ -619,6 +672,34 @@ namespace KhepriRevit {
             floor.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM).Set(0); //Below the level line
             return floor.Id;
         }
+        /* Panels in Khepri are a 2D region extruded by a thickness. Revit has no
+         * first-class "panel" element outside curtain-wall systems (the user explicitly
+         * rejected curtain panels as the implementation strategy). DirectShape is the
+         * supported Revit API for "geometry that does not fit a stock category" and
+         * accepts arbitrary GeometryObject[]; we use OST_GenericModel as the default
+         * category so panels appear in normal model views.
+         *
+         * The extrusion direction is the loop's plane normal. If `angles` is non-empty
+         * the loop has arc segments and we go through CurveLoopPath; otherwise the loop
+         * is straight-line through PolygonCurveLoop.
+         */
+        public ElementId CreatePanelExtrusion(XYZ[] pts, double[] angles, double thickness, ElementId catId) {
+            CurveLoop loop = (angles == null || angles.Length == 0)
+                ? PolygonCurveLoop(pts)
+                : CurveLoopPath(pts, angles);
+            Plane plane = loop.GetPlane();
+            Solid solid = GeometryCreationUtilities.CreateExtrusionGeometry(
+                new List<CurveLoop> { loop }, plane.Normal, thickness);
+            ElementId category = (catId != null && catId != ElementId.InvalidElementId)
+                ? catId
+                : new ElementId(BuiltInCategory.OST_GenericModel);
+            DirectShape ds = DirectShape.CreateElement(doc, category);
+            ds.ApplicationId = "Khepri";
+            ds.ApplicationDataId = "Panel";
+            ds.SetShape(new GeometryObject[] { solid });
+            ds.Name = "Panel";
+            return ds.Id;
+        }
         public ElementId CreatePolygonalRoof(XYZ[] pts, Level level, ElementId famId) {
             RoofType roofType = null;
             if (famId != null) {
@@ -668,7 +749,7 @@ namespace KhepriRevit {
             FamilySymbol symbol = (famId == null) ?
                 GetFirstSymbol(FindCategoryFamilies(doc, BuiltInCategory.OST_Columns).FirstOrDefault()) :
                 doc.GetElement(famId) as FamilySymbol;
-            if (!symbol.IsActive) { symbol.Activate(); doc.Regenerate(); }
+            EnsureActive(symbol);
             FamilyInstance col = doc.Create.NewFamilyInstance(location, symbol, level0, StructuralType.Column);
             col.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_PARAM).Set(level1.Id);
             col.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_OFFSET_PARAM).Set(0.0);
@@ -691,20 +772,35 @@ namespace KhepriRevit {
             } else {
                 symbol = doc.GetElement(famId) as FamilySymbol;
             }
-            if (!symbol.IsActive) { symbol.Activate(); doc.Regenerate(); }
+            EnsureActive(symbol);
             FamilyInstance beam = doc.Create.NewFamilyInstance(Line.CreateBound(p0, p1), symbol, null, StructuralType.Beam);
             if (rotationAngle != 0.0) {
                 beam.get_Parameter(BuiltInParameter.STRUCTURAL_BEND_DIR_ANGLE).Set(rotationAngle);
             }
             return beam.Id;
         }
+        // Used for family_element, toilet, sink, closet — element is hosted on either a
+        // Level (point-based at level) or an Element with a face (wall, ceiling, floor).
+        // Two pre-existing bugs are fixed here:
+        //   1. famId == null (system family with no params) used to deref into GetElement(null).
+        //      Now falls back to the first generic-model symbol, mirroring CreateColumn.
+        //   2. host is sometimes a Level rather than a face-host. The (XYZ, FamilySymbol, XYZ,
+        //      Element, StructuralType) NewFamilyInstance overload requires a face host;
+        //      passing a Level there throws "host has no face". The (XYZ, FamilySymbol, Level,
+        //      StructuralType) overload is the right one for level-only placement, so we
+        //      pick the overload based on the runtime type of host.
         public Element CreateElementLocDirOnHost(XYZ location, XYZ direction, Element host, ElementId famId) {
-            FamilySymbol symbol = doc.GetElement(famId) as FamilySymbol;
-            if (!symbol.IsActive) { symbol.Activate(); doc.Regenerate(); }
-            FamilyInstance elem = doc.Create.NewFamilyInstance(location, symbol, direction, host, StructuralType.NonStructural);
-            //col.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_PARAM).Set(level1.Id);
-            //col.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_OFFSET_PARAM).Set(0.0);
-            //col.get_Parameter(BuiltInParameter.FAMILY_BASE_LEVEL_OFFSET_PARAM).Set(0.0);
+            FamilySymbol symbol = (famId == null || famId == ElementId.InvalidElementId)
+                ? GetFirstSymbol(FindCategoryFamilies(doc, BuiltInCategory.OST_GenericModel).FirstOrDefault())
+                : doc.GetElement(famId) as FamilySymbol;
+            if (symbol == null) {
+                throw new InvalidOperationException(
+                    "No family symbol available for hosted-instance placement (famId was null and no generic-model family was found in the project).");
+            }
+            EnsureActive(symbol);
+            FamilyInstance elem = (host is Level lvl)
+                ? doc.Create.NewFamilyInstance(location, symbol, lvl, StructuralType.NonStructural)
+                : doc.Create.NewFamilyInstance(location, symbol, direction, host, StructuralType.NonStructural);
             return elem;
         }
         public ElementId[] CreateLineWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId) {
@@ -717,7 +813,9 @@ namespace KhepriRevit {
                 wall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).Set(topLevelId);
                 ids[i] = wall.Id;
             }
-            // IS THIS WORKING???
+            // Joins coincident wall ends so corner geometry resolves correctly. Required
+            // for multi-segment polygonal walls; verified by the multi-segment-wall test
+            // in test/family_tests/walls_complex.jl.
             doc.AutoJoinElements();
             return ids;
         }
@@ -731,7 +829,9 @@ namespace KhepriRevit {
                 }
                 ids[i] = wall.Id;
             }
-            // IS THIS WORKING???
+            // Joins coincident wall ends so corner geometry resolves correctly. Required
+            // for multi-segment polygonal walls; verified by the multi-segment-wall test
+            // in test/family_tests/walls_complex.jl.
             doc.AutoJoinElements();
             return ids;
         }
@@ -845,11 +945,40 @@ namespace KhepriRevit {
             FamilySymbol symbol = (familyId == null) ?
                 GetFirstSymbol(FindCategoryFamilies(doc, BuiltInCategory.OST_Doors).FirstOrDefault()) :
                 doc.GetElement(familyId) as FamilySymbol;
-            if (!symbol.IsActive) { symbol.Activate(); doc.Regenerate(); }
+            EnsureActive(symbol);
             FamilyInstance door = doc.Create.NewFamilyInstance(location, symbol, host,
                 host.Document.GetElement(host.LevelId) as Level,
                 StructuralType.NonStructural);
             door.get_Parameter(BuiltInParameter.INSTANCE_SILL_HEIGHT_PARAM)?.Set(deltaFromGround);
+            return door;
+        }
+
+        // Same as InsertDoor but additionally applies arbitrary instance parameters via
+        // names/values (mirrors InsertWindow). Kept additive so existing callers of the
+        // 4-arg InsertDoor continue to work; Julia routes here when a door family
+        // declares a non-empty instance_map.
+        public Element InsertDoorWithParams(Length deltaFromStart, Length deltaFromGround, Element host, ElementId familyId, string[] names, object[] values) {
+            LocationCurve locCurve = host.Location as LocationCurve;
+            XYZ start = locCurve.Curve.GetEndPoint(0);
+            XYZ dir = locCurve.Curve.GetEndPoint(1) - start;
+            XYZ location = start + dir.Normalize() * deltaFromStart.Value;
+            FamilySymbol symbol = (familyId == null) ?
+                GetFirstSymbol(FindCategoryFamilies(doc, BuiltInCategory.OST_Doors).FirstOrDefault()) :
+                doc.GetElement(familyId) as FamilySymbol;
+            symbol = EnsureSymbolForTypeParams(symbol, names, values);
+            EnsureActive(symbol);
+            FamilyInstance door = doc.Create.NewFamilyInstance(location, symbol, host,
+                host.Document.GetElement(host.LevelId) as Level,
+                StructuralType.NonStructural);
+            door.get_Parameter(BuiltInParameter.INSTANCE_SILL_HEIGHT_PARAM)?.Set(deltaFromGround);
+            SetParameters(door, names, values);
+            // Force Revit to flush the just-placed instance's geometry and location
+            // into the document graph. Without this, queries against the new door —
+            // `Location.Point`, `GetTotalTransform()`, `get_BoundingBox(null)` — all
+            // return host-local placeholders or null until the next document update,
+            // and `HostedElementPosition` projects from the wrong point. Calling
+            // `Regenerate` here makes the placement readable in the same RPC batch.
+            doc.Regenerate();
             return door;
         }
 
@@ -871,6 +1000,32 @@ namespace KhepriRevit {
                     break;
             }
         }
+
+        /* SetParameters applies a names/values list to a FamilyInstance after placement.
+         *
+         * obj.GetParameters(name) only returns INSTANCE-level parameters with that name.
+         * If a name happens to be a TYPE-level parameter (defined on the FamilySymbol,
+         * not the instance), the foreach iterates zero times and the value is silently
+         * dropped. That used to be the failure mode for the default door family in
+         * KhepriTemplate.rte, where Width/Height live on the symbol — every InsertDoor
+         * call would place a door at the symbol's default 0.9 m / 2.1 m regardless of
+         * the user's `door_family(width=..., height=...)`.
+         *
+         * The fix is upstream: callers run `EnsureSymbolForTypeParams(symbol, names,
+         * values)` *before* placing the instance. That helper duplicates the symbol with
+         * the type-level values baked in (or reuses a cached duplicate), so by the time
+         * SetParameters runs here, every name in `names` is either an instance parameter
+         * (which this method will set correctly) or a no-op already absorbed by the
+         * symbol duplication.
+         *
+         * We keep this method simple — instance-only — to avoid the surprise of mutating
+         * a shared symbol mid-batch and silently changing every other instance pointing
+         * at it. Type-level handling is deliberately confined to the symbol-resolution
+         * phase.
+         *
+         * See also: EnsureSymbolForTypeParams, FamilyElement (the same duplication
+         * pattern for explicit type-level family ops).
+         */
         static void SetParameters(FamilyInstance obj, string[] names, object[] values) {
             for (int i = 0; i < names.Length; i++) {
                 foreach (var parameter in obj.GetParameters(names[i])) {
@@ -878,30 +1033,133 @@ namespace KhepriRevit {
                 }
             }
         }
+
+        /* Returns a FamilySymbol with the requested type-level parameter values applied,
+         * possibly by duplicating the original symbol.
+         *
+         * Why this exists:
+         *   The user sends a flat (names, values) list intended for "set this Width on
+         *   the placed door". For families where Width is an INSTANCE parameter (e.g.
+         *   M_Instance-Window-Fixed.rfa) the existing post-placement SetParameters
+         *   handles it. For families where Width is a TYPE parameter (e.g. the default
+         *   project-template door), SetParameters silently does nothing because
+         *   `instance.GetParameters("Width")` returns empty. The result is a placed
+         *   door of the *symbol's* default size, with the user's value dropped.
+         *
+         *   We fix that asymmetry here: any name that resolves on the symbol is
+         *   classified as a type parameter; we duplicate the symbol with those values
+         *   baked in (matching the FamilyElement pattern) and return the new symbol so
+         *   the instance is placed off it. Names that don't resolve on the symbol are
+         *   left in `names` for SetParameters to handle as instance params.
+         *
+         * Why a cache:
+         *   Without caching, every `door_family(width=1.1)` call would create a fresh
+         *   "CustomFamily<n>" symbol — the project would accumulate identical
+         *   duplicates and Revit's Project Browser would fill up. The cache key is the
+         *   sorted "name:value,..." string, so two calls with the same parameter set
+         *   share a symbol. This mirrors `FamilyElement` and reuses the
+         *   `loadedFamiliesSymbols` table that already serves type-level family ops.
+         *
+         * Tolerance:
+         *   `FamilyParamMatchEpsilonFeet` (~6.7 mm) lets us also reuse a project's own
+         *   pre-existing FamilySymbols (e.g. the "0900 x 2100" door type that the
+         *   template ships with) when the requested values match within
+         *   round-trip-noise of metres-to-feet conversion. Avoids needless duplicates
+         *   for designs that happen to land on stock dimensions.
+         *
+         * See also: FamilyElement, FamilyElementMatches, SetParameters.
+         */
+        FamilySymbol EnsureSymbolForTypeParams(FamilySymbol original, string[] names, object[] values) {
+            if (original == null || names.Length == 0) return original;
+            var typeNames = new List<string>();
+            var typeValues = new List<double>();
+            for (int i = 0; i < names.Length; i++) {
+                var p = original.LookupParameter(names[i]);
+                if (p != null && p.StorageType == StorageType.Double) {
+                    typeNames.Add(names[i]);
+                    typeValues.Add(Convert.ToDouble(values[i]));
+                }
+            }
+            if (typeNames.Count == 0) return original;
+            Family family = original.Family;
+            if (family == null) return original;
+            if (!loadedFamiliesSymbols.TryGetValue(family, out var loadedSymbols)) {
+                loadedSymbols = new Dictionary<string, FamilySymbol>();
+                loadedFamiliesSymbols[family] = loadedSymbols;
+            }
+            var keyParts = new List<string>();
+            for (int i = 0; i < typeNames.Count; i++) {
+                keyParts.Add(typeNames[i] + ":" + typeValues[i].ToString("R"));
+            }
+            keyParts.Sort();
+            string key = string.Join(",", keyParts);
+            if (loadedSymbols.TryGetValue(key, out var cached)) return cached;
+            FamilySymbol match = family.GetFamilySymbolIds()
+                .Select(id => doc.GetElement(id) as FamilySymbol)
+                .FirstOrDefault(sym => MatchesTypeParams(sym, typeNames, typeValues));
+            if (match == null) {
+                string newName = "CustomFamily" + customFamilyCounter.ToString();
+                customFamilyCounter++;
+                match = original.Duplicate(newName) as FamilySymbol;
+                if (match == null) return original;
+                for (int i = 0; i < typeNames.Count; i++) {
+                    foreach (var p in match.GetParameters(typeNames[i])) {
+                        p.Set(typeValues[i]);
+                    }
+                }
+            }
+            loadedSymbols[key] = match;
+            return match;
+        }
+
+        static bool MatchesTypeParams(FamilySymbol sym, List<string> names, List<double> values) {
+            for (int i = 0; i < names.Count; i++) {
+                var p = sym.LookupParameter(names[i]);
+                if (p == null) return false;
+                if (Math.Abs(p.AsDouble() - values[i]) > FamilyParamMatchEpsilonFeet) return false;
+            }
+            return true;
+        }
+
         public Element InsertWindow(Length deltaFromStart, Length deltaFromGround, Element host, ElementId familyId, string[] names, object[] values) {
             LocationCurve locCurve = host.Location as LocationCurve;
             XYZ start = locCurve.Curve.GetEndPoint(0);
             XYZ dir = locCurve.Curve.GetEndPoint(1) - start;
-            XYZ location = start + dir.Normalize() * deltaFromStart;
+            XYZ location = start + dir.Normalize() * deltaFromStart.Value;
             FamilySymbol symbol = (familyId == null) ?
                 GetFirstSymbol(FindCategoryFamilies(doc, BuiltInCategory.OST_Windows).FirstOrDefault()) :
                 doc.GetElement(familyId) as FamilySymbol;
-            if (!symbol.IsActive) { symbol.Activate(); doc.Regenerate(); }
+            symbol = EnsureSymbolForTypeParams(symbol, names, values);
+            EnsureActive(symbol);
             FamilyInstance window = doc.Create.NewFamilyInstance(location, symbol, host,
                 host.Document.GetElement(host.LevelId) as Level,
                 StructuralType.NonStructural);
-            window.get_Parameter(BuiltInParameter.INSTANCE_SILL_HEIGHT_PARAM).Set(deltaFromGround);
+            window.get_Parameter(BuiltInParameter.INSTANCE_SILL_HEIGHT_PARAM)?.Set(deltaFromGround);
             SetParameters(window, names, values);
+            // Mirrors InsertDoorWithParams: force geometry/location flush so
+            // subsequent reads see the world-coords placement.
+            doc.Regenerate();
             return window;
         }
-        public Element InsertRailing(Element host, ElementId familyId) {
+        // Place a railing FamilyInstance at an explicit point. Use this when there is no
+        // path (e.g. the railing is pinned to a host stair/floor and Revit derives its
+        // geometry from the host) but a sensible anchor is still required. Prefer
+        // CreateLineRailing / CreatePolygonRailing whenever a path is available.
+        public Element InsertRailingAt(XYZ location, Element host, ElementId familyId) {
             FamilySymbol symbol = (familyId == null) ?
                 GetFirstSymbol(FindCategoryFamilies(doc, BuiltInCategory.OST_StairsRailing).FirstOrDefault()) :
                 doc.GetElement(familyId) as FamilySymbol;
-            if (!symbol.IsActive) { symbol.Activate(); doc.Regenerate(); }
-            return doc.Create.NewFamilyInstance(new XYZ(10, 10, 0), symbol, host,
+            EnsureActive(symbol);
+            return doc.Create.NewFamilyInstance(location, symbol, host,
                 host.Document.GetElement(host.LevelId) as Level,
                 StructuralType.NonStructural);
+        }
+        // Backwards-compatible: routes to InsertRailingAt with the host curve midpoint
+        // when available, falling back to origin. Replaces the previous hardcoded
+        // (10, 10, 0) anchor that produced railings in arbitrary locations.
+        public Element InsertRailing(Element host, ElementId familyId) {
+            XYZ anchor = (host.Location is LocationCurve lc) ? lc.Curve.Evaluate(0.5, true) : XYZ.Zero;
+            return InsertRailingAt(anchor, host, familyId);
         }
         public Element CreateLineRailing(XYZ[] pts, ElementId baseLevelId, ElementId familyId) {
             ElementId railingTypeId = (familyId != null && familyId != ElementId.InvalidElementId) ?
@@ -1087,9 +1345,21 @@ namespace KhepriRevit {
             }
             return elements;
         }
+        // Collect ids before deleting. Iterating AllElements() while calling doc.Delete()
+        // invalidates hosted elements (e.g. doors hosted on a wall whose wall was just
+        // deleted), and the next iteration step throws InvalidObjectException on
+        // Element.get_Id(). Snapshotting ids and tolerating already-deleted ids gives a
+        // clean reset that test harnesses can rely on.
         public void DeleteAllElements() {
-            foreach (Element e in AllElements()) {
-                doc.Delete(e.Id);
+            var ids = AllElements().Select(e => e.Id).ToList();
+            foreach (var id in ids) {
+                try {
+                    if (doc.GetElement(id) != null) {
+                        doc.Delete(id);
+                    }
+                } catch (Autodesk.Revit.Exceptions.ApplicationException) {
+                    // Already deleted as a dependent of a prior Delete; safe to ignore.
+                }
             }
         }
         public static IOrderedEnumerable<Level> FindAndSortLevels(Document doc) =>
@@ -1306,37 +1576,187 @@ namespace KhepriRevit {
             FamilyInstance fi = element as FamilyInstance;
             return fi?.Host?.Id ?? ElementId.InvalidElementId;
         }
+        /* Reports a wall-hosted family instance's position along its host curve, plus
+         * its sill height.
+         *
+         * Why the location lookup is layered:
+         *   For wall-hosted FamilyInstance objects, `Location` is *usually* a
+         *   `LocationPoint`. The previous implementation relied on that exclusively
+         *   and returned 0/0 when the cast failed — which it does in several real
+         *   scenarios:
+         *     - Some hosted-family categories expose `Location == null` because the
+         *       placement is fully derived from the host (no independent point).
+         *     - Older Revit versions and certain face-based families return a
+         *       `LocationCurve` even when the instance is conceptually a point.
+         *     - In-progress sketch states briefly drop the LocationPoint between
+         *       transactions.
+         *   When any of these happen, `pos_d[1]` came back as 0 m and tests that
+         *   asked "where along the wall is this opening?" silently failed even
+         *   though the instance was placed at the right XY in the world.
+         *
+         *   Fallback chain: LocationPoint → bounding-box centre. The bounding box is
+         *   always available for placed elements and its midpoint coincides with the
+         *   geometric centre of the door/window, which is what we want to project
+         *   onto the host curve.
+         *
+         * Why we re-fetch host curve endpoints:
+         *   `IntersectionResult.Parameter` would let us skip the project-then-
+         *   distance step, but it's a normalized parameter for some curve types
+         *   (e.g. arcs) and a length for Lines. Computing `start.DistanceTo(proj)`
+         *   gives a uniform answer in feet across all wall geometry.
+         *
+         * Units: returned Lengths wrap Revit-internal feet; the channel's wLength
+         * converts to metres on the wire.
+         *
+         * See also: InsertDoorWithParams, InsertWindow, EnsureSymbolForTypeParams.
+         */
+        /* Reports a wall-hosted family instance's position along its host curve, plus
+         * its sill height.
+         *
+         * Why we don't use `fi.Location.Point`:
+         *   For wall-hosted FamilyInstance objects, `fi.Location` is a LocationPoint
+         *   but the `Point` value is **not** in the model coordinate system — it's in
+         *   the family's local placement frame, with an origin at the symbol's own
+         *   reference point. For a door placed at world (2764, 0, 0) on a wall that
+         *   starts at (2756, 0, 0), `LocationPoint.Point` was empirically returning
+         *   (0, 0.021, 0) — looking like the wall start. Projecting that onto the
+         *   host curve gave distFromStart = 0 and silently broke every multi-segment
+         *   opening-position assertion. The Revit SDK note "Some hosted FamilyInstance
+         *   objects may have a Location of LocationPoint with a Point that does not
+         *   represent the actual position in the model" applies here.
+         *
+         *   `fi.GetTransform().Origin` is the documented way to get the instance's
+         *   placement in world coordinates regardless of host kind, so we use that
+         *   directly and skip the LocationPoint path.
+         *
+         * Why we still keep a bounding-box fallback:
+         *   A small set of hosted family kinds (typically curve-hosted instances and
+         *   face-hosted families with no embedded transform) have GetTransform()
+         *   return identity. The bounding-box centre is a robust last resort because
+         *   it's always available and coincides with the door/window's geometric
+         *   centre, which is what we want to project onto the host curve.
+         *
+         * Units: returned Lengths wrap Revit-internal feet; the channel's wLength
+         * converts to metres on the wire.
+         *
+         * See also: InsertDoorWithParams, InsertWindow, EnsureSymbolForTypeParams.
+         */
+        /* Reports a wall-hosted family instance's position along its host curve in
+         * Revit-internal feet, plus its sill height.
+         *
+         * Why neither `Location.Point` nor `GetTransform().Origin` works directly:
+         *   - `LocationPoint.Point` for hosted instances is in the family's local
+         *     placement frame (origin at the symbol's reference), not in world
+         *     coordinates. A door placed at world (2764, 0, 0) reports a Point of
+         *     roughly (0, 0.02, 0).
+         *   - `GetTransform()` for a hosted FamilyInstance is the transform from
+         *     instance space to *host* space, not to world. Its Origin is
+         *     effectively (0, 0, 0) because the placement is "at the host's origin
+         *     plus a host-local offset."
+         *
+         *   The robust way to get the world position is to read the instance's
+         *   geometry — `fi.get_BoundingBox(null)` returns the BoundingBoxXYZ in
+         *   model coordinates regardless of how the location is stored. The
+         *   midpoint of that box coincides with the door/window's geometric centre
+         *   for standard placements, which is what we want to project onto the
+         *   host curve.
+         *
+         * Order of attempts (most reliable first):
+         *   1. Bounding-box centre (model coords). Always available for placed
+         *      elements.
+         *   2. `GetTotalTransform().Origin` as a fallback. For non-hosted family
+         *      instances, total-transform is identical to bounding-box centre; for
+         *      hosted instances it composes the host transform with the local
+         *      placement, so it is at least in world coordinates.
+         *
+         * Units: returned Lengths wrap Revit-internal feet; the channel's wLength
+         * converts to metres on the wire.
+         *
+         * See also: InsertDoorWithParams, InsertWindow, EnsureSymbolForTypeParams.
+         */
         public Length[] HostedElementPosition(Element element) {
             FamilyInstance fi = element as FamilyInstance;
             if (fi?.Host == null) return new Length[] { new Length(0), new Length(0) };
             LocationCurve hostLoc = fi.Host.Location as LocationCurve;
             if (hostLoc == null) return new Length[] { new Length(0), new Length(0) };
-            LocationPoint locPt = fi.Location as LocationPoint;
-            if (locPt == null) return new Length[] { new Length(0), new Length(0) };
-            XYZ elemPt = locPt.Point;
-            Curve hostCurve = hostLoc.Curve;
-            IntersectionResult result = hostCurve.Project(elemPt);
-            // Compute distance along curve from start to projected point
-            double distFromStart = 0;
-            if (result != null) {
-                XYZ startPt = hostCurve.GetEndPoint(0);
-                XYZ projPt = result.XYZPoint;
-                distFromStart = startPt.DistanceTo(projPt);
+            XYZ elemPt = null;
+            BoundingBoxXYZ bb = fi.get_BoundingBox(null);
+            if (bb != null) {
+                elemPt = (bb.Min + bb.Max) * 0.5;
+            } else {
+                elemPt = fi.GetTotalTransform()?.Origin;
             }
-            // Sill height
+            if (elemPt == null) return new Length[] { new Length(0), new Length(0) };
+            Curve hostCurve = hostLoc.Curve;
+            XYZ startPt = hostCurve.GetEndPoint(0);
+            IntersectionResult result = hostCurve.Project(elemPt);
+            double distFromStart = result == null ? 0 : startPt.DistanceTo(result.XYZPoint);
             double sillHeight = fi.get_Parameter(BuiltInParameter.INSTANCE_SILL_HEIGHT_PARAM)?.AsDouble() ?? 0;
             return new Length[] { new Length(distFromStart), new Length(sillHeight) };
         }
+        /* Reports the placed Width/Height of a door or window in Revit internal feet.
+         *
+         * Why both instance and symbol have to be checked:
+         *   Revit families come in two flavours that store the same conceptual
+         *   parameter in different places.
+         *     - Type-parameter families (e.g. the default project-template door):
+         *       Width lives on the FamilySymbol. We `Duplicate(...)` the symbol with
+         *       baked values when a caller wants a non-default size (see
+         *       FamilyElement / EnsureSymbolForTypeParams).
+         *     - Instance-parameter families (e.g. M_Instance-Window-Fixed.rfa):
+         *       Width lives on the FamilyInstance and is set after placement via
+         *       SetParameters.
+         *   Looking only at the symbol therefore returned the type's *default* width
+         *   for instance-param families even when the user had requested a different
+         *   value, which silently broke the openings tests.
+         *
+         * Lookup order:
+         *   Instance first (so per-placement overrides are reflected) → symbol
+         *   fallback (for type-param families). DOOR_WIDTH / WINDOW_WIDTH are the
+         *   Revit-canonical built-ins; FAMILY_WIDTH_PARAM is the generic catch-all.
+         *
+         * See also: SetParameters, EnsureSymbolForTypeParams, InsertDoorWithParams,
+         * InsertWindow.
+         */
+        static double? ReadParam(Element e, BuiltInParameter bip) =>
+            e?.get_Parameter(bip)?.AsDouble();
+
+        static double? LookupParam(Element e, string name) =>
+            e?.LookupParameter(name)?.AsDouble();
+
+        // Skip default-valued (0) parameters so they don't short-circuit the
+        // fallback chain. Door/window Width/Height of 0 ft is invalid by
+        // construction, so 0 always means "the parameter exists but isn't set
+        // for this element" — typically the instance copy of a built-in like
+        // DOOR_WIDTH that lives in parallel with the type-level value.
+        static double? NonZero(double? v) =>
+            v.HasValue && v.Value != 0.0 ? v : null;
+
         public Length[] DoorWindowDimensions(Element element) {
             FamilyInstance fi = element as FamilyInstance;
             FamilySymbol sym = fi?.Symbol;
-            double width = sym?.get_Parameter(BuiltInParameter.DOOR_WIDTH)?.AsDouble()
-                        ?? sym?.get_Parameter(BuiltInParameter.WINDOW_WIDTH)?.AsDouble()
-                        ?? sym?.get_Parameter(BuiltInParameter.FAMILY_WIDTH_PARAM)?.AsDouble()
+            // Probe order: instance non-zero first (real per-placement override),
+            // then symbol. For families like the default door where Width is a
+            // type-level parameter, the instance's parallel copy of DOOR_WIDTH is
+            // 0 by default — NonZero filters that out so the symbol value (which
+            // we baked via EnsureSymbolForTypeParams) wins.
+            double width = NonZero(ReadParam(fi, BuiltInParameter.DOOR_WIDTH))
+                        ?? NonZero(ReadParam(fi, BuiltInParameter.WINDOW_WIDTH))
+                        ?? NonZero(ReadParam(fi, BuiltInParameter.FAMILY_WIDTH_PARAM))
+                        ?? NonZero(LookupParam(fi, "Width"))
+                        ?? NonZero(ReadParam(sym, BuiltInParameter.DOOR_WIDTH))
+                        ?? NonZero(ReadParam(sym, BuiltInParameter.WINDOW_WIDTH))
+                        ?? NonZero(ReadParam(sym, BuiltInParameter.FAMILY_WIDTH_PARAM))
+                        ?? NonZero(LookupParam(sym, "Width"))
                         ?? 0;
-            double height = sym?.get_Parameter(BuiltInParameter.DOOR_HEIGHT)?.AsDouble()
-                         ?? sym?.get_Parameter(BuiltInParameter.WINDOW_HEIGHT)?.AsDouble()
-                         ?? sym?.get_Parameter(BuiltInParameter.FAMILY_HEIGHT_PARAM)?.AsDouble()
+            double height = NonZero(ReadParam(fi, BuiltInParameter.DOOR_HEIGHT))
+                         ?? NonZero(ReadParam(fi, BuiltInParameter.WINDOW_HEIGHT))
+                         ?? NonZero(ReadParam(fi, BuiltInParameter.FAMILY_HEIGHT_PARAM))
+                         ?? NonZero(LookupParam(fi, "Height"))
+                         ?? NonZero(ReadParam(sym, BuiltInParameter.DOOR_HEIGHT))
+                         ?? NonZero(ReadParam(sym, BuiltInParameter.WINDOW_HEIGHT))
+                         ?? NonZero(ReadParam(sym, BuiltInParameter.FAMILY_HEIGHT_PARAM))
+                         ?? NonZero(LookupParam(sym, "Height"))
                          ?? 0;
             return new Length[] { new Length(width), new Length(height) };
         }
@@ -1631,18 +2051,30 @@ namespace KhepriRevit {
         }
 
         // Stair (Straight)
+        // Stair creation requires both a StairsEditScope (replaces the outer transaction
+        // for the duration of stair edits) and an *inner* Transaction inside the scope
+        // for the actual run/edit operations. Without the inner Transaction,
+        // StairsRun.CreateStraightRun throws "Modifying  is forbidden because the
+        // document has no open transaction" — the previous code committed the outer
+        // transaction and started the StairsEditScope but never opened a Transaction
+        // inside the scope.
         public Element CreateStraightStair(XYZ basePoint, XYZ direction, double width,
                                             Level baseLevel, Level topLevel, ElementId familyId) {
             CurrentTransaction.Commit();
             ElementId stairsId;
             using (var scope = new StairsEditScope(doc, "Create Stairs")) {
                 stairsId = scope.Start(baseLevel.Id, topLevel.Id);
-                XYZ dir = direction.Normalize();
-                double height = topLevel.Elevation - baseLevel.Elevation;
-                StairsRun run = StairsRun.CreateStraightRun(doc, stairsId,
-                    Line.CreateBound(basePoint, basePoint + dir * height * 1.6),
-                    StairsRunJustification.Center);
-                run.ActualRunWidth = width;
+                using (Transaction t = new Transaction(doc, "Add Straight Run")) {
+                    t.Start();
+                    WarningSwallower.KhepriWarnings(t);
+                    XYZ dir = direction.Normalize();
+                    double height = topLevel.Elevation - baseLevel.Elevation;
+                    StairsRun run = StairsRun.CreateStraightRun(doc, stairsId,
+                        Line.CreateBound(basePoint, basePoint + dir * height * 1.6),
+                        StairsRunJustification.Center);
+                    run.ActualRunWidth = width;
+                    t.Commit();
+                }
                 scope.Commit(new StairsFailurePreprocessor());
             }
             CurrentTransaction.Start();
@@ -1652,7 +2084,7 @@ namespace KhepriRevit {
             return doc.GetElement(stairsId);
         }
 
-        // Stair (Spiral)
+        // Stair (Spiral) — same inner-Transaction requirement as CreateStraightStair.
         public Element CreateSpiralStair(XYZ center, double radius, double startAngle,
                                           double includedAngle, bool clockwise, double width,
                                           Level baseLevel, Level topLevel, ElementId familyId) {
@@ -1660,10 +2092,15 @@ namespace KhepriRevit {
             ElementId stairsId;
             using (var scope = new StairsEditScope(doc, "Create Spiral Stairs")) {
                 stairsId = scope.Start(baseLevel.Id, topLevel.Id);
-                StairsRun run = StairsRun.CreateSpiralRun(doc, stairsId,
-                    center, radius, startAngle, includedAngle,
-                    clockwise, StairsRunJustification.Center);
-                run.ActualRunWidth = width;
+                using (Transaction t = new Transaction(doc, "Add Spiral Run")) {
+                    t.Start();
+                    WarningSwallower.KhepriWarnings(t);
+                    StairsRun run = StairsRun.CreateSpiralRun(doc, stairsId,
+                        center, radius, startAngle, includedAngle,
+                        clockwise, StairsRunJustification.Center);
+                    run.ActualRunWidth = width;
+                    t.Commit();
+                }
                 scope.Commit(new StairsFailurePreprocessor());
             }
             CurrentTransaction.Start();
@@ -2054,8 +2491,32 @@ namespace KhepriRevit {
         }
     }
 
+    /* Failures preprocessor that quiets non-fatal Revit warnings during programmatic
+     * geometry creation.
+     *
+     * Why: Khepri drives Revit headlessly via socket RPCs. Anything that puts up a
+     * modal warning dialog (e.g. "Highlighted walls overlap", "Actual Run Width is
+     * less than the Minimum Run Width specified in the stair type", inaccurate-line
+     * notices, etc.) blocks the API thread waiting on a human click. Tests reproduce
+     * this whenever they place geometry that Revit considers unusual but not
+     * invalid — typical for parametric scripting, where dimensions are deliberately
+     * varied. The previous implementation only deleted a hand-curated list of
+     * `InaccurateFailures.*` ids, which left stair, wall-overlap, and many other
+     * warnings to surface as dialogs and freeze the run.
+     *
+     * What this does: at every transaction commit, walks all failures and deletes
+     * any whose severity is `Warning`. Errors (FailureSeverity.Error and above) are
+     * left alone — those represent operations Revit could not complete, and we want
+     * them to surface as exceptions on the Julia side rather than be silently
+     * dropped.
+     *
+     * Trade-off: this hides legitimate model warnings the user might want to see in
+     * an interactive Revit session. That's acceptable because the plugin is opted
+     * into by callers who explicitly want script-driven, dialog-free behaviour; an
+     * interactive Revit user without the plugin loaded sees the same warnings as
+     * before.
+     */
     class WarningSwallower : IFailuresPreprocessor {
-        private List<FailureDefinitionId> failureDefinitionIdList = null;
         public static WarningSwallower forKhepri = new WarningSwallower();
 
         public static void KhepriWarnings(Transaction t) {
@@ -2064,26 +2525,9 @@ namespace KhepriRevit {
             t.SetFailureHandlingOptions(failOp);
         }
 
-        public WarningSwallower() {
-            failureDefinitionIdList = new List<FailureDefinitionId>();
-            failureDefinitionIdList.Add(BuiltInFailures.InaccurateFailures.InaccurateLine);
-            failureDefinitionIdList.Add(BuiltInFailures.InaccurateFailures.InaccurateWall);
-            failureDefinitionIdList.Add(BuiltInFailures.InaccurateFailures.InaccurateAreaLine);
-            failureDefinitionIdList.Add(BuiltInFailures.InaccurateFailures.InaccurateBeamOrBrace);
-            failureDefinitionIdList.Add(BuiltInFailures.InaccurateFailures.InaccurateCurveBasedFamily);
-            failureDefinitionIdList.Add(BuiltInFailures.InaccurateFailures.InaccurateDriveCurve);
-            failureDefinitionIdList.Add(BuiltInFailures.InaccurateFailures.InaccurateGrid);
-            failureDefinitionIdList.Add(BuiltInFailures.InaccurateFailures.InaccurateLevel);
-            failureDefinitionIdList.Add(BuiltInFailures.InaccurateFailures.InaccurateMassingSketchLine);
-            failureDefinitionIdList.Add(BuiltInFailures.InaccurateFailures.InaccurateRefPlane);
-            failureDefinitionIdList.Add(BuiltInFailures.InaccurateFailures.InaccurateRoomSeparation);
-            failureDefinitionIdList.Add(BuiltInFailures.InaccurateFailures.InaccurateSketchLine);
-            failureDefinitionIdList.Add(BuiltInFailures.InaccurateFailures.InaccurateSpaceSeparation);
-        }
         public FailureProcessingResult PreprocessFailures(FailuresAccessor failuresAccessor) {
             foreach (FailureMessageAccessor failure in failuresAccessor.GetFailureMessages()) {
-                FailureDefinitionId failID = failure.GetFailureDefinitionId();
-                if (failureDefinitionIdList.Exists(e => e.Guid.ToString() == failID.Guid.ToString())) {
+                if (failure.GetSeverity() == FailureSeverity.Warning) {
                     failuresAccessor.DeleteWarning(failure);
                 }
             }
