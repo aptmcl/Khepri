@@ -16,14 +16,36 @@ namespace KhepriBase {
     /// throws AmbiguousMatchException for overloaded methods.
     /// </summary>
     public class RMIfy {
-        //Reflection machinery
+        /* Reflection machinery
+         *
+         * Used by codegen to find a Channel reader/writer by its naming convention
+         * (e.g. `rInt32`, `wString`, `wByte`). Several call sites pass a name whose
+         * intended overload is parameterless (readers like `rInt32`, `wVoid`, also
+         * `wByte` used as a writer-of-byte-then-call-with-arg) but at least one
+         * Channel name has two overloads — `rObject()` (the public reader) and
+         * `rObject(byte code)` (the virtual dispatch helper for self-describing
+         * heterogeneous values, overridden in subclasses).
+         *
+         * Plain `Type.GetMethod(name)` throws `AmbiguousMatchException` whenever two
+         * methods share a name, even if their arity differs. So when an RPC carries an
+         * `object[]` parameter (e.g. `InsertWindow`, `InsertDoorWithParams`),
+         * `BuildReader` recurses to `Object`, calls this method with name `"rObject"`,
+         * and used to crash the whole RMI registration — taking the connection down
+         * with it because nothing along the call stack catches the exception. We
+         * constrain the lookup to the parameterless overload via `Type.EmptyTypes` so
+         * the reader codegen path stays unambiguous.
+         *
+         * See also: `GetMethod(Type, String, Type)` for the writer path that already
+         * disambiguates by argument type, and `KhepriBase.Channel.rObject` for the
+         * overload pair that motivates this guard.
+         */
         static MethodInfo GetMethod(Type t, String name) {
             try {
-                MethodInfo m = t.GetMethod(name);
+                MethodInfo m = t.GetMethod(name, Type.EmptyTypes);
                 if (m != null) {
                     return m;
                 } else {
-                    throw new Exception("There is no method named '" + name + "' in type '" + t + "'");
+                    throw new Exception("There is no parameterless method named '" + name + "' in type '" + t + "'");
                 }
             } catch (AmbiguousMatchException) {
                 throw new Exception("The method '" + name + "' is ambiguous in type '" + t + "'");
@@ -129,7 +151,7 @@ namespace KhepriBase {
         // inside the frame payload, keeping the framing layer (Int32 length prefix) clean.
         static Expression SerializeReturn(ParameterExpression c, ParameterInfo p, Expression e) {
             var returnType = p.ParameterType;
-            var wByteMethod = GetMethod(c.Type, "wByte");
+            var wByteMethod = GetMethod(c.Type, "wByte", typeof(byte));
             var okPrefix = Expression.Call(c, wByteMethod, Expression.Constant((byte)0));
             if (returnType == typeof(void)) {
                 var writer = GetMethod(c.Type, "wVoid");
@@ -149,8 +171,8 @@ namespace KhepriBase {
         // prefix byte first and either decodes the return value (0x00) or throws a
         // BackendError (0x01).
         static Expression SerializeErrors(ParameterExpression c, ParameterInfo p, Expression e) {
-            var wByteMethod = GetMethod(c.Type, "wByte");
-            var wStringMethod = GetMethod(c.Type, "wString");
+            var wByteMethod = GetMethod(c.Type, "wByte", typeof(byte));
+            var wStringMethod = GetMethod(c.Type, "wString", typeof(string));
             var notokPrefix = Expression.Call(c, wByteMethod, Expression.Constant((byte)1));
             var ex = Expression.Parameter(typeof(Exception), "ex");
             var errorMsg = Expression.Call(
