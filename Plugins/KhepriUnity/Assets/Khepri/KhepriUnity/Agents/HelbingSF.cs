@@ -1,12 +1,8 @@
-using System.Collections;
-using System.Collections.Generic;
 using System.Linq;
-using Unity.AI.Navigation;
 using UnityEngine;
 using UnityEngine.AI;
 
 namespace KhepriUnity {
-
     public class HelbingSF : IMovement {
         public Agent_ agent;
 
@@ -42,7 +38,8 @@ namespace KhepriUnity {
             float V, float sigma,
             float U, float R,
             float c, float phi,
-            float desiredSpeed) {
+            float desiredSpeed) 
+        {
             this.relaxationTime = relaxationTime;
             this.maximumSpeedCoef = maximumSpeedCoef;
             this.V = V;
@@ -63,7 +60,7 @@ namespace KhepriUnity {
         }
 
         // Update is called once per frame
-        public Vector3 Move(float deltaTime, float impacience)
+        /*public Vector3 Move(float deltaTime, float impacience)
         {
             // Velocity update
             currentVelocity = new Vector3(agent.characterController.velocity.x, 0.0f, agent.characterController.velocity.z);
@@ -114,6 +111,66 @@ namespace KhepriUnity {
             // Update velocity based on social forces model
             currentVelocity = UpdateVelocity(deltaTime, impacience);
             return currentVelocity * deltaTime;
+        }*/
+
+        
+        private float turnTimer = 0.0f;
+        private const float COOLDOWN_DURATION = 2.0f; // Adjust this duration as needed
+
+        public Vector3 Move(float deltaTime, float impacience)
+        {
+            currentVelocity = new Vector3(agent.characterController.velocity.x, 0.0f, agent.characterController.velocity.z);
+
+            elapsed += deltaTime;
+            // Update the cooldown timer
+            if (turnTimer > 0)
+            {
+                turnTimer -= deltaTime;
+            }
+
+            if (true)
+            {
+                if (agent.goal == null) throw new System.Exception("BOOM!");
+
+                NavMesh.CalculatePath(agent.transform.position, agent.goal.transform.position, NavMesh.AllAreas, path);
+
+                if (path.corners.Length >= 2)
+                {
+                    var newDir = (path.corners[1] - path.corners[0]).normalized;
+
+                    if (newDir.sqrMagnitude > 0.05f)
+                    {
+                        float angle = Vector3.Angle(desiredDirection, newDir);
+
+                        const float maxAngle = 80.0f;
+
+                        // LOGIC: If timer is active, block sharp turns. 
+                        // If timer is NOT active, allow the turn and start the timer if it's sharp.
+                        if (turnTimer > 0)
+                        {
+                            // During cooldown, we reject sharp turns
+                            desiredDirection = angle > maxAngle ? desiredDirection : newDir;
+                        }
+                        else
+                        {
+                            // Cooldown is over, we accept the turn
+                            if (angle > maxAngle)
+                            {
+                                // It was a sharp turn! Start the timer now.
+                                turnTimer = COOLDOWN_DURATION;
+                            }
+                            desiredDirection = newDir;
+                        }
+                    }
+                }
+                else
+                {
+                    desiredDirection = (agent.goal.transform.position - agent.transform.position).normalized;
+                }
+            }
+
+            currentVelocity = UpdateVelocity(deltaTime, impacience);
+            return currentVelocity * deltaTime;
         }
 
         private Vector3 DesiredVelocityForce() // _F_alpha_0
@@ -157,7 +214,6 @@ namespace KhepriUnity {
 
         private Vector3 RepulsiveForceObstaclesTotal() 
         {
-            Vector3 totalForce = Vector3.zero;
             Vector3 closest = Vector3.zero;
             float closestDistance = float.MaxValue;
 
@@ -215,28 +271,9 @@ namespace KhepriUnity {
             force2 -= log_increase(impatience, 10) * force2 / 2;
 
             Vector3 totalForce = force0 + force1 + force2;
-            Vector3 preferedVelocity = currentVelocity + (totalForce / mass) * deltaTime;
+            Vector3 preferedVelocity = currentVelocity + totalForce/mass * deltaTime;
             preferedVelocity *= G(preferedVelocity.magnitude);
             return new Vector3(preferedVelocity.x, 0.0f, preferedVelocity.z);
         }
-        /*public Vector3 UpdateVelocity(float deltaTime, float impacience) {
-            //relaxationTime = TestScript.instance.relaxationTime;
-            //maximumSpeedCoef = TestScript.instance.maximumSpeedCoef;
-            //V = TestScript.instance.V;
-            //sigma = TestScript.instance.sigma;
-            //U = TestScript.instance.U;
-            //R = TestScript.instance.R;
-            //c = TestScript.instance.c;
-            //phi = TestScript.instance.phi;
-
-            Vector3 force0 = DesiredVelocityForce();
-            force0 += 5 * force0 * impacience;
-            Vector3 force1 = RepulsiveForceAgentsTotal(deltaTime);
-            Vector3 force2 = RepulsiveForceObstaclesTotal();
-            Vector3 totalForce = force0 + force1 + force2;
-            Vector3 preferedVelocity = currentVelocity + (totalForce / mass) * deltaTime;
-            preferedVelocity *= G(preferedVelocity.magnitude);
-            return new Vector3(preferedVelocity.x, 0.0f, preferedVelocity.z);
-        }*/
     }
 }

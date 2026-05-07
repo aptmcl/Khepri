@@ -314,7 +314,6 @@ namespace KhepriUnity {
                 MeshCollider meshCollider = obj.GetComponent<MeshCollider>();
                 if (meshCollider == null)
                     meshCollider = obj.AddComponent<MeshCollider>();
-
                 meshCollider.sharedMesh = mesh;
             }
             return obj;
@@ -1602,7 +1601,7 @@ namespace KhepriUnity {
             // Agent template (inactive so OnEnable doesn't fire on the template)
             var agentTemplate = new GameObject("AgentTemplate");
             agentTemplate.SetActive(false);
-            agentTemplate.tag = "Agent";
+            //agentTemplate.tag = "Agent";
             var cc = agentTemplate.AddComponent<CharacterController>();
             cc.slopeLimit = 80;
             cc.stepOffset = 0.3f;
@@ -1611,6 +1610,10 @@ namespace KhepriUnity {
             cc.center = new Vector3(0, 0, 0);
             cc.radius = 0.2279f;
             cc.height = 1.7f;
+            var rb = agentTemplate.AddComponent<Rigidbody>();
+            rb.mass = 1.0f;
+            rb.useGravity = false;
+            rb.isKinematic = true;
             var trigger = agentTemplate.AddComponent<SphereCollider>();
             trigger.isTrigger = true;
             trigger.center = new Vector3(0, 0, 0);
@@ -1619,6 +1622,7 @@ namespace KhepriUnity {
             agentComp.characterController = cc;
             // Capsule child provides a MeshRenderer for Agent_.SetColor
             var visual = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            visual.tag = "Agent";
             visual.transform.SetParent(agentTemplate.transform);
             agentComp.capsule = visual;
             visual.transform.localPosition = new Vector3(0, 0, 0);
@@ -1729,7 +1733,12 @@ namespace KhepriUnity {
             EnsureSimulationManager();
             SystemLib.UpdateNavMesh();
         }
-        public void SetSimRandSeed(int seed) => UnityEngine.Random.InitState(seed);
+
+        public void SetSimRandSeed(int seed)
+        {
+            UnityEngine.Random.InitState(seed);
+            Debug.Log($"Global RNG initialized with seed {seed}");
+        }
 
         // Blocking selection: starts selection; the result is sent later
         // by SceneLoad when the user clicks (deferred response).
