@@ -68,4 +68,20 @@ using Test
   @testset "Boolean operations" begin
     @test KhepriBase.has_boolean_ops(KhepriRevit.RVT) isa KhepriBase.HasBooleanOps{true}
   end
+
+  # Live family-placement tests run against a real Revit instance. They are
+  # gated on KHEPRI_REVIT_TESTS=1 so the static suite above stays cheap and
+  # cross-platform; sibling backends (KhepriAutoCAD, KhepriRhino) use the
+  # same convention. The harness assumes Windows + Revit + the Khepri plugin.
+  if get(ENV, "KHEPRI_REVIT_TESTS", "0") == "1"
+    Sys.iswindows() || error(
+      "KhepriRevit live tests require Windows + a running Revit with the Khepri plugin.")
+    # verbose=true prints a summary line for each nested @testset as it
+    # completes, instead of buffering everything until the outermost one
+    # finishes. This makes it possible to tell where the suite is in real
+    # time, and to see how far we got if a later test hangs the connection.
+    @testset verbose=true "Live Revit (FamilyTests)" begin
+      include("FamilyTests.jl")
+    end
+  end
 end
