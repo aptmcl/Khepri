@@ -51,6 +51,198 @@ using Test
   end
 
   #=
+  Pure Julia tests for the BIM box-decomposition introduced to give walls,
+  slabs, columns, beams and panels primitive BoxColliders instead of
+  non-convex MeshColliders (which Physics.ClosestPoint refuses).
+
+  These tests exercise the decomposition functions directly — no Unity
+  connection needed — to verify (a) the rectangular cases produce the
+  expected count of boxes with correct dimensions, and (b) the
+  fall-through cases (multi-material, smooth paths) return `nothing`.
+
+  See `Julia/KhepriUnity/src/Unity.jl` "BIM box decomposition" section.
+  =#
+  @testset "BIM box decomposition" begin
+    using KhepriUnity: _rectangle_obb, _wall_box_decomposition,
+                      _slab_box_decomposition, _panel_obb, _beam_rect_obb,
+                      _decompose_segment_with_openings
+
+    @testset "_rectangle_obb" begin
+      let r = _rectangle_obb(rectangular_path(xy(0,0), 4, 3))
+        @test r isa NamedTuple
+        @test r.dx ≈ 4
+        @test r.dy ≈ 3
+        @test r.centre ≈ xy(2, 1.5)
+      end
+      let r = _rectangle_obb(closed_polygonal_path([xy(0,0), xy(4,0), xy(4,3), xy(0,3)]))
+        @test r isa NamedTuple
+        @test r.dx ≈ 4
+        @test r.dy ≈ 3
+      end
+      # Not a rectangle (parallelogram): non-perpendicular edges
+      @test isnothing(_rectangle_obb(closed_polygonal_path([xy(0,0), xy(4,0), xy(5,3), xy(1,3)])))
+      # Wrong vertex count
+      @test isnothing(_rectangle_obb(closed_polygonal_path([xy(0,0), xy(4,0), xy(4,3)])))
+      # Smooth path falls through
+      @test isnothing(_rectangle_obb(circular_path(xy(0,0), 1.0)))
+    end
+
+    @testset "_decompose_segment_with_openings" begin
+      # No openings: one full-height bay
+      let pieces = _decompose_segment_with_openings(5.0, 3.0, [])
+        @test length(pieces) == 1
+        @test pieces[1] == (s=0.0, e=5.0, b=0.0, t=3.0)
+      end
+      # One window in the middle (sill below, lintel above, bays left & right)
+      let pieces = _decompose_segment_with_openings(
+            5.0, 3.0,
+            [(s=2.0, e=3.0, b=1.0, t=2.0)])
+        @test length(pieces) == 4
+        # Left bay
+        @test (s=0.0, e=2.0, b=0.0, t=3.0) in pieces
+        # Sill
+        @test (s=2.0, e=3.0, b=0.0, t=1.0) in pieces
+        # Lintel
+        @test (s=2.0, e=3.0, b=2.0, t=3.0) in pieces
+        # Right bay
+        @test (s=3.0, e=5.0, b=0.0, t=3.0) in pieces
+      end
+      # Door (touches floor — no sill emitted, so 3 pieces)
+      let pieces = _decompose_segment_with_openings(
+            5.0, 3.0,
+            [(s=2.0, e=3.0, b=0.0, t=2.0)])
+        @test length(pieces) == 3
+        @test !any(p -> p.b == 0 && p.t == 2 && p.s == 2 && p.e == 3, pieces)  # no sill
+      end
+    end
+
+    # Helper: convert a Wall into the primitive args b_wall receives,
+    # mirroring the body of KhepriBase.realize(::HasBooleanOps{false}, b, w).
+    wall_args(w) = let lift = vz(w.bottom_level.height),
+                       w_path = translate(w.path, lift),
+                       w_height = w.top_level.height - w.bottom_level.height,
+                       l_face = isnothing(w.left_face_path)  ? nothing : translate(w.left_face_path,  lift),
+                       r_face = isnothing(w.right_face_path) ? nothing : translate(w.right_face_path, lift),
+                       openings = [KhepriBase.WallOpening(op.loc.x, op.loc.y, op.family.width, op.family.height)
+                                   for op in [w.doors..., w.windows...]]
+      (w_path, w_height, w.family, w.offset, openings, l_face, r_face)
+    end
+
+    @testset "Wall: single straight, no openings" begin
+      let w = wall(open_polygonal_path([xy(0,0), xy(5,0)]),
+                   level(0), level(3))
+        let boxes = _wall_box_decomposition(wall_args(w)...)
+          @test boxes isa Vector
+          @test length(boxes) == 1
+          @test boxes[1].dx ≈ 5     # along
+          @test boxes[1].dz ≈ 3     # height
+          # default thickness 0.2, no offset → total thickness 0.2
+          @test boxes[1].dy ≈ 0.2
+        end
+      end
+    end
+
+    @testset "Wall: single straight, one window" begin
+      let w = wall(open_polygonal_path([xy(0,0), xy(5,0)]),
+                   level(0), level(3))
+        # add a window 1 m wide, 1 m tall, centred at x=2.5, base 1 m up
+        add_window(w, xy(2, 1))
+        let boxes = _wall_box_decomposition(wall_args(w)...)
+          @test boxes isa Vector
+          # left bay + sill + lintel + right bay = 4
+          @test length(boxes) == 4
+        end
+      end
+    end
+
+    @testset "Wall: multi-segment polygonal" begin
+      let w = wall(open_polygonal_path([xy(0,0), xy(5,0), xy(5,5)]),
+                   level(0), level(3))
+        let boxes = _wall_box_decomposition(wall_args(w)...)
+          @test boxes isa Vector
+          # 2 segments, 1 box per segment (no openings) → 2 boxes
+          @test length(boxes) == 2
+        end
+      end
+    end
+
+    @testset "Wall: smooth path falls through" begin
+      let w = wall(circular_path(xy(0,0), 5),
+                   level(0), level(3))
+        @test isnothing(_wall_box_decomposition(wall_args(w)...))
+      end
+    end
+
+    @testset "Wall: multi-material falls through" begin
+      let fam = KhepriBase.wall_family_element(default_wall_family(),
+                                               left_material=material_glass,
+                                               right_material=material_concrete),
+          w = wall(open_polygonal_path([xy(0,0), xy(5,0)]),
+                   level(0), level(3), fam)
+        @test isnothing(_wall_box_decomposition(wall_args(w)...))
+      end
+    end
+
+    @testset "Slab: rectangular, no holes" begin
+      let s = slab(rectangular_path(xy(0,0), 5, 4), level(0))
+        let boxes = _slab_box_decomposition(unity, s.region, s.level, s.family)
+          @test boxes isa Vector
+          @test length(boxes) == 1
+          @test boxes[1].dx ≈ 5
+          @test boxes[1].dy ≈ 4
+          # Default slab_family thickness = 0.2 m
+          @test boxes[1].dz ≈ 0.2
+        end
+      end
+    end
+
+    @testset "Slab: rectangular with one rectangular hole" begin
+      let s = slab(region(rectangular_path(xy(0,0), 10, 10),
+                          rectangular_path(xy(4,4), 2, 2)),
+                   level(0))
+        let boxes = _slab_box_decomposition(unity, s.region, s.level, s.family)
+          @test boxes isa Vector
+          # Strip-sweep splits along x: left strip [0,4], hole strip [4,6]
+          # split into two boxes (sill+lintel), right strip [6,10] = 4 boxes.
+          @test length(boxes) == 4
+        end
+      end
+    end
+
+    @testset "Panel: rectangular profile" begin
+      let p = panel(region(rectangular_path(xy(0,0), 2, 3)))
+        let obb = _panel_obb(p.region, p.family)
+          @test obb isa NamedTuple
+          @test obb.dx ≈ 2
+          @test obb.dy ≈ 3
+          # Default panel thickness 0.02 m
+          @test obb.dz ≈ 0.02
+        end
+      end
+    end
+
+    @testset "Beam: rectangular profile (default)" begin
+      let bm = beam(xyz(0,0,0), 3.0, 0.0, default_beam_family())
+        let obb = _beam_rect_obb(unity, bm.cb, bm.h, bm.angle, bm.family)
+          @test obb isa NamedTuple
+          @test obb.dz ≈ 3.0
+          # Default beam profile is top_aligned_rectangular_profile(1, 2)
+          @test obb.dx ≈ 1
+          @test obb.dy ≈ 2
+        end
+      end
+    end
+
+    @testset "Beam: circular profile falls through" begin
+      let fam = KhepriBase.beam_family_element(default_beam_family(),
+                                               profile=circular_path(u0(), 0.1)),
+          bm = beam(xyz(0,0,0), 3.0, 0.0, fam)
+        @test isnothing(_beam_rect_obb(unity, bm.cb, bm.h, bm.angle, bm.family))
+      end
+    end
+  end
+
+  #=
   Combinatorial stress tests. KhepriUnity follows the standard Khepri pattern
   (CLAUDE.md: "Julia acts as server, plugins as clients"):
 

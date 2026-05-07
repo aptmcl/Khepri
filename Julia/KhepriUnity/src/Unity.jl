@@ -72,6 +72,7 @@ public GameObject RightCuboid(Vector3 position, Vector3 vx, Vector3 vy, float dx
 public GameObject RightCuboidWithMaterial(Vector3 position, Vector3 vx, Vector3 vy, float dx, float dy, float dz, float angle, Material material)
 public GameObject BoxWithMaterial(Vector3 position, Vector3 vx, Vector3 vy, float dx, float dy, float dz, Material material)
 public GameObject Box(Vector3 position, Vector3 vx, Vector3 vy, float dx, float dy, float dz)
+public GameObject BoxCompound(string name, Vector3[] centers, Vector3[] vxs, Vector3[] vys, float[] dxs, float[] dys, float[] dzs, Material material)
 public GameObject Cylinder(Vector3 bottom, float radius, Vector3 top)
 public GameObject CylinderWithMaterial(Vector3 bottom, float radius, Vector3 top, Material material)
 public GameObject Unite(GameObject s0, GameObject s1)
@@ -778,17 +779,597 @@ tag_refs_nav_mesh(b::Unity, refs, area) =
     r != void_ref(b) && @remote(b, SetNavMeshArea(r, area))
   end
 
-# Automatic NavMesh tagging for BIM elements
-KhepriBase.realize(b::Unity, w::Wall) =
-  let refs = realize(has_boolean_ops(Unity), b, w)
-    nav_mesh_tagging() && tag_refs_nav_mesh(b, refs, 1)
-    refs
+#=
+==============================================================================
+BIM box decomposition for KhepriUnity
+==============================================================================
+
+Walls, slabs, columns, beams and panels with rectangular geometry are
+emitted as compound BoxColliders (one Unity Cube primitive per piece,
+parented under a single GameObject) instead of going through the
+default surface-decomposition + Solidify path that ends in a
+non-convex MeshCollider. The motivating problem is that
+`Physics.ClosestPoint` — used by the agent simulation and any
+distance-to-obstacle query — refuses non-convex MeshColliders;
+walls with openings, slabs with rectangular service shafts, etc.
+all fall in that bucket today and silently fail those queries.
+
+The decomposition only fires when the geometry trivially collapses to
+boxes; anything more complex (smooth/curved walls, non-rectangular
+slab outlines, multi-material BIM elements) falls back to the legacy
+path so the visual result is preserved exactly. Multi-material walls
+fall back because a Unity Cube has one shared material across all six
+faces, so a per-face material distinction can't survive the box
+collapse.
+
+`_rectangle_obb` answers "is this closed path a rectangle, and if so
+what frame does it have?" — used by slabs, panels and the rectangular-
+profile beam/column path. `_decompose_segment_with_openings` is the
+shared 1-D rectangle subtraction used by walls (and by slabs whose
+inner holes are rectangles): given a [0, segment_length] × [0, height]
+rectangle and a list of opening sub-rectangles inside it, return a
+sweep of solid sub-rectangles.
+
+The Unity-side BoxCompound RPC takes parallel arrays describing the
+boxes' centres, frames and extents and spawns one Cube child per box
+under a parent GameObject; the parent is what gets returned to Julia
+as the wall/slab ref, mirroring the single-ref shape produced by
+Solidify. Selection, Move, Rotate, DeleteMany and NavMesh tagging
+all continue to operate on that parent.
+
+See also: BoxCompound in Plugins/KhepriUnity/.../Primitives.cs and
+SetNavMeshArea in the same file (which now also tags compound
+children with the Obstacle tag for agent steering).
+=#
+
+#=
+Tolerance for rectangle/perpendicularity tests during box detection.
+1e-6 is two orders of magnitude looser than `coincidence_tolerance()`
+(1e-10): authoring tools and offset() routines accumulate floating-
+point drift that shows up well above 1e-10 in cross-product norms,
+and a too-strict test would silently push everything down the
+fall-through path. 1e-6 m on architectural geometry is sub-µm — far
+below anything visually or physically meaningful.
+=#
+const _box_decomp_tolerance = 1e-6
+
+#=
+Returns (centre, vx, vy, dx, dy) when `path` describes an oriented
+rectangle and `nothing` otherwise. (centre, vx, vy) is a frame on the
+rectangle's plane with `vx` and `vy` unit vectors along its two edges;
+dx, dy are the corresponding edge lengths.
+
+`RectangularPath` is rectangular by construction (the type carries
+corner + dx + dy directly) so we read the frame off its fields. For
+`ClosedPolygonalPath` we accept exactly four vertices forming a
+parallelogram with mutually perpendicular adjacent edges — that's the
+rectangle test used everywhere downstream. Anything else (smooth
+paths, polygons with more or fewer vertices, near-rectangles outside
+tolerance) returns `nothing` and the BIM caller falls back to the
+default path.
+
+Why we test `dot(unitized(e0), unitized(e1))` instead of computing a
+plane normal and projecting: dot is a scalar, dimensionless, and its
+zero-test directly captures perpendicularity at the tolerance. A
+normal-vector test would need to also defend against degenerate
+vertices (collinear triples) which the parallelogram check already
+rules out implicitly.
+=#
+_rectangle_obb(path::RectangularPath) =
+  (centre = path.corner + vxy(path.dx/2, path.dy/2, path.corner.cs),
+   vx = vx(1, path.corner.cs),
+   vy = vy(1, path.corner.cs),
+   dx = Float64(path.dx),
+   dy = Float64(path.dy))
+_rectangle_obb(path::ClosedPolygonalPath) =
+  let vs = path.vertices
+    if length(vs) != 4
+      nothing
+    else
+      let e0 = vs[2] - vs[1],
+          e1 = vs[3] - vs[2],
+          e2 = vs[4] - vs[3],
+          e3 = vs[1] - vs[4],
+          n0 = norm(e0), n1 = norm(e1),
+          n2 = norm(e2), n3 = norm(e3)
+        if !(isapprox(n0, n2; atol=_box_decomp_tolerance) &&
+             isapprox(n1, n3; atol=_box_decomp_tolerance))
+          nothing
+        elseif n0 < _box_decomp_tolerance || n1 < _box_decomp_tolerance
+          nothing
+        else
+          let u0 = unitized(e0),
+              u1 = unitized(e1)
+            if abs(dot(u0, u1)) > _box_decomp_tolerance
+              nothing
+            else
+              (centre = vs[1] + e0/2 + e1/2,
+               vx = u0,
+               vy = u1,
+               dx = Float64(n0),
+               dy = Float64(n1))
+            end
+          end
+        end
+      end
+    end
+  end
+_rectangle_obb(path::Path) = nothing
+
+#=
+True iff `path` is a single straight segment that we can fully
+characterise as a (start, end) point pair. A two-vertex
+`OpenPolygonalPath` qualifies; closed paths and multi-segment paths
+do not, because the per-segment box decomposition handles them via
+`subpaths` instead of via a single-shot rectangle frame.
+=#
+_is_straight_segment(path::OpenPolygonalPath) = length(path.vertices) == 2
+_is_straight_segment(path::Path) = false
+
+#=
+Decompose a segment-rectangle [0, seg_length] × [0, w_height] minus
+a set of opening rectangles into a sweep of solid sub-rectangles.
+
+`openings` is a vector of NamedTuples (s, e, b, t):
+  s, e — opening's along-segment span [s, e] ⊆ [0, seg_length]
+  b, t — opening's vertical span [b, t] ⊆ [0, w_height]
+The list must be sorted by `s` and the openings must not overlap each
+other along the segment axis (Khepri walls don't allow horizontally
+overlapping doors/windows on the same segment).
+
+Output: a vector of the same NamedTuple shape, each describing one
+solid piece of the segment (full-height bays between openings, sills
+below openings, lintels above openings).
+
+The sweep: cursor walks left→right; for each opening we emit the
+full-height bay strictly to its left if any, then the sill / lintel
+above and below the opening, then advance the cursor past the
+opening. After the last opening, emit a trailing full-height bay if
+the cursor hasn't reached the segment end.
+
+`b > 0` and `t < w_height` guards skip degenerate (zero-height) sills
+and lintels — they would emit cubes of zero `dz`, which Unity rejects
+as a degenerate mesh.
+=#
+_decompose_segment_with_openings(seg_length::Real, w_height::Real, openings) =
+  let pieces = NamedTuple{(:s,:e,:b,:t),NTuple{4,Float64}}[],
+      cursor = 0.0
+    for op in openings
+      if op.s > cursor
+        push!(pieces, (s=cursor, e=op.s, b=0.0, t=Float64(w_height)))
+      end
+      if op.b > _box_decomp_tolerance
+        push!(pieces, (s=op.s, e=op.e, b=0.0, t=Float64(op.b)))
+      end
+      if op.t < w_height - _box_decomp_tolerance
+        push!(pieces, (s=op.s, e=op.e, b=Float64(op.t), t=Float64(w_height)))
+      end
+      cursor = max(cursor, Float64(op.e))
+    end
+    if cursor < seg_length - _box_decomp_tolerance
+      push!(pieces, (s=cursor, e=Float64(seg_length), b=0.0, t=Float64(w_height)))
+    end
+    pieces
   end
 
-KhepriBase.realize(b::Unity, s::Slab) =
-  let refs = b_slab(b, s.region, s.level, s.family)
-    nav_mesh_tagging() && tag_refs_nav_mesh(b, refs, 0)
-    refs
+#=
+Build the (centre, vx, vy, dx, dy, dz) box description from a
+segment-local rectangle (s, e, b, t) and the segment's frame.
+
+`seg_p0` is the segment's start point already lifted to the wall's
+base height — so the box centre's Z = seg_p0.z + (b+t)/2, no
+further offset needed. `offset_perp` shifts the box centre off the
+centerline by (l_thickness − r_thickness)/2 to honour asymmetric wall
+thicknesses (the wall's `offset` field).
+
+The (dx, dy, dz) returned correspond to (along-segment, perpendicular,
+vertical) extents — encoded by the BoxCompound RPC into Unity's
+local (height, thickness, length) order, which is the convention
+b_box already uses (see the X<->Z swap there).
+=#
+_segment_piece_to_box(seg_p0::Loc, seg_axis::Vec, seg_perp::Vec,
+                      piece, total_th::Real, offset_perp::Real) =
+  let c_along = (piece.s + piece.e) / 2,
+      c_vert  = (piece.b + piece.t) / 2,
+      d_along = piece.e - piece.s,
+      d_vert  = piece.t - piece.b,
+      centre = seg_p0 + seg_axis*c_along + seg_perp*offset_perp + vz(c_vert, seg_p0.cs)
+    (centre = centre,
+     vx = seg_axis,
+     vy = seg_perp,
+     dx = Float64(d_along),
+     dy = Float64(total_th),
+     dz = Float64(d_vert))
+  end
+
+#=
+Wall → list of box descriptions, or `nothing` if the wall doesn't fit
+the box decomposition.
+
+Takes the same primitive arguments as KhepriBase's `b_wall` so the
+override is `b_wall(::Unity, ...)`-shaped and stays decoupled from the
+`Wall` shape proxy: the decomposer never reaches into `w.path`,
+`w.doors`, `w.bottom_level`, etc. — the realize chain in KhepriBase
+extracts and lifts those for us before calling `b_wall`.
+
+Falls through (returns `nothing`) when:
+  * left/right/side materials differ — Unity Cube uses one material;
+  * the chain resolver supplied face polylines (`l_face_path` /
+    `r_face_path`) — those represent non-symmetric junction
+    geometry that the simple OBB decomposition can't reproduce;
+  * the centerline isn't a polygonal/rectangular path (i.e. it's
+    smooth — arc walls, spline walls).
+
+For a `RectangularPath` centerline (closed perimeter wall) we walk
+its 4 segments via `subpaths`. Multi-segment polygonal walls work
+the same way; corners between segments are not mitred — adjacent
+boxes meet at the corner with a small in-thickness overlap inherited
+from the centerline geometry, which is acceptable for collision
+purposes and visually invisible at architectural scales.
+
+`openings` is a `Vector{WallOpening}` carrying `path_position`,
+`base_height`, `width`, `height` — the same struct the default
+`b_wall` builds from doors+windows before dispatching.
+=#
+_wall_box_decomposition(w_path, w_height, family, offset, openings,
+                        l_face_path, r_face_path) =
+  if !(family.left_material === family.right_material === family.side_material) ||
+     !isnothing(l_face_path) || !isnothing(r_face_path) ||
+     !(w_path isa OpenPolygonalPath || w_path isa ClosedPolygonalPath || w_path isa RectangularPath)
+    nothing
+  else
+    let l_th = (1/2 + offset) * (family.thickness + family.left_coating_thickness),
+        r_th = (1/2 - offset) * (family.thickness + family.right_coating_thickness),
+        total_th = l_th + r_th,
+        offset_perp = (l_th - r_th) / 2,
+        ops_all = sort(
+          [(s=Float64(op.path_position),
+            e=Float64(op.path_position + op.width),
+            b=Float64(op.base_height),
+            t=Float64(op.base_height + op.height))
+           for op in openings],
+          by = o -> o.s),
+        boxes = NamedTuple{(:centre,:vx,:vy,:dx,:dy,:dz),Tuple{Loc,Vec,Vec,Float64,Float64,Float64}}[],
+        arclen = 0.0
+      for seg in subpaths(w_path)
+        let seg_p0 = path_start(seg),
+            seg_p1 = path_end(seg),
+            seg_length = norm(seg_p1 - seg_p0)
+          if seg_length < _box_decomp_tolerance
+            arclen += seg_length
+            continue
+          end
+          let seg_axis = unitized(seg_p1 - seg_p0),
+              seg_perp = unitized(cross(vz(1, seg_p0.cs), seg_axis)),
+              seg_ops = sort(
+                [(s=max(0.0, op.s - arclen),
+                  e=min(seg_length, op.e - arclen),
+                  b=op.b, t=op.t)
+                 for op in ops_all
+                 if op.s < arclen + seg_length - _box_decomp_tolerance &&
+                    op.e > arclen + _box_decomp_tolerance],
+                by = o -> o.s)
+            for piece in _decompose_segment_with_openings(seg_length, w_height, seg_ops)
+              push!(boxes, _segment_piece_to_box(seg_p0, seg_axis, seg_perp,
+                                                 piece, total_th, offset_perp))
+            end
+          end
+          arclen += seg_length
+        end
+      end
+      isempty(boxes) ? nothing : boxes
+    end
+  end
+
+#=
+Slab → list of box descriptions, or `nothing`.
+
+Decomposes a rectangular slab outline into a single box (no holes) or
+into a list of boxes when all interior holes are rectangles parallel
+to the outer rectangle's frame. The 1-D opening sweep used by walls
+applies here too: project each rectangular hole onto the outer
+rectangle's vx axis to get a list of (s, e, b, t) sub-rectangles on
+the slab's plane, then sweep.
+
+Slabs can have non-uniform top/bottom/side materials. Like walls,
+the box collapse uses one material so we fall back when the three
+differ. Falls back too when the outer outline isn't a rectangle or
+any inner path isn't.
+
+The slab thickness comes from `slab_family_thickness` and is applied
+along the world-Z axis — slabs are always horizontal in KhepriBase.
+The slab's bottom is at level_height + family_elevation, top at +
+thickness above that.
+=#
+_slab_box_decomposition(b::Unity, region::Region, level, family) =
+  if !(family.bottom_material === family.top_material === family.side_material)
+    nothing
+  else
+    let outer = _rectangle_obb(outer_path(region))
+      isnothing(outer) && return nothing
+      let inners = inner_paths(region),
+          inner_obbs = [_rectangle_obb(p) for p in inners]
+        any(isnothing, inner_obbs) && return nothing
+        # All inner rectangles must share the outer's frame (axis-aligned
+        # in the slab's local coordinates) so we can flatten them into
+        # 1-D opening intervals along the outer's vx axis. This catches
+        # the common case (axis-aligned rectangular shafts) and rejects
+        # rotated holes — which would need true 2-D rectangle subtraction
+        # not implemented here.
+        for io in inner_obbs
+          if abs(dot(io.vx, outer.vx) - 1) > _box_decomp_tolerance ||
+             abs(dot(io.vy, outer.vy) - 1) > _box_decomp_tolerance
+            return nothing
+          end
+        end
+        let thickness = slab_family_thickness(b, family),
+            elevation = slab_family_elevation(b, family),
+            slab_z_centre = level.height + elevation + thickness/2,
+            # Project inner rectangles onto outer's local (along-vx, along-vy):
+            # each inner becomes (s, e) along vx and (b, t) along vy where
+            # (s, e, b, t) ∈ [0, dx] × [0, dy] of the outer rectangle.
+            outer_corner = outer.centre - outer.vx*outer.dx/2 - outer.vy*outer.dy/2,
+            holes = sort(
+              [let local_centre = io.centre - outer_corner,
+                   cs = dot(local_centre, outer.vx),
+                   ct = dot(local_centre, outer.vy)
+                 (s=cs - io.dx/2, e=cs + io.dx/2,
+                  b=ct - io.dy/2, t=ct + io.dy/2)
+               end for io in inner_obbs],
+              by = h -> h.s),
+            boxes = NamedTuple{(:centre,:vx,:vy,:dx,:dy,:dz),Tuple{Loc,Vec,Vec,Float64,Float64,Float64}}[]
+          # Strip-sweep: along outer.vx axis, each "strip" is a vertical
+          # column of width Δs spanning the full outer.dy. Holes split
+          # each strip into top/bottom solid pieces. We linearly sweep
+          # the outer rectangle as if it were a wall segment with the
+          # hole rectangles as openings, then build a 3-D box per piece.
+          for piece in _decompose_segment_with_openings(outer.dx, outer.dy, holes)
+            let c_along = (piece.s + piece.e) / 2,
+                c_perp  = (piece.b + piece.t) / 2,
+                d_along = piece.e - piece.s,
+                d_perp  = piece.t - piece.b,
+                centre = outer_corner + outer.vx*c_along + outer.vy*c_perp +
+                         vz(slab_z_centre - outer_corner.z, outer_corner.cs)
+              push!(boxes, (centre=centre,
+                            vx=outer.vx, vy=outer.vy,
+                            dx=Float64(d_along), dy=Float64(d_perp),
+                            dz=Float64(thickness)))
+            end
+          end
+          isempty(boxes) ? nothing : boxes
+        end
+      end
+    end
+  end
+
+#=
+Panel → single box description, or `nothing`.
+
+A panel is a region extruded by `family.thickness` along the region's
+plane normal; when the region's outer path is a rectangle and no
+inner paths are present, the panel is one OBB. We don't decompose
+panels with holes; rectangle-with-rectangular-hole panels are
+unusual enough that a fall-through to MeshCollider is acceptable.
+=#
+_panel_obb(profile::Region, family) =
+  if !(family.left_material === family.right_material === family.side_material) ||
+     !isempty(inner_paths(profile))
+    nothing
+  else
+    let r = _rectangle_obb(outer_path(profile))
+      isnothing(r) ? nothing :
+      let n = planar_path_normal(outer_path(profile)),
+          th = family.thickness
+        (centre = r.centre,
+         vx = r.vx, vy = r.vy,
+         dx = Float64(r.dx), dy = Float64(r.dy), dz = Float64(th),
+         normal = n)
+      end
+    end
+  end
+
+#=
+Beam (and column / free-column via b_beam) → single box, or `nothing`.
+
+`family_profile` is the cross-section in the beam's local XY plane
+with extrusion along local +Z by `h`. When that profile is a
+rectangle (the default `rectangular_profile` and `top_aligned_…`,
+`bottom_aligned_…` profiles all return `RectangularPath`), the
+beam is exactly a box. Circular and other profiles fall through;
+circular beams already get a CapsuleCollider via the
+`b_extruded_curve(::CircularPath)` shortcut in
+KhepriBase/src/Backend.jl.
+
+The beam frame at world space comes from `loc_from_o_phi(c, angle)`
+exactly as `b_beam` builds it; we then reproject the rectangular
+profile's centre into world coordinates to get the box centre.
+=#
+_beam_rect_obb(b::Unity, c::Loc, h::Real, angle::Real, family) =
+  let prof = family_profile(b, family),
+      r = _rectangle_obb(prof)
+    isnothing(r) ? nothing :
+    let frame = loc_from_o_phi(c, angle),
+        # `r.centre` is in the profile's CS (centred at u0() for
+        # the rectangular_profile family default); reproject into
+        # the beam frame and lift by h/2 along the beam's local Z
+        # to land at the beam's geometric centre.
+        centre_local = r.centre,
+        centre = frame +
+                 vx(centre_local.x, frame.cs) +
+                 vy(centre_local.y, frame.cs) +
+                 vz(h/2, frame.cs),
+        # Profile's vx/vy live in the profile's CS; convert into
+        # the beam's frame by treating their (x, y) components as
+        # offsets along (frame.vx, frame.vy).
+        vxw = unitized(vx(r.vx.x, frame.cs) + vy(r.vx.y, frame.cs)),
+        vyw = unitized(vx(r.vy.x, frame.cs) + vy(r.vy.y, frame.cs))
+      (centre=centre, vx=vxw, vy=vyw,
+       dx=Float64(r.dx), dy=Float64(r.dy), dz=Float64(h))
+    end
+  end
+
+# Helper: emit a list of box descriptions as a single BoxCompound RPC.
+_emit_box_compound(b::Unity, name::String, boxes, mat_ref) =
+  @remote(b, BoxCompound(
+    name,
+    [box.centre for box in boxes],
+    [box.vx     for box in boxes],
+    [box.vy     for box in boxes],
+    [box.dz     for box in boxes],   # X<->Z swap: see b_box convention
+    [box.dy     for box in boxes],
+    [box.dx     for box in boxes],
+    mat_ref))
+
+#=
+Walls — overrides `b_wall` (the dispatcher KhepriBase calls after
+realize() has already done the data extraction: lifted centerline,
+height delta, opening list converted from doors+windows, optional
+face polylines from the chain resolver).
+
+When the box decomposition succeeds we emit a single BoxCompound
+(one Unity Cube child per solid sub-rectangle of the wall) and tag
+it for NavMesh as area=1 (NotWalkable, Obstacle). On fall-through
+we re-enter the default `b_wall` body via `invoke` and tag whatever
+refs it returns; the default path goes through Solidify and ends in
+a MeshCollider as before.
+
+Centralising NavMesh tagging here keeps `realize(::Wall)` generic —
+no Unity-specific override of realize() is needed. Other backends'
+b_wall overrides (or the default) continue to work unchanged.
+=#
+KhepriBase.b_wall(b::Unity, w_path, w_height, family, offset, openings;
+                  l_face_path=nothing, r_face_path=nothing) =
+  let boxes = _wall_box_decomposition(w_path, w_height, family, offset,
+                                      openings, l_face_path, r_face_path)
+    if isnothing(boxes)
+      let refs = invoke(KhepriBase.b_wall,
+                        Tuple{KhepriBase.Backend, Any, Any, Any, Any, Any},
+                        b, w_path, w_height, family, offset, openings;
+                        l_face_path=l_face_path, r_face_path=r_face_path)
+        nav_mesh_tagging() && tag_refs_nav_mesh(b, refs, 1)
+        refs
+      end
+    else
+      let mat_ref = material_ref(b, family.right_material),
+          ref = with_material_as_layer(b, family.right_material) do
+            _emit_box_compound(b, "Wall", boxes, mat_ref)
+          end
+        nav_mesh_tagging() && tag_refs_nav_mesh(b, [ref], 1)
+        UnityId[ref]
+      end
+    end
+  end
+
+#=
+Slabs — overrides `b_slab` (KhepriBase's `realize(::Slab)` calls
+this directly with `s.region`, `s.level`, `s.family`).
+
+NavMesh area = 0 (Walkable). Same fall-through pattern as walls:
+when box decomposition fails we invoke the default `b_slab` body
+which extrudes the region and Solidifies it.
+=#
+KhepriBase.b_slab(b::Unity, profile, level, family) =
+  let boxes = _slab_box_decomposition(b, profile, level, family)
+    if isnothing(boxes)
+      let refs = invoke(KhepriBase.b_slab,
+                        Tuple{KhepriBase.Backend, Any, Any, Any},
+                        b, profile, level, family)
+        nav_mesh_tagging() && tag_refs_nav_mesh(b, refs, 0)
+        refs
+      end
+    else
+      let mat_ref = material_ref(b, family.top_material),
+          ref = with_material_as_layer(b, family.top_material) do
+            _emit_box_compound(b, "Slab", boxes, mat_ref)
+          end
+        nav_mesh_tagging() && tag_refs_nav_mesh(b, [ref], 0)
+        UnityId[ref]
+      end
+    end
+  end
+
+#=
+Roofs — KhepriBase's `realize(::Roof)` calls `b_roof` (whose default
+delegates to `b_slab`). We override both paths: `_slab_box_decomposition`
+handles the rectangular-region geometry the same way, with NavMesh
+area = 0 (a roof is walkable from the top in Khepri's convention).
+=#
+KhepriBase.b_roof(b::Unity, profile, level, family) =
+  let boxes = _slab_box_decomposition(b, profile, level, family)
+    if isnothing(boxes)
+      let refs = invoke(KhepriBase.b_roof,
+                        Tuple{KhepriBase.Backend, Any, Any, Any},
+                        b, profile, level, family)
+        nav_mesh_tagging() && tag_refs_nav_mesh(b, refs, 0)
+        refs
+      end
+    else
+      let mat_ref = material_ref(b, family.top_material),
+          ref = with_material_as_layer(b, family.top_material) do
+            _emit_box_compound(b, "Roof", boxes, mat_ref)
+          end
+        nav_mesh_tagging() && tag_refs_nav_mesh(b, [ref], 0)
+        UnityId[ref]
+      end
+    end
+  end
+
+# Beams (and columns / free-columns, which delegate to b_beam)
+KhepriBase.b_beam(b::Unity, c::Loc, h::Real, angle::Real, family) =
+  let obb = _beam_rect_obb(b, c, h, angle, family)
+    if isnothing(obb)
+      # Fall through to KhepriBase default body. Inlined rather than
+      # delegated through dispatch so that this method itself doesn't
+      # loop. Mirrors KhepriBase/src/Backend.jl:b_beam exactly: build
+      # the angle-rotated frame, then extrude the family profile
+      # along that frame's local Z by `h`.
+      let frame = loc_from_o_phi(c, angle),
+          mat = material_ref(b, family.material)
+        with_material_as_layer(b, family.material) do
+          b_extruded_surface(b, region(family_profile(b, family)),
+                             vz(h, frame.cs), frame, mat, mat, mat)
+        end
+      end
+    else
+      let mat_ref = material_ref(b, family.material),
+          ref = with_material_as_layer(b, family.material) do
+            _emit_box_compound(b, "Beam", [obb], mat_ref)
+          end
+        UnityId[ref]
+      end
+    end
+  end
+
+# Panels
+KhepriBase.b_panel(b::Unity, profile::Region, family) =
+  let obb = _panel_obb(profile, family)
+    if isnothing(obb)
+      # Default path: extrude profile by family.thickness along its normal.
+      # Mirrors KhepriBase's default b_panel implementation.
+      let lmat = material_ref(b, family.left_material),
+          rmat = material_ref(b, family.right_material),
+          smat = material_ref(b, family.side_material),
+          th = family.thickness,
+          v = planar_path_normal(profile)
+        b_extruded_surface(b, profile, v*th, u0(v.cs)+v*(th/-2),
+                           lmat, rmat, smat)
+      end
+    else
+      let mat_ref = material_ref(b, family.right_material),
+          # Project the panel's normal-plane frame to a 3-D box frame.
+          # The OBB returned by `_panel_obb` carries (vx, vy) in the
+          # profile's plane plus a `normal` Vec; the box's third axis
+          # is along that normal, so the centre offsets to mid-thickness
+          # automatically (centre is already on the profile's plane).
+          ref = with_material_as_layer(b, family.right_material) do
+            _emit_box_compound(b, "Panel",
+                               [(centre=obb.centre, vx=obb.vx, vy=obb.vy,
+                                 dx=obb.dx, dy=obb.dy, dz=obb.dz)],
+                               mat_ref)
+          end
+        UnityId[ref]
+      end
+    end
   end
 
 # Agent size
