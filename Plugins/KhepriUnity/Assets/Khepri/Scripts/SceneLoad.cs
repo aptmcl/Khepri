@@ -25,6 +25,7 @@ public class SceneLoad {
         set { _visualizing = value; }
     }
     private static bool I_am_the_server = false;
+
     public State currentState = I_am_the_server ? State.StartingServer : State.WaitingConnections;
 
     // Async connection state
@@ -42,7 +43,8 @@ public class SceneLoad {
             mainObject.isStatic = true;
         }
         serverAddress = DEFAULT_SERVER_ADDRESS;
-        serverPort = DEFAULT_SERVER_PORT;
+        //serverPort = DEFAULT_SERVER_PORT;
+        serverPort = DEFAULT_CLIENT_PORT;
         string[] args = Environment.GetCommandLineArgs();
         foreach (string arg in args) {
             if (arg.StartsWith("-serverIP=")) {
