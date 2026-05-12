@@ -32,11 +32,25 @@ public class SceneLoad {
     private float lastConnectAttempt = -999f;
     private const float CONNECT_RETRY_DELAY = 3f; // seconds between attempts
 
+    public string serverAddress;
+    public int serverPort;
+
     public SceneLoad() {
         mainObject = GameObject.Find("MainObject");
         if (mainObject == null) {
             mainObject = new GameObject("MainObject");
             mainObject.isStatic = true;
+        }
+        serverAddress = DEFAULT_SERVER_ADDRESS;
+        serverPort = DEFAULT_SERVER_PORT;
+        string[] args = Environment.GetCommandLineArgs();
+        foreach (string arg in args) {
+            if (arg.StartsWith("-serverIP=")) {
+                serverAddress = arg.Substring("-serverIP=".Length);
+            }
+            if (arg.StartsWith("-port=")) {
+                serverPort = int.Parse(arg.Substring("-port=".Length));
+            }
         }
         primitives = new Primitives(mainObject);
     }
@@ -46,8 +60,8 @@ public class SceneLoad {
         if (I_am_the_server) {
             try {
                 if (server == null) {
-                    IPAddress localAddr = IPAddress.Parse(DEFAULT_SERVER_ADDRESS);
-                    server = new TcpListener(localAddr, DEFAULT_SERVER_PORT);
+                    IPAddress localAddr = IPAddress.Parse(serverAddress);
+                    server = new TcpListener(localAddr, serverPort);
                 } else {
                     server.Stop();
                 }
@@ -118,8 +132,8 @@ public class SceneLoad {
             lastConnectAttempt = now;
             try {
                 client = new TcpClient();
-                IPAddress remoteAddr = IPAddress.Parse(DEFAULT_SERVER_ADDRESS);
-                connectTask = client.ConnectAsync(remoteAddr, DEFAULT_CLIENT_PORT);
+                IPAddress remoteAddr = IPAddress.Parse(serverAddress);
+                connectTask = client.ConnectAsync(remoteAddr, serverPort);
                 currentState = State.Connecting;
                 WriteMessage("Connecting to Julia...\n");
             } catch (Exception e) {
