@@ -152,6 +152,30 @@ There are numerous problems in the way AutoCAD starts. The
 current scheme involves starting AutoCAD and then launching
 the template file.
 This means we need to locate AutoCAD's executable.
+
+Detached spawn (`run(detach(...), wait=false)`): without the `detach`
+wrapper, the launched acad.exe becomes a child of the Julia process and
+inherits Julia's Win32 Job Object. Most environments that host Julia —
+VSCode/Cursor terminals, WSL2's Windows-interop layer, MSBuild/dotnet
+wrappers — create such a job with KILL_ON_JOB_CLOSE so that killing the
+host (or the host losing its last handle) tears down every descendant.
+With AutoCAD in that job, terminating Julia took AutoCAD down with it,
+which is why a fresh Julia could not reconnect — there was nothing left
+to connect to. `detach` sets UV_PROCESS_DETACHED on libuv's spawn, which
+on Windows adds DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP; in practice
+this is enough for AutoCAD to survive Julia in the environments we care
+about. KhepriBlender, KhepriFreeCAD, and Khepri3dsMax already use the
+same pattern (see e.g. KhepriFreeCAD/src/FreeCAD.jl#start_freecad);
+KhepriAutoCAD was the odd one out.
+
+Why `wait=false`: we want to return immediately so the connection retry
+loop in KhepriBase.start_connection can poll the socket while AutoCAD
+finishes initialising. The plugin's KHEPRI command starts a server only
+after the user (or the /t-loaded template) triggers it.
+
+See also: KhepriAutoCAD/Plugins/.../PlugIn.cs which makes the C# side
+survive socket disconnects so a fresh Julia can re-attach to a still-
+running AutoCAD.
 =#
 
 start_autocad() =
@@ -172,7 +196,7 @@ start_autocad() =
       length(candidates) == 0 ?
         error("Couldn't find AutoCAD. Please, start it manually.") :
         let most_recent = sort!(candidates)[end]
-          run(`$(most_recent) /nologo /t $(autocad_template())`, wait=false)
+          run(detach(`$(most_recent) /nologo /t $(autocad_template())`), wait=false)
         end
     else
       error("Couldn't find AutoCAD. Please, start it manually.")
@@ -444,10 +468,38 @@ const ACAD = SocketBackend{ACADKey, ACADId}
 
 KhepriBase.shape_storage_type(::Type{ACAD}) = RemoteShapeStorage()
 
+#=
+`before_connecting` should be reattach-friendly. Now that `start_autocad`
+spawns AutoCAD detached from Julia's process tree (see the literate block
+above `start_autocad`), a previous AutoCAD will outlive the Julia that
+created it — so a fresh Julia must *attach* to that survivor rather than
+boot a second instance. We do this by probing TCP port `autocad_port`
+before spawning: if the plugin is already accepting connections, we trust
+it and skip the launch (the main `start_connection` call that follows
+will get the actual session). If nothing is listening — either no
+AutoCAD at all, or AutoCAD is up but the `KHEPRI` command was never
+issued — we fall back to spawning. The probe is closed immediately; the
+plugin handles the resulting brief connect-disconnect cycle by returning
+to its `AcceptClient` state (see Plugins/KhepriAutoCAD/PlugIn.cs).
+
+We deliberately probe the *port*, not the OS process table (e.g. via
+`tasklist`): a running `acad.exe` without the plugin loaded (or without
+the user having run `KHEPRI`) cannot serve us, and treating that case as
+"already running" would hang forever in the retry loop. Port-listening
+is the precise condition we actually need.
+=#
 KhepriBase.before_connecting(b::ACAD) =
   begin
     check_plugin()
-    start_autocad()
+    autocad_is_listening() || start_autocad()
+  end
+
+autocad_is_listening() =
+  try
+    close(Sockets.connect("127.0.0.1", autocad_port))
+    true
+  catch
+    false
   end
 
 KhepriBase.retry_connecting(b::ACAD) =
@@ -842,10 +894,18 @@ KhepriBase/Backend.jl decomposes the region into outer/inner curve
 extrusions plus top/bottom surface caps — a multi-entity assembly that
 fails AutoCAD's Surface→Region promotion in BooleanOperation
 (eNonPlanarEntity from Surface.ConvertToRegion).
+
+`cb` is the base location of the extrusion. Callers (e.g. `b_column`,
+`b_beam`, `b_slab`) pass a profile centered at the world origin plus the
+target position in `cb`; the profile itself carries no XY/Z offset. We must
+apply `path_on(profile, cb)` before realizing the curve, otherwise every
+extruded primitive collapses onto the world origin regardless of the
+requested location. The default Region implementation in Backend.jl makes
+the same move on its top/bottom caps; this override mirrors that contract.
 =#
 KhepriBase.b_extruded_surface(b::ACAD, profile::Region, v, cb, mat) =
   let curve_mat = material_ref(b, default_curve_material()),
-      r = b_realize_path(b, profile, curve_mat)
+      r = b_realize_path(b, path_on(profile, cb), curve_mat)
     @remote(b, ExtrudeWithMaterial(r, v, mat))
   end
 KhepriBase.b_extruded_surface(b::ACAD, profile::Region, v, cb, bmat, tmat, smat) =
