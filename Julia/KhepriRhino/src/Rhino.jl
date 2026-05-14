@@ -115,6 +115,7 @@ public Plane SurfaceFrameAt(RhinoObject obj, double u, double v)
 public Point3d[] BoundingBox(ObjectId[] ids)
 public Brep Extrusion(RhinoObject obj, Vector3d dir)
 public Brep[] SweepPathProfile(RhinoObject path, RhinoObject profile, double rotation, double scale)
+public Brep Revolve(RhinoObject profile, Point3d p, Vector3d n, double startAngle, double amplitude)
 public Brep Loft(RhinoObject[] profiles, RhinoObject[] rails, bool ruled, bool closed)
 public Guid[] Unite(RhinoObject[]objs)
 public Guid[] Intersect(RhinoObject obj0, RhinoObject obj1)
@@ -594,9 +595,18 @@ KhepriBase.b_extruded_surface(b::RH, s::Shape2D, v, cb, mat) =
 # Rhino's Extrusion of a Region entity, instead of the default in
 # KhepriBase/Backend.jl that decomposes outer/inner curves and surface caps
 # (a multi-Brep assembly that downstream CSG cannot consume).
+#
+# `cb` is the base location of the extrusion. Callers (e.g. `b_column`,
+# `b_beam`, `b_slab`) pass a profile centered at the world origin plus the
+# target position in `cb`; the profile itself carries no XY/Z offset. We
+# must apply `path_on(profile, cb)` before realizing the curve, otherwise
+# every extruded primitive collapses onto the world origin regardless of
+# the requested location. The default Region implementation in Backend.jl
+# makes the same move on its top/bottom caps; this override mirrors that
+# contract.
 KhepriBase.b_extruded_surface(b::RH, profile::Region, v, cb, mat) =
   let curve_mat = material_ref(b, default_curve_material()),
-      r = b_realize_path(b, profile, curve_mat)
+      r = b_realize_path(b, path_on(profile, cb), curve_mat)
     @remote(b, Extrusion(r, v))
   end
 KhepriBase.b_extruded_surface(b::RH, profile::Region, v, cb, bmat, tmat, smat) =
@@ -656,6 +666,42 @@ KhepriBase.b_loft_surface_point(b::RH, profile, point, mat) =
                       UInt128[], true, false)),
       [profile, point])
   end
+
+#=
+Native revolve via the plugin's `Revolve` (Rhino.jl line 219, C# line 1560 of
+KhepriRhinoceros/Primitives.cs). Without these overrides the default in
+KhepriBase/Backend.jl converts the input to a Path (`convert(Path, profile)`),
+which for a Surface with spline frontiers produces an OpenSplinePath whose
+`path_length` is undefined — surfacing as `MethodError: no method matching
+path_length(::OpenSplinePath)` for aula08_barril and friends. The pattern
+mirrors AutoCAD's `acad_revolve` (KhepriAutoCAD/src/AutoCAD.jl:892): walk the
+existing Shape refs via `map_ref` for Shape inputs, realize the path via
+`b_realize_path` for Region inputs.
+
+Note: AutoCAD's RevolveWithMaterial flips the sign of `amplitude` to match
+its rotation convention; Rhino's Revolve uses the same sign as Khepri, so
+the override passes `amplitude` through unchanged. (The original commented-
+out `realize(b::RH, s::Revolve)` at line 680 confirmed this.)
+=#
+# Only override for Shape inputs. Region inputs fall through to the default
+# `b_revolved_*(b::Backend, ...)` which decomposes outer + inner paths and
+# revolves each via b_surface_grid — that path correctly handles a Region
+# with hole (e.g. `revolve_region_with_hole`), whereas the C# plugin's
+# `Revolve(profile, ...)` with a Region-as-Brep input throws "Index outside
+# bounds of array" for the inner-loop branch (Primitives.cs:1604-1608).
+KhepriBase.b_revolved_point(b::RH, profile::Union{Loc,Point,Shape0D}, p, n, start_angle, amplitude, mat) =
+  b_arc(b, loc_from_o_vz(p, n), distance(point_position(profile), p), start_angle, amplitude, mat)
+KhepriBase.b_revolved_curve(b::RH, profile::Shape, p, n, start_angle, amplitude, mat) =
+  rhino_revolve(b, profile, p, n, start_angle, amplitude, mat)
+KhepriBase.b_revolved_surface(b::RH, profile::Shape, p, n, start_angle, amplitude, mat) =
+  rhino_revolve(b, profile, p, n, start_angle, amplitude, mat)
+
+rhino_revolve(b::RH, profile::Shape, p, n, start_angle, amplitude, mat) =
+  and_delete_shape(
+    map_ref(b, profile) do r
+      @remote(b, Revolve(r, p, n, start_angle, amplitude))
+    end,
+    profile)
 
 KhepriBase.b_subtract_ref(b::RH, s, r) =
   @remote(b, Subtract(s, r))
