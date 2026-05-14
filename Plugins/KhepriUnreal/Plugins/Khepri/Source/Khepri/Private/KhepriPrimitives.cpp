@@ -30,8 +30,15 @@
 #include "Kismet/KismetRenderingLibrary.h"
 #include "Engine/Selection.h"
 #include "EngineUtils.h"
+#include "Engine/Light.h"
+#include "Engine/Brush.h"
+#include "GameFramework/WorldSettings.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SWindow.h"
+
+// Deferred selection state
+bool KhepriPrimitives::bSelectionPending = false;
+bool KhepriPrimitives::bSelectMany = false;
 
 // =============================================================================
 // Static base material for dynamic material instances
@@ -124,6 +131,180 @@ static UMaterial* GetOrCreateBaseMaterial()
 }
 
 // =============================================================================
+// Static translucent base material (for transmission/alpha < 1)
+// =============================================================================
+
+static UMaterial* GKhepriTranslucentMaterial = nullptr;
+
+static UMaterial* GetOrCreateTranslucentBaseMaterial()
+{
+  if (GKhepriTranslucentMaterial && GKhepriTranslucentMaterial->IsValidLowLevel())
+  {
+    return GKhepriTranslucentMaterial;
+  }
+
+  UMaterial* Mat = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_KhepriTranslucent"));
+
+  auto* BaseColorParam = NewObject<UMaterialExpressionVectorParameter>(Mat);
+  BaseColorParam->ParameterName = TEXT("BaseColor");
+  BaseColorParam->DefaultValue = FLinearColor(0.8f, 0.8f, 0.8f, 1.0f);
+
+  auto* MetallicParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+  MetallicParam->ParameterName = TEXT("Metallic");
+  MetallicParam->DefaultValue = 0.0f;
+
+  auto* SpecularParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+  SpecularParam->ParameterName = TEXT("Specular");
+  SpecularParam->DefaultValue = 0.5f;
+
+  auto* RoughnessParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+  RoughnessParam->ParameterName = TEXT("Roughness");
+  RoughnessParam->DefaultValue = 0.5f;
+
+  auto* OpacityParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+  OpacityParam->ParameterName = TEXT("Opacity");
+  OpacityParam->DefaultValue = 0.5f;
+
+  auto* EmissiveColorParam = NewObject<UMaterialExpressionVectorParameter>(Mat);
+  EmissiveColorParam->ParameterName = TEXT("EmissiveColor");
+  EmissiveColorParam->DefaultValue = FLinearColor(0.0f, 0.0f, 0.0f, 1.0f);
+
+  auto* EmissionStrengthParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+  EmissionStrengthParam->ParameterName = TEXT("EmissionStrength");
+  EmissionStrengthParam->DefaultValue = 0.0f;
+
+  auto* RefractionParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+  RefractionParam->ParameterName = TEXT("Refraction");
+  RefractionParam->DefaultValue = 1.5f;
+
+  auto* EmissiveMultiply = NewObject<UMaterialExpressionMultiply>(Mat);
+
+  Mat->GetExpressionCollection().Expressions.Add(BaseColorParam);
+  Mat->GetExpressionCollection().Expressions.Add(MetallicParam);
+  Mat->GetExpressionCollection().Expressions.Add(SpecularParam);
+  Mat->GetExpressionCollection().Expressions.Add(RoughnessParam);
+  Mat->GetExpressionCollection().Expressions.Add(OpacityParam);
+  Mat->GetExpressionCollection().Expressions.Add(EmissiveColorParam);
+  Mat->GetExpressionCollection().Expressions.Add(EmissionStrengthParam);
+  Mat->GetExpressionCollection().Expressions.Add(RefractionParam);
+  Mat->GetExpressionCollection().Expressions.Add(EmissiveMultiply);
+
+#if WITH_EDITORONLY_DATA
+  UMaterialEditorOnlyData* EditorData = Mat->GetEditorOnlyData();
+  EditorData->BaseColor.Expression = BaseColorParam;
+  EditorData->Metallic.Expression = MetallicParam;
+  EditorData->Specular.Expression = SpecularParam;
+  EditorData->Roughness.Expression = RoughnessParam;
+  EditorData->Opacity.Expression = OpacityParam;
+  EmissiveMultiply->A.Expression = EmissiveColorParam;
+  EmissiveMultiply->B.Expression = EmissionStrengthParam;
+  EditorData->EmissiveColor.Expression = EmissiveMultiply;
+  EditorData->Refraction.Expression = RefractionParam;
+#endif
+
+  Mat->BlendMode = BLEND_Translucent;
+  Mat->TwoSided = true;
+
+  Mat->PreEditChange(nullptr);
+  Mat->PostEditChange();
+  Mat->AddToRoot();
+  GKhepriTranslucentMaterial = Mat;
+
+  UE_LOG(LogKhepri, Log, TEXT("Created KhepriTranslucentMaterial"));
+  return GKhepriTranslucentMaterial;
+}
+
+// =============================================================================
+// Static clear coat base material
+// =============================================================================
+
+static UMaterial* GKhepriClearCoatMaterial = nullptr;
+
+static UMaterial* GetOrCreateClearCoatBaseMaterial()
+{
+  if (GKhepriClearCoatMaterial && GKhepriClearCoatMaterial->IsValidLowLevel())
+  {
+    return GKhepriClearCoatMaterial;
+  }
+
+  UMaterial* Mat = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_KhepriClearCoat"));
+
+  auto* BaseColorParam = NewObject<UMaterialExpressionVectorParameter>(Mat);
+  BaseColorParam->ParameterName = TEXT("BaseColor");
+  BaseColorParam->DefaultValue = FLinearColor(0.8f, 0.8f, 0.8f, 1.0f);
+
+  auto* MetallicParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+  MetallicParam->ParameterName = TEXT("Metallic");
+  MetallicParam->DefaultValue = 0.0f;
+
+  auto* SpecularParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+  SpecularParam->ParameterName = TEXT("Specular");
+  SpecularParam->DefaultValue = 0.5f;
+
+  auto* RoughnessParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+  RoughnessParam->ParameterName = TEXT("Roughness");
+  RoughnessParam->DefaultValue = 0.5f;
+
+  auto* OpacityParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+  OpacityParam->ParameterName = TEXT("Opacity");
+  OpacityParam->DefaultValue = 1.0f;
+
+  auto* EmissiveColorParam = NewObject<UMaterialExpressionVectorParameter>(Mat);
+  EmissiveColorParam->ParameterName = TEXT("EmissiveColor");
+  EmissiveColorParam->DefaultValue = FLinearColor(0.0f, 0.0f, 0.0f, 1.0f);
+
+  auto* EmissionStrengthParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+  EmissionStrengthParam->ParameterName = TEXT("EmissionStrength");
+  EmissionStrengthParam->DefaultValue = 0.0f;
+
+  auto* ClearCoatParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+  ClearCoatParam->ParameterName = TEXT("ClearCoat");
+  ClearCoatParam->DefaultValue = 1.0f;
+
+  auto* ClearCoatRoughnessParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+  ClearCoatRoughnessParam->ParameterName = TEXT("ClearCoatRoughness");
+  ClearCoatRoughnessParam->DefaultValue = 0.1f;
+
+  auto* EmissiveMultiply = NewObject<UMaterialExpressionMultiply>(Mat);
+
+  Mat->GetExpressionCollection().Expressions.Add(BaseColorParam);
+  Mat->GetExpressionCollection().Expressions.Add(MetallicParam);
+  Mat->GetExpressionCollection().Expressions.Add(SpecularParam);
+  Mat->GetExpressionCollection().Expressions.Add(RoughnessParam);
+  Mat->GetExpressionCollection().Expressions.Add(OpacityParam);
+  Mat->GetExpressionCollection().Expressions.Add(EmissiveColorParam);
+  Mat->GetExpressionCollection().Expressions.Add(EmissionStrengthParam);
+  Mat->GetExpressionCollection().Expressions.Add(ClearCoatParam);
+  Mat->GetExpressionCollection().Expressions.Add(ClearCoatRoughnessParam);
+  Mat->GetExpressionCollection().Expressions.Add(EmissiveMultiply);
+
+#if WITH_EDITORONLY_DATA
+  UMaterialEditorOnlyData* EditorData = Mat->GetEditorOnlyData();
+  EditorData->BaseColor.Expression = BaseColorParam;
+  EditorData->Metallic.Expression = MetallicParam;
+  EditorData->Specular.Expression = SpecularParam;
+  EditorData->Roughness.Expression = RoughnessParam;
+  EditorData->Opacity.Expression = OpacityParam;
+  EmissiveMultiply->A.Expression = EmissiveColorParam;
+  EmissiveMultiply->B.Expression = EmissionStrengthParam;
+  EditorData->EmissiveColor.Expression = EmissiveMultiply;
+  EditorData->ClearCoat.Expression = ClearCoatParam;
+  EditorData->ClearCoatRoughness.Expression = ClearCoatRoughnessParam;
+#endif
+
+  Mat->SetShadingModel(MSM_ClearCoat);
+  Mat->TwoSided = true;
+
+  Mat->PreEditChange(nullptr);
+  Mat->PostEditChange();
+  Mat->AddToRoot();
+  GKhepriClearCoatMaterial = Mat;
+
+  UE_LOG(LogKhepri, Log, TEXT("Created KhepriClearCoatMaterial"));
+  return GKhepriClearCoatMaterial;
+}
+
+// =============================================================================
 // Actor naming counter
 // =============================================================================
 
@@ -179,11 +360,14 @@ void KhepriPrimitives::RegisterAllOperations(FKhepriServer& Server)
   // Materials & Layers
   Server.RegisterOperation(TEXT("Primitive::LoadMaterial"), &KhepriPrimitives::LoadMaterial);
   Server.RegisterOperation(TEXT("Primitive::CreateMaterial"), &KhepriPrimitives::CreateMaterial);
+  Server.RegisterOperation(TEXT("Primitive::CreatePBRMaterial"), &KhepriPrimitives::CreatePBRMaterial);
   Server.RegisterOperation(TEXT("Primitive::CurrentMaterial"), &KhepriPrimitives::CurrentMaterial);
   Server.RegisterOperation(TEXT("Primitive::SetCurrentMaterial"), &KhepriPrimitives::SetCurrentMaterial);
   Server.RegisterOperation(TEXT("Primitive::CurrentParent"), &KhepriPrimitives::CurrentParent);
   Server.RegisterOperation(TEXT("Primitive::SetCurrentParent"), &KhepriPrimitives::SetCurrentParent);
   Server.RegisterOperation(TEXT("Primitive::CreateParent"), &KhepriPrimitives::CreateParent);
+  Server.RegisterOperation(TEXT("Primitive::SetParentVisible"), &KhepriPrimitives::SetParentVisible);
+  Server.RegisterOperation(TEXT("Primitive::DeleteAllInParent"), &KhepriPrimitives::DeleteAllInParent);
   Server.RegisterOperation(TEXT("Primitive::LoadResource"), &KhepriPrimitives::LoadResource);
 
   // Lighting
@@ -216,6 +400,13 @@ void KhepriPrimitives::RegisterAllOperations(FKhepriServer& Server)
   Server.RegisterOperation(TEXT("Primitive::HighlightRefs"), &KhepriPrimitives::HighlightRefs);
   Server.RegisterOperation(TEXT("Primitive::UnhighlightRefs"), &KhepriPrimitives::UnhighlightRefs);
   Server.RegisterOperation(TEXT("Primitive::UnhighlightAllRefs"), &KhepriPrimitives::UnhighlightAllRefs);
+
+  // Shape query
+  Server.RegisterOperation(TEXT("Primitive::ShapeType"), &KhepriPrimitives::ShapeType);
+
+  // Deferred selection
+  Server.RegisterOperation(TEXT("Primitive::GetShape"), &KhepriPrimitives::GetShape);
+  Server.RegisterOperation(TEXT("Primitive::GetShapes"), &KhepriPrimitives::GetShapes);
 }
 
 // =============================================================================
@@ -306,7 +497,9 @@ int32 KhepriPrimitives::CreateMeshActor(
   NewActor->SetRootComponent(ProcMesh);
   ProcMesh->RegisterComponent();
 
-  // Set mesh data on section 0 using LinearColor variant
+  // Set mesh data on section 0 using LinearColor variant.
+  // Normals are outward-facing. Individual shape functions are responsible
+  // for producing correct winding (CW from outside for UE's left-handed system).
   TArray<FProcMeshTangent> EmptyTangents;
   TArray<FLinearColor> EmptyColors;
   ProcMesh->CreateMeshSection_LinearColor(
@@ -356,21 +549,138 @@ int32 KhepriPrimitives::CreateMeshActor(
 }
 
 // =============================================================================
+// CreateMeshActor — multi-section variant (one section per FMeshData, each with its own material)
+// =============================================================================
+
+int32 KhepriPrimitives::CreateMeshActor(
+  FKhepriChannel& Channel,
+  const TArray<KhepriMeshBuilder::FMeshData>& Sections,
+  const TArray<int32>& MaterialIndices,
+  const FVector& Location,
+  const FRotator& Rotation,
+  bool bCreateCollision,
+  const TCHAR* ShapeLabel)
+{
+  UWorld* World = GetEditorWorld();
+  if (!World)
+  {
+    UE_LOG(LogKhepri, Error, TEXT("Khepri: No editor world available"));
+    return -1;
+  }
+
+  int32 ActorNum = GKhepriActorCounter++;
+  FString ActorName = FString::Printf(TEXT("Khepri_%s_%d"), ShapeLabel, ActorNum);
+
+  FActorSpawnParameters SpawnParams;
+  SpawnParams.Name = FName(*ActorName);
+  SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+  AActor* NewActor = World->SpawnActor<AActor>(SpawnParams);
+  if (!NewActor)
+  {
+    UE_LOG(LogKhepri, Error, TEXT("Khepri: Failed to spawn actor"));
+    return -1;
+  }
+
+#if WITH_EDITOR
+  NewActor->SetActorLabel(*ActorName);
+#endif
+
+  UProceduralMeshComponent* ProcMesh = NewObject<UProceduralMeshComponent>(NewActor, TEXT("ProceduralMesh"));
+  NewActor->SetRootComponent(ProcMesh);
+  ProcMesh->RegisterComponent();
+
+  TArray<FProcMeshTangent> EmptyTangents;
+  TArray<FLinearColor> EmptyColors;
+
+  for (int32 i = 0; i < Sections.Num(); ++i)
+  {
+    const auto& MeshData = Sections[i];
+    if (MeshData.Vertices.Num() == 0) continue;
+
+    ProcMesh->CreateMeshSection_LinearColor(
+      i, MeshData.Vertices, MeshData.Triangles, MeshData.Normals,
+      MeshData.UVs, EmptyColors, EmptyTangents, bCreateCollision);
+
+    int32 MatIndex = (i < MaterialIndices.Num()) ? MaterialIndices[i] : -1;
+    UMaterialInterface* Material = nullptr;
+    if (MatIndex >= 0)
+    {
+      Material = Channel.GetMaterial(MatIndex);
+    }
+    else if (Channel.CurrentMaterialIndex >= 0)
+    {
+      Material = Channel.GetMaterial(Channel.CurrentMaterialIndex);
+    }
+    if (Material)
+    {
+      ProcMesh->SetMaterial(i, Material);
+    }
+  }
+
+  if (Channel.CurrentParentIndex >= 0)
+  {
+    AActor* ParentActor = Channel.GetActor(Channel.CurrentParentIndex);
+    if (ParentActor)
+    {
+      NewActor->AttachToActor(ParentActor, FAttachmentTransformRules::KeepWorldTransform);
+    }
+  }
+
+  NewActor->SetActorLocation(Location);
+  NewActor->SetActorRotation(Rotation);
+
+  int32 Index = Channel.RegisterActor(NewActor);
+  return Index;
+}
+
+// =============================================================================
 // Shape Management
 // =============================================================================
 
 void KhepriPrimitives::DeleteAll(FKhepriChannel& Channel)
 {
+  // Delete all Khepri-registered actors
   const TArray<AActor*>& Actors = Channel.GetActorRegistry();
   for (AActor* Actor : Actors)
   {
-    if (Actor && IsValid(Actor))
+    if (Actor && !Actor->IsUnreachable() && IsValid(Actor))
     {
       Actor->Destroy();
     }
   }
   Channel.ClearRegistries();
-  GKhepriActorCounter = 0;
+  // Don't reset GKhepriActorCounter — UE's name registry retains
+  // destroyed actor names until GC, so reusing names causes a fatal error.
+
+  // Also destroy pre-existing level geometry (StaticMeshActors, etc.)
+  // so the scene is clean for rendering. Preserve infrastructure actors
+  // (lights, sky, landscape, cameras, volumes, brushes, world settings).
+  UWorld* World = GetEditorWorld();
+  if (World)
+  {
+    TArray<AActor*> ToDestroy;
+    for (TActorIterator<AActor> It(World); It; ++It)
+    {
+      AActor* Actor = *It;
+      if (!Actor || !IsValid(Actor)) continue;
+
+      // Only destroy StaticMeshActors — preserve everything else
+      // (lights, sky, atmosphere, landscape, volumes, fog, cameras, etc.)
+      if (!Actor->GetClass()->GetName().Contains(TEXT("StaticMeshActor")))
+      {
+        continue;
+      }
+
+      ToDestroy.Add(Actor);
+    }
+    for (AActor* Actor : ToDestroy)
+    {
+      Actor->Destroy();
+    }
+    UE_LOG(LogKhepri, Log, TEXT("Khepri: DeleteAll - destroyed %d Khepri + %d level actors"),
+      Actors.Num(), ToDestroy.Num());
+  }
+
   Channel.WriteInt32(0);
 }
 
@@ -386,7 +696,7 @@ void KhepriPrimitives::DeleteMany(FKhepriChannel& Channel)
   for (int32 Idx : Indices)
   {
     AActor* Actor = Channel.GetActor(Idx);
-    if (Actor && IsValid(Actor))
+    if (Actor && !Actor->IsUnreachable() && IsValid(Actor))
     {
       Actor->Destroy();
     }
@@ -398,7 +708,7 @@ void KhepriPrimitives::DeleteRef(FKhepriChannel& Channel)
 {
   int32 Idx = Channel.ReadInt32();
   AActor* Actor = Channel.GetActor(Idx);
-  if (Actor && IsValid(Actor))
+  if (Actor && !Actor->IsUnreachable() && IsValid(Actor))
   {
     Actor->Destroy();
   }
@@ -412,9 +722,10 @@ void KhepriPrimitives::DeleteRef(FKhepriChannel& Channel)
 void KhepriPrimitives::Point(FKhepriChannel& Channel)
 {
   FVector Position = Channel.ReadFVector();
+  int32 MatIndex = Channel.ReadInt32();
 
   KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildPointMarker(FVector::ZeroVector, 5.0f);
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, Position, FRotator::ZeroRotator, false, TEXT("Point"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, Position, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("Point"));
   Channel.WriteInt32(Index);
 }
 
@@ -432,8 +743,10 @@ void KhepriPrimitives::Line(FKhepriChannel& Channel)
     LocalPts.Add(P - Origin);
   }
 
+  int32 MatIndex = Channel.ReadInt32();
+
   KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildTube(LocalPts, 2.0f);
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, Origin, FRotator::ZeroRotator, false, TEXT("Line"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, Origin, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("Line"));
   Channel.WriteInt32(Index);
 }
 
@@ -456,8 +769,10 @@ void KhepriPrimitives::ClosedLine(FKhepriChannel& Channel)
     LocalPts.Add(P - Origin);
   }
 
+  int32 MatIndex = Channel.ReadInt32();
+
   KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildTube(LocalPts, 2.0f);
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, Origin, FRotator::ZeroRotator, false, TEXT("ClosedLine"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, Origin, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("ClosedLine"));
   Channel.WriteInt32(Index);
 }
 
@@ -470,9 +785,10 @@ void KhepriPrimitives::Triangle(FKhepriChannel& Channel)
   FVector P1 = Channel.ReadFVector();
   FVector P2 = Channel.ReadFVector();
   FVector P3 = Channel.ReadFVector();
+  int32 MatIndex = Channel.ReadInt32();
 
   KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildTriangle(P1, P2, P3);
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, FVector::ZeroVector, FRotator::ZeroRotator, false, TEXT("Triangle"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("Triangle"));
   Channel.WriteInt32(Index);
 }
 
@@ -482,9 +798,10 @@ void KhepriPrimitives::Quad(FKhepriChannel& Channel)
   FVector P2 = Channel.ReadFVector();
   FVector P3 = Channel.ReadFVector();
   FVector P4 = Channel.ReadFVector();
+  int32 MatIndex = Channel.ReadInt32();
 
   KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildQuad(P1, P2, P3, P4);
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, FVector::ZeroVector, FRotator::ZeroRotator, false, TEXT("Quad"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("Quad"));
   Channel.WriteInt32(Index);
 }
 
@@ -492,9 +809,10 @@ void KhepriPrimitives::NGon(FKhepriChannel& Channel)
 {
   TArray<FVector> Pts = Channel.ReadFVectorArray();
   FVector Pivot = Channel.ReadFVector();
+  int32 MatIndex = Channel.ReadInt32();
 
   KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildNGon(Pts, Pivot);
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, FVector::ZeroVector, FRotator::ZeroRotator, false, TEXT("NGon"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("NGon"));
   Channel.WriteInt32(Index);
 }
 
@@ -505,17 +823,20 @@ void KhepriPrimitives::QuadStrip(FKhepriChannel& Channel)
   int32 SmoothInt = Channel.ReadInt32();
   bool bSmooth = (SmoothInt != 0);
 
+  int32 MatIndex = Channel.ReadInt32();
+
   KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildQuadStrip(Bottom, Top, bSmooth);
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, FVector::ZeroVector, FRotator::ZeroRotator, false, TEXT("QuadStrip"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("QuadStrip"));
   Channel.WriteInt32(Index);
 }
 
 void KhepriPrimitives::SurfacePolygon(FKhepriChannel& Channel)
 {
   TArray<FVector> Pts = Channel.ReadFVectorArray();
+  int32 MatIndex = Channel.ReadInt32();
 
   KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildSurfacePolygon(Pts);
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, FVector::ZeroVector, FRotator::ZeroRotator, false, TEXT("SurfacePolygon"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("SurfacePolygon"));
   Channel.WriteInt32(Index);
 }
 
@@ -533,8 +854,10 @@ void KhepriPrimitives::SurfaceGrid(FKhepriChannel& Channel)
   bool bClosedV = (ClosedVInt != 0);
   bool bSmooth = (SmoothInt != 0);
 
+  int32 MatIndex = Channel.ReadInt32();
+
   KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildSurfaceGrid(Pts, bClosedU, bClosedV, bSmooth);
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, FVector::ZeroVector, FRotator::ZeroRotator, false, TEXT("SurfaceGrid"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("SurfaceGrid"));
   Channel.WriteInt32(Index);
 }
 
@@ -542,9 +865,10 @@ void KhepriPrimitives::SurfaceMesh(FKhepriChannel& Channel)
 {
   TArray<FVector> Vertices = Channel.ReadFVectorArray();
   TArray<TArray<int32>> Faces = Channel.ReadInt32ArrayArray();
+  int32 MatIndex = Channel.ReadInt32();
 
   KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildFromVertsFaces(Vertices, Faces);
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, FVector::ZeroVector, FRotator::ZeroRotator, false, TEXT("SurfaceMesh"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("SurfaceMesh"));
   Channel.WriteInt32(Index);
 }
 
@@ -556,55 +880,85 @@ void KhepriPrimitives::Sphere(FKhepriChannel& Channel)
 {
   FVector Center = Channel.ReadFVector();
   float Radius = Channel.ReadFloat();
+  int32 MatIndex = Channel.ReadInt32();
 
   KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildSphere(Radius);
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, Center, FRotator::ZeroRotator, true, TEXT("Sphere"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, Center, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("Sphere"));
   Channel.WriteInt32(Index);
 }
 
 void KhepriPrimitives::Box(FKhepriChannel& Channel)
 {
-  FVector Pos = Channel.ReadFVector();
+  FVector Corner = Channel.ReadFVector();
   FVector Vx = Channel.ReadFVector();
   FVector Vy = Channel.ReadFVector();
-  FVector Size = Channel.ReadFVector();
+  float Dx = Channel.ReadFloat();
+  float Dy = Channel.ReadFloat();
+  float Dz = Channel.ReadFloat();
 
-  KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildBox(Size);
-
-  // Compute rotation from Vx/Vy
-  FVector Vz = FVector::CrossProduct(Vx, Vy).GetSafeNormal();
   Vx.Normalize();
   Vy.Normalize();
-  FMatrix RotMatrix = FMatrix(Vx, Vy, Vz, FVector::ZeroVector);
-  FRotator Rotation = RotMatrix.Rotator();
+  FVector Vz = FVector::CrossProduct(Vy, Vx).GetSafeNormal();
 
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, Pos, Rotation, true, TEXT("Box"));
+  FVector EdgeX = Vx * Dx;
+  FVector EdgeY = Vy * Dy;
+  FVector EdgeZ = Vz * Dz;
+
+  TArray<FVector> Corners;
+  Corners.SetNum(8);
+  Corners[0] = Corner;
+  Corners[1] = Corner + EdgeX;
+  Corners[2] = Corner + EdgeX + EdgeY;
+  Corners[3] = Corner + EdgeY;
+  Corners[4] = Corner + EdgeZ;
+  Corners[5] = Corner + EdgeX + EdgeZ;
+  Corners[6] = Corner + EdgeX + EdgeY + EdgeZ;
+  Corners[7] = Corner + EdgeY + EdgeZ;
+
+  int32 MatIndex = Channel.ReadInt32();
+
+  // Build mesh from 8 corners (6 quad faces)
+  KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildBoxFromCorners(
+    Corners[0], Corners[1], Corners[2], Corners[3],
+    Corners[4], Corners[5], Corners[6], Corners[7]);
+
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("Box"));
   Channel.WriteInt32(Index);
 }
 
 void KhepriPrimitives::RightCuboid(FKhepriChannel& Channel)
 {
-  FVector Pos = Channel.ReadFVector();
-  FVector Vx = Channel.ReadFVector();
-  FVector Vy = Channel.ReadFVector();
-  float SX = Channel.ReadFloat();
-  float SY = Channel.ReadFloat();
-  float SZ = Channel.ReadFloat();
+  FVector BaseCenter = Channel.ReadFVector();
+  FVector Vx = Channel.ReadFVector();   // length axis direction
+  FVector Vy = Channel.ReadFVector();   // cross-section direction
+  float Width = Channel.ReadFloat();    // cross-section width (along Vy)
+  float Height = Channel.ReadFloat();   // cross-section height (along Vz)
+  float Length = Channel.ReadFloat();   // length along Vx axis
   float Angle = Channel.ReadFloat();
 
-  KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildBox(FVector(SX, SY, SZ));
-
-  // Compute rotation from Vx/Vy, then apply additional angle rotation
-  FVector Vz = FVector::CrossProduct(Vx, Vy).GetSafeNormal();
   Vx.Normalize();
   Vy.Normalize();
-  FMatrix RotMatrix = FMatrix(Vx, Vy, Vz, FVector::ZeroVector);
-  FRotator Rotation = RotMatrix.Rotator();
-  // Apply angle around local Z axis
-  FRotator AngleRotation(0.0f, 0.0f, FMath::RadiansToDegrees(Angle));
-  Rotation = (FQuat(Rotation) * FQuat(AngleRotation)).Rotator();
+  FVector Vz = FVector::CrossProduct(Vx, Vy).GetSafeNormal();
 
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, Pos, Rotation, true, TEXT("RightCuboid"));
+  // Build box vertices directly in world space.
+  // BaseCenter is at the center of the base cross-section.
+  // The cuboid extends along Vx by Length, centered on Vy by Width, centered on Vz by Height.
+  FVector HalfW = Vy * (Width * 0.5f);
+  FVector HalfH = Vz * (Height * 0.5f);
+  FVector LenVec = Vx * Length;
+
+  FVector Base0 = BaseCenter - HalfW - HalfH;
+  FVector Base1 = BaseCenter + HalfW - HalfH;
+  FVector Base2 = BaseCenter + HalfW + HalfH;
+  FVector Base3 = BaseCenter - HalfW + HalfH;
+
+  int32 MatIndex = Channel.ReadInt32();
+
+  KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildBoxFromCorners(
+    Base0, Base1, Base2, Base3,
+    Base0 + LenVec, Base1 + LenVec, Base2 + LenVec, Base3 + LenVec);
+
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("RightCuboid"));
   Channel.WriteInt32(Index);
 }
 
@@ -613,6 +967,9 @@ void KhepriPrimitives::Cylinder(FKhepriChannel& Channel)
   FVector Bottom = Channel.ReadFVector();
   float Radius = Channel.ReadFloat();
   FVector Top = Channel.ReadFVector();
+  int32 BotMat = Channel.ReadInt32();
+  int32 TopMat = Channel.ReadInt32();
+  int32 SideMat = Channel.ReadInt32();
 
   FVector Dir = Top - Bottom;
   float Height = Dir.Size();
@@ -621,15 +978,14 @@ void KhepriPrimitives::Cylinder(FKhepriChannel& Channel)
     Height = KINDA_SMALL_NUMBER;
   }
 
-  KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildCylinder(Radius, Height);
+  TArray<KhepriMeshBuilder::FMeshData> Sections = KhepriMeshBuilder::BuildCylinderParts(Radius, Height);
+  TArray<int32> Mats = {BotMat, TopMat, SideMat};
 
-  // BuildCylinder generates mesh centered at origin (-Height/2 to +Height/2),
-  // so place actor at midpoint between Bottom and Top
   FVector Midpoint = (Bottom + Top) * 0.5f;
   FVector DirNorm = Dir.GetSafeNormal();
   FRotator Rotation = FRotationMatrix::MakeFromZ(DirNorm).Rotator();
 
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, Midpoint, Rotation, true, TEXT("Cylinder"));
+  int32 Index = CreateMeshActor(Channel, Sections, Mats, Midpoint, Rotation, Channel.bCreateCollision, TEXT("Cylinder"));
   Channel.WriteInt32(Index);
 }
 
@@ -639,6 +995,9 @@ void KhepriPrimitives::ConeFrustum(FKhepriChannel& Channel)
   float BaseRadius = Channel.ReadFloat();
   FVector Top = Channel.ReadFVector();
   float TopRadius = Channel.ReadFloat();
+  int32 BotMat = Channel.ReadInt32();
+  int32 TopMat = Channel.ReadInt32();
+  int32 SideMat = Channel.ReadInt32();
 
   FVector Dir = Top - Base;
   float Height = Dir.Size();
@@ -647,15 +1006,14 @@ void KhepriPrimitives::ConeFrustum(FKhepriChannel& Channel)
     Height = KINDA_SMALL_NUMBER;
   }
 
-  KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildConeFrustum(BaseRadius, TopRadius, Height);
+  TArray<KhepriMeshBuilder::FMeshData> Sections = KhepriMeshBuilder::BuildConeFrustumParts(BaseRadius, TopRadius, Height);
+  TArray<int32> Mats = {BotMat, TopMat, SideMat};
 
-  // BuildConeFrustum generates mesh centered at origin (-Height/2 to +Height/2),
-  // so place actor at midpoint between Base and Top
   FVector Midpoint = (Base + Top) * 0.5f;
   FVector DirNorm = Dir.GetSafeNormal();
   FRotator Rotation = FRotationMatrix::MakeFromZ(DirNorm).Rotator();
 
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, Midpoint, Rotation, true, TEXT("ConeFrustum"));
+  int32 Index = CreateMeshActor(Channel, Sections, Mats, Midpoint, Rotation, Channel.bCreateCollision, TEXT("ConeFrustum"));
   Channel.WriteInt32(Index);
 }
 
@@ -665,13 +1023,14 @@ void KhepriPrimitives::Torus(FKhepriChannel& Channel)
   float MajorR = Channel.ReadFloat();
   float MinorR = Channel.ReadFloat();
   FVector Normal = Channel.ReadFVector();
+  int32 MatIndex = Channel.ReadInt32();
 
   KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildTorus(MajorR, MinorR);
 
   // Compute rotation from Normal - the torus lies in the plane perpendicular to Normal
   FRotator Rotation = FRotationMatrix::MakeFromZ(Normal.GetSafeNormal()).Rotator();
 
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, Center, Rotation, true, TEXT("Torus"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, Center, Rotation, Channel.bCreateCollision, TEXT("Torus"));
   Channel.WriteInt32(Index);
 }
 
@@ -679,9 +1038,13 @@ void KhepriPrimitives::Pyramid(FKhepriChannel& Channel)
 {
   TArray<FVector> Base = Channel.ReadFVectorArray();
   FVector Apex = Channel.ReadFVector();
+  int32 BaseMat = Channel.ReadInt32();
+  int32 SideMat = Channel.ReadInt32();
 
-  KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildPyramid(Base, Apex);
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, FVector::ZeroVector, FRotator::ZeroRotator, true, TEXT("Pyramid"));
+  TArray<KhepriMeshBuilder::FMeshData> Sections = KhepriMeshBuilder::BuildPyramidParts(Base, Apex);
+  TArray<int32> Mats = {BaseMat, SideMat};
+
+  int32 Index = CreateMeshActor(Channel, Sections, Mats, FVector::ZeroVector, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("Pyramid"));
   Channel.WriteInt32(Index);
 }
 
@@ -689,9 +1052,14 @@ void KhepriPrimitives::PyramidFrustum(FKhepriChannel& Channel)
 {
   TArray<FVector> Base = Channel.ReadFVectorArray();
   TArray<FVector> Top = Channel.ReadFVectorArray();
+  int32 BotMat = Channel.ReadInt32();
+  int32 TopMat = Channel.ReadInt32();
+  int32 SideMat = Channel.ReadInt32();
 
-  KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildPyramidFrustum(Base, Top);
-  int32 Index = CreateMeshActor(Channel, MeshData, -1, FVector::ZeroVector, FRotator::ZeroRotator, true, TEXT("PyramidFrustum"));
+  TArray<KhepriMeshBuilder::FMeshData> Sections = KhepriMeshBuilder::BuildPyramidFrustumParts(Base, Top);
+  TArray<int32> Mats = {BotMat, TopMat, SideMat};
+
+  int32 Index = CreateMeshActor(Channel, Sections, Mats, FVector::ZeroVector, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("PyramidFrustum"));
   Channel.WriteInt32(Index);
 }
 
@@ -700,9 +1068,8 @@ void KhepriPrimitives::PyramidFrustumWithMaterial(FKhepriChannel& Channel)
   TArray<FVector> Base = Channel.ReadFVectorArray();
   TArray<FVector> Top = Channel.ReadFVectorArray();
   int32 MatIndex = Channel.ReadInt32();
-
   KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildPyramidFrustum(Base, Top);
-  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, true, TEXT("PyramidFrustum"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("PyramidFrustum"));
   Channel.WriteInt32(Index);
 }
 
@@ -718,7 +1085,7 @@ void KhepriPrimitives::Slab(FKhepriChannel& Channel)
   int32 MatIndex = Channel.ReadInt32();
 
   KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildSlab(Contour, Holes, Height);
-  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, true, TEXT("Slab"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("Slab"));
   Channel.WriteInt32(Index);
 }
 
@@ -729,7 +1096,7 @@ void KhepriPrimitives::Panel(FKhepriChannel& Channel)
   int32 MatIndex = Channel.ReadInt32();
 
   KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildPanel(Pts, Normal);
-  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, true, TEXT("Panel"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("Panel"));
   Channel.WriteInt32(Index);
 }
 
@@ -744,18 +1111,25 @@ void KhepriPrimitives::BeamRectSection(FKhepriChannel& Channel)
   float Angle = Channel.ReadFloat();
   int32 MatIndex = Channel.ReadInt32();
 
-  KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildBox(FVector(DX, DY, DZ));
-
-  // Compute rotation from Vx/Vy, then apply angle
-  FVector Vz = FVector::CrossProduct(Vx, Vy).GetSafeNormal();
+  // DX=width (along Vy), DY=height (along Vz), DZ=length (along Vx)
   Vx.Normalize();
   Vy.Normalize();
-  FMatrix RotMatrix = FMatrix(Vx, Vy, Vz, FVector::ZeroVector);
-  FRotator Rotation = RotMatrix.Rotator();
-  FRotator AngleRotation(0.0f, 0.0f, FMath::RadiansToDegrees(Angle));
-  Rotation = (FQuat(Rotation) * FQuat(AngleRotation)).Rotator();
+  FVector Vz = FVector::CrossProduct(Vx, Vy).GetSafeNormal();
 
-  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, Pos, Rotation, true, TEXT("BeamRect"));
+  FVector HalfW = Vy * (DX * 0.5f);
+  FVector HalfH = Vz * (DY * 0.5f);
+  FVector LenVec = Vx * DZ;
+
+  FVector Base0 = Pos - HalfW - HalfH;
+  FVector Base1 = Pos + HalfW - HalfH;
+  FVector Base2 = Pos + HalfW + HalfH;
+  FVector Base3 = Pos - HalfW + HalfH;
+
+  KhepriMeshBuilder::FMeshData MeshData = KhepriMeshBuilder::BuildBoxFromCorners(
+    Base0, Base1, Base2, Base3,
+    Base0 + LenVec, Base1 + LenVec, Base2 + LenVec, Base3 + LenVec);
+
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, FVector::ZeroVector, FRotator::ZeroRotator, Channel.bCreateCollision, TEXT("BeamRect"));
   Channel.WriteInt32(Index);
 }
 
@@ -780,7 +1154,7 @@ void KhepriPrimitives::BeamCircSection(FKhepriChannel& Channel)
   FVector DirNorm = Dir.GetSafeNormal();
   FRotator Rotation = FRotationMatrix::MakeFromZ(DirNorm).Rotator();
 
-  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, Midpoint, Rotation, true, TEXT("BeamCirc"));
+  int32 Index = CreateMeshActor(Channel, MeshData, MatIndex, Midpoint, Rotation, Channel.bCreateCollision, TEXT("BeamCirc"));
   Channel.WriteInt32(Index);
 }
 
@@ -998,6 +1372,88 @@ void KhepriPrimitives::CreateMaterial(FKhepriChannel& Channel)
   Channel.WriteInt32(Index);
 }
 
+void KhepriPrimitives::CreatePBRMaterial(FKhepriChannel& Channel)
+{
+  float R = Channel.ReadFloat();
+  float G = Channel.ReadFloat();
+  float B = Channel.ReadFloat();
+  float A = Channel.ReadFloat();
+  float Metallic = Channel.ReadFloat();
+  float Specular = Channel.ReadFloat();
+  float Roughness = Channel.ReadFloat();
+  float EmissiveR = Channel.ReadFloat();
+  float EmissiveG = Channel.ReadFloat();
+  float EmissiveB = Channel.ReadFloat();
+  float EmissionStrength = Channel.ReadFloat();
+  float IOR = Channel.ReadFloat();
+  float Transmission = Channel.ReadFloat();
+  float TransmissionRoughness = Channel.ReadFloat();
+  float ClearCoat = Channel.ReadFloat();
+  float ClearCoatRoughness = Channel.ReadFloat();
+
+  // Select base material variant based on PBR parameters
+  UMaterial* BaseMaterial = nullptr;
+  if (Transmission > 0.0f || A < 1.0f)
+  {
+    BaseMaterial = GetOrCreateTranslucentBaseMaterial();
+  }
+  else if (ClearCoat > 0.0f)
+  {
+    BaseMaterial = GetOrCreateClearCoatBaseMaterial();
+  }
+  else
+  {
+    BaseMaterial = GetOrCreateBaseMaterial();
+  }
+
+  if (!BaseMaterial)
+  {
+    UE_LOG(LogKhepri, Warning, TEXT("Khepri: CreatePBRMaterial - failed to create base material"));
+    Channel.WriteInt32(-1);
+    return;
+  }
+
+  UWorld* World = GetEditorWorld();
+  UMaterialInstanceDynamic* DynMat = UMaterialInstanceDynamic::Create(BaseMaterial, World);
+  if (!DynMat)
+  {
+    UE_LOG(LogKhepri, Warning, TEXT("Khepri: CreatePBRMaterial - failed to create dynamic material instance"));
+    Channel.WriteInt32(-1);
+    return;
+  }
+
+  // Common parameters (present on all three base material variants)
+  DynMat->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(R, G, B, A));
+  DynMat->SetScalarParameterValue(TEXT("Metallic"), Metallic);
+  DynMat->SetScalarParameterValue(TEXT("Specular"), Specular);
+  DynMat->SetScalarParameterValue(TEXT("Roughness"), Roughness);
+  DynMat->SetScalarParameterValue(TEXT("Opacity"), A);
+  DynMat->SetVectorParameterValue(TEXT("EmissiveColor"), FLinearColor(EmissiveR, EmissiveG, EmissiveB, 1.0f));
+  DynMat->SetScalarParameterValue(TEXT("EmissionStrength"), EmissionStrength);
+
+  // Variant-specific parameters
+  if (Transmission > 0.0f || A < 1.0f)
+  {
+    // For translucent: use IOR as refraction, blend opacity with transmission
+    DynMat->SetScalarParameterValue(TEXT("Refraction"), IOR);
+    // Reduce opacity when transmission is high
+    float EffectiveOpacity = A * (1.0f - Transmission);
+    DynMat->SetScalarParameterValue(TEXT("Opacity"), FMath::Max(EffectiveOpacity, 0.01f));
+  }
+  else if (ClearCoat > 0.0f)
+  {
+    DynMat->SetScalarParameterValue(TEXT("ClearCoat"), ClearCoat);
+    DynMat->SetScalarParameterValue(TEXT("ClearCoatRoughness"), ClearCoatRoughness);
+  }
+
+  DynMat->AddToRoot();
+
+  int32 Index = Channel.RegisterMaterial(DynMat);
+  UE_LOG(LogKhepri, Verbose, TEXT("Khepri: CreatePBRMaterial - RGBA(%.2f,%.2f,%.2f,%.2f) Metal=%.2f Rough=%.2f IOR=%.1f Trans=%.2f CC=%.2f -> index %d"),
+    R, G, B, A, Metallic, Roughness, IOR, Transmission, ClearCoat, Index);
+  Channel.WriteInt32(Index);
+}
+
 void KhepriPrimitives::CurrentMaterial(FKhepriChannel& Channel)
 {
   Channel.WriteInt32(Channel.CurrentMaterialIndex);
@@ -1044,6 +1500,49 @@ void KhepriPrimitives::CreateParent(FKhepriChannel& Channel)
   int32 Index = Channel.RegisterActor(ParentActor);
   Channel.ParentIndices.Add(Index);
   Channel.WriteInt32(Index);
+}
+
+void KhepriPrimitives::SetParentVisible(FKhepriChannel& Channel)
+{
+  int32 ParentIndex = Channel.ReadInt32();
+  int32 Visible = Channel.ReadInt32();
+  bool bHidden = (Visible == 0);
+
+  AActor* ParentActor = Channel.GetActor(ParentIndex);
+  if (ParentActor)
+  {
+    ParentActor->SetActorHiddenInGame(bHidden);
+    TArray<AActor*> AttachedActors;
+    ParentActor->GetAttachedActors(AttachedActors, /*bResetArray=*/true, /*bRecursivelyIncludeAttachedActors=*/true);
+    for (AActor* Child : AttachedActors)
+    {
+      if (Child)
+      {
+        Child->SetActorHiddenInGame(bHidden);
+      }
+    }
+  }
+  Channel.WriteInt32(0);
+}
+
+void KhepriPrimitives::DeleteAllInParent(FKhepriChannel& Channel)
+{
+  int32 ParentIndex = Channel.ReadInt32();
+
+  AActor* ParentActor = Channel.GetActor(ParentIndex);
+  if (ParentActor)
+  {
+    TArray<AActor*> AttachedActors;
+    ParentActor->GetAttachedActors(AttachedActors, /*bResetArray=*/true, /*bRecursivelyIncludeAttachedActors=*/true);
+    for (AActor* Child : AttachedActors)
+    {
+      if (Child && !Child->IsUnreachable() && IsValid(Child))
+      {
+        Child->Destroy();
+      }
+    }
+  }
+  Channel.WriteInt32(0);
 }
 
 void KhepriPrimitives::LoadResource(FKhepriChannel& Channel)
@@ -1323,7 +1822,7 @@ void KhepriPrimitives::RenderView(FKhepriChannel& Channel)
     FViewport* Viewport = ViewportClient ? ViewportClient->Viewport : nullptr;
     if (Viewport)
     {
-      // Configure and request high-res screenshot
+      // Configure high-res screenshot on the correct level editor viewport
       FHighResScreenshotConfig& ScreenshotConfig = GetHighResScreenshotConfig();
       ScreenshotConfig.SetResolution(Width, Height, 1.0f);
       ScreenshotConfig.FilenameOverride = FullPath;
@@ -1491,4 +1990,49 @@ void KhepriPrimitives::UnhighlightAllRefs(FKhepriChannel& Channel)
   }
 
   Channel.WriteInt32(0);
+}
+
+void KhepriPrimitives::ShapeType(FKhepriChannel& Channel)
+{
+  int32 Index = Channel.ReadInt32();
+  AActor* Actor = Channel.GetActor(Index);
+  FString Label = Actor ? Actor->GetActorLabel() : TEXT("Unknown");
+  // Label format: "Khepri_<Type>_<Num>" — extract the type part
+  FString Type = TEXT("Unknown");
+  if (Label.StartsWith(TEXT("Khepri_")))
+  {
+    FString Rest = Label.Mid(7); // after "Khepri_"
+    int32 UnderscorePos;
+    if (Rest.FindLastChar('_', UnderscorePos))
+    {
+      Type = Rest.Left(UnderscorePos);
+    }
+  }
+  Channel.WriteString(Type);
+}
+
+void KhepriPrimitives::GetShape(FKhepriChannel& Channel)
+{
+  FString Prompt = Channel.ReadString();
+  UE_LOG(LogTemp, Log, TEXT("Khepri: %s"), *Prompt);
+  // Start selection — deferred response sent by tick loop
+  if (GEditor)
+  {
+    GEditor->SelectNone(true, true, false);
+  }
+  bSelectionPending = true;
+  bSelectMany = false;
+  // No response — result written by the tick/serve loop when selection completes
+}
+
+void KhepriPrimitives::GetShapes(FKhepriChannel& Channel)
+{
+  FString Prompt = Channel.ReadString();
+  UE_LOG(LogTemp, Log, TEXT("Khepri: %s"), *Prompt);
+  if (GEditor)
+  {
+    GEditor->SelectNone(true, true, false);
+  }
+  bSelectionPending = true;
+  bSelectMany = true;
 }
