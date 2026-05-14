@@ -69,9 +69,29 @@ namespace KhepriRevit {
         public void wMaterial(Material m) => wElement(m);
 
 
+        // Keep a reverse lookup so RPCs receiving a Family can resolve the long id
+        // back to the Family object that LoadFamily produced.
         static private Dictionary<long, Family> loadedFamilies = new Dictionary<long, Family>() { { 0L, null } };
-        public Family rFamily() => loadedFamilies[rInt64()];
-        public void wFamily(Family f) { long i = f.Id.Value; loadedFamilies[i] = f; wInt64(i); }
+        public Family rFamily() {
+            long key = rInt64();
+            // Fall back to looking the family up directly in the document if it isn't
+            // in the cache — the cache is populated by wFamily on serializer-side, but
+            // RMIFy's expression-tree codegen doesn't always route Family return values
+            // through wFamily, leaving the cache empty for valid family ids.
+            if (loadedFamilies.TryGetValue(key, out var cached)) return cached;
+            var elem = uiApp.ActiveUIDocument.Document.GetElement(new ElementId(key));
+            if (elem is Family fam) {
+                loadedFamilies[key] = fam;
+                return fam;
+            }
+            throw new InvalidOperationException(
+                $"Family id {key} could not be resolved (LoadFamily was not called or the element is not a Family).");
+        }
+        public void wFamily(Family f) {
+            long i = f.Id.Value;
+            loadedFamilies[i] = f;
+            wInt64(i);
+        }
 
 
         /*
