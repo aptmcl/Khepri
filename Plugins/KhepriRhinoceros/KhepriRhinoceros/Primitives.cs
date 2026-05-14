@@ -1700,8 +1700,8 @@ def show_vertices(shape):
         public Guid[] GetSurface(string prompt) => GetShapeOfType(prompt, ObjectType.Surface);
         public Guid[] GetSurfaces(string prompt) => GetShapesOfType(prompt, ObjectType.Surface);
 
-        public Guid[] GetSolid(string prompt) => GetShapeOfType(prompt, ObjectType.Surface);
-        public Guid[] GetSolids(string prompt) => GetShapesOfType(prompt, ObjectType.Surface);
+        public Guid[] GetSolid(string prompt) => GetShapeOfType(prompt, ObjectType.Brep);
+        public Guid[] GetSolids(string prompt) => GetShapesOfType(prompt, ObjectType.Brep);
 
         public Guid[] GetShape(string prompt) => GetShapeOfType(prompt, ObjectType.AnyObject);
         public Guid[] GetShapes(string prompt) => GetShapesOfType(prompt, ObjectType.AnyObject);
