@@ -124,4 +124,94 @@ using Test
     @test isdefined(KhepriUnreal, :unreal_material_family)
     @test isdefined(KhepriUnreal, :unreal_resource_family)
   end
+
+  #=
+  Combinatorial stress tests. Unreal is a SocketBackend that needs:
+    1. UnrealEditor open on the KhepriUnreal project
+       (Plugins/KhepriUnreal/KhepriUnreal.uproject).
+    2. The Khepri C++ plugin's `FKhepriServer` listening on `unreal_port`
+       (11010). `FKhepriModule::StartupModule()`
+       (Plugins/KhepriUnreal/Plugins/Khepri/Source/Khepri/Private/KhepriModule.cpp)
+       calls `Server->StartServer()` unconditionally, so simply launching the
+       editor on the project is enough — no PIE required.
+
+  We launch UnrealEditor in standalone mode (not -game), wait for the port to
+  open, run the suite, and `taskkill` UE on cleanup.
+
+  Prerequisite: the Khepri C++ plugin's `UnrealEditor-Khepri.dll` and the
+  game-module `UnrealEditor-KhepriUnreal.dll` must match the engine version
+  pinned in `KhepriUnreal.uproject`. If you see
+  `LogPluginManager: Error: Plugin 'Khepri' failed to load`
+  with `GetLastError=193` in the editor log, rebuild via
+  `Engine\Build\BatchFiles\Build.bat KhepriUnrealEditor Win64 Development
+  -Project=…\KhepriUnreal.uproject` from a Visual Studio Developer Command
+  Prompt (the bundled UBT may also need its `XmlConfigCache-…\.bin` purged
+  from `%LOCALAPPDATA%\UnrealEngine\` if it complains about an
+  EndOfStreamException reading the cache).
+
+  Toggle with `KHEPRI_UNREAL_STRESS_TESTS=1`. Skipped on non-Windows.
+  =#
+  if get(ENV, "KHEPRI_UNREAL_STRESS_TESTS", "0") == "1"
+    if !Sys.iswindows()
+      error("Unreal stress tests require Windows (UnrealEditor.exe path hard-coded).")
+    end
+    @testset "Stress (Unreal)" begin
+      include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "BackendStressTests.jl"))
+      using .BackendStressTests
+      using Sockets
+
+      ue_exe = get(ENV, "KHEPRI_UNREAL_EXE",
+                   raw"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe")
+      isfile(ue_exe) || error("UnrealEditor not found at $ue_exe (override with KHEPRI_UNREAL_EXE)")
+
+      uproject = abspath(joinpath(@__DIR__, "..", "..", "..", "Plugins", "KhepriUnreal", "KhepriUnreal.uproject"))
+      isfile(uproject) || error("KhepriUnreal.uproject not found at $uproject")
+
+      log_file = joinpath(tempdir(), "khepri_unreal_runner.log")
+      isfile(log_file) && rm(log_file; force=true)
+
+      @info "Launching UnrealEditor..." ue_exe uproject log_file
+      ue_proc = run(pipeline(`$ue_exe $uproject -log -ABSLOG=$log_file`,
+                             stdout=devnull, stderr=devnull),
+                    wait=false)
+
+      try
+        # Wait up to 15 minutes for the listener. UE first-time shader
+        # compile + DDC build can take 10+ minutes on a cold cache (Slate
+        # icon caching alone takes ~2 min observed); subsequent launches
+        # are 30–60 s. Override with KHEPRI_UNREAL_BOOT_TIMEOUT (seconds).
+        port_ready = false
+        let deadline = time() + parse(Float64, get(ENV, "KHEPRI_UNREAL_BOOT_TIMEOUT", "900"))
+          while time() < deadline
+            try
+              Sockets.connect(KhepriBase.unreal_port) |> close
+              port_ready = true
+              break
+            catch
+              sleep(2.0)
+            end
+          end
+        end
+        port_ready || error("Unreal listener never opened on port $(KhepriBase.unreal_port). " *
+                            "Check $log_file for editor startup failures.")
+
+        skip_cats = let s = get(ENV, "KHEPRI_STRESS_SKIP", "")
+          isempty(s) ? Symbol[] : Symbol.(strip.(split(s, ',')))
+        end
+
+        run_stress_tests(unreal,
+          reset! = () -> begin
+            delete_all_shapes()
+            backend(unreal)
+          end,
+          verify = :envelope,
+          skip = skip_cats)
+      finally
+        try
+          run(`taskkill /F /IM UnrealEditor.exe`, wait=false)
+        catch
+        end
+      end
+    end
+  end
 end
