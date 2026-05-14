@@ -73,11 +73,23 @@ namespace KhepriBase {
 
         // Uses Socket.Poll + DataAvailable instead of NetworkStream.ReadTimeout,
         // which is broken on Mono/Linux (corrupts stream state on timeout).
+        //
+        // Disambiguating Poll=true: Socket.Poll(SelectRead) returns true in two
+        // distinct cases — bytes are available OR the peer closed the connection
+        // (FIN). The DataAvailable check below tells them apart. If Poll fires
+        // but no bytes are buffered, the connection has been closed gracefully
+        // and we must return -1 (disconnected). Returning -2 ("timeout") here
+        // is the bug that wedges idle-driven listeners like KhepriAutoCAD's
+        // current PlugIn.cs after a quick connect/close probe: the handler
+        // sees -2 on every subsequent tick, never transitions to AcceptClient,
+        // and any real connection queued behind the closed one in the kernel
+        // listen backlog is never picked up. Symptom on the Julia side: the
+        // first operation after reconnect blocks forever.
         public int TryReadOperation() {
             if (!channel.PollRead(minWaitTime * 1000))
                 return -2;
             if (!channel.DataAvailable)
-                return -2;
+                return -1;
             return ReadOperation();
         }
 
