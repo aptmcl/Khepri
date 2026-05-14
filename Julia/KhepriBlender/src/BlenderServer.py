@@ -206,20 +206,20 @@ def new_glass_material(name:str, color:RGBA, roughness:float, ior:float)->MatId:
     node.inputs['Color'].default_value = color
     node.inputs['Roughness'].default_value = roughness
     node.inputs['IOR'].default_value = ior
-    return add_node_material(mat, node)
+    return add_node_output_material(mat, node)
 
 def new_mirror_material(name:str, color:RGBA)->MatId:
     mat, node = new_node_material(name, 'ShaderNodeBsdfGlossy')
     node.distribution = 'Sharp'
     node.inputs['Color'].default_value = color
-    return add_node_material(mat, node)
+    return add_node_output_material(mat, node)
 
 def new_metal_material(name:str, color:RGBA, roughness:float, ior:float)->MatId:
     mat, node = new_node_material(name, 'ShaderNodeBsdfGlossy')
     node.distribution = 'GGX'
     node.inputs['Color'].default_value = color
     node.inputs['Roughness'].default_value = roughness
-    return add_node_material(mat, node)
+    return add_node_output_material(mat, node)
 
 # For Principled BSDF in Blender 4.0+/5.0, the inputs are:
 # 'Base Color', 'Metallic', 'Roughness', 'IOR', 'Alpha', 'Normal', 'Weight'
@@ -232,28 +232,35 @@ def new_metal_material(name:str, color:RGBA, roughness:float, ior:float)->MatId:
 # 'Sheen Weight' (formerly 'Sheen'), 'Sheen Roughness', 'Sheen Tint'
 # 'Emission Color' (formerly 'Emission'), 'Emission Strength'
 
+def _set_bsdf_input(node, candidates, value):
+    # Blender renamed a handful of Principled BSDF inputs between 4.0 and
+    # 4.1+: 'Specular' -> 'IOR Level', 'Transmission' -> 'Transmission
+    # Weight', 'Clearcoat' -> 'Coat Weight', etc. Accept a list of candidate
+    # names and silently skip when none match, so a single `new_material`
+    # body works on 4.0, 4.1+, and 5.x.
+    for name in candidates:
+        if name in node.inputs:
+            node.inputs[name].default_value = value
+            return True
+    return False
+
 def new_material(name:str, base_color:RGBA, metallic:float, specular:float, roughness:float,
                  clearcoat:float, clearcoat_roughness:float, ior:float,
                  transmission:float, transmission_roughness:float,
                  emission:RGBA, emission_strength:float)->MatId:
     mat, node = new_node_material(name, 'ShaderNodeBsdfPrincipled')
-    node.inputs['Base Color'].default_value = base_color
-    node.inputs['Metallic'].default_value = metallic
-    # 'Specular' was renamed to 'IOR Level' in Blender 4.0
-    node.inputs['IOR Level'].default_value = specular
-    node.inputs['Roughness'].default_value = roughness
-    # 'Clearcoat' was renamed to 'Coat Weight' in Blender 4.0
-    node.inputs['Coat Weight'].default_value = clearcoat
-    # 'Clearcoat Roughness' was renamed to 'Coat Roughness' in Blender 4.0
-    node.inputs['Coat Roughness'].default_value = clearcoat_roughness
-    node.inputs['IOR'].default_value = ior
-    # 'Transmission' was renamed to 'Transmission Weight' in Blender 4.0
-    node.inputs['Transmission Weight'].default_value = transmission
-    # Note: 'Transmission Roughness' was removed in Blender 4.0 - parameter kept for API compat
-    # 'Emission' was renamed to 'Emission Color' in Blender 4.0
-    node.inputs['Emission Color'].default_value = emission
-    node.inputs['Emission Strength'].default_value = emission_strength
-    return add_node_material(mat, node)
+    _set_bsdf_input(node, ['Base Color'], base_color)
+    _set_bsdf_input(node, ['Metallic'], metallic)
+    _set_bsdf_input(node, ['IOR Level', 'Specular'], specular)
+    _set_bsdf_input(node, ['Roughness'], roughness)
+    _set_bsdf_input(node, ['Coat Weight', 'Clearcoat'], clearcoat)
+    _set_bsdf_input(node, ['Coat Roughness', 'Clearcoat Roughness'], clearcoat_roughness)
+    _set_bsdf_input(node, ['IOR'], ior)
+    _set_bsdf_input(node, ['Transmission Weight', 'Transmission'], transmission)
+    # 'Transmission Roughness' was removed entirely in 4.0 — just ignore it.
+    _set_bsdf_input(node, ['Emission Color', 'Emission'], emission)
+    _set_bsdf_input(node, ['Emission Strength'], emission_strength)
+    return add_node_output_material(mat, node)
 
 
 def set_hdri_background(hdri_path:str)->None:
@@ -1103,16 +1110,49 @@ def set_sky(turbidity:float)->None:
     #2 city like atmosphere
     world.node_tree.links.new(bg.inputs[0], sky.outputs[0])
 
+# Viewport helpers.
+#
+# Blender has two independent camera concepts:
+#   - the 3D-viewport view   (space.region_3d), usable only with a UI open;
+#   - the scene's render camera (C.scene.camera), always usable.
+#
+# When `bpy.app.background` is true (blender was launched with --background,
+# i.e. headless), C.screen has no VIEW_3D areas and every call below that
+# touches region_3d raises. The *_headless variants below manipulate the scene
+# camera object instead, which is what bpy.ops.render.render uses anyway, so
+# headless renders produce the same framing as GUI renders.
+
 def current_area():
     return next(area for area in C.screen.areas if area.type == 'VIEW_3D')
 
-def current_space(area = current_area()):
+def current_space(area = None):
+    if area is None: area = current_area()
     return next(space for space in area.spaces if space.type == 'VIEW_3D')
 
-def current_region(area = current_area()):
+def current_region(area = None):
+    if area is None: area = current_area()
     return next(region for region in area.regions if region.type == 'WINDOW')
 
+def _set_view_headless(camera, target, lens):
+    # Manipulate the scene render camera directly. khepri_camera() creates or
+    # retrieves a scene-level Camera object; set_camera_view assigns it as the
+    # active render camera and configures its position/rotation/lens.
+    set_camera_view(camera, target, lens)
+
+def _get_view_headless():
+    cam = C.scene.camera if C.scene.camera is not None else khepri_camera()
+    # Camera forward is the -Z axis of the camera's world matrix.
+    forward = cam.matrix_world.to_quaternion() @ Vector((0.0, 0.0, -1.0))
+    # We don't track an explicit target distance in headless mode — use lens
+    # length as a nominal distance so the view triple round-trips sensibly.
+    distance = max(1.0, cam.data.lens)
+    target = cam.location + forward * distance
+    return (cam.location, target, cam.data.lens)
+
 def set_view(camera:Point3d, target:Point3d, lens:float)->None:
+    if bpy.app.background:
+        _set_view_headless(camera, target, lens)
+        return
     direction = target - camera
     rot_quat = direction.to_track_quat('-Z', 'Y')
     space = current_space()
@@ -1123,11 +1163,25 @@ def set_view(camera:Point3d, target:Point3d, lens:float)->None:
     space.lens = lens
 
 def set_view_top()->None:
+    if bpy.app.background:
+        # Headless: place the scene camera above the origin, looking straight down.
+        set_camera_view(Point3d((0.0, 0.0, 1000.0)),
+                        Point3d((0.0, 0.0, 0.0)),
+                        50.0)
+        return
     area = current_area()
     with C.temp_override(area=area, region=current_region(area)):
        bpy.ops.view3d.view_axis(type='TOP')
 
 def frame_all()->None:
+    if bpy.app.background:
+        # Headless approximation: frame a cube that encloses all mesh bounds.
+        mn, mx = get_global_bbox()
+        centre = Point3d(((mn[0]+mx[0])/2, (mn[1]+mx[1])/2, (mn[2]+mx[2])/2))
+        diag = max(10.0, ((mx[0]-mn[0])**2 + (mx[1]-mn[1])**2 + (mx[2]-mn[2])**2) ** 0.5)
+        eye = centre + Point3d((diag*0.6, -diag*0.8, diag*0.6))
+        set_camera_view(eye, centre, 50.0)
+        return
     area = current_area()
     with C.temp_override(area=area, region=current_region(area)):
         bpy.ops.view3d.view_all()
@@ -1147,6 +1201,8 @@ def frame_all()->None:
 # )
 
 def get_view()->Tuple[Point3d, Point3d, float]:
+    if bpy.app.background:
+        return _get_view_headless()
     space = current_space()
     view = space.region_3d
     return (
@@ -1175,14 +1231,21 @@ def khepri_camera():
         return D.objects[name]
 
 def set_camera_view(camera:Point3d, target:Point3d, lens:float)->None:
+    # Compute look-at rotation. The historical "direction *= 2" was a no-op
+    # for to_track_quat (which is magnitude-invariant) and is removed.
     direction = target - camera
-    direction *= 2
     rot_quat = direction.to_track_quat('-Z', 'Y')
     cam = khepri_camera()
     cam.location = camera
     cam.rotation_euler = rot_quat.to_euler()
     cam.data.lens = lens
-    d = direction.length 
+    # Match Mitsuba's perspective sensor: 36 mm horizontal sensor + lens in
+    # millimetres. Without an explicit sensor_fit Blender follows the render
+    # aspect, which in 4:3 produces a noticeably wider FOV than Mitsuba's
+    # `fov_axis=x` + `fov=h_angle` (computed from a 36 mm sensor in
+    # KhepriBase.view_angles). HORIZONTAL fixes that.
+    cam.data.sensor_fit = 'HORIZONTAL'
+    cam.data.sensor_width = 36.0
     # Architectural work suggests these distances:
     cam.data.clip_start = 0.1
     cam.data.clip_end = 100000
@@ -1235,57 +1298,215 @@ def set_render_path(filepath:str)->None:
     C.scene.render.image_settings.file_format = 'PNG'
     C.scene.render.filepath = filepath
 
+def _do_render()->None:
+    # bpy.ops.render.render's `use_viewport` draws the existing 3D-viewport
+    # framebuffer before rendering. That path relies on UI state and raises in
+    # --background mode. Force it off when Blender is headless and leave the
+    # GUI-friendly value otherwise.
+    use_vp = not bpy.app.background
+    bpy.ops.render.render(use_viewport=use_vp, write_still=True)
+
+def _configure_cycles_gpu()->None:
+    # Request CUDA if available; fall back to CPU silently if it isn't. In WSL
+    # this lets the same code path work on both native Linux/Windows GPUs and
+    # on headless CI runners without NVIDIA drivers.
+    try:
+        C.scene.cycles.device = "GPU"
+        prefs = C.preferences.addons["cycles"].preferences
+        prefs.compute_device_type = "CUDA"
+        prefs.get_devices()
+        any_cuda = False
+        for d in prefs.devices:
+            d["use"] = 1
+            if d.type == "CUDA":
+                any_cuda = True
+        if not any_cuda:
+            C.scene.cycles.device = "CPU"
+    except Exception:
+        C.scene.cycles.device = "CPU"
+
 def default_renderer()->None:
-    bpy.ops.render.render(use_viewport = True, write_still=True)
+    _do_render()
+
+def _safe_set_denoising(use_denoising):
+    # Distro Blender builds (notably Ubuntu's apt package) sometimes ship
+    # without OpenImageDenoiser, in which case enabling use_denoising raises
+    # at render time. Probe by setting it inside try/except and clear the
+    # flag if it fails. Returns the actual flag set.
+    try:
+        C.scene.view_layers[0].cycles.use_denoising = use_denoising
+        return use_denoising
+    except Exception:
+        try:
+            C.scene.view_layers[0].cycles.use_denoising = False
+        except Exception:
+            pass
+        return False
+
+def ensure_default_world():
+    # A scene without world lighting renders almost black under indirect
+    # illumination because there's nowhere for diffuse rays to bounce
+    # *from*. Mitsuba's `realistic_sky` plays the same role; here we install
+    # a procedural sky-coloured background unless the user already set one
+    # (e.g. via set_hdri_background).
+    world = C.scene.world
+    if world is None:
+        world = bpy.data.worlds.new('KhepriWorld')
+        C.scene.world = world
+    # If we already wired up an HDRI / Sky Texture, leave it alone.
+    if world.use_nodes and any(n.type in ('TEX_ENVIRONMENT', 'TEX_SKY')
+                               for n in world.node_tree.nodes):
+        return
+    world.use_nodes = True
+    nodes = world.node_tree.nodes
+    nodes.clear()
+    sky = nodes.new(type='ShaderNodeTexSky')
+    sky.sky_type = 'NISHITA'
+    sky.sun_elevation = 0.9        # ~52 deg above horizon
+    sky.sun_rotation = 2.4
+    # Nishita's unclamped output is several thousand W/m^2 at the sun disc;
+    # for a scene-average illumination that matches what Mitsuba's Perez sky
+    # delivers (after its own luminous-efficacy conversion), multiply by a
+    # small constant. Too high here produces a washed-out overexposed frame
+    # regardless of view_settings.exposure.
+    bg = nodes.new(type='ShaderNodeBackground')
+    bg.inputs['Strength'].default_value = 0.25
+    out = nodes.new(type='ShaderNodeOutputWorld')
+    world.node_tree.links.new(sky.outputs[0], bg.inputs[0])
+    world.node_tree.links.new(bg.outputs[0], out.inputs[0])
 
 def cycles_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool, exposure:float)->None:
     C.scene.render.engine = 'CYCLES'
     C.scene.render.use_motion_blur = motion_blur
     C.scene.render.film_transparent = transparent
-    C.scene.view_layers[0].cycles.use_denoising = denoising
+    actual_denoising = _safe_set_denoising(denoising)
     C.scene.cycles.samples = samples
-    #C.scene.cycles.film_exposure = exposure # Just a brightness multiplier 0-10
-    C.scene.view_settings.exposure = exposure # Better approximation
-    C.scene.cycles.device = "GPU"
-    C.preferences.addons["cycles"].preferences.compute_device_type = "CUDA"
-    C.preferences.addons["cycles"].preferences.get_devices()
-    for d in C.preferences.addons["cycles"].preferences.devices:
-        d["use"] = 1
-    bpy.ops.render.render(use_viewport=True, write_still=True)
+    # Filmic view transform produces much more pleasant tonemapping than the
+    # default 'Standard'; matches Mitsuba's perceptual sRGB output more
+    # closely. AGX is even better but only on Blender 4.0+.
+    try:
+        C.scene.view_settings.view_transform = 'AgX'
+    except (TypeError, AttributeError):
+        try:
+            C.scene.view_settings.view_transform = 'Filmic'
+        except Exception:
+            pass
+    C.scene.view_settings.exposure = exposure
+    # Cycles' world-bounce term needs *something* to bounce off. Install a
+    # procedural sky if the user hasn't already configured an environment.
+    ensure_default_world()
+    _configure_cycles_gpu()
+    try:
+        _do_render()
+    except RuntimeError as e:
+        # Some builds raise even after we cleared use_denoising — fall back
+        # to a final attempt with denoiser explicitly OFF and re-render.
+        if 'Denoiser' in str(e) or 'denois' in str(e).lower():
+            _safe_set_denoising(False)
+            _do_render()
+        else:
+            raise
+
+def eevee_renderer(samples:int, exposure:float)->None:
+    # Eevee is Blender's real-time rasteriser. It renders orders of magnitude
+    # faster than Cycles at the cost of bias (screen-space reflections, no true
+    # GI), which makes it the right engine for fast previews and for
+    # :shaded-style documentation figures where materials matter more than
+    # physical correctness. Eevee's API name changed between Blender 4.0 and
+    # 4.2+ (BLENDER_EEVEE → BLENDER_EEVEE_NEXT); we try the new name first and
+    # fall back.
+    for engine in ('BLENDER_EEVEE_NEXT', 'BLENDER_EEVEE'):
+        try:
+            C.scene.render.engine = engine
+            break
+        except TypeError:
+            continue
+    C.scene.view_settings.exposure = exposure
+    # Eevee samples attribute is called taa_render_samples.
+    if hasattr(C.scene, 'eevee'):
+        try:
+            C.scene.eevee.taa_render_samples = max(1, samples)
+        except AttributeError:
+            pass
+    _do_render()
+
+def _set_attr_safe(obj, name, value):
+    # Blender's Freestyle API has shifted attributes between versions
+    # (use_advanced_options was removed in 4.x; sphere_radius and
+    # kr_derivative_epsilon moved). Set tolerantly so a single missing field
+    # doesn't fail an entire render.
+    try:
+        setattr(obj, name, value)
+        return True
+    except (AttributeError, TypeError):
+        return False
 
 def freestylesvg_renderer(thickness:float, crease_angle:float, sphere_radius:float, kr_derivative_epsilon:float)->None:
-    freestylesvg = addon_utils.enable("render_freestyle_svg")
+    # In --background mode the addon-enable path still works because
+    # render_freestyle_svg only modifies scene data, not UI; no guard needed
+    # beyond what addon_utils already does.
+    addon_utils.enable("render_freestyle_svg")
     C.scene.render.use_freestyle = True
-    C.scene.svg_export.use_svg_export = True
+    if hasattr(C.scene, 'svg_export'):
+        C.scene.svg_export.use_svg_export = True
     C.scene.render.line_thickness_mode = 'ABSOLUTE'
-    D.linestyles['LineStyle'].use_export_strokes = True
-    D.linestyles['LineStyle'].thickness = thickness
+    if 'LineStyle' in D.linestyles:
+        ls = D.linestyles['LineStyle']
+        _set_attr_safe(ls, 'use_export_strokes', True)
+        _set_attr_safe(ls, 'thickness', thickness)
     settings = C.view_layer.freestyle_settings
-    settings.crease_angle = crease_angle
-    settings.use_culling = False
-    settings.use_advanced_options = True
-    settings.use_material_boundaries = True
-    settings.use_ridges_and_valleys = True
-    settings.use_smoothness = True
-    settings.use_suggestive_contours = True
-    settings.sphere_radius = sphere_radius
-    settings.kr_derivative_epsilon = kr_derivative_epsilon
-    bpy.ops.render.render(use_viewport = True, write_still=True)
+    _set_attr_safe(settings, 'crease_angle', crease_angle)
+    _set_attr_safe(settings, 'use_culling', False)
+    _set_attr_safe(settings, 'use_advanced_options', True)   # removed in 4.x
+    _set_attr_safe(settings, 'use_material_boundaries', True)
+    _set_attr_safe(settings, 'use_ridges_and_valleys', True)
+    _set_attr_safe(settings, 'use_smoothness', True)
+    _set_attr_safe(settings, 'use_suggestive_contours', True)
+    _set_attr_safe(settings, 'sphere_radius', sphere_radius)
+    _set_attr_safe(settings, 'kr_derivative_epsilon', kr_derivative_epsilon)
+    _do_render()
     C.scene.render.use_freestyle = False
 
 def clay_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool)->None:
+    # "Clay" = Cycles with white matte shading and AO emphasis, suitable for
+    # the :arctic visual style. Override every material to a near-white
+    # diffuse for the duration of the render, then restore on exit so the
+    # next render of the same scene gets its real materials back.
     C.scene.render.engine = 'CYCLES'
     C.scene.render.use_motion_blur = motion_blur
     C.scene.render.film_transparent = transparent
-    C.scene.view_layers[0].cycles.use_denoising = denoising
+    _safe_set_denoising(denoising)
     C.scene.view_layers[0].use_pass_ambient_occlusion = True
     C.scene.cycles.samples = samples
-    C.scene.cycles.device = "GPU"
-    C.preferences.addons["cycles"].preferences.compute_device_type = "CUDA"
-    C.preferences.addons["cycles"].preferences.get_devices()
-    for d in C.preferences.addons["cycles"].preferences.devices:
-        d["use"] = 1
-    bpy.ops.render.render(use_viewport = True, write_still=True)
+    ensure_default_world()
+    # Apply a global override-material (Cycles supports
+    # view_layer.material_override).
+    clay_mat = D.materials.get('KhepriClayOverride')
+    if clay_mat is None:
+        clay_mat = D.materials.new(name='KhepriClayOverride')
+        clay_mat.use_nodes = True
+        node = clay_mat.node_tree.nodes.get('Principled BSDF')
+        if node is not None:
+            node.inputs['Base Color'].default_value = (0.92, 0.92, 0.92, 1.0)
+            node.inputs['Roughness'].default_value = 0.85
+            try:
+                node.inputs['IOR Level'].default_value = 0.20
+            except KeyError:
+                pass
+    prev_override = C.view_layer.material_override
+    C.view_layer.material_override = clay_mat
+    _configure_cycles_gpu()
+    try:
+        try:
+            _do_render()
+        except RuntimeError as e:
+            if 'Denoiser' in str(e) or 'denois' in str(e).lower():
+                _safe_set_denoising(False)
+                _do_render()
+            else:
+                raise
+    finally:
+        C.view_layer.material_override = prev_override
 
 # Last resort
 
@@ -1406,10 +1627,13 @@ class Khepri(object):
     def __init__(self):
         pass
 
-# Use this when Blender is the server
-#init_client_server("Blender", 11003)
-
-# or this when it is the client
+# Run Blender as the client. Khepri's Julia side runs a single
+# khepri_socket_server (started by add_socket_backend_init_function on
+# `using KhepriBlender`) listening on port 12345. The Python plugin
+# connects out to that server, identifies itself as "Blender", and the
+# server-side accept loop creates a fresh BLR backend wired to the live
+# socket; that backend lands in `current_backends()` so user-side scripts
+# reach it via `top_backend()`.
 init_client_server("Blender", 0)
 
 if bpy.app.background:
