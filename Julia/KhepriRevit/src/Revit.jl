@@ -154,9 +154,16 @@ parse_signature(::Val{:RVT}, sig::T) where {T} = parse_signature(Val(:CS), sig)
 encode(::Val{:RVT}, t::Val{T}, c::IO, v) where {T} = encode(Val(:CS), t, c, v)
 decode(::Val{:RVT}, t::Val{T}, c::IO) where {T} = decode(Val(:CS), t, c)
 
-# CLR name mapping for signature validation: VXYZ is a C# using alias for Autodesk.Revit.DB.XYZ
+# CLR name mapping for signature validation:
+# - VXYZ is a C# using alias for Autodesk.Revit.DB.XYZ
+# - "object" maps to "Object" (System.Object); the base mapping in KhepriBase covers
+#   `int`/`double`/etc. but not `object`, so InsertWindow / InsertDoorWithParams which
+#   carry `object[] values` would otherwise produce "objectArray" on the Julia side
+#   versus "ObjectArray" on the C# side and fail signature validation.
 KhepriBase.clr_name(::Val{:RVT}, name::AbstractString) =
-  name == "VXYZ" ? "XYZ" : clr_name(name)
+  name == "VXYZ" ? "XYZ" :
+  name == "object" ? "Object" :
+  clr_name(name)
 
 #
 # We need some additional Encoders
@@ -166,9 +173,9 @@ decode(::Val{:RVT}, t::Val{:XYZ}, c::IO) =
   xyz(decode(Val(:CS), Val(:double3), c)..., world_cs)
 decode(::Val{:RVT}, t::Val{:VXYZ}, c::IO) =
   vxyz(decode(Val(:CS), Val(:double3), c)..., world_cs)
-encode(ns::Val{:RVT}, t::Union{Val{:ElementId},Val{:Element},Val{:Level},Val{:FloorFamily}}, c::IO, v) =
+encode(ns::Val{:RVT}, t::Union{Val{:ElementId},Val{:Element},Val{:Level},Val{:Family},Val{:FloorFamily}}, c::IO, v) =
   encode(ns, Val(:long), c, v)
-decode(ns::Val{:RVT}, t::Union{Val{:ElementId},Val{:Element},Val{:Level},Val{:FloorFamily}}, c::IO) =
+decode(ns::Val{:RVT}, t::Union{Val{:ElementId},Val{:Element},Val{:Level},Val{:Family},Val{:FloorFamily}}, c::IO) =
   decode(ns, Val(:long), c)
 
 @encode_decode_as(:RVT, Val{:Length}, Val{:double})
@@ -196,25 +203,28 @@ public Element Subtraction(ElementId idA, ElementId idB)
 public Level FindOrCreateLevelAtElevation(Length elevation)
 public Level UpperLevel(Level level, Length addedElevation)
 public Length GetLevelElevation(Level level)
-public ElementId LoadFamily(string fileName)
-public ElementId FamilyElement(ElementId familyId, string[] names, Length[] values)
+public Family LoadFamily(string fileName)
+public ElementId FamilyElement(Family family, string[] names, Length[] values)
 public String InstalledLibraryPath(String root)
 public void MoveElement(ElementId id, XYZ translation)
 public void RotateElement(ElementId id, double angle, XYZ axis0, XYZ axis1)
-public ElementId CreatePolygonalFloor(XYZ[] pts, ElementId levelId, ElementId famId)
-public ElementId CreatePolygonalRoof(XYZ[] pts, ElementId levelId, ElementId famId)
-public ElementId CreatePathFloor(XYZ[] pts, double[] angles, ElementId levelId, ElementId famId)
-public ElementId CreatePathRoof(XYZ[] pts, double[] angles, ElementId levelId, ElementId famId)
+public ElementId CreatePolygonalFloor(XYZ[] pts, Level level, ElementId famId)
+public ElementId CreatePolygonalRoof(XYZ[] pts, Level level, ElementId famId)
+public ElementId CreatePathFloor(XYZ[] pts, double[] angles, Level level, ElementId famId)
+public ElementId CreatePathRoof(XYZ[] pts, double[] angles, Level level, ElementId famId)
 public Element InsertDoor(Length deltaFromStart, Length deltaFromGround, Element host, ElementId familyId)
+public Element InsertDoorWithParams(Length deltaFromStart, Length deltaFromGround, Element host, ElementId familyId, string[] names, object[] values)
 public Element InsertWindow(Length deltaFromStart, Length deltaFromGround, Element host, ElementId familyId, string[] names, object[] values)
 public Element InsertRailing(Element host, ElementId familyId)
+public Element InsertRailingAt(XYZ location, Element host, ElementId familyId)
+public ElementId CreatePanelExtrusion(XYZ[] pts, double[] angles, double thickness, ElementId catId)
 public void CreateFamily(string familyTemplatesPath, string familyTemplateName, string familyName)
 public void CreateFamilyExtrusionTest(XYZ[] pts, double height)
 public void InsertFamily(string familyName, XYZ p)
 public void CreatePolygonalOpening(XYZ[] pts, Element host)
 public void CreatePathOpening(XYZ[] pts, double[] angles, Element host)
 public ElementId CreateBeam(XYZ p0, XYZ p1, double rotationAngle, ElementId famId)
-public Element CreateColumn(XYZ location, ElementId baseLevelId, ElementId topLevelId, ElementId famId)
+public Element CreateColumn(XYZ location, Level baseLevel, Level topLevel, ElementId famId)
 public Element CreateColumnPoints(XYZ p0, XYZ p1, Level level0, Level level1, ElementId famId)
 public ElementId[] CreateLineWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId)
 public ElementId[] CreateUnconnectedLineWall(XYZ[] pts, ElementId baseLevelId, double height, ElementId famId)
@@ -222,7 +232,7 @@ public ElementId[] CreatePathWall(XYZ[] pts, double[] angles, ElementId baseLeve
 public ElementId[] CreateUnconnectedPathWall(XYZ[] pts, double[] angles, ElementId baseLevelId, double height, ElementId famId)
 public Element CreateArcWall(XYZ center, Length radius, double startAngle, double endAngle, ElementId baseLevelId, ElementId topLevelId, ElementId famId)
 public Element CreateUnconnectedArcWall(XYZ center, Length radius, double startAngle, double endAngle, ElementId baseLevelId, double height, ElementId famId)
-public ElementId CreatePathCurtainWall(XYZ[] pts, double[] angles, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool isStructural)
+public ElementId[] CreatePathCurtainWall(XYZ[] pts, double[] angles, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool isStructural)
 public Element CreateLineRailing(XYZ[] pts, ElementId baseLevelId, ElementId familyId)
 public Element CreatePolygonRailing(XYZ[] pts, ElementId baseLevelId, ElementId familyId)
 public Element CreateElementLocDirOnHost(XYZ location, XYZ direction, Element host, ElementId famId)
@@ -248,11 +258,11 @@ public double GetLens()
 public void ViewSize(int width, int height)
 public void RenderView(string path)
 public void EnergyAnalysis()
-public ElementId CreatePolygonalCeiling(XYZ[] pts, ElementId levelId, ElementId famId)
-public ElementId CreatePathCeiling(XYZ[] pts, double[] angles, ElementId levelId, ElementId famId)
-public ElementId CreateRamp(XYZ p0, XYZ p1, double width, double thickness, ElementId baseLevelId, double baseOffset, double topOffset)
-public Element CreateStraightStair(XYZ basePoint, VXYZ direction, double width, ElementId baseLevelId, ElementId topLevelId, ElementId familyId)
-public Element CreateSpiralStair(XYZ center, double radius, double startAngle, double includedAngle, bool clockwise, double width, ElementId baseLevelId, ElementId topLevelId, ElementId familyId)
+public ElementId CreatePolygonalCeiling(XYZ[] pts, Level level, ElementId famId)
+public ElementId CreatePathCeiling(XYZ[] pts, double[] angles, Level level, ElementId famId)
+public ElementId CreateRamp(XYZ p0, XYZ p1, double width, double thickness, Level baseLevel, double baseOffset, double topOffset)
+public Element CreateStraightStair(XYZ basePoint, VXYZ direction, double width, Level baseLevel, Level topLevel, ElementId familyId)
+public Element CreateSpiralStair(XYZ center, double radius, double startAngle, double includedAngle, bool clockwise, double width, Level baseLevel, Level topLevel, ElementId familyId)
 public string WallCurveType(Element element)
 public XYZ[] ArcWallVertices(Element element)
 public Length ArcWallRadius(Element element)
@@ -339,12 +349,35 @@ KhepriBase.has_boolean_ops(::Type{RVT}) = HasBooleanOps{true}()
 KhepriBase.b_current_layer_ref(b::RVT) = nothing
 KhepriBase.b_current_layer_ref(b::RVT, layer) = nothing
 
-# Unit conversion: Revit internal units are feet.
-# - `Length` parameters: C# `rLength()` applies `* to_feet` automatically
-# - `object` parameters: C# `rObject()` reads raw doubles (no conversion)
-# - `family_map` values: send in meters (C# converts via `Length`)
-# - `instance_map` values: must be pre-converted to feet in Julia (sent as `object`)
+#=
+Unit conversion seam.
+
+Revit's internal length unit is feet, while Khepri (and most users) work in
+meters. Two parameter pipelines exist and they convert differently — be
+deliberate about which one a given parameter flows through:
+
+  - `Length` parameters in the C# RPC signature: serialized as `Length` and
+    multiplied by `to_feet` automatically inside the C# `rLength()` decoder.
+    Pass meters; the wire takes care of conversion.
+
+  - `object` parameters (used by the `instance_map` pipeline that flows
+    through `SetParameters` post-creation): serialized as raw doubles with
+    no conversion. The Julia caller MUST pre-convert to feet, e.g.
+    `f -> to_revit(f.width)`.
+
+Mnemonic: if the Revit parameter you're targeting is shown in the Properties
+panel in mm or m (display units), convert with `to_revit`. If you're
+crossing through a `Length`-typed argument in the RPC signature, do not
+convert — `rLength()` already does it.
+
+`to_feet` is the bare conversion constant; `to_revit(x)` is the helper to
+use in `instance_map` lambdas so the conversion is named where it happens.
+=#
 const to_feet = 3.28084
+
+export to_revit
+"to_revit(x) = x * to_feet — converts a Khepri length (meters) to Revit's internal feet."
+to_revit(x::Real) = x * to_feet
 #
 KhepriBase.before_connecting(b::RVT) =
   check_plugin()
@@ -354,10 +387,12 @@ KhepriBase.after_connecting(b::RVT) =
     set_backend_family(default_curtain_wall_family(), b, revit_system_family())
     set_backend_family(default_window_family(), b, revit_file_family(
       revit_library_path("Metric Library", raw"Windows\M_Instance-Window-Fixed.rfa"),
-      [], ["Width"=>f->f.width*to_feet, "Height"=>f->f.height*to_feet],
+      [], ["Width"=>f->to_revit(f.width), "Height"=>f->to_revit(f.height)],
       (f, p)->p+vx(f.width/2, p.cs)))
     set_backend_family(default_door_family(), b, revit_system_family(
-      [], [], (f, p)->p+vx(f.width/2, p.cs)))
+      [],
+      ["Width"=>f->to_revit(f.width), "Height"=>f->to_revit(f.height)],
+      (f, p)->p+vx(f.width/2, p.cs)))
     set_backend_family(default_slab_family(), b, revit_system_family())
     set_backend_family(default_column_family(), b, revit_file_family(
           revit_library_path("Metric Library", raw"Structural Columns\Concrete\M_Concrete-Rectangular-Column.rfa"),
@@ -384,6 +419,7 @@ KhepriBase.after_connecting(b::RVT) =
     =#
     set_backend_family(default_panel_family(), b, revit_system_family())
     set_backend_family(default_ceiling_family(), b, revit_system_family())
+    set_backend_family(default_roof_family(), b, revit_system_family())
     set_backend_family(default_railing_family(), b, revit_system_family())
     set_backend_family(default_ramp_family(), b, revit_system_family())
     set_backend_family(default_stair_family(), b, revit_system_family())
@@ -467,11 +503,51 @@ backend_get_family_ref(b::RVT, f::Family, rvtf::RevitFileFamily) =
   end
 #
 
+#=
+Sugar over `revit_file_family` for the canonical multi-step pattern:
+
+  - The *type* parameter (e.g. a window's Width, or — in a parametric round
+    window — the Radius) lives in `family_map` and is baked into a duplicated
+    `FamilySymbol` via the C# `FamilyElement(...)` RPC. Two instances that
+    request the same type values share a single duplicated symbol.
+
+  - The *instance* parameter (e.g. Default Sill Height, or — in a parametric
+    round window — the Opening Angle) lives in `instance_map` and is applied
+    per-placement via `SetParameters` after `NewFamilyInstance`.
+
+The defaults assume a stock Metric-library casement window where Width is the
+type parameter and "Default Sill Height" is the per-instance parameter.
+Override for round windows by passing your own `width_param`/`sill_param`
+keys (e.g. "Radius" and "Opening Angle") and matching extractors.
+
+See also: `revit_file_family`, `default_window_family`, `to_revit`.
+=#
+export revit_casement_window_family
+"Sugar for the type-vs-instance split: type-level Width baked into the symbol, instance-level sill height set per placement."
+revit_casement_window_family(path;
+                              width_param="Width",
+                              sill_param="Default Sill Height",
+                              width=f->to_revit(f.width),
+                              sill=f->to_revit(0.9),
+                              location_transform=(f, p)->p+vx(f.width/2, p.cs)) =
+  revit_file_family(path,
+    [width_param=>width],
+    [sill_param=>sill],
+    location_transform)
+
+
 # This is for future use
 struct RevitInPlaceFamily <: RevitFamily
     parameter_map::Dict{Symbol,String}
     ref::IdDict{Backend, Any}
 end
+
+# Without this, dispatching family_ref on a RevitInPlaceFamily would fall through
+# to the abstract method and raise a confusing MethodError deep inside realization.
+# Surface a clear, actionable error at the family-resolution boundary instead.
+backend_get_family_ref(b::RVT, f::Family, rvtf::RevitInPlaceFamily) =
+  error("RevitInPlaceFamily is not yet implemented. Use revit_file_family with " *
+        "a saved .rfa, or revit_system_family for built-in types.")
 
 #=
 root should be "Imperial Library" or "Metric Library"
@@ -626,37 +702,76 @@ KhepriBase.b_ceiling(b::RVT, contour::ClosedPath, level, family) =
     @remote(b, CreatePathCeiling(locs, arcs, ref_value(b, level), family_ref(b, family)))
   end
 
-# Railing
+#=
+Family-parameter lookup helper.
+
+Many backends-specific b_* operations want to read a "logical" parameter
+(width, thickness, ...) from a family. The natural source-of-truth is the
+backend-specific RevitFamily mapping (`family_map` for type-level values,
+`instance_map` for per-instance values). When neither map declares the
+parameter, fall back to a direct field access on the Khepri family struct
+— this is the original behavior and keeps default registrations working
+without forcing every map to declare every field.
+
+Returns a function `f -> value` so callers can apply it lazily.
+=#
+_lookup_family_param(rvtf::RevitFamily, name::AbstractString, default::Function) =
+  haskey(rvtf.family_map, name)   ? rvtf.family_map[name]   :
+  haskey(rvtf.instance_map, name) ? rvtf.instance_map[name] :
+  default
+
+# Railing — explicit dispatch on supported path types. Falls through to
+# InsertRailingAt when the caller has a host but no path (the typical
+# stair-attached-railing case); errors for any other path shape so users
+# aren't silently dropped onto the InsertRailing fallback that had a
+# hardcoded anchor in the previous C# code.
 KhepriBase.b_railing(b::RVT, path::OpenPolygonalPath, level, host, family) =
   @remote(b, CreateLineRailing(path.vertices, ref_value(b, level), family_ref(b, family)))
 
 KhepriBase.b_railing(b::RVT, path::ClosedPolygonalPath, level, host, family) =
   @remote(b, CreatePolygonRailing(path.vertices, ref_value(b, level), family_ref(b, family)))
 
-KhepriBase.b_railing(b::RVT, path, level, host, family) =
+KhepriBase.b_railing(b::RVT, ::Nothing, level, host, family) =
   @remote(b, InsertRailing(ref_value(b, host), family_ref(b, family)))
 
-# Ramp
+KhepriBase.b_railing(b::RVT, path, level, host, family) =
+  error("Revit railings need a polygonal path; got $(typeof(path)). " *
+        "Use open_polygonal_path or closed_polygonal_path, or pass " *
+        "path=nothing to attach the railing directly to its host.")
+
+# Ramp / stair / spiral_stair: parameters flow through _lookup_family_param so
+# users can override `width` or `thickness` via family_map/instance_map. The
+# default extractors (`f -> f.width`, `f -> f.thickness`) preserve the
+# pre-fix behavior for system families that already had those fields.
 KhepriBase.b_ramp(b::RVT, path, bottom_level, top_level, family) =
-  let p0 = in_world(path_start(path)),
+  let rvtf = backend_family(b, family),
+      width     = _lookup_family_param(rvtf, "width",     f -> f.width)(family),
+      thickness = _lookup_family_param(rvtf, "thickness", f -> f.thickness)(family),
+      p0 = in_world(path_start(path)),
       p1 = in_world(path_end(path)),
       bottom_h = level_height(b, bottom_level),
       top_h = level_height(b, top_level)
-    @remote(b, CreateRamp(p0, p1, family.width, family.thickness,
+    @remote(b, CreateRamp(p0, p1, width, thickness,
                           ref_value(b, bottom_level), 0.0, top_h - bottom_h))
   end
 
 # Stair
 KhepriBase.b_stair(b::RVT, base_point, direction, bottom_level, top_level, family) =
-  @remote(b, CreateStraightStair(
-    base_point, direction, family.width,
-    ref_value(b, bottom_level), ref_value(b, top_level), family_ref(b, family)))
+  let rvtf = backend_family(b, family),
+      width = _lookup_family_param(rvtf, "width", f -> f.width)(family)
+    @remote(b, CreateStraightStair(
+      base_point, direction, width,
+      ref_value(b, bottom_level), ref_value(b, top_level), family_ref(b, family)))
+  end
 
 KhepriBase.b_spiral_stair(b::RVT, center, radius, start_angle, included_angle,
                            clockwise, bottom_level, top_level, family) =
-  @remote(b, CreateSpiralStair(
-    center, radius, start_angle, included_angle, clockwise, family.width,
-    ref_value(b, bottom_level), ref_value(b, top_level), family_ref(b, family)))
+  let rvtf = backend_family(b, family),
+      width = _lookup_family_param(rvtf, "width", f -> f.width)(family)
+    @remote(b, CreateSpiralStair(
+      center, radius, start_angle, included_angle, clockwise, width,
+      ref_value(b, bottom_level), ref_value(b, top_level), family_ref(b, family)))
+  end
 
 KhepriBase.b_stair_landing(b::RVT, region, level, family) =
   b_slab(b, region, level, family)
@@ -780,32 +895,46 @@ _wall_host_and_offset(wall_refs, wall_path, global_x) =
     end
   end
 
+#=
+Single seam for placing wall-hosted openings (windows and doors).
+
+This consolidates what used to be three near-identical bodies:
+`realize_wall_openings`, `realize(::Window)`, and `realize(::Door)`. The
+work is the same in all three: read the family's `location_transform` and
+`instance_map`, map the global x-offset to a (host_segment, local_x) pair
+via `_wall_host_and_offset`, then dispatch to the right C# RPC based on
+opening type and whether the family declares any instance parameters.
+
+`InsertDoorWithParams` is used when the door's instance_map is non-empty;
+otherwise the legacy `InsertDoor` (4-arg) RPC is called so existing scripts
+that depend on its specific signature continue to work.
+=#
+_insert_opening(b, opening::Window, local_x, y, host_ref, fam_ref, params, values) =
+  @remote(b, InsertWindow(local_x, y, host_ref, fam_ref, params, values))
+
+_insert_opening(b, opening::Door, local_x, y, host_ref, fam_ref, params, values) =
+  isempty(params) ?
+    @remote(b, InsertDoor(local_x, y, host_ref, fam_ref)) :
+    @remote(b, InsertDoorWithParams(local_x, y, host_ref, fam_ref, params, values))
+
+_realize_wall_opening(b, opening, wall_path, wall_refs) =
+  let rvtf = backend_family(b, opening.family),
+      loc = rvtf.location_transform(opening.family, opening.loc),
+      (host_ref, local_x) = _wall_host_and_offset(wall_refs, wall_path, loc.x),
+      param_map = rvtf.instance_map,
+      params = collect(keys(param_map)),
+      values = [param_map[p](opening.family) for p in params]
+    _insert_opening(b, opening, local_x, loc.y, host_ref,
+                    family_ref(b, opening.family), params, values)
+  end
+
 KhepriBase.realize_wall_openings(b::RVT, w::Wall, w_ref, openings) =
   if isempty(openings)
     w_ref
   else
     let wall_refs = ref_values(b, w_ref)
       for opening in openings
-        let rvtf = backend_family(b, opening.family),
-            loc = rvtf.location_transform(opening.family, opening.loc),
-            (host_ref, local_x) = _wall_host_and_offset(wall_refs, w.path, loc.x)
-          if opening isa Window
-            let param_map = rvtf.instance_map,
-                params = keys(param_map)
-              ref!(b, opening,
-                @remote(b, InsertWindow(
-                  local_x, loc.y, host_ref,
-                  family_ref(b, opening.family),
-                  collect(params),
-                  [param_map[param](opening.family) for param in params])))
-            end
-          elseif opening isa Door
-            ref!(b, opening,
-              @remote(b, InsertDoor(
-                local_x, loc.y, host_ref,
-                family_ref(b, opening.family))))
-          end
-        end
+        ref!(b, opening, _realize_wall_opening(b, opening, w.path, wall_refs))
       end
       w_ref
     end
@@ -819,19 +948,7 @@ realize(b::RVT, s::Window) =
     if realized(b, s)
       ref_value(b, ref(b, s))
     else
-      let rvtf = backend_family(b, s.family),
-          param_map = rvtf.instance_map,
-          params = keys(param_map),
-          loc = rvtf.location_transform(s.family, s.loc),
-          (host_ref, local_x) = _wall_host_and_offset(wall_refs, s.wall.path, loc.x)
-        @remote(b, InsertWindow(
-            local_x,
-            loc.y,
-            host_ref,
-            family_ref(b, s.family),
-            collect(params),
-            [param_map[param](s.family) for param in params]))
-      end
+      _realize_wall_opening(b, s, s.wall.path, wall_refs)
     end
   end
 
@@ -840,15 +957,7 @@ realize(b::RVT, s::Door) =
     if realized(b, s)
       ref_value(b, ref(b, s))
     else
-      let rvtf = backend_family(b, s.family),
-          loc = rvtf.location_transform(s.family, s.loc),
-          (host_ref, local_x) = _wall_host_and_offset(wall_refs, s.wall.path, loc.x)
-        @remote(b, InsertDoor(
-            local_x,
-            loc.y,
-            host_ref,
-            family_ref(b, s.family)))
-      end
+      _realize_wall_opening(b, s, s.wall.path, wall_refs)
     end
   end
 
@@ -894,6 +1003,39 @@ KhepriBase.b_family_element(b::RVT, loc, angle, level, family) =
   let p = loc_from_o_phi(loc, angle)
     @remote(b, CreateElementLocDirOnHost(p, vx(1, p.cs),
             ref_value(b, level), family_ref(b, family)))
+  end
+
+#=
+Panels are realized as a Revit DirectShape whose geometry is the panel's region
+extruded by the family's thickness. Curtain panels were rejected as the
+implementation strategy because they require a hosting curtain-wall element and
+do not match the Khepri panel semantics (a free-floating planar piece). The
+DirectShape is placed in OST_GenericModel by default; users who need a different
+category can override via `family_map["category"]`.
+
+The thickness is read through the family seam so users can override via
+`family_map["thickness"]` (e.g. for a parametric panel where thickness depends
+on context). The default extractor reads PanelFamily.thickness.
+
+See also: `b_slab`, `b_curtain_wall`, `set_backend_family`.
+=#
+KhepriBase.b_panel(b::RVT, region::Region, family) =
+  b_panel(b, outer_path(region), family)
+
+KhepriBase.b_panel(b::RVT, contour::ClosedPolygonalPath, family) =
+  let rvtf = backend_family(b, family),
+      thickness = _lookup_family_param(rvtf, "thickness", f -> f.thickness)(family)
+    @remote(b, CreatePanelExtrusion(contour.vertices, Float64[], thickness, RVTId(0)))
+  end
+
+KhepriBase.b_panel(b::RVT, contour::RectangularPath, family) =
+  b_panel(b, convert(ClosedPolygonalPath, contour), family)
+
+KhepriBase.b_panel(b::RVT, contour::ClosedPath, family) =
+  let rvtf = backend_family(b, family),
+      thickness = _lookup_family_param(rvtf, "thickness", f -> f.thickness)(family),
+      (locs, arcs) = locs_and_arcs(contour)
+    @remote(b, CreatePanelExtrusion(locs, arcs, thickness, RVTId(0)))
   end
 
 realize(b::RVT, s::TrussNode) =
