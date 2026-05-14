@@ -874,11 +874,30 @@ namespace KhepriRhinoceros {
         public Guid[] Subtract(RhinoObject obj0, RhinoObject obj1) {
             Brep brep0 = AsBrep(obj0);
             Brep brep1 = AsBrep(obj1);
+            // Try the boolean across a wider tolerance range than before
+            // (was 1e-5 .. 1e-3). Tangent or near-coincident operands often
+            // resolve only at looser tolerances, while pathological floating-
+            // point boundaries occasionally need tighter ones. If the
+            // single-Brep overload returns null at every tolerance, fall back
+            // to the multi-Brep overload (Brep[] in, Brep[] in) — RhinoCommon
+            // dispatches them to slightly different internal paths and the
+            // multi-version sometimes succeeds where the single version fails
+            // (e.g. when the operand has near-coplanar faces with the result).
             Brep[] newBreps = null;
-            for (int e = 5; e > 2; e--) {
+            for (int e = 7; e > 1; e--) {
                 newBreps = Brep.CreateBooleanDifference(brep0, brep1, Math.Pow(10, -e));
                 if (newBreps != null) {
                     break;
+                }
+            }
+            if (newBreps == null) {
+                Brep[] arr0 = new[] { brep0 };
+                Brep[] arr1 = new[] { brep1 };
+                for (int e = 7; e > 1; e--) {
+                    newBreps = Brep.CreateBooleanDifference(arr0, arr1, Math.Pow(10, -e));
+                    if (newBreps != null) {
+                        break;
+                    }
                 }
             }
             if (newBreps == null) {
@@ -893,9 +912,33 @@ namespace KhepriRhinoceros {
                     .Where(id => id != Guid.Empty)
                     .ToArray();
             }
+            // newBreps.Length == 0: the boolean engine returned successfully
+            // with no solids. Three sub-cases distinguished by point-in-Brep
+            // tests:
             Point3d c1 = brep1.Vertices[0].Location;
             if (brep0.IsPointInside(c1, doc.ModelAbsoluteTolerance, false)) {
-                throw new Exception("Subtract failed"); //Signal failure
+                // brep1 is fully inside brep0 — the subtraction is well-
+                // defined as a hollow brep0 (outer shell + inner cavity), but
+                // CreateBooleanDifference doesn't always produce that. The
+                // earlier code threw "Subtract failed" here unconditionally.
+                // Construct the hollow manually: flip the inner Brep so its
+                // surface normals point into the cavity, then JoinBreps to
+                // assemble a single multi-shell Brep with the original outer
+                // and the inverted inner.
+                Brep flipped = brep1.DuplicateBrep();
+                flipped.Flip();
+                Brep[] hollow = Brep.CreateSolid(new[] { brep0.DuplicateBrep(), flipped },
+                                                 doc.ModelAbsoluteTolerance);
+                if (hollow != null && hollow.Length > 0) {
+                    doc.Objects.Delete(obj0, true);
+                    doc.Objects.Delete(obj1, true);
+                    return hollow
+                        .Where(brep => brep != null)
+                        .Select(brep => doc.Objects.AddBrep(brep))
+                        .Where(id => id != Guid.Empty)
+                        .ToArray();
+                }
+                throw new Exception("Subtract failed");
             } else {
                 Point3d c0 = brep0.Vertices[0].Location;
                 if (brep1.IsPointInside(c0, doc.ModelAbsoluteTolerance, false)) {
