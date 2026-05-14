@@ -477,7 +477,7 @@ function rebuild_scene!(b::TBS)
 end
 
 # Layer operations (no-op — Thebes does not support layers)
-KhepriBase.b_layer(b::TBS, name, active, color) = BasicLayer(name, active, color)
+KhepriBase.b_layer(b::TBS, name, visible, color) = BasicLayer(name, visible, color)
 KhepriBase.b_current_layer_ref(b::TBS) = nothing
 KhepriBase.b_current_layer_ref(b::TBS, layer) = nothing
 KhepriBase.b_delete_all_shapes_in_layer(b::TBS, layer) = nothing
