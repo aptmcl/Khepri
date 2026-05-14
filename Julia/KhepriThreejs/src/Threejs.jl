@@ -511,7 +511,7 @@ strip_mesh_part(path1, path2, mat) =
   end
 
 KhepriBase.b_wall_no_openings(b::THR, w_path, w_height, l_thickness, r_thickness, lmat, rmat, smat) =
-  path_length(w_path) < path_tolerance() ? void_ref(b) :
+  path_length(w_path) < coincidence_tolerance() ? void_ref(b) :
   let r_vs = path_vertices(offset(w_path, -r_thickness)),
       l_vs = path_vertices(offset(w_path, l_thickness)),
       h = Float32(w_height * wall_z_fighting_factor),
@@ -521,7 +521,7 @@ KhepriBase.b_wall_no_openings(b::THR, w_path, w_height, l_thickness, r_thickness
   end
 
 KhepriBase.b_wall_with_openings(b::THR, w_path, w_height, l_thickness, r_thickness, lmat, rmat, smat, openings) =
-  path_length(w_path) < path_tolerance() ? void_ref(b) :
+  path_length(w_path) < coincidence_tolerance() ? void_ref(b) :
   let w_paths = subpaths(w_path),
       r_w_paths = subpaths(offset(w_path, -r_thickness)),
       l_w_paths = subpaths(offset(w_path, l_thickness)),
@@ -566,11 +566,11 @@ KhepriBase.b_wall_with_openings(b::THR, w_path, w_height, l_thickness, r_thickne
                 l_op_translated = translate(fixed_l_op_path, vz(op.base_height)),
                 c_r_op_path = closed_path_for_height(r_op_translated, op_height),
                 c_l_op_path = closed_path_for_height(l_op_translated, op_height),
-                r_jacket = op.base_height < path_tolerance() ?
+                r_jacket = op.base_height < coincidence_tolerance() ?
                   let ps = path_vertices(r_op_translated)
                     open_polygonal_path([ps[1], ps[1]+vz(op_height), ps[end]+vz(op_height), ps[end]])
                   end : c_r_op_path,
-                l_jacket = op.base_height < path_tolerance() ?
+                l_jacket = op.base_height < coincidence_tolerance() ?
                   let ps = path_vertices(l_op_translated)
                     open_polygonal_path([ps[1], ps[1]+vz(op_height), ps[end]+vz(op_height), ps[end]])
                   end : c_l_op_path

@@ -2239,6 +2239,13 @@ typedFunction("extrudedSurface", [Matrix4x4, [Point2d], Bool, [[Point2d]], [Bool
     return withTransform(m, new THREE.Mesh(new THREE.ExtrudeGeometry(profile, extrudeSettings), mat));
   });
 
+// `basePoint` is the bottom-left corner when looking up the stair along
+// `direction`; `perp = direction × up` points to the user's right, so the
+// stair body spans `[basePoint, basePoint + perp * width]`. This matches
+// `KhepriBase/src/Backend.jl:b_stair` and the auto-railing geometry in
+// `realize(::Backend, ::Stair)`. Prior code centered the stair on
+// `basePoint` (perp/2 on both sides), which left manual railings at the
+// computed edges misplaced relative to the stair body.
 typedFunction("stair",
   [Point3d, Vector3d, Float32, Int32, Float32, Float32, Float32, Bool, MatId, MatId], Id,
   (basePoint: THREE.Vector3, direction: THREE.Vector3, bottomHeight: number,
@@ -2247,7 +2254,7 @@ typedFunction("stair",
     const group = new THREE.Group();
     const dir = direction.clone().normalize();
     const up = new THREE.Vector3(0, 0, 1);
-    const perp = new THREE.Vector3().crossVectors(up, dir);
+    const perp = new THREE.Vector3().crossVectors(dir, up);
     const treadVerts: number[] = [];
     const treadIdxs: number[] = [];
     const riserVerts: number[] = [];
@@ -2258,20 +2265,20 @@ typedFunction("stair",
       const stepZ = bottomHeight + (i + 1) * riserHeight;
       const stepStart = basePoint.clone().addScaledVector(dir, i * treadDepth);
       const stepEnd = stepStart.clone().addScaledVector(dir, treadDepth);
-      // Tread: 4 vertices
-      const t0 = stepStart.clone().addScaledVector(perp, width / 2).setZ(stepZ);
-      const t1 = stepStart.clone().addScaledVector(perp, -width / 2).setZ(stepZ);
-      const t2 = stepEnd.clone().addScaledVector(perp, -width / 2).setZ(stepZ);
-      const t3 = stepEnd.clone().addScaledVector(perp, width / 2).setZ(stepZ);
+      // Tread: 4 vertices (left-front, right-front, right-back, left-back)
+      const t0 = stepStart.clone().setZ(stepZ);
+      const t1 = stepStart.clone().addScaledVector(perp, width).setZ(stepZ);
+      const t2 = stepEnd.clone().addScaledVector(perp, width).setZ(stepZ);
+      const t3 = stepEnd.clone().setZ(stepZ);
       treadVerts.push(t0.x, t0.y, t0.z, t1.x, t1.y, t1.z, t2.x, t2.y, t2.z, t3.x, t3.y, t3.z);
       treadIdxs.push(treadBase, treadBase + 1, treadBase + 2, treadBase, treadBase + 2, treadBase + 3);
       treadBase += 4;
       if (hasRisers) {
         const rZ = bottomHeight + i * riserHeight;
-        const r0 = stepStart.clone().addScaledVector(perp, width / 2).setZ(rZ);
-        const r1 = stepStart.clone().addScaledVector(perp, -width / 2).setZ(rZ);
-        const r2 = stepStart.clone().addScaledVector(perp, -width / 2).setZ(stepZ);
-        const r3 = stepStart.clone().addScaledVector(perp, width / 2).setZ(stepZ);
+        const r0 = stepStart.clone().setZ(rZ);
+        const r1 = stepStart.clone().addScaledVector(perp, width).setZ(rZ);
+        const r2 = stepStart.clone().addScaledVector(perp, width).setZ(stepZ);
+        const r3 = stepStart.clone().setZ(stepZ);
         riserVerts.push(r0.x, r0.y, r0.z, r1.x, r1.y, r1.z, r2.x, r2.y, r2.z, r3.x, r3.y, r3.z);
         riserIdxs.push(riserBase, riserBase + 1, riserBase + 2, riserBase, riserBase + 2, riserBase + 3);
         riserBase += 4;
