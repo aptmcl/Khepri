@@ -334,6 +334,38 @@ namespace KhepriAutoCAD {
         }
 
         public Entity Spline(Point3d[] pts) => new Polyline3d(Poly3dType.CubicSplinePoly, new Point3dCollection(pts), false);
+        DoubleCollection ToDoubleCollection(double[] values) {
+            DoubleCollection result = new DoubleCollection();
+            foreach (double value in values) {
+                result.Add(value);
+            }
+            return result;
+        }
+        KnotCollection ToKnotCollection(double[] values) {
+            KnotCollection result = new KnotCollection();
+            foreach (double value in values) {
+                result.Add(value);
+            }
+            return result;
+        }
+        Entity SplineFromControlData(Point3d[] controlPoints, int degree, double[] knots, double[] weights, bool closed, ObjectId matId) {
+            bool rational = weights != null && weights.Length == controlPoints.Length && weights.Any(w => Math.Abs(w - 1.0) > 1e-12);
+            Spline spline = new Spline(
+                degree,
+                rational,
+                closed,
+                false,
+                new Point3dCollection(controlPoints),
+                ToDoubleCollection(knots),
+                rational ? ToDoubleCollection(weights) : new DoubleCollection(),
+                Tolerance.Global.EqualPoint,
+                Tolerance.Global.EqualPoint);
+            return WithMaterial(spline, matId);
+        }
+        public Entity BSplineCurve(Point3d[] controlPoints, int degree, double[] knots, bool closed, ObjectId matId) =>
+            SplineFromControlData(controlPoints, degree, knots, null, closed, matId);
+        public Entity NurbsCurve(Point3d[] controlPoints, int degree, double[] knots, double[] weights, bool closed, ObjectId matId) =>
+            SplineFromControlData(controlPoints, degree, knots, weights, closed, matId);
         public Entity InterpSpline(Point3d[] pts, Vector3d tan0, Vector3d tan1) =>
             new Spline(new Point3dCollection(pts), tan0, tan1, 3, 0.0);
         public Entity ClosedPolyLine(Point3d[] pts) => new Polyline3d(Poly3dType.SimplePoly, new Point3dCollection(pts), true);
@@ -924,6 +956,27 @@ namespace KhepriAutoCAD {
                 Entity ent = tr.GetObject(id, OpenMode.ForWrite) as Entity;
                 return AddAndDeleteAndCommit(AsNurbSurface(ent), ent, doc, tr);
         }
+        Entity NurbSurfaceFromControlData(Point3d[] controlPoints, int nU, int nV, int degreeU, int degreeV,
+                                          double[] knotsU, double[] knotsV, double[] weights, ObjectId matId) {
+            bool rational = weights != null && weights.Length == controlPoints.Length && weights.Any(w => Math.Abs(w - 1.0) > 1e-12);
+            DBNurbSurface surface = new DBNurbSurface(
+                degreeU,
+                degreeV,
+                rational,
+                nU,
+                nV,
+                new Point3dCollection(controlPoints),
+                rational ? ToDoubleCollection(weights) : new DoubleCollection(),
+                ToKnotCollection(knotsU),
+                ToKnotCollection(knotsV));
+            return WithMaterial(surface, matId);
+        }
+        public Entity BSplineSurface(Point3d[] controlPoints, int nU, int nV, int degreeU, int degreeV,
+                                     double[] knotsU, double[] knotsV, ObjectId matId) =>
+            NurbSurfaceFromControlData(controlPoints, nU, nV, degreeU, degreeV, knotsU, knotsV, null, matId);
+        public Entity NurbsSurface(Point3d[] controlPoints, int nU, int nV, int degreeU, int degreeV,
+                                   double[] knotsU, double[] knotsV, double[] weights, ObjectId matId) =>
+            NurbSurfaceFromControlData(controlPoints, nU, nV, degreeU, degreeV, knotsU, knotsV, weights, matId);
         public double[] SurfaceDomain(Entity ent) {
             if (ent is DBNurbSurface) {
                 DBNurbSurface s = ent as DBNurbSurface;
