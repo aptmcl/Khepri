@@ -54,6 +54,18 @@ using Test
     @test mt.Mirror == 4
   end
 
+  @testset "Exact geometry capabilities" begin
+    @test KhepriBase.supports_exact_interpolating_spline_curves(KhepriAutoCAD.ACAD)
+    @test KhepriBase.supports_exact_bezier_curves(KhepriAutoCAD.ACAD)
+    @test KhepriBase.supports_exact_bspline_curves(KhepriAutoCAD.ACAD)
+    @test KhepriBase.supports_exact_nurbs_curves(KhepriAutoCAD.ACAD)
+    @test KhepriBase.supports_exact_polycurves(KhepriAutoCAD.ACAD)
+    @test KhepriBase.supports_exact_bezier_surfaces(KhepriAutoCAD.ACAD)
+    @test KhepriBase.supports_exact_bspline_surfaces(KhepriAutoCAD.ACAD)
+    @test KhepriBase.supports_exact_nurbs_surfaces(KhepriAutoCAD.ACAD)
+    @test !KhepriBase.supports_exact_trimmed_surfaces(KhepriAutoCAD.ACAD)
+  end
+
   # Visual regression tests (require running AutoCAD with Khepri plugin on Windows)
   if get(ENV, "KHEPRI_AUTOCAD_TESTS", "0") == "1"
     if !Sys.iswindows()
@@ -100,6 +112,20 @@ using Test
         end,
         verify = :envelope,
         skip = Symbol[])
+    end
+  end
+
+  if get(ENV, "KHEPRI_AUTOCAD_EXACT_GEOMETRY_TESTS", "0") == "1"
+    if !Sys.iswindows()
+      error("AutoCAD exact geometry tests require Windows. Run these tests from a native Windows Julia installation.")
+    end
+    @testset "Exact Geometry (AutoCAD)" begin
+      include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "ExactGeometrySmokeTests.jl"))
+      using .ExactGeometrySmokeTests
+
+      delete_all_shapes()
+      backend(autocad)
+      run_exact_geometry_smoke_tests(autocad)
     end
   end
 end

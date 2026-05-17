@@ -288,6 +288,8 @@ public Point3d PointPosition(Entity ent)
 public Entity PolyLine(Point3d[] pts)
 public Point3d[] LineVertices(ObjectId id)
 public Entity Spline(Point3d[] pts)
+public Entity BSplineCurve(Point3d[] controlPoints, int degree, double[] knots, bool closed, ObjectId matId)
+public Entity NurbsCurve(Point3d[] controlPoints, int degree, double[] knots, double[] weights, bool closed, ObjectId matId)
 public Entity InterpSpline(Point3d[] pts, Vector3d tan0, Vector3d tan1)
 public Entity ClosedPolyLine(Point3d[] pts)
 public Entity ClosedSpline(Point3d[] pts)
@@ -325,6 +327,8 @@ public ObjectId IrregularPyramid(Point3d[] pts, Point3d apex, ObjectId matId)
 public ObjectId IrregularPyramidFrustum(Point3d[] bpts, Point3d[] tpts, ObjectId matId)
 public ObjectId Thicken(ObjectId obj, double thickness)
 public ObjectId NurbSurfaceFrom(ObjectId id)
+public Entity BSplineSurface(Point3d[] controlPoints, int nU, int nV, int degreeU, int degreeV, double[] knotsU, double[] knotsV, ObjectId matId)
+public Entity NurbsSurface(Point3d[] controlPoints, int nU, int nV, int degreeU, int degreeV, double[] knotsU, double[] knotsV, double[] weights, ObjectId matId)
 public ObjectId Extrude(ObjectId profileId, Vector3d dir)
 public ObjectId ExtrudeWithMaterial(ObjectId profileId, Vector3d dir, ObjectId matId)
 public ObjectId Sweep(ObjectId pathId, ObjectId profileId, double rotation, double scale)
@@ -515,6 +519,10 @@ KhepriBase.after_connecting(b::ACAD) =
 const autocad = ACAD("AutoCAD", autocad_port, acad_api)
 
 KhepriBase.void_ref(b::ACAD) = -1
+KhepriBase.curve_geometry_capabilities(::Type{ACAD}) =
+  CurveGeometryCapabilities{true,true,true,true,true}()
+KhepriBase.surface_geometry_capabilities(::Type{ACAD}) =
+  SurfaceGeometryCapabilities{true,true,true,false}()
 
 # Primitives
 KhepriBase.b_point(b::ACAD, p, mat) =
@@ -544,6 +552,42 @@ KhepriBase.b_spline(b::ACAD, ps, v0, v1, mat) =
 
 KhepriBase.b_closed_spline(b::ACAD, ps, mat) =
   @remote(b, InterpClosedSpline(ps))
+
+autocad_bezier_knots(n::Integer) =
+  vcat(fill(0.0, n), fill(1.0, n))
+
+autocad_bezier_segment_ref(b::ACAD, seg::BezierSegment, closed::Bool, mat) =
+  let degree = length(seg.control_points) - 1
+    @remote(b, BSplineCurve(seg.control_points,
+                            degree,
+                            autocad_bezier_knots(degree + 1),
+                            closed,
+                            mat))
+  end
+
+KhepriBase.b_bezier_curve(b::ACAD, path::BezierPath, mat) =
+  if length(path.segments) == 1
+    autocad_bezier_segment_ref(b, path.segments[1], is_closed_path(path), mat)
+  else
+    let refs = [autocad_bezier_segment_ref(b, seg, false, mat) for seg in path.segments]
+      @remote(b, JoinCurves(refs))
+    end
+  end
+
+KhepriBase.b_bspline_curve(b::ACAD, path::BSplinePath{Closed,false}, mat) where {Closed} =
+  @remote(b, BSplineCurve(path.control_points,
+                          path.degree,
+                          path.knots,
+                          is_closed_path(path),
+                          mat))
+
+KhepriBase.b_nurbs_curve(b::ACAD, path::NurbsPath, mat) =
+  @remote(b, NurbsCurve(path.control_points,
+                        path.degree,
+                        path.knots,
+                        path.weights,
+                        is_closed_path(path),
+                        mat))
 
 KhepriBase.b_circle(b::ACAD, c, r, mat) =
   @remote(b, Circle(c, vz(1, c.cs), r))
@@ -607,13 +651,28 @@ KhepriBase.b_surface_polygon_with_holes(b::ACAD, ps, qss, mat) =
 KhepriBase.b_surface_polygon_with_holes(b::ACAD, ps, qss, smooths, mat) =
   @remote(b, RegionWithHoles([ps, qss...], smooths, mat))
 
+_surface_circle_data(path::CircularPath) =
+  (center=path.center, radius=path.radius)
+_surface_circle_data(path::SegmentPath{true}) =
+  let segs = path_segments(path)
+    if length(segs) == 1 &&
+       segs[1] isa ArcSegment &&
+       abs(abs(arc_amplitude(segs[1])) - 2π) <= coincidence_tolerance()
+      (center=path_center(segs[1]), radius=path_radius(segs[1]))
+    else
+      nothing
+    end
+  end
+_surface_circle_data(path::ClosedPath) = nothing
+
 KhepriBase.b_surface(b::ACAD, region::Region, mat) =
-  let paths = region.paths
-    if all(p -> p isa CircularPath, paths)
+  let paths = region.paths,
+      circle_data = _surface_circle_data.(paths)
+    if all(!isnothing, circle_data)
       @remote(b, RegionCircleWithHoles(
-        [p.center for p in paths],
-        [vz(1, p.center.cs) for p in paths],
-        [p.radius for p in paths],
+        [data.center for data in circle_data],
+        [vz(1, data.center.cs) for data in circle_data],
+        [data.radius for data in circle_data],
         mat))
     else
       b_surface_polygon_with_holes(
@@ -626,7 +685,7 @@ KhepriBase.b_surface(b::ACAD, region::Region, mat) =
   end
 
 KhepriBase.b_surface_closed_spline(b::ACAD, ps, mat) =
-  @remote(b, SurfaceFromCurves([@remote(b, InterpClosedSpline(path.vertices))], mat))
+  @remote(b, SurfaceFromCurves([@remote(b, InterpClosedSpline(ps.vertices))], mat))
 
 KhepriBase.b_surface_circle(b::ACAD, c, r, mat) =
   @remote(b, SurfaceCircle(c, vz(1, c.cs), r, mat))
@@ -1117,6 +1176,38 @@ KhepriBase.b_surface_grid(b::ACAD, ptss, closed_u, closed_v, smooth_u, smooth_v,
                  [@remote(b, SurfaceFromGrid(2, nv, reshape(permutedims(ptss[[end,1],:]),:), false, closed_v, smooth_level, mat))] :
                  []) :
           @remote(b, SurfaceFromGrid(nu, nv, reshape(permutedims(ptss),:), closed_u, closed_v, 0, mat))))
+  end
+
+autocad_surface_points(s::TensorProductSurface) =
+  reshape(permutedims(s.control_points), :)
+
+autocad_surface_weights(s::BSplineSurface) =
+  isnothing(s.weights) ? Float64[] : reshape(permutedims(s.weights), :)
+
+KhepriBase.b_bezier_surface(b::ACAD, s::BezierSurface, mat) =
+  let (nu, nv) = size(s.control_points)
+    @remote(b, BSplineSurface(autocad_surface_points(s), nu, nv,
+                              s.degree_u, s.degree_v,
+                              autocad_bezier_knots(s.degree_u + 1),
+                              autocad_bezier_knots(s.degree_v + 1),
+                              mat))
+  end
+
+KhepriBase.b_bspline_surface(b::ACAD, s::BSplineSurface{ClosedU,ClosedV,false}, mat) where {ClosedU,ClosedV} =
+  let (nu, nv) = size(s.control_points)
+    @remote(b, BSplineSurface(autocad_surface_points(s), nu, nv,
+                              s.degree_u, s.degree_v,
+                              s.knots_u, s.knots_v,
+                              mat))
+  end
+
+KhepriBase.b_nurbs_surface(b::ACAD, s::BSplineSurface{ClosedU,ClosedV,true}, mat) where {ClosedU,ClosedV} =
+  let (nu, nv) = size(s.control_points)
+    @remote(b, NurbsSurface(autocad_surface_points(s), nu, nv,
+                            s.degree_u, s.degree_v,
+                            s.knots_u, s.knots_v,
+                            autocad_surface_weights(s),
+                            mat))
   end
 
 realize(b::ACAD, s::Thicken) =
