@@ -556,7 +556,7 @@ KhepriBase.b_closed_spline(b::ACAD, ps, mat) =
 autocad_bezier_knots(n::Integer) =
   vcat(fill(0.0, n), fill(1.0, n))
 
-autocad_bezier_segment_ref(b::ACAD, seg::BezierSegment, closed::Bool, mat) =
+autocad_bezier_segment_ref(b::ACAD, seg::BezierSpan, closed::Bool, mat) =
   let degree = length(seg.control_points) - 1
     @remote(b, BSplineCurve(seg.control_points,
                             degree,
@@ -566,10 +566,10 @@ autocad_bezier_segment_ref(b::ACAD, seg::BezierSegment, closed::Bool, mat) =
   end
 
 KhepriBase.b_bezier_curve(b::ACAD, path::BezierPath, mat) =
-  if length(path.segments) == 1
-    autocad_bezier_segment_ref(b, path.segments[1], is_closed_path(path), mat)
+  if length(path.spans) == 1
+    autocad_bezier_segment_ref(b, path.spans[1], is_closed_path(path), mat)
   else
-    let refs = [autocad_bezier_segment_ref(b, seg, false, mat) for seg in path.segments]
+    let refs = [autocad_bezier_segment_ref(b, seg, false, mat) for seg in path.spans]
       @remote(b, JoinCurves(refs))
     end
   end
@@ -653,12 +653,12 @@ KhepriBase.b_surface_polygon_with_holes(b::ACAD, ps, qss, smooths, mat) =
 
 _surface_circle_data(path::CircularPath) =
   (center=path.center, radius=path.radius)
-_surface_circle_data(path::SegmentPath{true}) =
-  let segs = path_segments(path)
-    if length(segs) == 1 &&
-       segs[1] isa ArcSegment &&
-       abs(abs(arc_amplitude(segs[1])) - 2π) <= coincidence_tolerance()
-      (center=path_center(segs[1]), radius=path_radius(segs[1]))
+_surface_circle_data(path::CompositePath{true}) =
+  let pieces = path_pieces(path)
+    if length(pieces) == 1 &&
+       pieces[1] isa ArcPath &&
+       abs(abs(arc_amplitude(pieces[1])) - 2π) <= coincidence_tolerance()
+      (center=path_center(pieces[1]), radius=path_radius(pieces[1]))
     else
       nothing
     end
