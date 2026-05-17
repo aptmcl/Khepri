@@ -324,7 +324,7 @@ KhepriBase.b_closed_spline(b::RH, ps, mat) =
   @remote(b, ClosedSpline(ps))
 
 KhepriBase.b_bezier_curve(b::RH, path::BezierPath, mat) =
-  @remote(b, BezierCurve([seg.control_points for seg in path.segments],
+  @remote(b, BezierCurve([seg.control_points for seg in path.spans],
                          is_closed_path(path),
                          mat))
 
@@ -1082,7 +1082,7 @@ KhepriBase.b_set_layer_material(b::RH, layer_ref, mat_ref) =
 KhepriBase.b_set_layer_visible(b::RH, layer, visible) =
   @remote(b, SetLayerVisible(layer, visible))
 KhepriBase.b_set_layer_opacity(b::RH, layer, opacity) =
-  @remote(b, SetLayerTransparency(layer, Float64(opacity)))
+  @remote(b, SetLayerTransparency(layer, opacity))
 
 KhepriBase.b_create_layer_from_ref_value(b::RH, r) =
   let name = @remote(b, LayerName(r)),
