@@ -302,6 +302,50 @@ namespace KhepriRhinoceros {
         public Guid Spline(Point3d[] pts) => doc.Objects.AddCurve(Curve.CreateInterpolatedCurve(pts, 3));
         public Guid SplineTangents(Point3d[] pts, Vector3d start, Vector3d end) => doc.Objects.AddCurve(Curve.CreateInterpolatedCurve(pts, 3, CurveKnotStyle.Chord, start, end));
         public Guid ClosedSpline(Point3d[] pts) => doc.Objects.AddCurve(Curve.CreateInterpolatedCurve(pts.Concat(new[] { pts[0] }), 3));
+        double[] RhinoStyleKnots(double[] knots, int targetCount) {
+            if (knots.Length == targetCount) {
+                return knots;
+            } else if (knots.Length == targetCount + 2) {
+                return knots.Skip(1).Take(targetCount).ToArray();
+            } else {
+                throw new ArgumentException("Unexpected knot vector length");
+            }
+        }
+        void SetKnots(Rhino.Geometry.NurbsCurve curve, double[] knots) {
+            double[] ks = RhinoStyleKnots(knots, curve.Knots.Count);
+            for (int i = 0; i < ks.Length; i++) {
+                curve.Knots[i] = ks[i];
+            }
+        }
+        void SetKnots(Rhino.Geometry.NurbsSurface surface, int direction, double[] knots) {
+            var knotList = direction == 0 ? surface.KnotsU : surface.KnotsV;
+            double[] ks = RhinoStyleKnots(knots, knotList.Count);
+            for (int i = 0; i < ks.Length; i++) {
+                knotList[i] = ks[i];
+            }
+        }
+        static double[] BezierKnots(int count) =>
+            Enumerable.Repeat(0.0, count).Concat(Enumerable.Repeat(1.0, count)).ToArray();
+        public Guid BezierCurve(Point3d[][] controlPoints, bool closed, MatId mat) {
+            PolyCurve curve = new PolyCurve();
+            foreach (Point3d[] pts in controlPoints) {
+                curve.Append(new BezierCurve(pts).ToNurbsCurve());
+            }
+            return SetMaterial(doc.Objects.AddCurve(curve), mat);
+        }
+        Rhino.Geometry.NurbsCurve NurbsCurveFrom(Point3d[] controlPoints, int degree, double[] knots, double[] weights, bool closed) {
+            bool rational = weights != null && weights.Length == controlPoints.Length && weights.Any(w => Math.Abs(w - 1.0) > 1e-12);
+            Rhino.Geometry.NurbsCurve curve = new Rhino.Geometry.NurbsCurve(3, rational, degree + 1, controlPoints.Length);
+            for (int i = 0; i < controlPoints.Length; i++) {
+                curve.Points.SetPoint(i, controlPoints[i], rational ? weights[i] : 1.0);
+            }
+            SetKnots(curve, knots);
+            return curve;
+        }
+        public Guid BSplineCurve(Point3d[] controlPoints, int degree, double[] knots, bool closed, MatId mat) =>
+            SetMaterial(doc.Objects.AddCurve(NurbsCurveFrom(controlPoints, degree, knots, null, closed)), mat);
+        public Guid NurbsCurve(Point3d[] controlPoints, int degree, double[] knots, double[] weights, bool closed, MatId mat) =>
+            SetMaterial(doc.Objects.AddCurve(NurbsCurveFrom(controlPoints, degree, knots, weights, closed)), mat);
         public Guid Circle(Point3d c, Vector3d n, double r) => doc.Objects.AddCircle(new Circle(new Plane(c, n), r));
         Circle CircleFrom(RhinoObject obj) {
             Circle circle = new Circle();
@@ -384,8 +428,8 @@ namespace KhepriRhinoceros {
         public Guid SurfaceClosedPolyLine(Point3d[] pts, MatId mat) =>
             (pts.Length > 2 && pts.Length <= 4) ?
                 Add(pts.Length == 3 ?
-                        NurbsSurface.CreateFromCorners(pts[0], pts[1], pts[2]) :
-                        NurbsSurface.CreateFromCorners(pts[0], pts[1], pts[2], pts[3]), 
+                        Rhino.Geometry.NurbsSurface.CreateFromCorners(pts[0], pts[1], pts[2]) :
+                        Rhino.Geometry.NurbsSurface.CreateFromCorners(pts[0], pts[1], pts[2], pts[3]),
                     mat) :
                 SurfaceFromCurve(new PolylineCurve(pts.Concat(new[] { pts[0] }).ToArray()).ToNurbsCurve(), mat);
         Curve[] ClosedCurvesFromPoints(Point3d[][] ptss, bool[] smooths) =>
@@ -508,7 +552,30 @@ namespace KhepriRhinoceros {
             new PolygonMesh(PolyMeshType.SimpleMesh, m, n, new Point3dCollection(pts), closedM, closedN);
             */
         public Guid SurfaceFromGrid(int nU, int nV, Point3d[] pts, bool closedU, bool closedV, int degreeU, int degreeV, MatId mat) =>
-            Add(NurbsSurface.CreateThroughPoints(pts, nU, nV, degreeU, degreeV, closedU, closedV), mat);
+            Add(Rhino.Geometry.NurbsSurface.CreateThroughPoints(pts, nU, nV, degreeU, degreeV, closedU, closedV), mat);
+        Rhino.Geometry.NurbsSurface NurbsSurfaceFrom(Point3d[] controlPoints, int nU, int nV, int degreeU, int degreeV,
+                                                     double[] knotsU, double[] knotsV, double[] weights) {
+            bool rational = weights != null && weights.Length == controlPoints.Length && weights.Any(w => Math.Abs(w - 1.0) > 1e-12);
+            Rhino.Geometry.NurbsSurface surface = Rhino.Geometry.NurbsSurface.Create(3, rational, degreeU + 1, degreeV + 1, nU, nV);
+            for (int u = 0; u < nU; u++) {
+                for (int v = 0; v < nV; v++) {
+                    int i = u * nV + v;
+                    surface.Points.SetPoint(u, v, controlPoints[i], rational ? weights[i] : 1.0);
+                }
+            }
+            SetKnots(surface, 0, knotsU);
+            SetKnots(surface, 1, knotsV);
+            return surface;
+        }
+        public Guid BezierSurface(Point3d[] controlPoints, int nU, int nV, bool closedU, bool closedV, MatId mat) =>
+            Add(NurbsSurfaceFrom(controlPoints, nU, nV, nU - 1, nV - 1,
+                                 BezierKnots(nU), BezierKnots(nV), null), mat);
+        public Guid BSplineSurface(Point3d[] controlPoints, int nU, int nV, int degreeU, int degreeV,
+                                   double[] knotsU, double[] knotsV, bool closedU, bool closedV, MatId mat) =>
+            Add(NurbsSurfaceFrom(controlPoints, nU, nV, degreeU, degreeV, knotsU, knotsV, null), mat);
+        public Guid NurbsSurface(Point3d[] controlPoints, int nU, int nV, int degreeU, int degreeV,
+                                 double[] knotsU, double[] knotsV, double[] weights, bool closedU, bool closedV, MatId mat) =>
+            Add(NurbsSurfaceFrom(controlPoints, nU, nV, degreeU, degreeV, knotsU, knotsV, weights), mat);
 
         /*
                        public Guid SolidFromGrid(int m, int n, Point3d[] pts, bool closedM, bool closedN, int level, double thickness) {
@@ -1731,7 +1798,7 @@ def show_vertices(shape):
                 } else if (c.IsPolyline()) {
                     if (c is LineCurve) {
                         return 3;
-                    } else if (c is NurbsCurve) {
+                    } else if (c is Rhino.Geometry.NurbsCurve) {
                         return (byte)(7 + (c.IsClosed ? 100 : 0));
                     } else {
                         return (byte)(4 + (c.IsClosed ? 100 : 0));
