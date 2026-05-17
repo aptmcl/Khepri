@@ -30,6 +30,18 @@ using Test
     @test KhepriBase.has_boolean_ops(KhepriRhino.RH) isa KhepriBase.HasBooleanOps{false}
   end
 
+  @testset "Exact geometry capabilities" begin
+    @test KhepriBase.supports_exact_interpolating_spline_curves(KhepriRhino.RH)
+    @test KhepriBase.supports_exact_bezier_curves(KhepriRhino.RH)
+    @test KhepriBase.supports_exact_bspline_curves(KhepriRhino.RH)
+    @test KhepriBase.supports_exact_nurbs_curves(KhepriRhino.RH)
+    @test KhepriBase.supports_exact_polycurves(KhepriRhino.RH)
+    @test KhepriBase.supports_exact_bezier_surfaces(KhepriRhino.RH)
+    @test KhepriBase.supports_exact_bspline_surfaces(KhepriRhino.RH)
+    @test KhepriBase.supports_exact_nurbs_surfaces(KhepriRhino.RH)
+    @test !KhepriBase.supports_exact_trimmed_surfaces(KhepriRhino.RH)
+  end
+
   @testset "Material types" begin
     @test isdefined(KhepriRhino, :RhinoDefaultMaterial)
     @test KhepriRhino.rhino_default_material === KhepriRhino.RhinoDefaultMaterial
@@ -88,6 +100,20 @@ using Test
         end,
         verify = :envelope,
         skip = Symbol[])
+    end
+  end
+
+  if get(ENV, "KHEPRI_RHINO_EXACT_GEOMETRY_TESTS", "0") == "1"
+    if !Sys.iswindows()
+      error("Rhino exact geometry tests require Windows. Run these tests from a native Windows Julia installation.")
+    end
+    @testset "Exact Geometry (Rhino)" begin
+      include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "ExactGeometrySmokeTests.jl"))
+      using .ExactGeometrySmokeTests
+
+      delete_all_shapes()
+      backend(rhino)
+      run_exact_geometry_smoke_tests(rhino)
     end
   end
 end

@@ -76,6 +76,9 @@ public Guid PolyLine(Point3d[] pts)
 public Point3d[] LineVertices(RhinoObject id)
 public Guid Spline(Point3d[] pts)
 public Guid SplineTangents(Point3d[] pts, Vector3d start, Vector3d end)
+public Guid BezierCurve(Point3d[][] controlPoints, bool closed, MatId mat)
+public Guid BSplineCurve(Point3d[] controlPoints, int degree, double[] knots, bool closed, MatId mat)
+public Guid NurbsCurve(Point3d[] controlPoints, int degree, double[] knots, double[] weights, bool closed, MatId mat)
 public Guid ClosedPolyLine(Point3d[] pts)
 public Guid ClosedSpline(Point3d[] pts)
 public Guid Circle(Point3d c, Vector3d n, double r)
@@ -105,6 +108,9 @@ public Guid IrregularPyramid(Point3d[] pts, Point3d apex, MatId mat)
 public Guid IrregularPyramidFrustum(Point3d[] bpts, Point3d[] tpts, MatId mat)
 public Guid PrismWithHoles(Point3d[][] ptss, bool[] smooths, Vector3d dir, MatId mat)
 public Guid SurfaceFromGrid(int nU, int nV, Point3d[] pts, bool closedU, bool closedV, int degreeU, int degreeV, MatId mat)
+public Guid BezierSurface(Point3d[] controlPoints, int nU, int nV, bool closedU, bool closedV, MatId mat)
+public Guid BSplineSurface(Point3d[] controlPoints, int nU, int nV, int degreeU, int degreeV, double[] knotsU, double[] knotsV, bool closedU, bool closedV, MatId mat)
+public Guid NurbsSurface(Point3d[] controlPoints, int nU, int nV, int degreeU, int degreeV, double[] knotsU, double[] knotsV, double[] weights, bool closedU, bool closedV, MatId mat)
 public Brep[] Thicken(RhinoObject obj, double thickness)
 public double[] CurveDomain(RhinoObject obj)
 public double CurveLength(RhinoObject obj)
@@ -287,6 +293,10 @@ KhepriBase.after_connecting(b::RH) =
 const rhino = RH("Rhino", rhino_port, rhino_api)
 
 KhepriBase.has_boolean_ops(::Type{RH}) = HasBooleanOps{false}()
+KhepriBase.curve_geometry_capabilities(::Type{RH}) =
+  CurveGeometryCapabilities{true,true,true,true,true}()
+KhepriBase.surface_geometry_capabilities(::Type{RH}) =
+  SurfaceGeometryCapabilities{true,true,true,false}()
 KhepriBase.backend(::RHRef) = rhino
 
 # Primitives
@@ -312,6 +322,26 @@ KhepriBase.b_spline(b::RH, ps, v0, v1, mat) =
 
 KhepriBase.b_closed_spline(b::RH, ps, mat) =
   @remote(b, ClosedSpline(ps))
+
+KhepriBase.b_bezier_curve(b::RH, path::BezierPath, mat) =
+  @remote(b, BezierCurve([seg.control_points for seg in path.segments],
+                         is_closed_path(path),
+                         mat))
+
+KhepriBase.b_bspline_curve(b::RH, path::BSplinePath{Closed,false}, mat) where {Closed} =
+  @remote(b, BSplineCurve(path.control_points,
+                          path.degree,
+                          path.knots,
+                          is_closed_path(path),
+                          mat))
+
+KhepriBase.b_nurbs_curve(b::RH, path::NurbsPath, mat) =
+  @remote(b, NurbsCurve(path.control_points,
+                        path.degree,
+                        path.knots,
+                        path.weights,
+                        is_closed_path(path),
+                        mat))
 
 KhepriBase.b_circle(b::RH, c, r, mat) =
   @remote(b, Circle(c, vz(1, c.cs), r))
@@ -392,6 +422,39 @@ KhepriBase.b_surface_grid(b::RH, ptss, closed_u, closed_v, smooth_u, smooth_v, m
                                smooth_u ? order(nu) : 1,
                                smooth_v ? order(nv) : 1,
 							   mat))
+  end
+
+rhino_surface_points(s::TensorProductSurface) =
+  reshape(permutedims(s.control_points), :)
+
+rhino_surface_weights(s::BSplineSurface) =
+  isnothing(s.weights) ? Float64[] : reshape(permutedims(s.weights), :)
+
+KhepriBase.b_bezier_surface(b::RH, s::BezierSurface{ClosedU,ClosedV}, mat) where {ClosedU,ClosedV} =
+  let (nu, nv) = size(s.control_points)
+    @remote(b, BezierSurface(rhino_surface_points(s), nu, nv,
+                             ClosedU,
+                             ClosedV,
+                             mat))
+  end
+
+KhepriBase.b_bspline_surface(b::RH, s::BSplineSurface{ClosedU,ClosedV,false}, mat) where {ClosedU,ClosedV} =
+  let (nu, nv) = size(s.control_points)
+    @remote(b, BSplineSurface(rhino_surface_points(s), nu, nv,
+                              s.degree_u, s.degree_v,
+                              s.knots_u, s.knots_v,
+                              ClosedU, ClosedV,
+                              mat))
+  end
+
+KhepriBase.b_nurbs_surface(b::RH, s::BSplineSurface{ClosedU,ClosedV,true}, mat) where {ClosedU,ClosedV} =
+  let (nu, nv) = size(s.control_points)
+    @remote(b, NurbsSurface(rhino_surface_points(s), nu, nv,
+                            s.degree_u, s.degree_v,
+                            s.knots_u, s.knots_v,
+                            rhino_surface_weights(s),
+                            ClosedU, ClosedV,
+                            mat))
   end
 
 KhepriBase.b_surface_mesh(b::RH, vertices, faces, mat) =
