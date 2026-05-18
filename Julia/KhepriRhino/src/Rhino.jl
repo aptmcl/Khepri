@@ -86,6 +86,9 @@ public Point3d CircleCenter(RhinoObject obj)
 public Vector3d CircleNormal(RhinoObject obj)
 public double CircleRadius(RhinoObject obj)
 public Guid Ellipse(Plane p, double radiusX, double radiusY)
+public Plane EllipsePlane(RhinoObject obj)
+public double EllipseRadiusX(RhinoObject obj)
+public double EllipseRadiusY(RhinoObject obj)
 public Guid Arc(Plane p, double radius, double startAngle, double endAngle)
 public Point3d ArcCenter(RhinoObject obj)
 public Vector3d ArcNormal(RhinoObject obj)
@@ -93,6 +96,13 @@ public double ArcRadius(RhinoObject obj)
 public double ArcStartAngle(RhinoObject obj)
 public double ArcEndAngle(RhinoObject obj)
 public Point3d[] CurveSamplePoints(RhinoObject obj, int samples)
+public Point3d CurveClosestPoint(RhinoObject obj, Point3d point)
+public double CurveClosestParameter(RhinoObject obj, Point3d point)
+public Point3d[] CurveCurveClosestPoints(RhinoObject obj0, RhinoObject obj1)
+public double[] CurveCurveClosestParameters(RhinoObject obj0, RhinoObject obj1)
+public Point3d BrepClosestPoint(RhinoObject obj, Point3d point)
+public int CurvePointClassification(RhinoObject obj, Point3d point, double tolerance)
+public int BrepPointClassification(RhinoObject obj, Point3d point, double tolerance)
 public Guid Text(string str, Plane p, double height, string fontName, bool bold, bool italic)
 public Guid JoinCurves(Guid[] objs)
 public Guid Mesh(Point3d[] pts, int[][] faces, MatId mat)
@@ -470,7 +480,7 @@ KhepriBase.b_nurbs_surface(b::RH, s::BSplineSurface{ClosedU,ClosedV,true}, mat) 
   end
 
 const RH_GEOMETRY_INTERSECTION_SAMPLES = 64
-const RHIntersectionSurface = Union{Region,BezierSurface,BSplineSurface,TrimmedSurface{PlaneSurface}}
+const RHIntersectionSurface = Union{PlaneSurface,Region,BezierSurface,BSplineSurface,TrimmedSurface{PlaneSurface}}
 
 rhino_temp_refs(refs::AbstractVector) = collect(refs)
 rhino_temp_refs(ref) = RHId[ref]
@@ -514,13 +524,21 @@ function rhino_intersection_set(a, b, points, polylines, opts; curve_kind::Symbo
 end
 
 KhepriBase.supports_geometry_operation(::RH, op::Symbol, ::Path, ::Path) =
-  op in (:intersections, :section)
+  op in (:intersections, :section, :closest_points)
 KhepriBase.supports_geometry_operation(::RH, op::Symbol, ::Path, ::RHIntersectionSurface) =
   op in (:intersections, :section)
 KhepriBase.supports_geometry_operation(::RH, op::Symbol, ::RHIntersectionSurface, ::Path) =
   op in (:intersections, :section)
 KhepriBase.supports_geometry_operation(::RH, op::Symbol, ::RHIntersectionSurface, ::RHIntersectionSurface) =
   op in (:intersections, :section)
+KhepriBase.supports_geometry_operation(::RH, op::Symbol, ::Loc, ::Path) =
+  op in (:project, :closest_points)
+KhepriBase.supports_geometry_operation(::RH, op::Symbol, ::Path, ::Loc) =
+  op in (:closest_points, :classify)
+KhepriBase.supports_geometry_operation(::RH, op::Symbol, ::Loc, ::RHIntersectionSurface) =
+  op in (:project, :closest_points)
+KhepriBase.supports_geometry_operation(::RH, op::Symbol, ::RHIntersectionSurface, ::Loc) =
+  op in (:closest_points, :classify)
 
 function KhepriBase.b_intersections(b::RH, a::Path, c::Path, opts::GeometryOperationOptions)
   ar = KhepriBase.b_stroke(b, a, KhepriBase.void_ref(b))
@@ -574,6 +592,85 @@ function KhepriBase.b_section(b::RH, a, c, opts::GeometryOperationOptions)
   r = KhepriBase.b_intersections(b, a, c, opts)
   IntersectionSet(a, c, IntersectionElement[e for e in r.elements if e isa CurveIntersection];
                   tolerance=r.tolerance, method=r.method, exactness=r.exactness)
+end
+
+function KhepriBase.b_project_geometry(b::RH, p::Loc, target::Path, opts::GeometryOperationOptions)
+  tr = KhepriBase.b_stroke(b, target, KhepriBase.void_ref(b))
+  try
+    projected = @remote(b, CurveClosestPoint(tr, p))
+    t = @remote(b, CurveClosestParameter(tr, p))
+    ProjectionResult(p, target, projected, (target=t,), distance(p, projected),
+                     :backend, :toleranced)
+  finally
+    rhino_delete_temp_refs(b, tr)
+  end
+end
+
+function KhepriBase.b_project_geometry(b::RH, p::Loc, target::SurfaceGeometry, opts::GeometryOperationOptions)
+  tr = KhepriBase.b_surface(b, target, KhepriBase.void_ref(b))
+  try
+    projected = @remote(b, BrepClosestPoint(tr, p))
+    ProjectionResult(p, target, projected, (;), distance(p, projected),
+                     :backend, :toleranced)
+  finally
+    rhino_delete_temp_refs(b, tr)
+  end
+end
+
+function KhepriBase.b_closest_points(b::RH, p::Loc, target::Path, opts::GeometryOperationOptions)
+  proj = KhepriBase.b_project_geometry(b, p, target, opts)
+  ClosestPointsResult(p, proj.geometry, nothing, get(proj.parameters, :target, nothing),
+                      proj.distance, proj.method, proj.exactness)
+end
+
+KhepriBase.b_closest_points(b::RH, target::Path, p::Loc, opts::GeometryOperationOptions) =
+  let r = KhepriBase.b_closest_points(b, p, target, opts)
+    ClosestPointsResult(r.second, r.first, r.second_parameter, r.first_parameter,
+                        r.distance, r.method, r.exactness)
+  end
+
+function KhepriBase.b_closest_points(b::RH, p::Loc, target::SurfaceGeometry, opts::GeometryOperationOptions)
+  proj = KhepriBase.b_project_geometry(b, p, target, opts)
+  ClosestPointsResult(p, proj.geometry, nothing, nothing,
+                      proj.distance, proj.method, proj.exactness)
+end
+
+KhepriBase.b_closest_points(b::RH, target::SurfaceGeometry, p::Loc, opts::GeometryOperationOptions) =
+  let r = KhepriBase.b_closest_points(b, p, target, opts)
+    ClosestPointsResult(r.second, r.first, r.second_parameter, r.first_parameter,
+                        r.distance, r.method, r.exactness)
+  end
+
+function KhepriBase.b_closest_points(b::RH, a::Path, c::Path, opts::GeometryOperationOptions)
+  ar = KhepriBase.b_stroke(b, a, KhepriBase.void_ref(b))
+  cr = KhepriBase.b_stroke(b, c, KhepriBase.void_ref(b))
+  try
+    pts = @remote(b, CurveCurveClosestPoints(ar, cr))
+    params = @remote(b, CurveCurveClosestParameters(ar, cr))
+    ClosestPointsResult(pts[1], pts[2], params[1], params[2],
+                        distance(pts[1], pts[2]), :backend, :toleranced)
+  finally
+    rhino_delete_temp_refs(b, ar, cr)
+  end
+end
+
+function KhepriBase.b_classify_geometry(b::RH, path::Path, p::Loc, opts::GeometryOperationOptions)
+  pr = KhepriBase.b_stroke(b, path, KhepriBase.void_ref(b))
+  try
+    @remote(b, CurvePointClassification(pr, p, opts.tolerance)) == 1 ? :on : :outside
+  finally
+    rhino_delete_temp_refs(b, pr)
+  end
+end
+
+function KhepriBase.b_classify_geometry(b::RH, surface::SurfaceGeometry, p::Loc, opts::GeometryOperationOptions)
+  sr = KhepriBase.b_surface(b, surface, KhepriBase.void_ref(b))
+  try
+    code = @remote(b, BrepPointClassification(sr, p, opts.tolerance))
+    code == 1 ? :inside : code == 2 ? :boundary : :outside
+  finally
+    rhino_delete_temp_refs(b, sr)
+  end
 end
 
 KhepriBase.b_surface_mesh(b::RH, vertices, faces, mat) =
@@ -1221,6 +1318,10 @@ KhepriBase.b_create_shape_from_ref_value(b::RH, r) =
       line(@remote(b, LineVertices(r)))
     elseif code == 7
       spline(@remote(b, CurveSamplePoints(r, 16)))
+    elseif code == 8
+      ellipse(@remote(b, EllipsePlane(r)),
+              @remote(b, EllipseRadiusX(r)),
+              @remote(b, EllipseRadiusY(r)))
     elseif code == 9
       let start_angle = mod(@remote(b, ArcStartAngle(r)), 2pi),
           end_angle = mod(@remote(b, ArcEndAngle(r)), 2pi)

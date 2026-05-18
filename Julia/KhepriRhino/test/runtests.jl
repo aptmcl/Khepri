@@ -42,6 +42,16 @@ using Test
     @test !KhepriBase.supports_exact_trimmed_surfaces(KhepriRhino.RH)
   end
 
+  @testset "Backend geometry mapping" begin
+    report = KhepriBase.backend_geometry_mapping(rhino)
+    @test report.import_mapping.storage == :remote_refs
+    @test report.import_mapping.all_shapes
+    @test report.import_mapping.create_shape
+    @test report.operations.closest_points_path_path
+    @test report.operations.project_point_surface
+    @test report.operations.classify_region_point
+  end
+
   @testset "Material types" begin
     @test isdefined(KhepriRhino, :RhinoDefaultMaterial)
     @test KhepriRhino.rhino_default_material === KhepriRhino.RhinoDefaultMaterial
