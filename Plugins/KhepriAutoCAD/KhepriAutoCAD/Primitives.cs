@@ -1188,6 +1188,14 @@ namespace KhepriAutoCAD {
             BooleanOperation(objId0, objId1, BooleanOperationType.BoolIntersect);
         public ObjectId Subtract(ObjectId objId0, ObjectId objId1) =>
             BooleanOperation(objId0, objId1, BooleanOperationType.BoolSubtract);
+        public Point3d[] IntersectionPoints(ObjectId objId0, ObjectId objId1) {
+            CommitAndStartTransaction();
+            Entity ent0 = tr.GetObject(objId0, OpenMode.ForRead) as Entity;
+            Entity ent1 = tr.GetObject(objId1, OpenMode.ForRead) as Entity;
+            Point3dCollection points = new Point3dCollection();
+            ent0.IntersectWith(ent1, Autodesk.AutoCAD.DatabaseServices.Intersect.OnBothOperands, points, IntPtr.Zero, IntPtr.Zero);
+            return points.Cast<Point3d>().ToArray();
+        }
         public void Slice(ObjectId id, Point3d p, Vector3d n) {
             Solid3d obj = tr.GetObject(id, OpenMode.ForWrite) as Solid3d;
             obj.Slice(new Plane(p, n.Negate()));
