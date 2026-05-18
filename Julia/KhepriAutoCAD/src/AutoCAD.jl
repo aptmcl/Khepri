@@ -338,6 +338,7 @@ public ObjectId LoftWithMaterial(ObjectId[] profilesIds, ObjectId[] guidesIds, b
 public ObjectId Unite(ObjectId objId0, ObjectId objId1)
 public ObjectId Intersect(ObjectId objId0, ObjectId objId1)
 public ObjectId Subtract(ObjectId objId0, ObjectId objId1)
+public Point3d[] IntersectionPoints(ObjectId objId0, ObjectId objId1)
 public void Slice(ObjectId id, Point3d p, Vector3d n)
 public ObjectId Revolve(ObjectId profileId, Point3d p, Vector3d n, double startAngle, double amplitude)
 public ObjectId RevolveWithMaterial(ObjectId profileId, Point3d p, Vector3d n, double startAngle, double amplitude, ObjectId matId)
@@ -1209,6 +1210,51 @@ KhepriBase.b_nurbs_surface(b::ACAD, s::BSplineSurface{ClosedU,ClosedV,true}, mat
                             autocad_surface_weights(s),
                             mat))
   end
+
+const ACADIntersectionSurface = Union{Region,BezierSurface,BSplineSurface,TrimmedSurface{PlaneSurface}}
+
+function autocad_intersection_set(a, b, points, opts)
+  elements = IntersectionElement[PointIntersection(p; kind=:transversal) for p in points]
+  IntersectionSet(a, b, elements; tolerance=opts.tolerance,
+                  method=:backend, exactness=:toleranced)
+end
+
+KhepriBase.supports_geometry_operation(::ACAD, op::Symbol, ::Path, ::Path) =
+  op == :intersections
+KhepriBase.supports_geometry_operation(::ACAD, op::Symbol, ::Path, ::ACADIntersectionSurface) =
+  op == :intersections
+KhepriBase.supports_geometry_operation(::ACAD, op::Symbol, ::ACADIntersectionSurface, ::Path) =
+  op == :intersections
+
+function KhepriBase.b_intersections(b::ACAD, a::Path, c::Path, opts::GeometryOperationOptions)
+  ar = KhepriBase.b_stroke(b, a, KhepriBase.void_ref(b))
+  cr = KhepriBase.b_stroke(b, c, KhepriBase.void_ref(b))
+  try
+    autocad_intersection_set(a, c, @remote(b, IntersectionPoints(ar, cr)), opts)
+  finally
+    KhepriBase.b_delete_refs(b, ACADId[ar, cr])
+  end
+end
+
+function KhepriBase.b_intersections(b::ACAD, curve::Path, surface::SurfaceGeometry, opts::GeometryOperationOptions)
+  cr = KhepriBase.b_stroke(b, curve, KhepriBase.void_ref(b))
+  sr = KhepriBase.b_surface(b, surface, KhepriBase.void_ref(b))
+  try
+    autocad_intersection_set(curve, surface, @remote(b, IntersectionPoints(cr, sr)), opts)
+  finally
+    KhepriBase.b_delete_refs(b, ACADId[cr, sr])
+  end
+end
+
+function KhepriBase.b_intersections(b::ACAD, surface::SurfaceGeometry, curve::Path, opts::GeometryOperationOptions)
+  cr = KhepriBase.b_stroke(b, curve, KhepriBase.void_ref(b))
+  sr = KhepriBase.b_surface(b, surface, KhepriBase.void_ref(b))
+  try
+    autocad_intersection_set(surface, curve, @remote(b, IntersectionPoints(cr, sr)), opts)
+  finally
+    KhepriBase.b_delete_refs(b, ACADId[cr, sr])
+  end
+end
 
 realize(b::ACAD, s::Thicken) =
   and_mark_deleted(b,
