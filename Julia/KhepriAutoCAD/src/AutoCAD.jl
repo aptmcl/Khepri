@@ -301,6 +301,10 @@ public Point3d CircleCenter(Entity ent)
 public Vector3d CircleNormal(Entity ent)
 public double CircleRadius(Entity ent)
 public Entity Ellipse(Point3d c, Vector3d n, Vector3d majorAxis, double radiusRatio)
+public Point3d EllipseCenter(Entity ent)
+public Vector3d EllipseNormal(Entity ent)
+public Vector3d EllipseMajorAxis(Entity ent)
+public double EllipseRadiusRatio(Entity ent)
 public Entity Arc(Point3d c, Vector3d vx, Vector3d vy, double radius, double startAngle, double endAngle)
 public Point3d ArcCenter(Entity ent)
 public Vector3d ArcNormal(Entity ent)
@@ -1588,6 +1592,15 @@ KhepriBase.b_create_shape_from_ref_value(b::ACAD, r) =
             else
                 spline(@remote(b, SplineInterpPoints(r)), tans[1], tans[2])
             end
+        end
+    elseif code == 8
+        let center = @remote(b, EllipseCenter(r)),
+            normal = @remote(b, EllipseNormal(r)),
+            major_axis = @remote(b, EllipseMajorAxis(r)),
+            radius_x = norm(major_axis),
+            radius_y = radius_x * @remote(b, EllipseRadiusRatio(r))
+            ellipse(loc_from_o_vx_vy(center, major_axis, cross(normal, major_axis)),
+                    radius_x, radius_y)
         end
     elseif code == 9
         let start_angle = mod(@remote(b, ArcStartAngle(r)), 2pi),
