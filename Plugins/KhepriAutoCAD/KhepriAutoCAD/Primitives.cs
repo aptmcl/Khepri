@@ -401,6 +401,10 @@ namespace KhepriAutoCAD {
 
         public Entity Ellipse(Point3d c, Vector3d n, Vector3d majorAxis, double radiusRatio) =>
             new Ellipse(c, n, majorAxis, radiusRatio, 0, 2 * Math.PI);
+        public Point3d EllipseCenter(Entity ent) => ((Ellipse)ent).Center;
+        public Vector3d EllipseNormal(Entity ent) => ((Ellipse)ent).Normal;
+        public Vector3d EllipseMajorAxis(Entity ent) => ((Ellipse)ent).MajorAxis;
+        public double EllipseRadiusRatio(Entity ent) => ((Ellipse)ent).RadiusRatio;
 
         public Entity Arc(Point3d c, Vector3d vx, Vector3d vy, double radius, double startAngle, double endAngle) {
             vx = vx.GetNormal();
