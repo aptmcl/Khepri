@@ -87,6 +87,12 @@ public Vector3d CircleNormal(RhinoObject obj)
 public double CircleRadius(RhinoObject obj)
 public Guid Ellipse(Plane p, double radiusX, double radiusY)
 public Guid Arc(Plane p, double radius, double startAngle, double endAngle)
+public Point3d ArcCenter(RhinoObject obj)
+public Vector3d ArcNormal(RhinoObject obj)
+public double ArcRadius(RhinoObject obj)
+public double ArcStartAngle(RhinoObject obj)
+public double ArcEndAngle(RhinoObject obj)
+public Point3d[] CurveSamplePoints(RhinoObject obj, int samples)
 public Guid Text(string str, Plane p, double height, string fontName, bool bold, bool italic)
 public Guid JoinCurves(Guid[] objs)
 public Guid Mesh(Point3d[] pts, int[][] faces, MatId mat)
@@ -477,6 +483,23 @@ function rhino_delete_temp_refs(b::RH, refs...)
   isempty(all_refs) || KhepriBase.b_delete_refs(b, all_refs)
 end
 
+function rhino_collinear_points(pts, tol)
+  length(pts) <= 2 && return true
+  p0 = in_world(pts[1])
+  p1 = in_world(pts[end])
+  dx, dy, dz = p1.x - p0.x, p1.y - p0.y, p1.z - p0.z
+  denom = max(sqrt(dx^2 + dy^2 + dz^2), tol)
+  all(pts[2:end-1]) do p
+    q = in_world(p)
+    qx, qy, qz = q.x - p0.x, q.y - p0.y, q.z - p0.z
+    cx, cy, cz = qy * dz - qz * dy, qz * dx - qx * dz, qx * dy - qy * dx
+    sqrt(cx^2 + cy^2 + cz^2) / denom <= tol
+  end
+end
+
+rhino_polyline_curve(pts, tol) =
+  rhino_collinear_points(pts, tol) ? line_path(pts[1], pts[end]) : polygonal_path(Loc[pts...])
+
 function rhino_intersection_set(a, b, points, polylines, opts; curve_kind::Symbol=:section)
   elements = IntersectionElement[]
   for p in points
@@ -484,7 +507,7 @@ function rhino_intersection_set(a, b, points, polylines, opts; curve_kind::Symbo
   end
   for pts in polylines
     length(pts) >= 2 || continue
-    push!(elements, CurveIntersection(polygonal_path(Loc[pts...]); kind=curve_kind))
+    push!(elements, CurveIntersection(rhino_polyline_curve(pts, opts.tolerance); kind=curve_kind))
   end
   IntersectionSet(a, b, elements; tolerance=opts.tolerance,
                   method=:backend, exactness=:toleranced)
@@ -1197,10 +1220,17 @@ KhepriBase.b_create_shape_from_ref_value(b::RH, r) =
     elseif 3 <= code <= 6
       line(@remote(b, LineVertices(r)))
     elseif code == 7
-      spline([xy(0,0)], false, false, #HACK obtain interpolation points
-             ref=ref)
+      spline(@remote(b, CurveSamplePoints(r, 16)))
+    elseif code == 9
+      let start_angle = mod(@remote(b, ArcStartAngle(r)), 2pi),
+          end_angle = mod(@remote(b, ArcEndAngle(r)), 2pi)
+        arc(loc_from_o_vz(@remote(b, ArcCenter(r)), @remote(b, ArcNormal(r))),
+            @remote(b, ArcRadius(r)), start_angle, mod(end_angle - start_angle, 2pi))
+      end
     elseif 103 <= code <= 106
       polygon(@remote(b, LineVertices(r)))
+    elseif code == 107
+      closed_spline(@remote(b, CurveSamplePoints(r, 16))[1:end-1])
     elseif code == 40
       # FIXME: frontier is missing
       surface(frontier=[])
