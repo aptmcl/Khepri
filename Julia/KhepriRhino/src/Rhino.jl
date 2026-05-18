@@ -126,6 +126,12 @@ public Brep Loft(RhinoObject[] profiles, RhinoObject[] rails, bool ruled, bool c
 public Guid[] Unite(RhinoObject[]objs)
 public Guid[] Intersect(RhinoObject obj0, RhinoObject obj1)
 public Guid[] Subtract(RhinoObject obj0, RhinoObject obj1)
+public Point3d[] CurveCurveIntersectionPoints(RhinoObject obj0, RhinoObject obj1, double tolerance)
+public Point3d[][] CurveCurveIntersectionPolylines(RhinoObject obj0, RhinoObject obj1, double tolerance, int samples)
+public Point3d[] CurveBrepIntersectionPoints(RhinoObject curveObj, RhinoObject brepObj, double tolerance)
+public Point3d[][] CurveBrepIntersectionPolylines(RhinoObject curveObj, RhinoObject brepObj, double tolerance, int samples)
+public Point3d[] BrepBrepIntersectionPoints(RhinoObject obj0, RhinoObject obj1, double tolerance)
+public Point3d[][] BrepBrepIntersectionPolylines(RhinoObject obj0, RhinoObject obj1, double tolerance, int samples)
 public Guid[] Slice(RhinoObject obj, Point3d p, Vector3d n)
 public Guid Move(Guid id, Vector3d v)
 public Guid Scale(Guid id, Point3d p, double s)
@@ -456,6 +462,96 @@ KhepriBase.b_nurbs_surface(b::RH, s::BSplineSurface{ClosedU,ClosedV,true}, mat) 
                             ClosedU, ClosedV,
                             mat))
   end
+
+const RH_GEOMETRY_INTERSECTION_SAMPLES = 64
+const RHIntersectionSurface = Union{Region,BezierSurface,BSplineSurface,TrimmedSurface{PlaneSurface}}
+
+rhino_temp_refs(refs::AbstractVector) = collect(refs)
+rhino_temp_refs(ref) = RHId[ref]
+
+function rhino_delete_temp_refs(b::RH, refs...)
+  all_refs = RHId[]
+  for ref in refs
+    append!(all_refs, rhino_temp_refs(ref))
+  end
+  isempty(all_refs) || KhepriBase.b_delete_refs(b, all_refs)
+end
+
+function rhino_intersection_set(a, b, points, polylines, opts; curve_kind::Symbol=:section)
+  elements = IntersectionElement[]
+  for p in points
+    push!(elements, PointIntersection(p; kind=:transversal))
+  end
+  for pts in polylines
+    length(pts) >= 2 || continue
+    push!(elements, CurveIntersection(polygonal_path(Loc[pts...]); kind=curve_kind))
+  end
+  IntersectionSet(a, b, elements; tolerance=opts.tolerance,
+                  method=:backend, exactness=:toleranced)
+end
+
+KhepriBase.supports_geometry_operation(::RH, op::Symbol, ::Path, ::Path) =
+  op in (:intersections, :section)
+KhepriBase.supports_geometry_operation(::RH, op::Symbol, ::Path, ::RHIntersectionSurface) =
+  op in (:intersections, :section)
+KhepriBase.supports_geometry_operation(::RH, op::Symbol, ::RHIntersectionSurface, ::Path) =
+  op in (:intersections, :section)
+KhepriBase.supports_geometry_operation(::RH, op::Symbol, ::RHIntersectionSurface, ::RHIntersectionSurface) =
+  op in (:intersections, :section)
+
+function KhepriBase.b_intersections(b::RH, a::Path, c::Path, opts::GeometryOperationOptions)
+  ar = KhepriBase.b_stroke(b, a, KhepriBase.void_ref(b))
+  cr = KhepriBase.b_stroke(b, c, KhepriBase.void_ref(b))
+  try
+    points = @remote(b, CurveCurveIntersectionPoints(ar, cr, opts.tolerance))
+    polylines = @remote(b, CurveCurveIntersectionPolylines(ar, cr, opts.tolerance, RH_GEOMETRY_INTERSECTION_SAMPLES))
+    rhino_intersection_set(a, c, points, polylines, opts; curve_kind=:overlap)
+  finally
+    rhino_delete_temp_refs(b, ar, cr)
+  end
+end
+
+function KhepriBase.b_intersections(b::RH, curve::Path, surface::SurfaceGeometry, opts::GeometryOperationOptions)
+  cr = KhepriBase.b_stroke(b, curve, KhepriBase.void_ref(b))
+  sr = KhepriBase.b_surface(b, surface, KhepriBase.void_ref(b))
+  try
+    points = @remote(b, CurveBrepIntersectionPoints(cr, sr, opts.tolerance))
+    polylines = @remote(b, CurveBrepIntersectionPolylines(cr, sr, opts.tolerance, RH_GEOMETRY_INTERSECTION_SAMPLES))
+    rhino_intersection_set(curve, surface, points, polylines, opts; curve_kind=:overlap)
+  finally
+    rhino_delete_temp_refs(b, cr, sr)
+  end
+end
+
+function KhepriBase.b_intersections(b::RH, surface::SurfaceGeometry, curve::Path, opts::GeometryOperationOptions)
+  cr = KhepriBase.b_stroke(b, curve, KhepriBase.void_ref(b))
+  sr = KhepriBase.b_surface(b, surface, KhepriBase.void_ref(b))
+  try
+    points = @remote(b, CurveBrepIntersectionPoints(cr, sr, opts.tolerance))
+    polylines = @remote(b, CurveBrepIntersectionPolylines(cr, sr, opts.tolerance, RH_GEOMETRY_INTERSECTION_SAMPLES))
+    rhino_intersection_set(surface, curve, points, polylines, opts; curve_kind=:overlap)
+  finally
+    rhino_delete_temp_refs(b, cr, sr)
+  end
+end
+
+function KhepriBase.b_intersections(b::RH, a::SurfaceGeometry, c::SurfaceGeometry, opts::GeometryOperationOptions)
+  ar = KhepriBase.b_surface(b, a, KhepriBase.void_ref(b))
+  cr = KhepriBase.b_surface(b, c, KhepriBase.void_ref(b))
+  try
+    points = @remote(b, BrepBrepIntersectionPoints(ar, cr, opts.tolerance))
+    polylines = @remote(b, BrepBrepIntersectionPolylines(ar, cr, opts.tolerance, RH_GEOMETRY_INTERSECTION_SAMPLES))
+    rhino_intersection_set(a, c, points, polylines, opts; curve_kind=:section)
+  finally
+    rhino_delete_temp_refs(b, ar, cr)
+  end
+end
+
+function KhepriBase.b_section(b::RH, a, c, opts::GeometryOperationOptions)
+  r = KhepriBase.b_intersections(b, a, c, opts)
+  IntersectionSet(a, c, IntersectionElement[e for e in r.elements if e isa CurveIntersection];
+                  tolerance=r.tolerance, method=r.method, exactness=r.exactness)
+end
 
 KhepriBase.b_surface_mesh(b::RH, vertices, faces, mat) =
   let ensure_4(v) = length(v) == 4 ? v : [v..., v[3]]
