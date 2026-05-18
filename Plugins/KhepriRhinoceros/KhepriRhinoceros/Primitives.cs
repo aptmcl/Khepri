@@ -871,6 +871,81 @@ namespace KhepriRhinoceros {
                 outCurves.All(curve => curve.IsClosed);
         }
 
+        Point3d[] SampleCurve(Curve curve, int samples) {
+            int count = Math.Max(2, samples);
+            double[] parameters = curve.DivideByCount(count - 1, true);
+            if (parameters == null || parameters.Length == 0) {
+                return new[] { curve.PointAtStart, curve.PointAtEnd };
+            }
+            return parameters.Select(t => curve.PointAt(t)).ToArray();
+        }
+
+        Point3d[][] SampleCurves(IEnumerable<Curve> curves, int samples) {
+            return curves
+                .Where(curve => curve != null)
+                .Select(curve => SampleCurve(curve, samples))
+                .Where(points => points.Length >= 2)
+                .ToArray();
+        }
+
+        public Point3d[] CurveCurveIntersectionPoints(RhinoObject obj0, RhinoObject obj1, double tolerance) {
+            Curve curve0 = AsCurve(obj0);
+            Curve curve1 = AsCurve(obj1);
+            CurveIntersections events = Intersection.CurveCurve(curve0, curve1, tolerance, tolerance);
+            return events
+                .Where(e => e.IsPoint)
+                .Select(e => e.PointA)
+                .ToArray();
+        }
+
+        public Point3d[][] CurveCurveIntersectionPolylines(RhinoObject obj0, RhinoObject obj1, double tolerance, int samples) {
+            Curve curve0 = AsCurve(obj0);
+            Curve curve1 = AsCurve(obj1);
+            CurveIntersections events = Intersection.CurveCurve(curve0, curve1, tolerance, tolerance);
+            Curve[] overlaps = events
+                .Where(e => e.IsOverlap)
+                .Select(e => curve0.Trim(e.OverlapA))
+                .Where(curve => curve != null)
+                .ToArray();
+            return SampleCurves(overlaps, samples);
+        }
+
+        public Point3d[] CurveBrepIntersectionPoints(RhinoObject curveObj, RhinoObject brepObj, double tolerance) {
+            Curve curve = AsCurve(curveObj);
+            Brep brep = AsBrep(brepObj);
+            Curve[] overlapCurves;
+            Point3d[] intersectionPoints;
+            Intersection.CurveBrep(curve, brep, tolerance, out overlapCurves, out intersectionPoints);
+            return intersectionPoints ?? new Point3d[] { };
+        }
+
+        public Point3d[][] CurveBrepIntersectionPolylines(RhinoObject curveObj, RhinoObject brepObj, double tolerance, int samples) {
+            Curve curve = AsCurve(curveObj);
+            Brep brep = AsBrep(brepObj);
+            Curve[] overlapCurves;
+            Point3d[] intersectionPoints;
+            Intersection.CurveBrep(curve, brep, tolerance, out overlapCurves, out intersectionPoints);
+            return SampleCurves(overlapCurves ?? new Curve[] { }, samples);
+        }
+
+        public Point3d[] BrepBrepIntersectionPoints(RhinoObject obj0, RhinoObject obj1, double tolerance) {
+            Brep brep0 = AsBrep(obj0);
+            Brep brep1 = AsBrep(obj1);
+            Curve[] intersectionCurves;
+            Point3d[] intersectionPoints;
+            Intersection.BrepBrep(brep0, brep1, tolerance, out intersectionCurves, out intersectionPoints);
+            return intersectionPoints ?? new Point3d[] { };
+        }
+
+        public Point3d[][] BrepBrepIntersectionPolylines(RhinoObject obj0, RhinoObject obj1, double tolerance, int samples) {
+            Brep brep0 = AsBrep(obj0);
+            Brep brep1 = AsBrep(obj1);
+            Curve[] intersectionCurves;
+            Point3d[] intersectionPoints;
+            Intersection.BrepBrep(brep0, brep1, tolerance, out intersectionCurves, out intersectionPoints);
+            return SampleCurves(intersectionCurves ?? new Curve[] { }, samples);
+        }
+
         public Guid[] Unite(RhinoObject[]objs) {
             Brep[] breps = objs.Select(AsBrep).ToArray();
             Brep[] newBreps = null;
