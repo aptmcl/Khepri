@@ -94,10 +94,17 @@ namespace KhepriAutoCAD {
         public override object rObject(byte code) {
             switch (code) {
                 case 7:
-                case 8:
-                    //This a ARGB color
-                    rByte(); //Discard alpha
-                    return rColor();
+                    return Color.FromRgb(
+                        UnitFloatToByte(rSingle()),
+                        UnitFloatToByte(rSingle()),
+                        UnitFloatToByte(rSingle()));
+                case 8: {
+                    byte red = UnitFloatToByte(rSingle());
+                    byte green = UnitFloatToByte(rSingle());
+                    byte blue = UnitFloatToByte(rSingle());
+                    rSingle(); // Alpha is not represented by Autodesk.AutoCAD.Colors.Color.
+                    return Color.FromRgb(red, green, blue);
+                }
                 default: return base.rObject(code);
             }
         }
