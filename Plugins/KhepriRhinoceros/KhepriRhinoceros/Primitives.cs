@@ -367,6 +367,20 @@ namespace KhepriRhinoceros {
         public Guid Arc(Plane p, double radius, double startAngle, double endAngle) =>
             doc.Objects.AddArc(new Arc(new Circle(p, radius), new Interval(startAngle, endAngle)));
 
+        Arc AsArc(RhinoObject obj) {
+            Arc arc;
+            if (!AsCurve(obj).TryGetArc(out arc)) {
+                throw new Exception("Object is not an arc");
+            }
+            return arc;
+        }
+        public Point3d ArcCenter(RhinoObject obj) => AsArc(obj).Center;
+        public Vector3d ArcNormal(RhinoObject obj) => AsArc(obj).Plane.Normal;
+        public double ArcRadius(RhinoObject obj) => AsArc(obj).Radius;
+        public double ArcStartAngle(RhinoObject obj) => AsArc(obj).StartAngle;
+        public double ArcEndAngle(RhinoObject obj) => AsArc(obj).EndAngle;
+        public Point3d[] CurveSamplePoints(RhinoObject obj, int samples) => SampleCurve(AsCurve(obj), samples);
+
         public Guid Text(string str, Plane p, double height, string fontName, bool bold, bool italic) =>
             doc.Objects.AddText(str, p, height, fontName, bold, italic);
 
