@@ -357,6 +357,16 @@ namespace KhepriRhinoceros {
         public double CircleRadius(RhinoObject obj) => CircleFrom(obj).Radius;
         public Guid Ellipse(Plane p, double radiusX, double radiusY) =>
             doc.Objects.AddEllipse(new Ellipse(p, radiusX, radiusY));
+        Ellipse AsEllipse(RhinoObject obj) {
+            Ellipse ellipse;
+            if (!AsCurve(obj).TryGetEllipse(out ellipse)) {
+                throw new Exception("Object is not an ellipse");
+            }
+            return ellipse;
+        }
+        public Plane EllipsePlane(RhinoObject obj) => AsEllipse(obj).Plane;
+        public double EllipseRadiusX(RhinoObject obj) => AsEllipse(obj).Radius1;
+        public double EllipseRadiusY(RhinoObject obj) => AsEllipse(obj).Radius2;
         Plane RotatedPlane(Point3d c, Vector3d n, double startAngle) {
             Plane pl = new Plane(c, n);
             if (startAngle != 0) {
@@ -380,6 +390,61 @@ namespace KhepriRhinoceros {
         public double ArcStartAngle(RhinoObject obj) => AsArc(obj).StartAngle;
         public double ArcEndAngle(RhinoObject obj) => AsArc(obj).EndAngle;
         public Point3d[] CurveSamplePoints(RhinoObject obj, int samples) => SampleCurve(AsCurve(obj), samples);
+
+        public Point3d CurveClosestPoint(RhinoObject obj, Point3d point) {
+            Curve curve = AsCurve(obj);
+            Ensure(curve.ClosestPoint(point, out double t));
+            return curve.PointAt(t);
+        }
+
+        public double CurveClosestParameter(RhinoObject obj, Point3d point) {
+            Curve curve = AsCurve(obj);
+            Ensure(curve.ClosestPoint(point, out double t));
+            return t;
+        }
+
+        public Point3d[] CurveCurveClosestPoints(RhinoObject obj0, RhinoObject obj1) {
+            Curve curve0 = AsCurve(obj0);
+            Curve curve1 = AsCurve(obj1);
+            Ensure(curve0.ClosestPoints(curve1, out Point3d point0, out Point3d point1));
+            return new[] { point0, point1 };
+        }
+
+        public double[] CurveCurveClosestParameters(RhinoObject obj0, RhinoObject obj1) {
+            Point3d[] points = CurveCurveClosestPoints(obj0, obj1);
+            return new[] {
+                CurveClosestParameter(obj0, points[0]),
+                CurveClosestParameter(obj1, points[1])
+            };
+        }
+
+        public Point3d BrepClosestPoint(RhinoObject obj, Point3d point) =>
+            AsBrep(obj).ClosestPoint(point);
+
+        public int CurvePointClassification(RhinoObject obj, Point3d point, double tolerance) =>
+            CurveClosestPoint(obj, point).DistanceTo(point) <= tolerance ? 1 : 0;
+
+        public int BrepPointClassification(RhinoObject obj, Point3d point, double tolerance) {
+            Brep brep = AsBrep(obj);
+            if (brep.IsSolid && brep.IsPointInside(point, tolerance, true)) {
+                return 1;
+            }
+            Point3d closest;
+            ComponentIndex componentIndex;
+            double u, v;
+            Vector3d normal;
+            if (!brep.ClosestPoint(point, out closest, out componentIndex, out u, out v, tolerance, out normal)) {
+                return 0;
+            }
+            if (closest.DistanceTo(point) > tolerance) {
+                return 0;
+            }
+            if (componentIndex.ComponentIndexType == ComponentIndexType.BrepFace) {
+                PointFaceRelation relation = brep.Faces[componentIndex.Index].IsPointOnFace(u, v);
+                return relation == PointFaceRelation.Boundary ? 2 : 1;
+            }
+            return 2;
+        }
 
         public Guid Text(string str, Plane p, double height, string fontName, bool bold, bool italic) =>
             doc.Objects.AddText(str, p, height, fontName, bold, italic);
