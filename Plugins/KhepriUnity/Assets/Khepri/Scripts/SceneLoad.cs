@@ -10,6 +10,7 @@ using static KhepriUnity.KhepriConstants;
 using UnityProcessor = KhepriUnity.Processor<KhepriUnity.Channel, KhepriUnity.Primitives>;
 
 public enum State { StartingServer, WaitingConnections, Connecting, WaitingCommands, Selecting, Simulating, Visualizing }
+public enum KhepriOperationMode { Client, Server }
 
 public class SceneLoad {
 
@@ -24,8 +25,8 @@ public class SceneLoad {
         get { return _visualizing; }
         set { _visualizing = value; }
     }
-    private static bool I_am_the_server = false;
-    public State currentState = I_am_the_server ? State.StartingServer : State.WaitingConnections;
+    private KhepriOperationMode operationMode = KhepriOperationMode.Client;
+    public State currentState = State.WaitingConnections;
 
     // Async connection state
     private Task connectTask;
@@ -41,36 +42,107 @@ public class SceneLoad {
             mainObject = new GameObject("MainObject");
             mainObject.isStatic = true;
         }
-        serverAddress = DEFAULT_SERVER_ADDRESS;
-        serverPort = DEFAULT_SERVER_PORT;
-        string[] args = Environment.GetCommandLineArgs();
+        ConfigureConnection(Environment.GetCommandLineArgs());
+        primitives = new Primitives(mainObject);
+    }
+
+    private void ConfigureConnection(string[] args) {
+        operationMode = KhepriOperationMode.Client;
         foreach (string arg in args) {
-            if (arg.StartsWith("-serverIP=")) {
+            if (TryParseOperationMode(arg, out KhepriOperationMode parsedMode)) {
+                operationMode = parsedMode;
+            }
+        }
+
+        serverAddress = DEFAULT_SERVER_ADDRESS;
+        serverPort = DefaultPortFor(operationMode);
+
+        foreach (string arg in args) {
+            if (arg.StartsWith("-serverIP=", StringComparison.OrdinalIgnoreCase)) {
                 serverAddress = arg.Substring("-serverIP=".Length);
             }
-            if (arg.StartsWith("-port=")) {
+            if (arg.StartsWith("-port=", StringComparison.OrdinalIgnoreCase)) {
                 serverPort = int.Parse(arg.Substring("-port=".Length));
             }
         }
-        primitives = new Primitives(mainObject);
+
+        currentState = InitialStateFor(operationMode);
+    }
+
+    private static int DefaultPortFor(KhepriOperationMode mode) =>
+        mode switch {
+            KhepriOperationMode.Server => DEFAULT_SERVER_PORT,
+            KhepriOperationMode.Client => DEFAULT_CLIENT_PORT,
+            _ => DEFAULT_CLIENT_PORT
+        };
+
+    private static State InitialStateFor(KhepriOperationMode mode) =>
+        mode switch {
+            KhepriOperationMode.Server => State.StartingServer,
+            KhepriOperationMode.Client => State.WaitingConnections,
+            _ => State.WaitingConnections
+        };
+
+    private static bool TryParseOperationMode(string arg, out KhepriOperationMode mode) {
+        mode = KhepriOperationMode.Client;
+
+        if (string.Equals(arg, "-server", StringComparison.OrdinalIgnoreCase)) {
+            mode = KhepriOperationMode.Server;
+            return true;
+        }
+        if (string.Equals(arg, "-client", StringComparison.OrdinalIgnoreCase)) {
+            mode = KhepriOperationMode.Client;
+            return true;
+        }
+
+        string value = null;
+        if (arg.StartsWith("-khepriMode=", StringComparison.OrdinalIgnoreCase)) {
+            value = arg.Substring("-khepriMode=".Length);
+        } else if (arg.StartsWith("-operationMode=", StringComparison.OrdinalIgnoreCase)) {
+            value = arg.Substring("-operationMode=".Length);
+        } else if (arg.StartsWith("-mode=", StringComparison.OrdinalIgnoreCase)) {
+            value = arg.Substring("-mode=".Length);
+        }
+
+        if (value == null)
+            return false;
+
+        KhepriOperationMode? parsedMode = value.ToLowerInvariant() switch {
+            "client" => KhepriOperationMode.Client,
+            "unity-client" => KhepriOperationMode.Client,
+            "connect" => KhepriOperationMode.Client,
+            "server" => KhepriOperationMode.Server,
+            "unity-server" => KhepriOperationMode.Server,
+            "listen" => KhepriOperationMode.Server,
+            _ => (KhepriOperationMode?)null
+        };
+
+        if (parsedMode.HasValue) {
+            mode = parsedMode.Value;
+        } else {
+            Debug.LogWarning("Khepri: Unknown operation mode '" + value + "'. Using client mode.");
+        }
+        return true;
     }
 
     public bool StartKhepri() {
         Disconnect();
-        if (I_am_the_server) {
-            try {
-                if (server == null) {
-                    IPAddress localAddr = IPAddress.Parse(serverAddress);
-                    server = new TcpListener(localAddr, serverPort);
-                } else {
-                    server.Stop();
+        switch (operationMode) {
+            case KhepriOperationMode.Server:
+                try {
+                    if (server == null) {
+                        IPAddress localAddr = IPAddress.Parse(serverAddress);
+                        server = new TcpListener(localAddr, serverPort);
+                    } else {
+                        server.Stop();
+                    }
+                    server.Start();
+                } catch (Exception e) {
+                    WriteMessage(e.ToString() + "\n");
+                    WriteMessage("Couldn't start server\n");
+                    return false;
                 }
-                server.Start();
-            } catch (Exception e) {
-                WriteMessage(e.ToString() + "\n");
-                WriteMessage("Couldn't start server\n");
-                return false;
-            }
+                break;
         }
         lastConnectAttempt = -999f;
         currentState = State.WaitingConnections;
@@ -100,7 +172,7 @@ public class SceneLoad {
             WriteMessage("Server stopped\n");
             server = null;
         }
-        currentState = I_am_the_server ? State.StartingServer : State.WaitingConnections;
+        currentState = InitialStateFor(operationMode);
     }
 
     public void WaitForConnections() {
@@ -108,39 +180,43 @@ public class SceneLoad {
             currentState = State.WaitingCommands;
             return;
         }
-        if (I_am_the_server) {
-            // Server mode: non-blocking accept
-            if (!server.Pending())
-                return;
-            try {
-                client = server.AcceptTcpClient();
-                client.NoDelay = true;
-                channel = new Channel(client.GetStream(), client.Client);
-                processor = new UnityProcessor(channel, primitives);
-                primitives.SetProcessor(processor);
-                WriteMessage("Connection established\n");
-                currentState = State.WaitingCommands;
-            } catch (Exception e) {
-                WriteMessage(e.ToString() + "\n");
-                processor = null;
-            }
-        } else {
-            // Client mode: start async connect with retry delay
-            float now = Time.realtimeSinceStartup;
-            if (now - lastConnectAttempt < CONNECT_RETRY_DELAY)
-                return;
-            lastConnectAttempt = now;
-            try {
-                client = new TcpClient();
-                IPAddress remoteAddr = IPAddress.Parse(serverAddress);
-                connectTask = client.ConnectAsync(remoteAddr, serverPort);
-                currentState = State.Connecting;
-                WriteMessage("Connecting to Julia...\n");
-            } catch (Exception e) {
-                WriteMessage("Connect error: " + e.Message + "\n");
-                try { client?.Close(); } catch { }
-                client = null;
-            }
+        switch (operationMode) {
+            case KhepriOperationMode.Server:
+                // Server mode: non-blocking accept
+                if (!server.Pending())
+                    return;
+                try {
+                    client = server.AcceptTcpClient();
+                    client.NoDelay = true;
+                    channel = new Channel(client.GetStream(), client.Client);
+                    processor = new UnityProcessor(channel, primitives);
+                    primitives.SetProcessor(processor);
+                    WriteMessage("Connection established\n");
+                    currentState = State.WaitingCommands;
+                } catch (Exception e) {
+                    WriteMessage(e.ToString() + "\n");
+                    processor = null;
+                }
+                break;
+            case KhepriOperationMode.Client:
+            default:
+                // Client mode: start async connect with retry delay
+                float now = Time.realtimeSinceStartup;
+                if (now - lastConnectAttempt < CONNECT_RETRY_DELAY)
+                    return;
+                lastConnectAttempt = now;
+                try {
+                    client = new TcpClient();
+                    IPAddress remoteAddr = IPAddress.Parse(serverAddress);
+                    connectTask = client.ConnectAsync(remoteAddr, serverPort);
+                    currentState = State.Connecting;
+                    WriteMessage("Connecting to Julia...\n");
+                } catch (Exception e) {
+                    WriteMessage("Connect error: " + e.Message + "\n");
+                    try { client?.Close(); } catch { }
+                    client = null;
+                }
+                break;
         }
     }
 

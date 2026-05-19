@@ -5,11 +5,11 @@
 //
 // This script:
 //   1. Locates (or creates) the Khepri GameObject in the open scene.
-//   2. Marks the Khepri instance to start its TCP listener on the next play-
-//      mode tick (`startKhepriOnLoad = true`).
+//   2. Marks the Khepri instance to start the configured connection mode on
+//      the next play-mode tick (`startKhepriOnLoad = true`).
 //   3. Enters Play mode programmatically — the existing
 //      `KhepriEditor.HandleStartStopKhepri` then calls `StartKhepri()` and the
-//      socket on `unity_port` becomes reachable to a Julia client.
+//      default client mode connects to the Khepri socket server on port 12345.
 //
 // The script intentionally does NOT exit Play mode or quit Unity — the Julia
 // harness drives those side effects (it sends a Disconnect/quit command after
@@ -22,7 +22,7 @@ using UnityEngine;
 
 public static class KhepriAutoRunner {
     // Entry point for `-executeMethod KhepriAutoRunner.AutoStartListener`.
-    // Returns immediately — the listener boots inside the next editor frame
+    // Returns immediately — the connection starts inside the next editor frame
     // when the play-mode transition completes.
     public static void AutoStartListener() {
         Debug.Log("[KhepriAutoRunner] Initiating listener startup...");
@@ -45,13 +45,12 @@ public static class KhepriAutoRunner {
             return;
         }
 
-        // Hand over to the existing edit→play→start flow. `startKhepriOnLoad`
+        // Hand over to the existing edit->play->start flow. `startKhepriOnLoad`
         // is checked by KhepriEditor.HandleStartStopKhepri once Play mode
-        // actually engages, which calls SceneLoad.StartKhepri() which binds
-        // the TcpListener on unity_port (11002).
+        // actually engages, which calls SceneLoad.StartKhepri().
         khepri.startKhepriOnLoad = true;
         EditorApplication.EnterPlaymode();
-        Debug.Log("[KhepriAutoRunner] EnterPlaymode requested; listener will bind once Khepri.Start() runs.");
+        Debug.Log("[KhepriAutoRunner] EnterPlaymode requested; Khepri connection will start once Khepri.Start() runs.");
     }
 
     // Convenience menu item so the same code path is available interactively.
