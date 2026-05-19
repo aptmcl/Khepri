@@ -306,7 +306,9 @@ KhepriBase.b_pyramid(b::Unity, bs, t, bmat, smat) =
   @remote(b, PyramidWithMaterial(bs, t, smat))
 
 KhepriBase.b_cylinder(b::Unity, c, r, h, bmat, tmat, smat) =
-  @remote(b, CylinderWithMaterial(c, r, c + vz(h, c.cs), smat))
+  isnothing(bmat) || isnothing(tmat) ?
+    b_cylinder_surfaces(b, c, r, h, bmat, tmat, smat) :
+    @remote(b, CylinderWithMaterial(c, r, c + vz(h, c.cs), smat))
 
 KhepriBase.b_box(b::Unity, c, dx, dy, dz, mat) =
   # X<->Z
@@ -359,28 +361,28 @@ KhepriBase.b_material(b::Unity, name, base_color, metallic, roughness, specular,
                           ior, transmission, transmission_roughness,
                           clearcoat, clearcoat_roughness,
                           emission_color, emission_strength) =
-  @remote(b, CreateMaterial(name, base_color, Float64(alpha(base_color)),
+  @remote(b, CreateMaterial(name, base_color, alpha(base_color),
                             metallic, specular, roughness,
                             ior, transmission, transmission_roughness,
                             clearcoat, clearcoat_roughness,
                             emission_color, emission_strength))
 
 KhepriBase.b_plastic_material(b::Unity, name, color, roughness) =
-  @remote(b, CreateMaterial(name, color, Float64(alpha(color)),
+  @remote(b, CreateMaterial(name, color, alpha(color),
                             0.0, 0.5, roughness,
                             1.5, 0.0, 0.0,
                             0.0, 0.0,
                             rgb(0,0,0), 0.0))
 
 KhepriBase.b_metal_material(b::Unity, name, color, roughness, ior) =
-  @remote(b, CreateMaterial(name, color, Float64(alpha(color)),
+  @remote(b, CreateMaterial(name, color, alpha(color),
                             1.0, 0.5, roughness,
                             ior, 0.0, 0.0,
                             0.0, 0.0,
                             rgb(0,0,0), 0.0))
 
 KhepriBase.b_glass_material(b::Unity, name, color, roughness, ior) =
-  @remote(b, CreateMaterial(name, color, Float64(alpha(color)),
+  @remote(b, CreateMaterial(name, color, alpha(color),
                             0.0, 0.5, roughness,
                             ior, 0.8, 0.0,
                             0.0, 0.0,
@@ -583,7 +585,7 @@ KhepriBase.b_layer(b::Unity, name, visible, color) =
 KhepriBase.b_set_layer_visible(b::Unity, layer, visible) =
   @remote(b, SetActive(ref_value(b, layer), visible))
 KhepriBase.b_set_layer_opacity(b::Unity, layer, opacity) =
-  @remote(b, SetParentOpacity(ref_value(b, layer), convert(Float32, opacity)))
+  @remote(b, SetParentOpacity(ref_value(b, layer), opacity))
 KhepriBase.b_create_layer_from_ref_value(b::Unity, r) =
   layer("Default")
 KhepriBase.b_delete_all_shapes_in_layer(b::Unity, layer) =
