@@ -894,7 +894,35 @@ _rectangle_obb(path::ClosedPolygonalPath) =
       end
     end
   end
-_rectangle_obb(path::Path) = nothing
+
+_linear_path_pieces(path::LinePath) = OpenPath[path]
+_linear_path_pieces(path::Union{RectangularPath,PolygonalPath}) = path_pieces(path)
+function _linear_path_pieces(path::CompositePath)
+  pieces = OpenPath[]
+  for piece in path.pieces
+    subpieces = _linear_path_pieces(piece)
+    isnothing(subpieces) && return nothing
+    append!(pieces, subpieces)
+  end
+  pieces
+end
+_linear_path_pieces(path::Path) = nothing
+
+_path_is_authored_linear(path::Path) = !isnothing(_linear_path_pieces(path))
+
+function _closed_linear_path_vertices(path::Path)
+  pieces = _linear_path_pieces(path)
+  (isnothing(pieces) || isempty(pieces) || !is_closed_path(path)) && return nothing
+  vertices = Loc[path_start(pieces[1])]
+  append!(vertices, path_end.(pieces))
+  coincident_path_location(vertices[1], vertices[end]) && pop!(vertices)
+  vertices
+end
+
+_rectangle_obb(path::Path) =
+  let vertices = _closed_linear_path_vertices(path)
+    isnothing(vertices) ? nothing : _rectangle_obb(closed_polygonal_path(vertices))
+  end
 
 #=
 True iff `path` is a single straight segment that we can fully
@@ -904,7 +932,10 @@ do not, because the per-segment box decomposition handles them via
 `subpaths` instead of via a single-shot rectangle frame.
 =#
 _is_straight_segment(path::OpenPolygonalPath) = length(path.vertices) == 2
-_is_straight_segment(path::Path) = false
+_is_straight_segment(path::Path) =
+  let pieces = _linear_path_pieces(path)
+    !isnothing(pieces) && length(pieces) == 1
+  end
 
 #=
 Decompose a segment-rectangle [0, seg_length] × [0, w_height] minus
@@ -1015,7 +1046,7 @@ _wall_box_decomposition(w_path, w_height, family, offset, openings,
                         l_face_path, r_face_path) =
   if !(family.left_material === family.right_material === family.side_material) ||
      !isnothing(l_face_path) || !isnothing(r_face_path) ||
-     !(w_path isa OpenPolygonalPath || w_path isa ClosedPolygonalPath || w_path isa RectangularPath)
+     !_path_is_authored_linear(w_path)
     nothing
   else
     let l_th = (1/2 + offset) * (family.thickness + family.left_coating_thickness),
