@@ -35,6 +35,41 @@ local_khepri_plugin = joinpath(local_plugins, bundle_name)
 local_khepri_plugin_dll_folder = joinpath(local_plugins, bundle_dll_folder)
 local_path_xml = joinpath(local_khepri_plugin, package_xml)
 
+autocad_plugin_files() =
+  vcat([package_xml], [joinpath("Contents", dll) for dll in dlls])
+
+same_file_contents(src, dst) =
+  isfile(src) &&
+  isfile(dst) &&
+  filesize(src) == filesize(dst) &&
+  read(src) == read(dst)
+
+plugin_file_needs_update(src_root, dst_root, rel_path) =
+  !same_file_contents(joinpath(src_root, rel_path), joinpath(dst_root, rel_path))
+
+ensure_autocad_plugin_dlls!(src_folder) =
+  for dll in dlls
+    let path = joinpath(src_folder, dll)
+      isfile(path) ||
+        error("AutoCAD plugin DLL not found: $path. Build KhepriAutoCAD for Debug|x64 or Release|x64 before running upgrade_plugin.")
+    end
+  end
+
+ensure_local_autocad_bundle_files!() =
+  for rel_path in autocad_plugin_files()
+    let path = joinpath(local_khepri_plugin, rel_path)
+      isfile(path) ||
+        error("AutoCAD local plugin file not found: $path. Run upgrade_plugin() to create the local bundle.")
+    end
+  end
+
+function autocad_appdata()
+  haskey(ENV, "APPDATA") && return ENV["APPDATA"]
+  fallback = joinpath("/mnt/c/Users", get(ENV, "USER", basename(homedir())), "AppData", "Roaming")
+  isdir(fallback) && return fallback
+  error("APPDATA is not set. Set ENV[\"APPDATA\"] to the Windows roaming profile before updating the AutoCAD plugin.")
+end
+
 upgrade_plugin(; advance_major_version=false, advance_minor_version=true, phase="Debug") =
   let # 1. The dlls are updated in VisualStudio after compilation of the plugin, and they are stored in the folder.
       # 2. Depending on whether we are in Debug mode or Release mode,
@@ -46,7 +81,9 @@ upgrade_plugin(; advance_major_version=false, advance_minor_version=true, phase=
       # 5. Besides the dlls, we also need the bundle folder
       # 6. which is contained in the Plugins folder
       bundle_path = joinpath(plugin_folder, bundle_name)
+      dlls_path = joinpath(plugin_folder, dlls_folder)
       # 11. Update major or minor version
+      ensure_autocad_plugin_dlls!(dlls_path)
       if advance_major_version || advance_minor_version
           bundle_xml = joinpath(bundle_path, "PackageContents.xml")
           doc = readxml(bundle_xml)
@@ -66,7 +103,7 @@ upgrade_plugin(; advance_major_version=false, advance_minor_version=true, phase=
       # 9. Now we do the copy
       cp(bundle_path, local_khepri_plugin)
       # 10. and we copy the dlls to the local bundle Contents folder
-      copy_plugin_files!(dlls, joinpath(plugin_folder, dlls_folder), joinpath(local_khepri_plugin, "Contents"))
+      copy_plugin_files!(dlls, dlls_path, joinpath(local_khepri_plugin, "Contents"))
       # 11. Deploy to AutoCAD's plugin directory and reset the checker
       try
         update_plugin()
@@ -95,7 +132,7 @@ autocad_allusers_plugins = joinpath(ENV["ALLUSERSPROFILE"], "Autodesk", "Applica
 const autocad_template = Parameter(normpath(@__DIR__, "../Plugin/Khepri.dwt"))
       
 update_plugin() =
-  let autocad_user_plugins = joinpath(ENV["APPDATA"], "Autodesk", "ApplicationPlugins"),
+  let autocad_user_plugins = joinpath(autocad_appdata(), "Autodesk", "ApplicationPlugins"),
       autocad_khepri_plugin = joinpath(autocad_user_plugins, bundle_name),
       autocad_khepri_plugin_dll_folder = joinpath(autocad_user_plugins, bundle_dll_folder),
       autocad_path_xml = joinpath(autocad_khepri_plugin, package_xml)
@@ -104,7 +141,9 @@ update_plugin() =
     isdir(autocad_khepri_plugin) || mkpath(autocad_khepri_plugin)
     isdir(autocad_khepri_plugin_dll_folder) || mkpath(autocad_khepri_plugin_dll_folder)
     # Must we update?
-    need_update = ! isfile(autocad_path_xml) || autocad_version(autocad_path_xml) < autocad_version(local_path_xml)
+    ensure_local_autocad_bundle_files!()
+    need_update = any(rel_path -> plugin_file_needs_update(local_khepri_plugin, autocad_khepri_plugin, rel_path),
+                      autocad_plugin_files())
     if need_update
       # remove first to avoid loosing the local file
       #isfile(autocad_path_xml) && rm(autocad_path_xml)
