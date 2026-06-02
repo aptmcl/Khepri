@@ -3,7 +3,7 @@
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <Platform Condition=" '$(Platform)' == '' ">x64</Platform>
     <ProjectGuid>{0D07F50B-A078-457B-85EC-F2DA79615BB8}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
@@ -12,23 +12,6 @@
     <TargetFrameworkVersion>v4.8.1</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <TargetFrameworkProfile />
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <DebugSymbols>true</DebugSymbols>
-    <DebugType>full</DebugType>
-    <Optimize>false</Optimize>
-    <OutputPath>bin\Debug\</OutputPath>
-    <DefineConstants>DEBUG;TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <DebugType>pdbonly</DebugType>
-    <Optimize>true</Optimize>
-    <OutputPath>bin\Release\</OutputPath>
-    <DefineConstants>TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'">
     <DebugSymbols>true</DebugSymbols>
@@ -91,11 +74,13 @@
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
-       Other similar extension points exist, see Microsoft.Common.targets.
-  <Target Name="BeforeBuild">
+  <Target Name="EnsureX64Platform" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(Platform)' != 'x64'" Text="KhepriAutoCAD only supports the x64 platform. Select Debug|x64 or Release|x64." />
   </Target>
   <Target Name="AfterBuild">
+    <MakeDir Directories="$(ProjectDir)KhepriAutoCAD.bundle\Contents" />
+    <Error Condition="!Exists('$(TargetDir)KhepriBase.dll')" Text="KhepriBase.dll was not found in $(TargetDir). Build the KhepriBase project reference before deploying." />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ProjectDir)KhepriAutoCAD.bundle\Contents" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(TargetDir)KhepriBase.dll" DestinationFolder="$(ProjectDir)KhepriAutoCAD.bundle\Contents" SkipUnchangedFiles="true" />
   </Target>
-  -->
 </Project>
