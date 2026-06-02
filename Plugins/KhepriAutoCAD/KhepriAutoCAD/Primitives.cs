@@ -1050,31 +1050,14 @@ namespace KhepriAutoCAD {
                 }
         }
 
-        // Pre-translate profile to world origin before letting AutoCAD's
-        // sweep handle alignment. The earlier code did
-        //   Transform(profile, pathFrame)
-        // which works only when the profile is at world origin to begin with;
-        // for profiles constructed in a translated CS (already at the path's
-        // start in world coords), it double-translated. Translating to world
-        // origin first restores the original-precondition assumption.
-        void TranslateProfileToOrigin(Entity profile) {
-            Extents3d bb = profile.GeometricExtents;
-            Point3d c = new Point3d(
-                (bb.MinPoint.X + bb.MaxPoint.X) / 2,
-                (bb.MinPoint.Y + bb.MaxPoint.Y) / 2,
-                (bb.MinPoint.Z + bb.MaxPoint.Z) / 2);
-            profile.TransformBy(Matrix3d.Displacement(Point3d.Origin - c));
-        }
-
         public ObjectId Sweep(ObjectId pathId, ObjectId profileId, double rotation, double scale) {
                 Curve path = tr.GetObject(pathId, OpenMode.ForWrite) as Curve;
                 Frame3d frame = CurveFrameAt(path, CurveDomain(path)[0]);
                 Entity profile = tr.GetObject(profileId, OpenMode.ForWrite) as Entity;
-                TranslateProfileToOrigin(profile);
                 profile = Transform(profile, frame);
                 SweepOptionsBuilder sob = new SweepOptionsBuilder();
-                sob.Align = SweepOptionsAlignOption.NoAlignment;
-                sob.Bank = false;
+                sob.Align = SweepOptionsAlignOption.AlignSweepEntityToPath;
+                sob.Bank = true;
                 sob.BasePoint = path.StartPoint;
                 sob.TwistAngle = rotation;
                 sob.ScaleFactor = scale;
@@ -1098,10 +1081,9 @@ namespace KhepriAutoCAD {
                 Curve path = tr.GetObject(pathId, OpenMode.ForWrite) as Curve;
                 Frame3d frame = CurveFrameAt(path, CurveDomain(path)[0]);
                 Entity profile = tr.GetObject(profileId, OpenMode.ForWrite) as Entity;
-                TranslateProfileToOrigin(profile);
                 profile = Transform(profile, frame);
                 SweepOptionsBuilder sob = new SweepOptionsBuilder();
-                sob.Align = SweepOptionsAlignOption.NoAlignment;
+                sob.Align = SweepOptionsAlignOption.AlignSweepEntityToPath;
                 sob.Bank = false;
                 sob.BasePoint = path.StartPoint;
                 sob.TwistAngle = rotation;
@@ -1618,11 +1600,14 @@ namespace KhepriAutoCAD {
             vport.Background = ibl.Id;
             CommitAndStartOpenCloseTransaction();
             object prevEXPVALUE = Application.GetSystemVariable("EXPVALUE");
-            Application.SetSystemVariable("EXPVALUE", exposure);
-            dynamic ddoc = doc.GetAcadDocument();
-            ddoc.SendCommand("_-RENDERPRESETS _custom Khepri\n");
-            ddoc.SendCommand("_RENDER\n");
-            Application.SetSystemVariable("EXPVALUE", prevEXPVALUE);
+            try {
+                Application.SetSystemVariable("EXPVALUE", exposure);
+                dynamic ddoc = doc.GetAcadDocument();
+                ddoc.SendCommand("_-RENDERPRESETS _custom Khepri\n");
+                ddoc.SendCommand("_RENDER\n");
+            } finally {
+                Application.SetSystemVariable("EXPVALUE", prevEXPVALUE);
+            }
         }
         private bool wasCleanBeforeSetup = false;
         private ObjectId lastVisualStyleId = ObjectId.Null;
