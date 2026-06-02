@@ -1398,10 +1398,29 @@ const acad_visual_styles = Dict(
   :xray => "X-Ray",
   :wireframe_2d => "2dWireframe")
 
+const acad_canonical_visual_styles = Dict(
+  :wireframe => :wireframe,
+  :shaded => :shaded,
+  :realistic => :realistic,
+  :arctic => :shades_of_gray,
+  :technical => :hidden,
+  :pen => :wireframe_2d,
+  :sketchy => :sketchy,
+  :xray => :xray,
+  :ghosted => :xray)
+
+acad_native_visual_style(style::Symbol) =
+  get(acad_canonical_visual_styles, style, style)
+
+acad_visual_style_name(style::Symbol) =
+  let native_style = acad_native_visual_style(style)
+    get(acad_visual_styles, native_style) do
+      error("Unknown AutoCAD visual style: $style. Options: $(join(keys(acad_visual_styles), ", "))")
+    end
+  end
+
 KhepriBase.b_view_settings(b::ACAD; visual_style::Symbol=:conceptual) =
-  let style = get(acad_visual_styles, visual_style) do
-        error("Unknown AutoCAD visual style: $visual_style. Options: $(join(keys(acad_visual_styles), ", "))")
-      end
+  let style = acad_visual_style_name(visual_style)
     @remote(b, SetViewStyle(style))
   end
 
@@ -1833,35 +1852,109 @@ backend_enable_update(b::ACAD) =
 
 # Render
 
-#render exposure: [-3, +3] -> [-6, 21]
-convert_render_exposure(b::ACAD, v::Real) = -4.05*v + 8.8
+const acad_neutral_exposure = 13.0
+
+# AutoCAD EXPVALUE uses -6 as brightest and 21 as darkest. Khepri's AutoCAD
+# IBL setup needs a darker neutral point than AutoCAD's factory default.
+convert_render_exposure(b::ACAD, v::Real) =
+  let exposure = Float64(v),
+      neutral = acad_neutral_exposure,
+      brightest = -6.0,
+      darkest = 21.0
+    exposure < 0 ?
+      neutral + (neutral - darkest) * exposure / 3 :
+      neutral + (brightest - neutral) * exposure / 3
+  end
 #render quality: [-1, +1] -> [+1, +50]
 convert_render_quality(b::ACAD, v::Real) = round(Int, 25.5 + 24.5*v)
 
-KhepriBase.b_render_and_save_view(b::ACAD, path::String) =
-  let kind = render_kind(),
-      (w, h) = (render_width(), render_height()),
-      quality = convert_render_quality(b, render_quality()),
-      exposure = convert_render_exposure(b, render_exposure()),
-      hdrfile = joinpath("C:\\Program Files\\Autodesk\\AutoCAD 2024\\Environments\\studio_03_grids.hdr")
-    if kind == :realistic
-      @remote(b, Render(w, h, path, quality,
-                        "C:\\Program Files\\Autodesk\\AutoCAD 2024\\Environments\\mi360_Plaza.hdr",
-                        0.0, exposure))
-    else
-      let (camera, target) = (@remote(b, ViewCamera()), @remote(b, ViewTarget())),
-          rot = (11π/6 - π/2 - (camera - target).ϕ)*180/π,
-          hdrfile = joinpath(@__DIR__, "studio_small_05_4k.exr")
-        if render_kind() == :white
-          @remote(b, Render(w, h, path, 10, hdrfile, rot, 0))
-        elseif render_kind() == :black
-          @remote(b, Render(w, h, path, 10, hdrfile, rot, 0))
-        else
-          error("Unknown render kind $kind")
+acad_windows_join(parts::AbstractString...) =
+  join(parts, "\\")
+
+acad_autodesk_root() = raw"C:\Program Files\Autodesk"
+
+acad_environment_file_candidate(dir::String, filename::String) =
+  acad_windows_join(dir, filename)
+
+acad_environment_dir_candidate(root::String, entry::String) =
+  acad_windows_join(root, entry, "Environments")
+
+acad_environment_dirs() =
+  let env_dir = get(ENV, "KHEPRI_AUTOCAD_ENV_DIR", ""),
+      roots = String[]
+    isempty(env_dir) || push!(roots, env_dir)
+    let root = acad_autodesk_root()
+      if isdir(root)
+        for entry in readdir(root)
+          occursin(r"^AutoCAD\s\d{4}$", entry) &&
+            push!(roots, acad_environment_dir_candidate(root, entry))
         end
       end
     end
+    roots
   end
+
+acad_autocad_environment_file(filename::String) =
+  let paths = [acad_environment_file_candidate(dir, filename) for dir in acad_environment_dirs()]
+    for path in sort!(paths; rev=true)
+      isfile(path) && return path
+    end
+    nothing
+  end
+
+acad_bundled_render_environment() =
+  joinpath(@__DIR__, "studio_small_05_4k.exr")
+
+acad_realistic_render_environment() =
+  let path = acad_autocad_environment_file("mi360_Plaza.hdr")
+    isnothing(path) ? acad_bundled_render_environment() : path
+  end
+
+acad_render_profile(kind::Symbol, quality::Integer, exposure::Real) =
+  kind == :realistic ?
+    (level=quality,
+     environment=acad_realistic_render_environment(),
+     rotation_mode=:fixed,
+     exposure=exposure,
+     default_visual_style=nothing) :
+  kind == :white ?
+    (level=quality,
+     environment=acad_bundled_render_environment(),
+     rotation_mode=:view,
+     exposure=exposure,
+     default_visual_style=:arctic) :
+  kind == :black ?
+    error("AutoCAD render kind :black is not implemented correctly yet; use :white or :realistic until the plugin supports a black render background.") :
+  error("Unknown render kind $kind")
+
+acad_effective_render_visual_style(opts::RenderViewOptions, profile) =
+  opts.visual_style == :shaded && !isnothing(profile.default_visual_style) ?
+    profile.default_visual_style :
+    opts.visual_style
+
+acad_render_environment_rotation(b::ACAD, rotation_mode::Symbol) =
+  rotation_mode == :fixed ? 0.0 :
+  rotation_mode == :view ?
+    let (camera, target) = (@remote(b, ViewCamera()), @remote(b, ViewTarget()))
+      (11π/6 - π/2 - (camera - target).ϕ)*180/π
+    end :
+  error("Unknown AutoCAD render environment rotation mode $rotation_mode")
+
+KhepriBase.b_render_and_save_view(b::ACAD, path::String, opts::RenderViewOptions) =
+  let quality = convert_render_quality(b, opts.quality),
+      exposure = convert_render_exposure(b, opts.exposure),
+      profile = acad_render_profile(opts.kind, quality, exposure),
+      visual_style = acad_effective_render_visual_style(opts, profile)
+    b_view_settings(b; visual_style=visual_style)
+    let rot = acad_render_environment_rotation(b, profile.rotation_mode)
+      @remote(b, Render(opts.width, opts.height, path, profile.level,
+                        profile.environment, rot, profile.exposure))
+    end
+    path
+  end
+
+KhepriBase.b_render_and_save_view(b::ACAD, path::String) =
+  b_render_and_save_view(b, path, RenderViewOptions())
 
 mentalray_render_view(name::String) =
     let b = autocad

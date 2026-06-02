@@ -38,6 +38,38 @@ using Test
     @test d[:architectural] == "_ARCHTICK"
   end
 
+  @testset "Render helpers" begin
+    @test KhepriAutoCAD.acad_neutral_exposure == 13.0
+    @test KhepriAutoCAD.convert_render_exposure(autocad, -3) ≈ 21
+    @test KhepriAutoCAD.convert_render_exposure(autocad, 0) ≈ KhepriAutoCAD.acad_neutral_exposure
+    @test KhepriAutoCAD.convert_render_exposure(autocad, 3) ≈ -6
+    @test KhepriAutoCAD.convert_render_quality(autocad, -1) == 1
+    @test KhepriAutoCAD.convert_render_quality(autocad, 1) == 50
+
+    @test KhepriAutoCAD.acad_visual_style_name(:wireframe) == "Wireframe"
+    @test KhepriAutoCAD.acad_visual_style_name(:arctic) == "ShadesOfGray"
+    @test KhepriAutoCAD.acad_visual_style_name(:technical) == "Hidden"
+    @test KhepriAutoCAD.acad_visual_style_name(:ghosted) == "X-Ray"
+    @test_throws ErrorException KhepriAutoCAD.acad_visual_style_name(:bogus)
+
+    @test KhepriAutoCAD.acad_autodesk_root() == raw"C:\Program Files\Autodesk"
+    @test KhepriAutoCAD.acad_environment_file_candidate(raw"C:\Env", "studio.hdr") == raw"C:\Env\studio.hdr"
+    @test KhepriAutoCAD.acad_environment_dir_candidate(KhepriAutoCAD.acad_autodesk_root(), "AutoCAD 2025") ==
+          raw"C:\Program Files\Autodesk\AutoCAD 2025\Environments"
+
+    profile = KhepriAutoCAD.acad_render_profile(:white, 12, 1.5)
+    @test profile.level == 12
+    @test profile.rotation_mode == :view
+    @test profile.exposure == 1.5
+    @test profile.default_visual_style == :arctic
+
+    opts = KhepriBase.RenderViewOptions(kind=:white)
+    @test KhepriAutoCAD.acad_effective_render_visual_style(opts, profile) == :arctic
+    opts = KhepriBase.RenderViewOptions(kind=:white, visual_style=:wireframe)
+    @test KhepriAutoCAD.acad_effective_render_visual_style(opts, profile) == :wireframe
+    @test_throws ErrorException KhepriAutoCAD.acad_render_profile(:black, 12, 1.5)
+  end
+
   @testset "Material named tuples" begin
     mp = KhepriAutoCAD.MaterialProjection
     @test mp.InheritProjection == 0
