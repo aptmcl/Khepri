@@ -10,11 +10,20 @@ namespace KhepriBase {
         /*
          * For extra flexibility, we will accept a dictionary of property/value pairs and use reflection
         */
-        public void Set(object obj, string prop, object val) => obj.GetType().GetProperty(prop).SetValue(obj, val, null);
+        public void Set(object obj, string prop, object val) {
+            var type = obj.GetType();
+            var pi = type.GetProperty(prop);
+            if (pi == null)
+                throw new ArgumentException($"Type {type.Name} has no settable property '{prop}'");
+            pi.SetValue(obj, val, null);
+        }
         public void Set(object obj, Options propValues) {
             Type type = obj.GetType();
             foreach (var kv in propValues) {
-                type.GetProperty(kv.Key).SetValue(obj, kv.Value, null);
+                var pi = type.GetProperty(kv.Key);
+                if (pi == null)
+                    throw new ArgumentException($"Type {type.Name} has no settable property '{kv.Key}'");
+                pi.SetValue(obj, kv.Value, null);
             }
         }
     }

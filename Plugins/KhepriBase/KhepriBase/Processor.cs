@@ -60,6 +60,17 @@ namespace KhepriBase {
         }
 
         public virtual void Execute(int op) {
+            // A stale/desynced opcode (e.g. after a reconnect without re-registration)
+            // would index operations[] out of range and throw BEFORE the RMI delegate's
+            // error handler runs, so no NOTOK frame is written and the Julia caller
+            // blocks on receive(). Guard it and write a clean NOTOK response (the frame
+            // is already begun by ReadOperation), matching RMIFy's error format.
+            if (op < 0 || op >= operations.Count) {
+                channel.wByte(1);
+                channel.wString($"Unknown opcode {op}");
+                channel.EndFrame();
+                return;
+            }
             operations[op](channel, primitives);
             channel.EndFrame();
         }
@@ -105,8 +116,11 @@ namespace KhepriBase {
                 }
                 Execute(op);
                 count++;
-                if (count > MaxRepeated) {
-                    return false;
+                // Exact cap (>=, not >) and break (not return false): hitting the batch
+                // cap means "yield to the host idle loop, keep the connection", which the
+                // caller must not confuse with a real disconnect (op == -1).
+                if (count >= MaxRepeated) {
+                    break;
                 }
                 if (!channel.DataAvailable) {
                     break;

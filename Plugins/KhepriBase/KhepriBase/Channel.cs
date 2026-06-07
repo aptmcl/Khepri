@@ -72,6 +72,11 @@ namespace KhepriBase {
         // r/w to in-memory streams so the operation handler reads from the buffered
         // request and writes to a buffered response. The original network reader/writer
         // are saved for EndFrame to restore.
+        // Largest length-prefixed frame we will allocate for. A corrupt or
+        // desynchronized stream can yield a garbage Int32 length; without this cap a
+        // negative value throws ArgumentOutOfRange and a huge value OOMs, either way
+        // killing the dispatch loop. 64 MiB is far above any real Khepri RPC frame.
+        const int MaxFrameLength = 64 * 1024 * 1024;
         public bool BeginFrame() {
             int frameLen;
             try {
@@ -79,7 +84,15 @@ namespace KhepriBase {
             } catch (EndOfStreamException) {
                 return false;
             }
+            // Corrupt/desynced length -> treat as a closed connection rather than
+            // crashing the loop on ReadBytes (negative -> exception, huge -> OOM).
+            if (frameLen < 0 || frameLen > MaxFrameLength)
+                return false;
             byte[] frameData = r.ReadBytes(frameLen);
+            // ReadBytes can legally return fewer bytes at EOF; a short read means the
+            // peer closed the connection mid-frame.
+            if (frameData.Length != frameLen)
+                return false;
             savedReader = r;
             savedWriter = w;
             r = new BinaryReader(new MemoryStream(frameData), Encoding.UTF8);
@@ -143,6 +156,30 @@ namespace KhepriBase {
         // collections (Options dictionaries, mixed arrays).
         public object rObject() => rObject(rByte());
 
+        protected static byte UnitFloatToByte(float v) {
+            if (float.IsNaN(v) || v < 0.0f || v > 1.0f)
+                throw new ArgumentOutOfRangeException(nameof(v), v, "Color component must be in [0, 1].");
+            return (byte)Math.Round(v * 255.0f);
+        }
+
+        protected Color rRGBObject() =>
+            Color.FromArgb(255,
+                UnitFloatToByte(rSingle()),
+                UnitFloatToByte(rSingle()),
+                UnitFloatToByte(rSingle()));
+
+        protected Color rRGBAObject() {
+            float red = rSingle();
+            float green = rSingle();
+            float blue = rSingle();
+            float alpha = rSingle();
+            return Color.FromArgb(
+                UnitFloatToByte(alpha),
+                UnitFloatToByte(red),
+                UnitFloatToByte(green),
+                UnitFloatToByte(blue));
+        }
+
         public virtual object rObject(byte code) {
             switch (code) {
                 case 0: return rBoolean();
@@ -152,7 +189,9 @@ namespace KhepriBase {
                 case 4: return rSingle();
                 case 5: return rDouble();
                 case 6: return rString();
-                case 7: return rColor();
+                case 7: return rRGBObject();
+                case 8: return rRGBAObject();
+                case 9: return rOptions();
                 default: throw new Exception("Unexpected type code:" + code);
             }
         }
