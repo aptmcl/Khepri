@@ -11,6 +11,15 @@ using Test
 
 @testset "KhepriUnity.jl" begin
 
+  @testset "RPC Conformance (static)" begin
+    # Every @remote/@get_remote RPC the adapter calls must be declared in its
+    # @remote_api block. Catches the undeclared-RPC crash class at CI, with no
+    # live CAD connection (reads getfield(unity, :remote) + parses source).
+    include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "RPCConformanceTests.jl"))
+    using .RPCConformanceTests
+    run_rpc_conformance_tests(unity, joinpath(dirname(pathof(KhepriUnity))))
+  end
+
   @testset "Type system" begin
     @test isdefined(KhepriUnity, :UnityKey)
     @test KhepriUnity.UnityId === Int32
