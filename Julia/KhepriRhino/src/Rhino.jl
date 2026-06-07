@@ -218,11 +218,13 @@ public Guid CreateDiametricDimension(String text, Plane c, Point3d p, Point3d pd
 public Guid CreateAngularDimension(String text, Plane p, Point3d p0, Point3d p1, Point3d ptdim, double scale, String mark, Options props) {
 public void SunLight(DateTime dt, double latitude, double longitude, int meridian, float turbidity, bool hasSun)
 public Guid PointLight(Point3d p, Color c, double power)
+public Guid SpotLight(Point3d position, double hotspot, double falloff, Point3d target)
+public Guid IESLight(string webFile, Point3d position, Point3d target, Vector3d rotation)
 public void EnableGrasshopperSolver()
 public void DisableGrasshopperSolver()
 public void RunGrasshopperSolver()
 public void Render(int width, int height, int quality, string path)
-public void RenderLoadKhepriEnvironment(string name, string path)
+public void RenderLoadHDRiEnvironment(string name, string path)
 public void RenderUseHDRiEnvironment(string name, double rotation)
 public void ClayRenderBlack(string env, double rotation, int width, int height, int quality, string path)
 public void ClayRenderWhite(string env, double rotation, int width, int height, int quality, string path)
@@ -289,26 +291,26 @@ KhepriBase.after_connecting(b::RH) =
   	if m === nothing
 	    error("Unrecognized Rhino materials folder: $(mat_folder)")
   	else
-	  let v = VersionNumber(m[1])
-	    if v >= v"6.0"
-			# Apparently, materials are not yet working in Rhino 6!!!!
-	      set_material(RH, material_metal, rhino_default_material(raw"Metal\Matte\Matte Silver"))
-	      set_material(RH, material_glass, rhino_default_material(raw"Glass\Clear Glass"))
-	      set_material(RH, material_wood, rhino_default_material(raw"Wood\Pear polished"))
-	      set_material(RH, material_concrete, rhino_default_material(raw"Ceramics\Stoneware"))
-	      set_material(RH, material_plaster, rhino_default_material(raw"White Matte"))
-	      set_material(RH, material_grass, rhino_default_material(raw"Textures\Grass"))
-	    elseif v >= v"5.0"
-          set_material(RH, material_metal, rhino_default_material(raw"Metal\Silver"))
-          set_material(RH, material_glass, rhino_default_material(raw"Transparent\Glass"))
-          set_material(RH, material_wood, rhino_default_material(raw"Wood\Scots Pine"))
-          set_material(RH, material_concrete, rhino_default_material(raw"Stone\Granite"))
-          set_material(RH, material_plaster, rhino_default_material(raw"White Matte"))
-          set_material(RH, material_grass, rhino_default_material(raw"Special\Grass"))
-	    else
-	      error("Unrecognized Rhino version: ")
+	    let v = VersionNumber(m[1])
+	      if v >= v"6.0"
+		  	# Apparently, materials are not yet working in Rhino 6!!!!
+	        set_material(RH, material_metal, rhino_default_material(raw"Metal\Matte\Matte Silver"))
+	        set_material(RH, material_glass, rhino_default_material(raw"Glass\Clear Glass"))
+	        set_material(RH, material_wood, rhino_default_material(raw"Wood\Pear polished"))
+	        set_material(RH, material_concrete, rhino_default_material(raw"Ceramics\Stoneware"))
+	        set_material(RH, material_plaster, rhino_default_material(raw"White Matte"))
+	        set_material(RH, material_grass, rhino_default_material(raw"Textures\Grass"))
+	      elseif v >= v"5.0"
+            set_material(RH, material_metal, rhino_default_material(raw"Metal\Silver"))
+            set_material(RH, material_glass, rhino_default_material(raw"Transparent\Glass"))
+            set_material(RH, material_wood, rhino_default_material(raw"Wood\Scots Pine"))
+            set_material(RH, material_concrete, rhino_default_material(raw"Stone\Granite"))
+            set_material(RH, material_plaster, rhino_default_material(raw"White Matte"))
+            set_material(RH, material_grass, rhino_default_material(raw"Special\Grass"))
+	      else
+	        error("Unrecognized Rhino version: ")
+	      end
 	    end
-	  end
     end
   end
 
@@ -840,7 +842,7 @@ realize(b::RH, s::Text) =
 =#
 
 backend_surface_domain(b::RH, s::Shape2D) =
-    tuple(@remote(b, SurfaceDomain(ref(b, s).value)...))
+    tuple(@remote(b, SurfaceDomain(ref(b, s).value))...)
 
 backend_map_division(b::RH, f::Function, s::Shape2D, nu::Int, nv::Int) =
     let conn = connection(b)
@@ -1433,7 +1435,7 @@ KhepriBase.b_render_and_save_view(b::RH, path::String) =
         @remote(b, Render(render_width(), render_height(), quality, path))
       end
     else
-      @remote(b, RenderLoadEnvironment("KhepriStudio", joinpath(@__DIR__, "KhepriStudio.renv")))
+      @remote(b, RenderLoadHDRiEnvironment("KhepriStudio", joinpath(@__DIR__, "KhepriStudio.renv")))
       let (camera, target) = (@remote(b, ViewCamera()), @remote(b, ViewTarget())),
           rot = 11π/6 + π/2 - (camera - target).ϕ
         if render_kind() == :white

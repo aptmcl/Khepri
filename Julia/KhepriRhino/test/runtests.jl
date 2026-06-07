@@ -64,6 +64,19 @@ using Test
     @test KhepriRhino.RhinoLayerFamily <: KhepriRhino.RhinoFamily
   end
 
+  @testset "Light & render RPCs declared in rhino_api (SOCKETBK-3/4)" begin
+    api = KhepriRhino.rhino_api
+    # b_spotlight/b_ieslight call these; they were missing from the @remote_api
+    # block, so every spot/IES light crashed with a NamedTuple field error.
+    @test :SpotLight in keys(api)
+    @test :IESLight in keys(api)
+    # the non-realistic (clay) render path calls RenderLoadHDRiEnvironment, which
+    # must be declared (matching the plugin); the two stale names must be gone.
+    @test :RenderLoadHDRiEnvironment in keys(api)
+    @test !(:RenderLoadKhepriEnvironment in keys(api))
+    @test !(:RenderLoadEnvironment in keys(api))
+  end
+
   # Visual regression tests (require running Rhino with Khepri plugin on Windows)
   if get(ENV, "KHEPRI_RHINO_TESTS", "0") == "1"
     if !Sys.iswindows()
