@@ -569,14 +569,25 @@ KhepriBase.b_trig(b::POVRay, p1, p2, p3, mat) =
   write_povray_object(connection(b), "triangle", mat, p1, p2, p3)
 
 KhepriBase.b_surface_polygon(b::POVRay, ps, mat) =
-  write_povray_object(connection(b), "polygon", mat, length(ps) + 1, ps..., ps[1])
+  # No vertices -> no polygon. Without this guard `ps[1]` (the closing vertex
+  # POVRay's polygon syntax repeats) raises a BoundsError on an empty `ps`.
+  # Mirrors the degenerate-input contract of b_arc/b_surface_arc: emit void_ref.
+  isempty(ps) ?
+    void_ref(b) :
+    write_povray_object(connection(b), "polygon", mat, length(ps) + 1, ps..., ps[1])
 
 KhepriBase.b_surface_polygon_with_holes(b::POVRay, ps, qss, mat) =
-  let vss = [ps, qss...]
-    write_povray_object(connection(b), "polygon", mat,
-      mapreduce(length, +, vss) + length(vss),
-      mapreduce(vs->[vs..., vs[1]], vcat, vss)...)
-  end
+  # Empty outer ring -> no surface. The inner `mapreduce(vs->[vs..., vs[1]], ...)`
+  # repeats each ring's first vertex to close it, so an empty `ps` makes `vs[1]`
+  # raise a BoundsError. As with b_surface_polygon, emit void_ref for the
+  # degenerate case rather than crashing.
+  isempty(ps) ?
+    void_ref(b) :
+    let vss = [ps, qss...]
+      write_povray_object(connection(b), "polygon", mat,
+        mapreduce(length, +, vss) + length(vss),
+        mapreduce(vs->[vs..., vs[1]], vcat, vss)...)
+    end
 
 KhepriBase.b_surface_circle(b::POVRay, c, r, mat) =
   	write_povray_object(connection(b), "disc", mat, c, uvz(c.cs), r)
