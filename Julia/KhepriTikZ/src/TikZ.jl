@@ -478,12 +478,13 @@ KhepriBase.b_point(b::TikZ, p, mat) =
   tikz_point(connection(b), p, mat)
 
 KhepriBase.b_line(b::TikZ, ps, mat) =
-  tikz_line(connection(b), ps, mat)
+  isempty(ps) ? void_ref(b) : tikz_line(connection(b), ps, mat)
 
 KhepriBase.b_polygon(b::TikZ, ps, mat) =
-  tikz_closed_line(connection(b), ps, false, mat)
+  isempty(ps) ? void_ref(b) : tikz_closed_line(connection(b), ps, false, mat)
 
-KhepriBase.b_spline(b::TikZ, ps, v0, v1, mat) =
+function KhepriBase.b_spline(b::TikZ, ps, v0, v1, mat)
+  length(ps) < 2 && return void_ref(b)  # a spline needs >= 2 control points (ps[2]/ps[end-1] below)
   if (v0 == false) && (v1 == false)
     #tikz_hobby_spline(connection(b), ps, false)
     tikz_spline(connection(b), ps, false)
@@ -495,6 +496,7 @@ KhepriBase.b_spline(b::TikZ, ps, v0, v1, mat) =
                      v0 == false ? ps[2] - ps[1] : v0,
                      v1 == false ? ps[end-1] - ps[end] : v1)
   end
+end
 
 KhepriBase.b_closed_spline(b::TikZ, ps, mat) =
   tikz_hobby_closed_spline(connection(b), ps)
