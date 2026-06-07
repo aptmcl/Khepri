@@ -243,7 +243,9 @@ KhepriBase.b_sphere(b::UE, c, r, mat) =
   @remote(b, Primitive__Sphere(c, r * ue_scale, mat))
 
 KhepriBase.b_cylinder(b::UE, c, r, h, bmat, tmat, smat) =
-  @remote(b, Primitive__Cylinder(c, r * ue_scale, c + vz(h, c.cs), bmat, tmat, smat))
+  isnothing(bmat) || isnothing(tmat) ?
+    b_cylinder_surfaces(b, c, r, h, bmat, tmat, smat) :
+    @remote(b, Primitive__Cylinder(c, r * ue_scale, c + vz(h, c.cs), bmat, tmat, smat))
 
 KhepriBase.b_cone(b::UE, cb, r, h, bmat, smat) =
   @remote(b, Primitive__ConeFrustum(cb, r * ue_scale, cb + vz(h, cb.cs), 0.0, bmat, bmat, smat))
@@ -387,7 +389,7 @@ KhepriBase.b_layer(b::UE, name, visible, color) =
 KhepriBase.b_set_layer_visible(b::UE, layer, visible) =
   @remote(b, Primitive__SetParentVisible(layer, visible ? 1 : 0))
 KhepriBase.b_set_layer_opacity(b::UE, layer, opacity) =
-  @remote(b, Primitive__SetParentOpacity(layer, convert(Float32, opacity)))
+  @remote(b, Primitive__SetParentOpacity(layer, opacity))
 
 KhepriBase.b_delete_all_shapes_in_layer(b::UE, layer) =
   @remote(b, Primitive__DeleteAllInParent(layer))
