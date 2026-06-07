@@ -188,6 +188,7 @@ public Element Sphere(XYZ centre, Length radius)
 public Element ConeFrustumNamed(string name, XYZ bottom, VXYZ axis, Length bottomRadius, Length height, Length topRadius)
 public Element ConeFrustum(XYZ bottom, VXYZ axis, Length bottomRadius, Length height, Length topRadius)
 public Element Cylinder(XYZ bottom, VXYZ axis, Length radius, Length height)
+public Element CylinderWithCaps(XYZ bottom, VXYZ axis, Length radius, Length height, bool bottomCap, bool topCap)
 public Element Cone(XYZ bottom, VXYZ axis, Length bottomRadius, Length height)
 public ElementId SurfaceFromGrid(int m, int n, XYZ[] pts, bool closedM, bool closedN, int level)
 public Element PyramidFrustumNamed(String name, XYZ[] ps, XYZ[] qs, ElementId materialId)
@@ -659,6 +660,61 @@ locs_and_arcs(circle::CircularPath) =
       p1 = circle.center + vpol(circle.radius, π)
     ([p0, p1], [π, π])
   end
+
+#= The wall/railing path handling below is written against a "segment" vocabulary
+   that maps directly onto KhepriBase's composite-path API: a SegmentPath is a
+   CompositePath (parameterized by Closed, like OpenPathSequence/ClosedPathSequence),
+   its pieces are LinePath/ArcPath, and path_segments/segment_path are path_pieces /
+   the piece itself. These aliases bridge that vocabulary onto the existing types so
+   the package precompiles. TODO(revit): if a distinct SegmentPath abstraction is
+   actually intended, replace these aliases with it. =#
+const SegmentPath = CompositePath
+const LineSegment = LinePath
+const ArcSegment = ArcPath
+const PathSegment = Path
+path_segments(p) = path_pieces(p)
+segment_path(seg) = seg
+
+function _append_segment_locs_and_arcs!(locs, arcs, seg::LineSegment)
+  isempty(locs) && push!(locs, seg.p0)
+  push!(locs, seg.p1)
+  push!(arcs, 0.0)
+end
+
+function _append_segment_locs_and_arcs!(locs, arcs, seg::ArcSegment)
+  let path = segment_path(seg)
+    isempty(locs) && push!(locs, path_start(path))
+    if abs(arc_amplitude(seg)) >= 2π - coincidence_tolerance()
+      push!(locs, location_at(path, arc_amplitude(seg)/2))
+      push!(locs, path_end(path))
+      push!(arcs, arc_amplitude(seg)/2)
+      push!(arcs, arc_amplitude(seg)/2)
+    else
+      push!(locs, path_end(path))
+      push!(arcs, arc_amplitude(seg))
+    end
+  end
+end
+
+function _append_segment_locs_and_arcs!(locs, arcs, seg::PathSegment)
+  let vs = convert(OpenPolygonalPath, segment_path(seg)).vertices
+    isempty(vs) && return
+    isempty(locs) ? append!(locs, vs) : append!(locs, vs[2:end])
+    append!(arcs, zeros(max(length(vs) - 1, 0)))
+  end
+end
+
+locs_and_arcs(path::SegmentPath) =
+  let locs = [],
+      arcs = []
+    for seg in path_segments(path)
+      _append_segment_locs_and_arcs!(locs, arcs, seg)
+    end
+    if is_closed_path(path) && length(locs) > 1 && coincident_path_location(locs[1], locs[end])
+      pop!(locs)
+    end
+    (locs, arcs)
+  end
 locs_and_arcs(path::OpenPathSequence) =
   let all_locs = [],
       all_arcs = []
@@ -730,6 +786,12 @@ KhepriBase.b_railing(b::RVT, path::OpenPolygonalPath, level, host, family) =
 
 KhepriBase.b_railing(b::RVT, path::ClosedPolygonalPath, level, host, family) =
   @remote(b, CreatePolygonRailing(path.vertices, ref_value(b, level), family_ref(b, family)))
+
+KhepriBase.b_railing(b::RVT, path::SegmentPath{false}, level, host, family) =
+  b_railing(b, convert(OpenPolygonalPath, path), level, host, family)
+
+KhepriBase.b_railing(b::RVT, path::SegmentPath{true}, level, host, family) =
+  b_railing(b, convert(ClosedPolygonalPath, path), level, host, family)
 
 KhepriBase.b_railing(b::RVT, ::Nothing, level, host, family) =
   @remote(b, InsertRailing(ref_value(b, host), family_ref(b, family)))
@@ -872,6 +934,8 @@ _wall_segment_lengths(path::ClosedPolygonalPath) =
   end
 _wall_segment_lengths(path::RectangularPath) =
   _wall_segment_lengths(convert(ClosedPolygonalPath, path))
+_wall_segment_lengths(path::SegmentPath) =
+  [path_length(segment_path(seg)) for seg in path_segments(path)]
 _wall_segment_lengths(path) = [path_length(path)]
 
 _opening_wall_segment(cum_lengths, global_x) =
@@ -1053,25 +1117,35 @@ realize(b::RVT, s::TrussBar) =
 #KhepriBase.material_ref(b::RVT, m::Material) = nothing
 
 
+# Revit has no native Box/Pyramid/CenteredBox RPCs; express them via the
+# PyramidFrustum element it does support. A box is a frustum with identical bottom
+# and top rectangles; an apex pyramid is a frustum whose top polygon collapses to
+# the apex (one apex copy per base vertex). b_right_cuboid is left to the KhepriBase
+# default, which centers and delegates to b_box.
 KhepriBase.b_pyramid(b::RVT, bs, t, bmat, smat) =
-  @remote(b, Pyramid(bs, t))
+  b_pyramid_frustum(b, bs, fill(t, length(bs)), bmat, smat, smat)
 KhepriBase.b_pyramid_frustum(b::RVT, bs, ts, bmat, tmat, smat) =
   @remote(b, PyramidFrustum(bs, ts))
-KhepriBase.b_right_cuboid(b::RVT, cb, width, height, h, mat) =
-  @remote(b, CenteredBox(cb, width, height, h))
 KhepriBase.b_box(b::RVT, c, dx, dy, dz, mat) =
-  @remote(b, Box(c, dx, dy, dz))
+  let pb0 = c, pb1 = add_x(c, dx), pb2 = add_xy(c, dx, dy), pb3 = add_y(c, dy)
+    b_pyramid_frustum(b,
+      [pb0, pb1, pb2, pb3],
+      [add_z(pb0, dz), add_z(pb1, dz), add_z(pb2, dz), add_z(pb3, dz)],
+      mat, mat, mat)
+  end
 KhepriBase.b_cone(b::RVT, cb, r, h, bmat, smat) =
   @remote(b, Cone(cb, vz(1, cb.cs), r, h))
 KhepriBase.b_cone_frustum(b::RVT, cb, rb, h, rt, bmat, tmat, smat) =
   @remote(b, ConeFrustum(cb, vz(1, cb.cs), rb, h, rt))
 KhepriBase.b_cylinder(b::RVT, cb, r, h, bmat, tmat, smat) =
-  @remote(b, Cylinder(cb, vz(1, cb.cs), r, h))
+  isnothing(bmat) || isnothing(tmat) ?
+    @remote(b, CylinderWithCaps(cb, vz(1, cb.cs), r, h, !isnothing(bmat), !isnothing(tmat))) :
+    @remote(b, Cylinder(cb, vz(1, cb.cs), r, h))
 #Experiment with private Element Cylinder2(XYZ bottom, VXYZ axis, Length radius, Length height) {
 KhepriBase.b_sphere(b::RVT, c, r, mat) =
   @remote(b, Sphere(c, r))
-realize(b::RVT, s::Torus) =
-  @remote(b, Torus(s.center, vz(1, s.center.cs), s.re, s.ri))
+# Torus has no native Revit RPC; the KhepriBase default (b_torus -> b_surface_grid,
+# which Revit implements) tessellates it.
 
 #
 
@@ -1146,18 +1220,11 @@ KhepriBase.b_set_view_size(b::RVT, width, height) =
 KhepriBase.b_render_and_save_view(b::RVT, path::String) =
   @remote(b, RenderView(path))
 
-zoom_extents(b::RVT) = @remote(b, ZoomExtents())
-
-view_top(b::RVT) =
-    @remote(b, ViewTop())
-
 KhepriBase.b_delete_all_shape_refs(b::RVT) =
   @remote(b, DeleteAllElements())
 
-prompt_position(prompt::String, b::RVT) =
-  let ans = @remote(b, GetPoint(prompt))
-    length(ans) > 0 && ans[1]
-  end
+# prompt_position removed: the Revit plugin has no GetPoint RPC (only
+# GetSelectedElements). Interactive position picking is not supported on Revit.
 
 all_levels(b::RVT) =
   with_introspection(b) do

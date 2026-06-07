@@ -11,6 +11,15 @@ using Test
 
 @testset "KhepriRevit.jl" begin
 
+  @testset "RPC Conformance (static)" begin
+    # Every @remote/@get_remote RPC the adapter calls must be declared in its
+    # @remote_api block. Catches the undeclared-RPC crash class at CI, with no
+    # live CAD connection (reads getfield(revit, :remote) + parses source).
+    include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "RPCConformanceTests.jl"))
+    using .RPCConformanceTests
+    run_rpc_conformance_tests(revit, joinpath(dirname(pathof(KhepriRevit))))
+  end
+
   @testset "Type system" begin
     @test isdefined(KhepriRevit, :RVTKey)
     @test KhepriRevit.RVTId === Int64
