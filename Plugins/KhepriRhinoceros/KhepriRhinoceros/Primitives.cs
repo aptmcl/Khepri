@@ -122,7 +122,7 @@ namespace KhepriRhinoceros {
             mat.IndexOfRefraction = refractionIndex;
             mat.Transparency = transparency;
             mat.CommitChanges();
-            return AddRenderMaterial(RenderMaterial.CreateBasicMaterial(mat));
+            return AddRenderMaterial(RenderMaterial.CreateBasicMaterial(mat, doc));
         }
 
         public MatId CreateColorMaterial(Color color) {
@@ -135,7 +135,7 @@ namespace KhepriRhinoceros {
             mat.Shine = 0.5;
             mat.Transparency = ((double)(255 - color.A) / 255.0);
             mat.CommitChanges();
-            return AddRenderMaterial(RenderMaterial.CreateBasicMaterial(mat));
+            return AddRenderMaterial(RenderMaterial.CreateBasicMaterial(mat, doc));
         }
 
         public ObjectAttributes WithMaterial(int idx) =>
@@ -192,7 +192,7 @@ namespace KhepriRhinoceros {
         public double ViewLens() =>
             PerspectiveView().ActiveViewport.Camera35mmLensLength;
 
-        public void RenderLoadHEnvironment(string name, string path) {
+        public void RenderLoadHDRiEnvironment(string name, string path) {
             RenderEnvironment env = doc.RenderEnvironments.FirstOrDefault(e => e.Name == name);
             if (env == null) {
                 env = RenderContent.LoadFromFile(path) as RenderEnvironment;
@@ -207,25 +207,47 @@ namespace KhepriRhinoceros {
                 rt.SetParameter("azimuth", rotation);
                 rt.EndChange();
             }
-            doc.CurrentEnvironment.ForAnyUsage = renv;
-            doc.RenderSettings.BackgroundStyle = BackgroundStyle.Environment;
-            doc.RenderSettings.TransparentBackground = true;
+            // RhinoDoc.CurrentEnvironment.ForAnyUsage is obsolete: assign the
+            // environment to each usage individually via RenderSettings (Rhino 8).
+            // RenderSettings is returned by value, so every edit here — including
+            // the background style — must be written back to the document.
+            RenderSettings rs = doc.RenderSettings;
+            foreach (RenderSettings.EnvironmentUsage usage in new[] {
+                         RenderSettings.EnvironmentUsage.Background,
+                         RenderSettings.EnvironmentUsage.Reflection,
+                         RenderSettings.EnvironmentUsage.Skylighting }) {
+                rs.SetRenderEnvironmentId(usage, renv.Id);
+                rs.SetRenderEnvironmentOverride(usage, true);
+            }
+            rs.BackgroundStyle = BackgroundStyle.Environment;
+            rs.TransparentBackground = true;
+            doc.RenderSettings = rs;
         }
         public void ClayRenderBlack(string env, double rotation, int width, int height, int quality, string path) {
             RenderUseHDRiEnvironment(env, rotation);
-            doc.GroundPlane.Enabled = false;
-            doc.GroundPlane.ShadowOnly = true;
+            // RhinoDoc.GroundPlane is obsolete; use RenderSettings.GroundPlane
+            // (value copy -> write back).
+            RenderSettings rs = doc.RenderSettings;
+            rs.GroundPlane.Enabled = false;
+            rs.GroundPlane.ShadowOnly = true;
+            doc.RenderSettings = rs;
             Render(width, height, quality, path);
         }
         public void ClayRenderWhite(string env, double rotation, int width, int height, int quality, string path) {
             RenderUseHDRiEnvironment(env, rotation);
-            doc.GroundPlane.Enabled = true;
-            doc.GroundPlane.ShadowOnly = false;
+            RenderSettings rs = doc.RenderSettings;
+            rs.GroundPlane.Enabled = true;
+            rs.GroundPlane.ShadowOnly = false;
+            doc.RenderSettings = rs;
             Render(width, height, quality, path);
         }
         public void SetBackgroundHDRi(string path, double angle) {
-            RenderTexture rt = doc.CurrentEnvironment.ForLighting.FindChild("texture") as RenderTexture;
-            Field field = rt.Fields.GetField("filename");
+            // RhinoDoc.CurrentEnvironment.ForLighting is obsolete: look up the
+            // skylighting environment via RenderSettings (Rhino 8) and edit its texture.
+            Guid envId = doc.RenderSettings.RenderEnvironmentId(
+                RenderSettings.EnvironmentUsage.Skylighting, RenderSettings.EnvironmentPurpose.Standard);
+            RenderEnvironment renv = RenderContent.FromId(doc, envId) as RenderEnvironment;
+            RenderTexture rt = renv.FindChild("texture") as RenderTexture;
             rt.Fields.Set("filename", path);
 
             //rt.SetEnvironmentMappingMode(TextureEnvironmentMappingMode.EnvironmentMap);
@@ -819,7 +841,7 @@ namespace KhepriRhinoceros {
             Transform xform = Transform.ChangeBasis(plane, Plane.WorldXY);
             xform = Transform.Multiply(xform, Transform.Scale(Point3d.Origin, scale));
             xform = Transform.Multiply(xform, Transform.Rotation(rotation, Vector3d.ZAxis, Point3d.Origin));
-            return new ObjRef(doc.Objects.Transform(profile, xform, false)).Object();
+            return new ObjRef(doc, doc.Objects.Transform(profile, xform, false)).Object();
         }
 
         IEnumerable<double> Division(double start, double end, int n) {
@@ -848,7 +870,7 @@ namespace KhepriRhinoceros {
         }
 
         public Brep[] SolidSweepPathCurve(RhinoObject path, Curve profile, double rotation, double scale) =>
-            SolidSweepPathProfile(path, new ObjRef(doc.Objects.AddCurve(profile)).Object(), rotation, scale);
+            SolidSweepPathProfile(path, new ObjRef(doc, doc.Objects.AddCurve(profile)).Object(), rotation, scale);
 
         Brep[] TryBooleanDifference(Brep brep0, Brep brep1) {
             for (int e = 5; e > 2; e--) {
@@ -2044,7 +2066,7 @@ def show_vertices(shape):
                     Material mat = new Material(obj.GetMaterial(true));
                     mat.Transparency = 1.0 - opacity;
                     mat.CommitChanges();
-                    RenderMaterial rmat = RenderMaterial.CreateBasicMaterial(mat);
+                    RenderMaterial rmat = RenderMaterial.CreateBasicMaterial(mat, doc);
                     doc.RenderMaterials.Add(rmat);
                     doc.Objects.ModifyRenderMaterial(obj.Id, rmat);
                     attrs.MaterialSource = ObjectMaterialSource.MaterialFromObject;
@@ -2293,10 +2315,19 @@ def show_vertices(shape):
         }
         public void SunLight(DateTime dt, double latitude, double longitude, int meridian, float turbidity, bool hasSun) {
             Sun sun = doc.Lights.Sun;
-            sun.SetPosition(dt, latitude, longitude);
+            // Sun.SetPosition(DateTime, lat, lon) and Sun.SkylightOn are obsolete:
+            // set Latitude/Longitude/TimeZone and the date/time individually, and
+            // enable the skylight through RenderSettings. TimeZone is set before
+            // SetDateTime so the Unspecified-kind time is read at the right zone.
+            sun.Latitude = latitude;
+            sun.Longitude = longitude;
             sun.TimeZone = meridian;
-            sun.SkylightOn = true;
+            sun.SetDateTime(dt, DateTimeKind.Unspecified);
             sun.Enabled = hasSun;
+            // RenderSettings is returned by value; modify the copy and write it back.
+            RenderSettings rs = doc.RenderSettings;
+            rs.Skylight.Enabled = true;
+            doc.RenderSettings = rs;
         }
         public Guid PointLight(Point3d p, Color c, double power) {
             LightObject obj = doc.Lights[doc.Lights.Add(new Light())];
