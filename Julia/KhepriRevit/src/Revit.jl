@@ -661,53 +661,39 @@ locs_and_arcs(circle::CircularPath) =
     ([p0, p1], [π, π])
   end
 
-#= The wall/railing path handling below is written against a "segment" vocabulary
-   that maps directly onto KhepriBase's composite-path API: a SegmentPath is a
-   CompositePath (parameterized by Closed, like OpenPathSequence/ClosedPathSequence),
-   its pieces are LinePath/ArcPath, and path_segments/segment_path are path_pieces /
-   the piece itself. These aliases bridge that vocabulary onto the existing types so
-   the package precompiles. TODO(revit): if a distinct SegmentPath abstraction is
-   actually intended, replace these aliases with it. =#
-const SegmentPath = CompositePath
-const LineSegment = LinePath
-const ArcSegment = ArcPath
-const PathSegment = Path
-path_segments(p) = path_pieces(p)
-segment_path(seg) = seg
-
-function _append_segment_locs_and_arcs!(locs, arcs, seg::LineSegment)
+# Convert a path into (locs, arc-bulges) for Revit walls/railings, dispatching on
+# each piece of a CompositePath (its path_pieces) by concrete type.
+function _append_segment_locs_and_arcs!(locs, arcs, seg::LinePath)
   isempty(locs) && push!(locs, seg.p0)
   push!(locs, seg.p1)
   push!(arcs, 0.0)
 end
 
-function _append_segment_locs_and_arcs!(locs, arcs, seg::ArcSegment)
-  let path = segment_path(seg)
-    isempty(locs) && push!(locs, path_start(path))
-    if abs(arc_amplitude(seg)) >= 2π - coincidence_tolerance()
-      push!(locs, location_at(path, arc_amplitude(seg)/2))
-      push!(locs, path_end(path))
-      push!(arcs, arc_amplitude(seg)/2)
-      push!(arcs, arc_amplitude(seg)/2)
-    else
-      push!(locs, path_end(path))
-      push!(arcs, arc_amplitude(seg))
-    end
+function _append_segment_locs_and_arcs!(locs, arcs, seg::ArcPath)
+  isempty(locs) && push!(locs, path_start(seg))
+  if abs(arc_amplitude(seg)) >= 2π - coincidence_tolerance()
+    push!(locs, location_at(seg, arc_amplitude(seg)/2))
+    push!(locs, path_end(seg))
+    push!(arcs, arc_amplitude(seg)/2)
+    push!(arcs, arc_amplitude(seg)/2)
+  else
+    push!(locs, path_end(seg))
+    push!(arcs, arc_amplitude(seg))
   end
 end
 
-function _append_segment_locs_and_arcs!(locs, arcs, seg::PathSegment)
-  let vs = convert(OpenPolygonalPath, segment_path(seg)).vertices
+function _append_segment_locs_and_arcs!(locs, arcs, seg::Path)
+  let vs = convert(OpenPolygonalPath, seg).vertices
     isempty(vs) && return
     isempty(locs) ? append!(locs, vs) : append!(locs, vs[2:end])
     append!(arcs, zeros(max(length(vs) - 1, 0)))
   end
 end
 
-locs_and_arcs(path::SegmentPath) =
+locs_and_arcs(path::CompositePath) =
   let locs = [],
       arcs = []
-    for seg in path_segments(path)
+    for seg in path_pieces(path)
       _append_segment_locs_and_arcs!(locs, arcs, seg)
     end
     if is_closed_path(path) && length(locs) > 1 && coincident_path_location(locs[1], locs[end])
@@ -787,10 +773,10 @@ KhepriBase.b_railing(b::RVT, path::OpenPolygonalPath, level, host, family) =
 KhepriBase.b_railing(b::RVT, path::ClosedPolygonalPath, level, host, family) =
   @remote(b, CreatePolygonRailing(path.vertices, ref_value(b, level), family_ref(b, family)))
 
-KhepriBase.b_railing(b::RVT, path::SegmentPath{false}, level, host, family) =
+KhepriBase.b_railing(b::RVT, path::CompositePath{false}, level, host, family) =
   b_railing(b, convert(OpenPolygonalPath, path), level, host, family)
 
-KhepriBase.b_railing(b::RVT, path::SegmentPath{true}, level, host, family) =
+KhepriBase.b_railing(b::RVT, path::CompositePath{true}, level, host, family) =
   b_railing(b, convert(ClosedPolygonalPath, path), level, host, family)
 
 KhepriBase.b_railing(b::RVT, ::Nothing, level, host, family) =
@@ -934,8 +920,8 @@ _wall_segment_lengths(path::ClosedPolygonalPath) =
   end
 _wall_segment_lengths(path::RectangularPath) =
   _wall_segment_lengths(convert(ClosedPolygonalPath, path))
-_wall_segment_lengths(path::SegmentPath) =
-  [path_length(segment_path(seg)) for seg in path_segments(path)]
+_wall_segment_lengths(path::CompositePath) =
+  [path_length(seg) for seg in path_pieces(path)]
 _wall_segment_lengths(path) = [path_length(path)]
 
 _opening_wall_segment(cum_lengths, global_x) =
