@@ -10,6 +10,15 @@ using Test
 
 @testset "KhepriAutoCAD.jl" begin
 
+  @testset "RPC Conformance (static)" begin
+    # Every @remote/@get_remote RPC the adapter calls must be declared in its
+    # @remote_api block. Catches the undeclared-RPC crash class at CI, with no
+    # live CAD connection (reads getfield(autocad, :remote) + parses source).
+    include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "RPCConformanceTests.jl"))
+    using .RPCConformanceTests
+    run_rpc_conformance_tests(autocad, joinpath(dirname(pathof(KhepriAutoCAD))))
+  end
+
   @testset "Type system" begin
     @test isdefined(KhepriAutoCAD, :ACADKey)
     @test KhepriAutoCAD.ACADId === Int64
