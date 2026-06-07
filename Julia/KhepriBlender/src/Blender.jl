@@ -319,10 +319,10 @@ KhepriBase.b_quad_strip_closed(b::BLR, ps, qs, smooth, mat) =
   @remote(b, quad_strip_closed(ps, qs, smooth, mat))
 
 KhepriBase.b_surface_polygon(b::BLR, ps, mat) =
-  @remote(b, polygon(ps, mat))
+  isempty(ps) ? void_ref(b) : @remote(b, polygon(ps, mat))
 
 KhepriBase.b_surface_polygon_with_holes(b::BLR, ps, qss, mat) =
-  @remote(b, polygon_with_holes([ps, qss...], mat))
+  isempty(ps) ? void_ref(b) : @remote(b, polygon_with_holes([ps, qss...], mat))
 
 KhepriBase.b_surface_circle(b::BLR, c, r, mat) =
   @remote(b, circle(c, vz(1, c.cs), r, mat))
