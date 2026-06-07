@@ -1594,10 +1594,12 @@ KhepriBase.b_set_layer_opacity(b::ACAD, layer, opacity) =
   @remote(b, SetLayerTransparency(ref_value(b, layer), round(UInt8, opacity * 255)))
 
 switch_to_layer(to, b::ACAD) =
-    if to != from
-      set_layer_visible(to, true)
-      set_layer_visible(from, false)
-      current_layer(to)
+    let from = current_layer()
+      if to != from
+        set_layer_visible(to, true)
+        set_layer_visible(from, false)
+        current_layer(to)
+      end
     end
 
 # Blocks
