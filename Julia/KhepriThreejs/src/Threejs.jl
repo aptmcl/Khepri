@@ -387,7 +387,8 @@ KhepriBase.b_trig(b::THR, p1, p2, p3, mat) =
 KhepriBase.b_quad(b::THR, p1, p2, p3, p4, mat) =
   @remote(b, meshIndexed([p1, p2, p3, p4], [0,1,2,2,3,0], mat))
 
-KhepriBase.b_ngon(b::THR, ps, pivot, smooth, mat) =
+function KhepriBase.b_ngon(b::THR, ps, pivot, smooth, mat)
+  isempty(ps) && return void_ref(b)  # empty ring -> ps[end]/ps[1] would BoundsError
   if smooth # Threejs merges normals if indexed with repeated vertices
     let pts = [pivot, ps...],
         idxs = Int[],
@@ -408,6 +409,7 @@ KhepriBase.b_ngon(b::THR, ps, pivot, smooth, mat) =
       @remote(b, mesh(pts, mat))
     end
   end
+end
 
 KhepriBase.b_quad_strip(b::THR, ps, qs, smooth, mat) =
   @remote(b, quadStrip(ps, qs, smooth, mat))
