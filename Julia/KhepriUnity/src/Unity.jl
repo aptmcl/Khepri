@@ -533,10 +533,6 @@ KhepriBase.b_set_view(b::Unity, camera::Loc, target::Loc, lens::Real, aperture::
 KhepriBase.b_get_view(b::Unity) =
   (@remote(b, ViewCamera()), @remote(b, ViewTarget()), @remote(b, ViewLens()))
 
-zoom_extents(b::Unity) = @remote(b, ZoomExtents())
-
-view_top(b::Unity) = @remote(b, ViewTop())
-
 KhepriBase.b_set_view_size(b::Unity, width, height) =
   @remote(b, ViewSize(width, height))
 
@@ -652,14 +648,28 @@ Khepri.create_block("Foo", [circle(radius=r) for r in 1:10])
 
 # Lights
 
-KhepriBase.b_pointlight(b::Unity, loc::Loc, color::RGB, intensity::Real, range::Real) =
-    @remote(b, PointLight(loc, color, range, intensity))
+#=
+Unity's PointLight RPC takes an explicit `range` (the radius beyond which the
+light no longer contributes) that the portable Khepri light model does not
+carry. 10 world units is Unity's conventional point-light range; reusing it for
+every b_* light path keeps a generic `point_light` looking the same regardless
+of which path (point/ies/area) built it. Override only for scenes that need a
+wider falloff.
+
+b_pointlight follows the KhepriBase contract b_pointlight(b, loc, energy, color);
+the earlier 5-arg (loc, color, intensity, range) signature never matched dispatch
+and fell through to the erroring default, so point lights were broken on Unity.
+=#
+const unity_default_light_range = 10.0
+
+KhepriBase.b_pointlight(b::Unity, loc, energy, color) =
+    @remote(b, PointLight(loc, color, unity_default_light_range, energy))
 
 KhepriBase.b_ieslight(b::Unity, file, loc, dir, alpha, beta, gamma) =
-    @remote(b, PointLight(loc, rgb(1, 1, 1), 10.0, 1500.0))
+    @remote(b, PointLight(loc, rgb(1, 1, 1), unity_default_light_range, 1500.0))
 
 KhepriBase.b_arealight(b::Unity, loc, dir, size, energy, color) =
-    @remote(b, PointLight(loc, color, 10.0, energy))
+    @remote(b, PointLight(loc, color, unity_default_light_range, energy))
 #=
 backend_spotlight(b::Unity, loc::Loc, dir::Vec, hotspot::Real, falloff::Real) =
     @remote(b, SpotLight(loc, hotspot, falloff, loc + dir))
@@ -718,13 +728,11 @@ KhepriBase.b_unhighlight_all_refs(b::Unity) =
 KhepriBase.b_select_position(b::Unity, prompt) =
   begin
     @info "$(prompt) on the $(b) backend."
-    @remote(b, StartSelectingPosition())
-    let s = u0() # Means not found
-      while s == u0()
-        sleep(0.1)
-        s = @remote(b, SelectedPosition())
-      end
-      s
+    # Use the declared GetPosition RPC (returns Point3d[]), matching the Rhino
+    # backend. The previous StartSelectingPosition/SelectedPosition polling loop
+    # called RPCs that neither unity_api nor the plugin ever declared.
+    let ans = @remote(b, GetPosition(prompt))
+      length(ans) > 0 ? ans[1] : nothing
     end
   end
 

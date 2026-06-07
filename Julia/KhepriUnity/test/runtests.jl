@@ -50,6 +50,21 @@ using Test
     @test isdefined(KhepriUnity, :fast_unity)
   end
 
+  @testset "Light & selection RPCs (SOCKETBK-5/6)" begin
+    # b_pointlight must follow the KhepriBase contract (b, loc, energy, color);
+    # the old 5-arg/swapped signature never matched dispatch and fell through to
+    # the erroring default, so point lights were broken on Unity.
+    bpl = which(KhepriBase.b_pointlight, (KhepriUnity.Unity, Any, Any, Any))
+    @test bpl.module === KhepriUnity
+    @test KhepriUnity.unity_default_light_range == 10.0
+    # b_select_position uses the declared GetPosition RPC, not the undeclared
+    # StartSelectingPosition/SelectedPosition pair.
+    @test :GetPosition in keys(KhepriUnity.unity_api)
+    # the dead, broken zoom_extents/view_top specializations were removed
+    @test isempty(filter(m -> m.module === KhepriUnity, collect(methods(KhepriBase.zoom_extents))))
+    @test !isdefined(KhepriUnity, :view_top)
+  end
+
   #=
   Pure Julia tests for the BIM box-decomposition introduced to give walls,
   slabs, columns, beams and panels primitive BoxColliders instead of
