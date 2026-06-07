@@ -147,13 +147,6 @@ write_povray_mesh(io::IO, mat, pts, closed_u, closed_v, smooth_u, smooth_v) =
     end
   end
 
-write_povray_isosurface(io::IO, mat, func, contained_by, max_gradient) =
-  write_povray_object(io, "isosurface", mat) do
-    write_povray_object(io, "function", nothing, func)
-    write_povray_object(io, "contained_by", nothing, contained_by)
-    write_povray_param(io, "max_gradient", max_gradient)
-  end
-
 #=
 struct POVRayPigment
   color::RGB
@@ -606,12 +599,22 @@ KhepriBase.b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_
   end
 
 KhepriBase.b_cylinder(b::POVRay, cb, r, h, bmat, tmat, smat) =
-  let buf = connection(b)
-    write_povray_object(buf, "cylinder", smat, [0,0,0], [0,0,h], r) do
-      write_povray_matrix(buf, cb)
+  isnothing(bmat) || isnothing(tmat) ?
+    isnothing(bmat) && isnothing(tmat) ?
+      let buf = connection(b)
+        write_povray_object(buf, "cylinder", smat, [0,0,0], [0,0,h], r) do
+          write(buf, "  open\n")
+          write_povray_matrix(buf, cb)
+        end
+        -1
+      end :
+      b_cylinder_surfaces(b, cb, r, h, bmat, tmat, smat) :
+    let buf = connection(b)
+      write_povray_object(buf, "cylinder", smat, [0,0,0], [0,0,h], r) do
+        write_povray_matrix(buf, cb)
+      end
+      -1
     end
-    -1
-  end
 
 KhepriBase.b_sphere(b::POVRay, c, r, mat) =
   write_povray_object(connection(b), "sphere", mat, c, r)
@@ -661,9 +664,6 @@ KhepriBase.b_cone_frustum(b::POVRay, cb, rb, h, rt, bmat, tmat, smat) =
 #     end
 #   end
 #
-
-b_isosurface(b::POVRay, frep, bounding_box, mat) =
-  write_povray_isosurface(connection(b), mat, func, bounding_box, max_gradient)
 
 #=
 #=
