@@ -868,9 +868,15 @@ export autocad_basic_material
 autocad_basic_material = AutoCADBasicMaterial
 
 KhepriBase.b_get_material(b::ACAD, m::AutoCADBasicMaterial) =
+  # CreateMaterialNamed (see its @remote_api declaration above) takes exactly one
+  # textureMapPath plus 13 scalar/color params, in this order: name, textureMapPath,
+  # uScale, vScale, uOffset, vOffset, projection, uTiling, vTiling, diffuseColor,
+  # refractionIndex, opacity, reflectivity, translucence, illuminationModel. The
+  # diffuse texture map is carried by `diffuse_blend_map_source`; the struct's other
+  # blend_* fields are not exposed by this RPC.
   @remote(b, CreateMaterialNamed(
     m.name,
-    m.texture_path,
+    m.diffuse_blend_map_source,
     m.u_scale,
     m.v_scale,
     m.u_offset,
@@ -879,8 +885,6 @@ KhepriBase.b_get_material(b::ACAD, m::AutoCADBasicMaterial) =
     m.u_tiling,
     m.v_tiling,
     m.diffuse_color,
-    m.diffuse_map_source,
-    m.bump_map_source,
     m.refraction_index,
     m.opacity,
     m.reflectivity,
@@ -901,7 +905,7 @@ KhepriBase.b_surface(b::ACAD, frontier::Shapes, mat) =
     ids
   end
 backend_surface_boundary(b::ACAD, s::Shape2D) =
-    map(c -> b_shape_from_ref(b, r), @remote(b, CurvesFromSurface(ref_value(b, s))))
+    map(c -> b_shape_from_ref(b, c), @remote(b, CurvesFromSurface(ref_value(b, s))))
 
 # Iterating over curves and surfaces
 

@@ -98,6 +98,22 @@ using Test
     @test !KhepriBase.supports_exact_trimmed_surfaces(KhepriAutoCAD.ACAD)
   end
 
+  @testset "AutoCADBasicMaterial maps to CreateMaterialNamed (SOCKETBK-8)" begin
+    # b_get_material(::ACAD, ::AutoCADBasicMaterial) feeds these struct fields to
+    # CreateMaterialNamed's 15 parameters. A prior bug referenced three fields that
+    # do not exist (texture_path / diffuse_map_source / bump_map_source) and passed
+    # 17 args, so any AutoCADBasicMaterial crashed on resolution. Guard that every
+    # field the call maps is real and that the specialized method is selected.
+    M = KhepriAutoCAD.AutoCADBasicMaterial
+    for f in (:name, :diffuse_blend_map_source, :u_scale, :v_scale, :u_offset, :v_offset,
+              :projection, :u_tiling, :v_tiling, :diffuse_color, :refraction_index,
+              :opacity, :reflectivity, :translucence, :illumination_model)
+      @test hasfield(M, f)
+    end
+    T = SocketBackend{KhepriAutoCAD.ACADKey, Int64}
+    @test which(KhepriBase.b_get_material, (T, M)).module === KhepriAutoCAD
+  end
+
   # Visual regression tests (require running AutoCAD with Khepri plugin on Windows)
   if get(ENV, "KHEPRI_AUTOCAD_TESTS", "0") == "1"
     if !Sys.iswindows()
