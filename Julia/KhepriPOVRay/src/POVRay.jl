@@ -345,11 +345,34 @@ povray_material(name::String;
                 gray::Real=0.3,
                 red::Real=gray, green::Real=gray, blue::Real=gray,
                 specularity=0, roughness=0,
+                metallic=0,
+                emission_red=0, emission_green=0, emission_blue=0,
                 transmissivity=nothing, transmitted_specular=nothing) =
-  povray_definition(name, "texture", """{
-  pigment { rgb <$(Float64(red)),$(Float64(green)),$(Float64(blue))> }
-  finish { specular $(specularity) roughness $(roughness) }
+  #= Optional finish/pigment terms are appended only when non-default so a plain
+     diffuse material keeps its previous minimal output (regression safety) and
+     only metallic/emissive/transparent materials gain extra terms.
+       metallic   -> POVRay `finish { metallic AMOUNT }`: tints highlights and
+                     reflection toward the surface colour (the POVRay analogue of
+                     PBR metalness; Khepri `metallic`).
+       emission_* -> POVRay 3.7 `finish { emission COLOR }` self-illumination. The
+                     caller premultiplies emission_color by emission_strength,
+                     since POVRay's emission term takes a single colour (values >1
+                     are valid intensities). Channels are passed separately so the
+                     `red`/`green`/`blue` keyword args do not shadow the colour
+                     accessor functions of the same name.
+       transmissivity -> POVRay pigment `transmit AMOUNT` transparency. This kwarg
+                     was previously accepted but never emitted, so any transmission
+                     value rendered opaque; it is now honoured. =#
+  let transmit = isnothing(transmissivity) ? "" : " transmit $(Float64(transmissivity))",
+      metallic_term = Float64(metallic) == 0 ? "" : " metallic $(Float64(metallic))",
+      emission_term = (Float64(emission_red) == 0 && Float64(emission_green) == 0 && Float64(emission_blue) == 0) ?
+                        "" :
+                        " emission <$(Float64(emission_red)),$(Float64(emission_green)),$(Float64(emission_blue))>"
+    povray_definition(name, "texture", """{
+  pigment { rgb <$(Float64(red)),$(Float64(green)),$(Float64(blue))>$(transmit) }
+  finish { specular $(specularity) roughness $(roughness)$(metallic_term)$(emission_term) }
 }""")
+  end
 
 const povray_grass =
   povray_definition("Grass", "texture",
@@ -546,6 +569,10 @@ KhepriBase.b_material(b::POVRay, name,
   povray_material(name,
     red=Float64(red(base_color)), green=Float64(green(base_color)), blue=Float64(blue(base_color)),
     specularity=Float64(specular), roughness=Float64(roughness),
+    metallic=Float64(metallic),
+    emission_red=Float64(red(emission_color))*Float64(emission_strength),
+    emission_green=Float64(green(emission_color))*Float64(emission_strength),
+    emission_blue=Float64(blue(emission_color))*Float64(emission_strength),
     transmissivity=transmission > 0 ? Float64(transmission) : nothing)
 KhepriBase.b_plastic_material(b::POVRay, name, color, roughness) =
   povray_material(name,
