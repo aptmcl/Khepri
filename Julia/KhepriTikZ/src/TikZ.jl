@@ -24,8 +24,40 @@ tikz_options(out::IO, options::String) =
 tikz_options(out::IO, options::Integer) =
   nothing  # Ignore void_ref integer values
 
+#=
+Wireframe is, by design, an *outline-only* rendering mode: it shows the edges
+of every shape and paints no faces. We honour that with a single coordinated
+policy split across the two TikZ levels that can introduce a fill:
+
+  * path level (here, `tikz_draw`): a "filled" path is emitted as `\fill`
+    only when we are NOT in wireframe mode; in wireframe mode it degrades to
+    `\draw`, i.e. just the outline. This is intentional, not a missing case --
+    a filled `surface_polygon` in wireframe mode SHOULD render as its boundary.
+
+  * picture level (`wireframe_picture_fill_option`): the surrounding
+    `tikzpicture` only sets the default `fill=gray` colour when NOT in
+    wireframe mode, so even the `\fill` paths that 3D solids emit (via
+    `paint_trig`, which always fills) have somewhere to take their colour from.
+
+Keeping the rule in these two named places -- and nowhere else -- is the whole
+point: earlier copies of the picture-level string lived in dead `tikz_set_view`
+helpers and drifted.
+
+See also: wireframe_picture_fill_option, use_wireframe, paint_trig.
+=#
 tikz_draw(out::IO, filled=false) =
   print(out, filled && ! use_wireframe() ? "\\fill " : "\\draw ")
+
+"""
+    wireframe_picture_fill_option()
+
+Picture-level `tikzpicture` option that supplies the default face colour, or
+the empty string in wireframe mode (where no faces are painted). Single source
+of truth for the picture-level half of the wireframe-fill policy documented on
+`tikz_draw`.
+"""
+wireframe_picture_fill_option() =
+  use_wireframe() ? "" : ",fill=gray"
 
 tikz_number(out::IO, x::Real) =
   isinteger(x) ?
@@ -367,26 +399,12 @@ tikz_transform(out::IO, f::Function, c::Loc) =
     tikz_e(out, "\\end{scope}")
   end
 
-tikz_set_view(out::IO, view, options) =
-  let v = view.target - view.camera,
-      contents = String(take(out)),
-      out = IOBuffer()
-    println(out, "\\begin{tikzpicture}[3d view={$(rad2deg(sph_phi(v))-90)}{$(rad2deg(sph_psi(v))-90)}$(use_wireframe() ? "" : ",fill=gray")$(options=="" ? "" : ",")$options]") #)opacity=0.2")]")
-    print(out, contents)
-    println(out, "\\end{tikzpicture}")
-    String(take!(out))
-  end
-
-
-
-tikz_set_view_top(out::IO, options) =
-  let contents = String(take(out)),
-      out = IOBuffer()
-    println(out, "\\begin{tikzpicture}[$options]")
-    print(out, contents)
-    println(out, "\\end{tikzpicture}")
-    String(take!(out))
-  end
+# NOTE: the live view pipeline is gen_tex_document -> gen_tikz_picture, which
+# wraps the commands and (via wireframe_picture_fill_option) applies the
+# wireframe-fill policy. The former tikz_set_view / tikz_set_view_top helpers
+# duplicated that picture wrapper, were never called, and re-implemented the
+# fill option string by hand; they have been removed so the policy lives in one
+# place. See gen_tikz_picture and wireframe_picture_fill_option.
 
 #=
   \begin{tikzpicture}
@@ -430,13 +448,32 @@ KhepriBase.merge_backend_materials(b::TikZ, m1::String, m2::String) =
   join(union(split(m1, ","), split(m2, ",")), ",")
 
 
-KhepriBase.b_get_material(b::TikZ, layer, spec) =
+#=
+b_layer_material overrides KhepriBase's layer-aware generic
+(Shapes.jl: b_layer_material(b, layer, spec)). The macro-generated
+realize(::MaterialInLayer) calls THAT generic with the realized layer
+(a BasicLayer, carrying .color) and the backend spec. The previous name
+b_get_material(b, layer, spec) matched no generic at all, so this 3-arg
+method was unreachable: every layer colour fell through to the 2-arg
+b_get_material(b, spec) default and collapsed to void_ref, i.e. TikZ
+layer colouring was dead code.
+
+The default-white test must be approximate. Layer colours are Float
+channels; a colour that only rounds to white (e.g. 1 - eps) fails an
+exact ==rgba(1,1,1,1) and would emit a spurious near-white scope. The
+per-channel ≈ 1 here mirrors tikz_color's own ≈ 1.0 channel suppression,
+so a default-white layer yields void_ref (no \begin{scope} emitted).
+=#
+KhepriBase.b_layer_material(b::TikZ, layer, spec) =
   let c = layer.color
-    c == rgba(1,1,1,1) ?
-      void_ref(b) : 
+    (c.r ≈ 1 && c.g ≈ 1 && c.b ≈ 1 && c.alpha ≈ 1) ?
+      void_ref(b) :
       tikz_color(c)
   end
   
+# 2-arg material resolution for an explicit nothing spec (PbrMaterial
+# with no backend override). Distinct from the layer-aware
+# b_layer_material above; kept so b_get_material(b, nothing) -> void_ref.
 KhepriBase.b_get_material(b::TikZ, spec::Nothing) = void_ref(b)
 
 KhepriBase.b_material(b::TikZ, name, base_color) =
@@ -651,7 +688,14 @@ KhepriBase.b_ext_line(b::TikZ, p, q, mat) =
   tikz_line(connection(b), [p, q], "illustration")
 
 KhepriBase.b_arc_dimension(b::TikZ, c, r, α, Δα, rstr, Δstr, size, offset, mat) =
-  withTikZXForm(b, c, mat) do out, cc
+  #= The do-block parameter shadows the outer center on purpose: withTikZXForm
+     hands us the LOCAL-frame anchor (the origin of the surrounding TikZ cm/canvas
+     scope) when a transform or material scope is active, and the unchanged outer
+     center otherwise. Drawing with the outer center inside that scope would let
+     tikz_coord emit absolute world coordinates that the scope then transforms a
+     second time. Binding the parameter as `c` keeps every coordinate below in the
+     frame the scope expects (same convention as b_vectors_illustration). =#
+  withTikZXForm(b, c, mat) do out, c
     tikz_dim_arc(out, c, r, α, Δα, rstr, Δstr)
   end
 
@@ -687,7 +731,10 @@ arrow_spec(color, scale, left, right) =
   "illustration,"*(left ? "{Latex[scale=$scale]}" : "")*"-"*(right ? "{Latex[scale=$scale]}" : "")*","*color
 
 KhepriBase.b_radii_illustration(b::TikZ, c, rs, rs_txts, mats, mat) =
-  withTikZXForm(b, c, mat) do out, cc
+  #= Shadow the outer center: withTikZXForm passes the local-frame anchor of the
+     surrounding TikZ scope, so every coordinate below must be expressed relative
+     to it (same convention as b_vectors_illustration). =#
+  withTikZXForm(b, c, mat) do out, c
     for (r,r_txt,ϕ,mat) in zip(rs, rs_txts, division(π/6, 2π+π/6, length(rs), false), mats)
       color = tikz_color(material_color(mat))
       tikz_polar_segment(out, c, vpol(r, ϕ), arrow_spec(color, default_annotation_scale(), true, true))
@@ -705,7 +752,10 @@ KhepriBase.b_vectors_illustration(b::TikZ, p, a, rs, rs_txts, mats, mat) =
   end
 
 KhepriBase.b_angles_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, mats, mat) =
-  withTikZXForm(b, c, mat) do out, cc
+  #= Shadow the outer center: withTikZXForm passes the local-frame anchor of the
+     surrounding TikZ scope, so every coordinate below must be expressed relative
+     to it (same convention as b_vectors_illustration). =#
+  withTikZXForm(b, c, mat) do out, c
     let maxr = maximum(rs),
         n = length(rs),
         ars = division(0.2maxr, 0.7maxr, n, false),
@@ -724,7 +774,7 @@ KhepriBase.b_angles_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts,
             tikz_polar_segment(out, c, vpol(ar, s), tikz_params)
             tikz_polar_segment(out, c, vpol(r, s + a), arrow_spec(color, default_annotation_scale(), false, true))
             if (ar > r)
-              tikz_polar_segment(out, pol(r, s + a), vpol(ar-r, s + a), "dashed,$tikz_params")
+              tikz_polar_segment(out, c + vpol(r, s + a), vpol(ar-r, s + a), "dashed,$tikz_params")
             end
             (a > 0.0) ?
               tikz_maybe_arc(out, c, ar, s, a, false, arrow_spec(color, default_annotation_scale(), false, true)) :
@@ -740,7 +790,10 @@ KhepriBase.b_angles_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts,
   end
 
 KhepriBase.b_arcs_illustration(b::TikZ, c, rs, ss, as, r_txts, s_txts, a_txts, mats, mat) =
-  withTikZXForm(b, c, mat) do out, cc
+  #= Shadow the outer center: withTikZXForm passes the local-frame anchor of the
+     surrounding TikZ scope, so every coordinate below must be expressed relative
+     to it (same convention as b_vectors_illustration). =#
+  withTikZXForm(b, c, mat) do out, c
     let maxr = maximum(rs),
         n = length(rs),
         ars = division(0.2maxr, 0.7maxr, n, false),
@@ -844,7 +897,7 @@ gen_tikz_picture(b::TikZ) =
       v = b.view.target - b.view.camera,
       options = b.view.is_top_view ?
         "" :
-        "3d view={$(rad2deg(sph_phi(v))-90)}{$(rad2deg(sph_psi(v))-90)}$(use_wireframe() ? "" : ",fill=gray")"
+        "3d view={$(rad2deg(sph_phi(v))-90)}{$(rad2deg(sph_psi(v))-90)}$(wireframe_picture_fill_option())"
     println(out, "\\begin{tikzpicture}[$options]")
     gen_tikz_commands(b)
     # Outline
