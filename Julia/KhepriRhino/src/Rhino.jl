@@ -728,20 +728,6 @@ KhepriBase.b_cylinder(b::RH, c, r, h, bmat, tmat, smat) =
          isnothing(tmat) ? [] : b_surface_circle(b, add_z(c, h), r, tmat)) :
   @remote(b, Cylinder(c, r, add_z(c, h), smat))
 
-#=
-See comment above regarding the use of Meshes vs Surfaces or Polysurfaces!
-
-KhepriBase.b_cuboid(b::RH, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat) =
-  @remote(b, Mesh([pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3], 
-                  [[0, 1, 2, 3],
-                   [0, 1, 5, 4],
-                   [1, 2, 6, 5],
-                   [2, 3, 7, 6],
-                   [3, 0, 4, 7],
-                   [4, 5, 6, 7]],
-                  mat))
-=# 
-
 KhepriBase.b_cuboid(b::RH, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat) =
   b_pyramid_frustum(b, [pb0, pb1, pb2, pb3], [pt0, pt1, pt2, pt3], mat, mat, mat)
 
@@ -842,11 +828,6 @@ backend_map_division(b::RH, f::Function, s::Shape1D, n::Int) =
       frames = rotation_minimizing_frames(@remote(b, CurveFrameAt(r, t1)), ps, ts)
     map(f, frames)
   end
-
-#=
-realize(b::RH, s::Text) =
-  @remote(b, Text(s.str, s.c, vx(1, s.c.cs), vy(1, s.c.cs), s.h))
-=#
 
 backend_surface_domain(b::RH, s::Shape2D) =
     tuple(@remote(b, SurfaceDomain(ref(b, s).value))...)
@@ -1010,46 +991,6 @@ KhepriBase.b_stroke_unite(b::RH, refs, mat) =
 KhepriBase.b_slice_ref(b::RH, r, p, v) =
   @remote(b, Slice(r, p, v))
 
-#=
-realize(b::RH, s::Revolve) =
-  and_delete_shape(
-    map_ref(b, s.profile) do r
-      @remote(b, Revolve(r, s.p, s.n, s.start_angle, s.amplitude))
-    end,
-    s.profile)
-
-backend_loft_points(b::Backend, profiles::Shapes, rails::Shapes, ruled::Bool, closed::Bool) =
-  let f = (ruled ? (closed ? polygon : line) : (closed ? closed_spline : spline))
-    and_delete_shapes(ref(b, f(map(point_position, profiles), backend=b)),
-                      vcat(profiles, rails))
-  end
-
-backend_loft_curves(b::RH, profiles::Shapes, rails::Shapes, ruled::Bool, closed::Bool) =
-  and_delete_shapes(RHLoft(connection(b),
-                             ref_values(b, profiles),
-                             ref_values(b, rails),
-                             ruled, closed),
-                    vcat(profiles, rails))
-
-backend_loft_surfaces(b::RH, profiles::Shapes, rails::Shapes, ruled::Bool, closed::Bool) =
-  backend_loft_curves(b, profiles, rails, ruled, closed)
-
-backend_loft_curve_point(b::RH, profile::Shape, point::Shape) =
-  and_delete_shapes(RHLoft(connection(b),
-                             vcat(ref_values(b, profile), ref_values(b, point)),
-                             [],
-                             true, false),
-                    [profile, point])
-
-backend_loft_surface_point(b::RH, profile::Shape, point::Shape) =
-  backend_loft_curve_point(b, profile, point)
-=#
-
-#=
-slice_ref(b::RH, r::RHNativeRef, p::Loc, v::Vec) =
-  (@remote(b, Slice(r.value, p, v); r))
-
-=#
 realize(b::RH, s::Move) =
   and_mark_deleted(b,
 	  map_ref(b, s.shape) do r
@@ -1087,11 +1028,6 @@ realize(b::RH, s::Thicken) =
       @remote(b, Thicken(r, s.thickness))
     end,
     s.shape)
-#=
-backend_frame_at(b::RH, s::Shape2D, u::Real, v::Real) =
-  @remote(b, SurfaceFrameAt(ref(b, s).value, u, v))
-
-=#
 
 # BIM
 
