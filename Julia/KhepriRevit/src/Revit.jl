@@ -330,11 +330,6 @@ public XYZ[] RailingPath(Element element)
 public ElementId RailingLevel(Element element)
 """
 
-#=         //AML Revit cannot handle walls with curves that are not lines or arcs!!!!
-public ElementId CreateSplineWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool closed)
-public ElementId CreateSplineCurtainWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool closed)
-=#
-
 abstract type RVTKey end
 const RVTId = Int64
 const RVTIds = Vector{RVTId}
