@@ -581,10 +581,21 @@ KhepriBase.b_polygon(b::ACAD, ps, mat) =
 KhepriBase.b_spline(b::ACAD, ps, v0, v1, mat) =
   if (v0 == false) && (v1 == false)
     #@remote(b, Spline(s.points))
+    #=
+    Auto end tangent convention: ps[end-1]-ps[end], i.e. it points back
+    from the last fit point toward the previous one (reverse direction),
+    mirroring the auto start tangent ps[2]-ps[1] which points forward into
+    the curve. The same convention is used by the mixed branch below and by
+    every other interpolating-spline backend (KhepriRhino Rhino.jl,
+    KhepriTikZ TikZ.jl). Using ps[end]-ps[end-1] here instead (the negation)
+    flips the curvature at the spline end, so an identical point set rendered
+    differently depending only on whether a start tangent was supplied.
+    See also: b_spline mixed branch below.
+    =#
     @remote(b, InterpSpline(
                      ps,
                      ps[2]-ps[1],
-                     ps[end]-ps[end-1]))
+                     ps[end-1]-ps[end]))
   elseif (v0 != false) && (v1 != false)
     @remote(b, InterpSpline(ps, v0, v1))
   else
