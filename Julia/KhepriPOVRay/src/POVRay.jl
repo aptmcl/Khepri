@@ -323,7 +323,23 @@ show(io::IO, ::MIMEPOVRay, m::POVRayInclude) =
   write(io, "$(m.kind) { $(m.name) }")
 
 export povray_definition, povray_include, povray_material
+"""
+    povray_definition(name, kind, description) -> POVRayDefinition
+
+Create a named POVRay material from an inline SDL fragment. `name` is the Khepri
+identifier (spaces become underscores in the emitted `#declare`); `kind` is the
+POVRay statement that wraps the body (e.g. `"texture"`, `"pigment"`, `"material"`);
+`description` is the literal POVRay SDL block (braces included).
+"""
 const povray_definition = POVRayDefinition
+"""
+    povray_include(filename, kind, name) -> POVRayInclude
+
+Reference a predefined POVRay material by `name` from the standard include
+`filename` (e.g. `"textures.inc"`). `kind` is the wrapping POVRay statement
+(e.g. `"texture"` or `"material"`); the corresponding `#include` is emitted once
+at scene export.
+"""
 const povray_include = POVRayInclude
 
 const povray_concrete =
@@ -341,6 +357,17 @@ const povray_neutral =
   povray_definition("Material", "texture",
     "{ pigment { color rgb 0.3 } finish { reflection 0 ambient 0 }}")
 
+"""
+    povray_material(name; gray, red, green, blue, specularity, roughness, metallic,
+                    emission_red, emission_green, emission_blue, transmissivity,
+                    transmitted_specular) -> POVRayDefinition
+
+Build a diffuse/metallic/emissive POVRay material named `name`. Colour channels
+(`red`/`green`/`blue`, default `gray`) and `emission_*` are in [0,1] linear RGB
+(emission may exceed 1 for intensity); `specularity`, `roughness`, `metallic` are
+dimensionless [0,1]; `transmissivity` in [0,1] sets pigment `transmit` transparency.
+Only non-default terms are emitted, so a plain diffuse material keeps minimal SDL.
+"""
 povray_material(name::String;
                 gray::Real=0.3,
                 red::Real=gray, green::Real=gray, blue::Real=gray,
@@ -408,6 +435,13 @@ IMAGE_MAP:
  FUNCTION_IMAGE_BODY:
    PIGMENT | FN_FLOAT | pattern { PATTERN [PATTERN_MODIFIERS] }
 =#
+"""
+    povray_image_map_material(name; image_map, map_type=0) -> POVRayDefinition
+
+Build a POVRay material named `name` that textures surfaces with the bitmap given
+by `image_map` (a POVRay `image_map` body such as `png "tex.png"`). `map_type` is
+the POVRay projection code (0 = planar, 1 = spherical, 2 = cylindrical, 5 = toroidal).
+"""
 povray_image_map_material(name::String; image_map, map_type=0) =
   povray_definition(name, "texture", """{
   pigment { image_map $(image_map) map_type $(map_type) }
@@ -796,9 +830,24 @@ realize(b::POVRay, s::SubtractionShape3D) =
 
 =#
 =#
+#=
+KhepriBase's `pointlight` proxy defaults `intensity` to 1500 candela
+(BIM.jl `@defproxy(pointlight, ... intensity::Real=1500.0 ...)`). A POVRay
+`light_source` takes a plain RGB colour with no physical intensity unit, so we
+fold the candela value into the colour by normalising against this default: a
+1500 cd light reproduces the source colour at full strength, and brighter or
+dimmer lights scale it linearly. The divisor is in candela and must track the
+KhepriBase proxy default; change it only if that default changes.
+See also: b_pointlight, KhepriBase.pointlight.
+=#
+"Reference luminous intensity (candela) that maps a point light to full colour."
+const povray_default_candela = 1500
+
 KhepriBase.b_pointlight(b::POVRay, loc::Loc, color::RGB, intensity::Real, range::Real) =
-  # assume 1500 candela intensity as default
-  write_povray_pointlight(connection(b), loc, rgb(red(color)*intensity/1500, green(color)*intensity/1500, blue(color)*intensity/1500))
+  write_povray_pointlight(connection(b), loc,
+    rgb(red(color)*intensity/povray_default_candela,
+        green(color)*intensity/povray_default_candela,
+        blue(color)*intensity/povray_default_candela))
 
 KhepriBase.b_ieslight(b::POVRay, file, loc, dir, alpha, beta, gamma) =
   write_povray_pointlight(connection(b), loc, rgb(1, 1, 1))
@@ -808,14 +857,26 @@ KhepriBase.b_arealight(b::POVRay, loc, dir, size, energy, color) =
 
 export povray_family_materials
 
+"""
+    povray_family_materials(m1, m2=m1, m3=m2, m4=m3) -> NamedTuple
+
+Bundle up to four POVRay materials into the `(materials=(...),)` named tuple
+expected by Khepri family definitions (e.g. slab top/bottom/sides). Omitted
+materials default to the previous one, so `povray_family_materials(m)` applies `m`
+to all four faces.
+"""
 povray_family_materials(m1, m2=m1, m3=m2, m4=m3) = (materials=(m1, m2, m3, m4), )
 
 export povray_stone, povray_metal, povray_wood, povray_glass
 
+"Predefined stone material (`T_Stone35` from POVRay's `stones2.inc`)."
 povray_stone = povray_include("stones2.inc", "texture", "T_Stone35")
+"Predefined metal material (`Chrome_Metal` from POVRay's `textures.inc`)."
 povray_metal = povray_include("textures.inc", "texture", "Chrome_Metal")
 #povray_wood = povray_include("textures.inc", "texture", "DMFWood1")
+"Predefined wood material (`T_Wood10` from POVRay's `woods.inc`)."
 povray_wood = povray_include("woods.inc", "texture", "T_Wood10")
+"Predefined glass material (`M_Glass` from POVRay's `textures.inc`)."
 povray_glass = povray_include("textures.inc", "material", "M_Glass")
 
 #=
