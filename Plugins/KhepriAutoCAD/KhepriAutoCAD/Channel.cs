@@ -52,18 +52,6 @@ namespace KhepriAutoCAD {
         public Handle rHandle() => new Handle(r.ReadInt64());
         public void wHandle(Handle h) => wInt64(h.Value);
 
-        /*
-        public ObjectId rObjectId() => shapes[r.ReadInt32()];
-        public void wObjectId(ObjectId id) {
-            shapes.Add(id);
-            if (FastMode) {
-                //do nothing, the client knows the id in advance
-            }
-            else {
-                wInt32(shapes.Count - 1);
-            }
-        }
-        */
         public ObjectId rObjectId() {
             long value = rInt64();
             return value < 0 ?
@@ -76,13 +64,6 @@ namespace KhepriAutoCAD {
         // This needs an open transaction public Entity rEntity() => rObjectId().GetObject(OpenMode.ForRead) as Entity;
         public void wEntity(Entity e) { using (e) { wObjectId(addShape(e)); }}
 
-        /*
-        public Material rMaterial() {
-            int idx = r.ReadInt32();
-            return idx < 0 ? null : materials[idx];
-        }
-        public void wMaterial(Material m) { materials.Add(m); wInt32(materials.Count - 1); }
-        */
         public Material rMaterial() {
             int idx = r.ReadInt32();
             return idx < 0 ? null : materials[idx];
