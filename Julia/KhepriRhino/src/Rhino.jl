@@ -708,8 +708,15 @@ KhepriBase.b_generic_prism(b::RH, bs, smooth, v, bmat, tmat, smat) =
 KhepriBase.b_generic_prism_with_holes(b::RH, bs, smooth, bss, smooths, v, bmat, tmat, smat) =
   @remote(b, PrismWithHoles([bs, bss...], [smooth, smooths...], v, smat))
 
+#= IrregularPyramidFrustum is a single-material native solid: it applies one
+material to the whole frustum. The conventional representative for a
+single-material solid is the side material `smat`, matching AutoCAD
+(b_pyramid_frustum -> smat), Unity, and Revit, and the KhepriBase fallback
+`b_generic_pyramid_frustum`, where the side faces (b_quad_strip_closed) take
+`smat`. Previously this passed `tmat`, making the same frustum render with a
+different face material on Rhino than on every other backend. =#
 KhepriBase.b_pyramid_frustum(b::RH, bs, ts, bmat, tmat, smat) =
-  @remote(b, IrregularPyramidFrustum(bs, ts, tmat))
+  @remote(b, IrregularPyramidFrustum(bs, ts, smat))
 
 KhepriBase.b_pyramid(b::RH, bs, t, bmat, smat) =
   @remote(b, IrregularPyramid(bs, t, smat))
