@@ -86,6 +86,8 @@ async function highlightSourceShapes(juliaApi: JuliaApi, editor: vscode.TextEdit
 	);
 }
 
+let traceabilityIsActive = false;
+
 export async function activate(context: vscode.ExtensionContext) {
 	const juliaApi = await activateJuliaApi();
 	if (juliaApi === undefined) {
@@ -138,7 +140,24 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(disposable2);
 
 	context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(event => {
-		void highlightSourceShapes(juliaApi, event.textEditor);
+		if (traceabilityIsActive) {
+			void highlightSourceShapes(juliaApi, event.textEditor);
+		}
+	}));
+
+	context.subscriptions.push(vscode.commands.registerCommand('khepriide.toggleTraceability', async () => {
+		traceabilityIsActive = !traceabilityIsActive;
+		vscode.window.setStatusBarMessage(`Khepri's Traceability is ${traceabilityIsActive ? 'on' : 'off'}.`, 3000);
+		const editor = vscode.window.activeTextEditor;
+		if (editor) {
+			if (traceabilityIsActive) {
+				await executeInJulia(juliaApi, 'using KhepriBase');
+				await highlightSourceShapes(juliaApi, editor);
+			} else {
+				clearHighlightDecorationTypes(editor);
+				await executeInJulia(juliaApi, `KhepriBase.highlight_source_shapes(${juliaStringLiteral('none')}, -1)`);
+			}
+		}
 	}));
 }
 

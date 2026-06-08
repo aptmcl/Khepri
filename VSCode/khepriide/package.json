@@ -20,6 +20,10 @@
       {
         "command": "khepriide.generatingCode",
         "title": "Khepri Code"
+      },
+      {
+        "command": "khepriide.toggleTraceability",
+        "title": "Khepri Traceability"
       }
     ]
   },
