@@ -593,24 +593,37 @@ KhepriBase.b_wall_with_openings(b::THR, w_path, w_height, l_thickness, r_thickne
     refs
   end
 
+#=
+The Three.js `railing` op takes a `postRadius` (TS signature
+`railing(..., postSpacing, postRadius, mat)`) sizing the cylindrical posts; it
+is a length in the model's world units (metres, like `family.post_spacing`).
+The railing family has no post-radius field, so we supply a fixed 0.025 m
+(25 mm) default — a slim, handrail-like baluster that reads correctly at typical
+building scale. Override here if/when a post-radius is added to the railing
+family, or to model chunkier posts.
+See also: b_railing, railing (threejs_api).
+=#
+"Default railing post radius, in world units (metres), for the Three.js backend."
+const threejs_railing_post_radius = 0.025
+
 KhepriBase.b_railing(b::THR, path, level, host, family) =
-  let h = Float32(family.height),
-      base = Float32(level_height(b, level)),
+  let h = family.height,
+      base = level_height(b, level),
       mat = material_ref(b, family.material),
       vs = path_vertices(path)
     @remote(b, railing(map(in_world, vs), base, h,
-                       Float32(family.post_spacing), Float32(0.025), mat))
+                       family.post_spacing, threejs_railing_post_radius, mat))
   end
 
 KhepriBase.b_stair(b::THR, base_point, direction, bottom_level, top_level, family) =
   let bottom_h = level_height(b, bottom_level),
       top_h = level_height(b, top_level),
       total_h = top_h - bottom_h,
-      n_steps = Int32(round(total_h / family.riser_height)),
-      riser_h = Float32(total_h / n_steps)
+      n_steps = stair_step_count(total_h, family.riser_height),
+      riser_h = total_h / n_steps
     @remote(b, stair(in_world(base_point), unitized(direction),
-                     Float32(bottom_h), n_steps, riser_h,
-                     Float32(family.tread_depth), Float32(family.width),
+                     bottom_h, n_steps, riser_h,
+                     family.tread_depth, family.width,
                      family.has_risers,
                      material_ref(b, family.tread_material),
                      material_ref(b, family.riser_material)))
