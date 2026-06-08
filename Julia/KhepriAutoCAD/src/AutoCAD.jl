@@ -294,9 +294,6 @@ decode(ns::Val{:ACAD}, ::Val{:Color}, c::IO) =
     RGB(r, g, b)
   end
 
-#
-convert(RGB{ColorTypes.N0f8}, rgba(0.7, 0, 0, 0.5))
-
 acad_api = @remote_api :ACAD """
 public Entity QuadStrip(Point3d[] bpts, Point3d[] tpts, int smoothLevel, ObjectId matId)
 public Entity ClosedQuadStrip(Point3d[] bpts, Point3d[] tpts, int smoothLevel, ObjectId matId)
