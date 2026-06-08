@@ -150,8 +150,20 @@ tikz_circle(out::IO, c::Loc, r::Real, filled::Bool=false, options=nothing) =
     tikz_e(out, ")")
   end
 
+#=
+A TikZ point is drawn as a tiny filled circle. Its radius is given in TikZ
+canvas centimetres (`tikz_cm` appends "cm"), i.e. on-paper size, independent of
+the model's world scale, so points stay a fixed legible size rather than
+shrinking or growing with the drawing. 0.03 cm (0.3 mm) reads as a dot yet stays
+visible at typical print resolutions. Override if points look too heavy or too
+faint for a given page scale.
+See also: tikz_point, tikz_circle, tikz_cm.
+=#
+"On-paper radius, in TikZ centimetres, of the filled dot drawn for a point."
+const tikz_point_radius = 0.03
+
 tikz_point(out::IO, c::Loc, options=nothing) =
-  tikz_circle(out, c, 0.03, true, options)
+  tikz_circle(out, c, tikz_point_radius, true, options)
 
 tikz_ellipse(out::IO, c::Loc, r0::Real, r1::Real, fi::Real, filled=false, options=nothing) =
   begin
@@ -363,9 +375,22 @@ tikz_rectangle(out::IO, p::Loc, w::Real, h::Real, filled::Bool=false) =
     println(out, ";")
   end
 
-# Assuming default Arial font for AutoCAD
+#=
+Khepri text height `h` is a world-space cap height, but a TikZ `node` is sized
+by a unitless `xscale`/`yscale` applied to the selected family's default 10 pt
+glyphs (here Helvetica/Arial, `\fontfamily{phv}`). This empirical factor converts
+a unit model height into the scale that makes an Arial glyph's cap height equal
+`h`, reproducing AutoCAD's default-font text sizing. It is a pure ratio (the
+model-height units cancel), tuned so that `h == 1` yields cap height 1 in the
+same units `tikz_coord` emits. Re-tune only if the default font family changes,
+since a different typeface has a different cap-height-to-em ratio.
+See also: tikz_text, tikz_point_radius.
+=#
+"Unitless xscale/yscale factor mapping a Khepri text height to Arial cap height."
+const tikz_arial_glyph_scale = 3.7
+
 tikz_text(out::IO, txt, p::Loc, h::Real) =
-  let (scale_x, scale_y) = (3.7*h, 3.7*h)
+  let (scale_x, scale_y) = (tikz_arial_glyph_scale*h, tikz_arial_glyph_scale*h)
     tikz_draw(out)
     print(out, "[anchor=base west]")
     tikz_coord(out, p)
