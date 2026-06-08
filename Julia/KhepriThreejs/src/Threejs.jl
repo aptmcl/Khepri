@@ -285,7 +285,7 @@ threejs_glass_material(b, opacity=0.3, color=RGB(1.0,1.0,1.0)) =
   @remote(b, MeshPhysicalMaterial(
     (color=color,           # Base color (white for clear glass)
      transmission=0.95,        # High transmission for transparency
-     opacity=0.1,              # Low opacity (glass is mostly transparent)
+     opacity=opacity,          # Forwarded: glass opacity is caller-controlled (default 0.3, see set_default_materials / material_glass registration)
      transparent=true,          # Enable transparency
      roughness=0.05,           # Very low roughness for smooth surface
      metalness=0.0,            # No metalness
