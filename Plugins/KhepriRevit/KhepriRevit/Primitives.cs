@@ -409,6 +409,29 @@ namespace KhepriRevit {
             ConeFrustumNamed("ConeFrustum", bottom, axis, bottomRadius, height, topRadius);
         public Element Cylinder(XYZ bottom, VXYZ axis, Length radius, Length height) =>
             ConeFrustumNamed("Cylinder", bottom, axis, radius, height, radius);
+        public Element CylinderWithCaps(XYZ bottom, VXYZ axis, Length radius, Length height, bool bottomCap, bool topCap) {
+            const int segments = 64;
+            Frame frame = FrameFromAxis(bottom, axis.Normalize());
+            XYZ top = bottom + frame.BasisZ * height;
+            List<XYZ> bottomRing = new List<XYZ>(segments);
+            List<XYZ> topRing = new List<XYZ>(segments);
+            for (int i = 0; i < segments; i++) {
+                double angle = 2 * Math.PI * i / segments;
+                XYZ offset = frame.BasisX * (radius * Math.Cos(angle)) + frame.BasisY * (radius * Math.Sin(angle));
+                bottomRing.Add(bottom + offset);
+                topRing.Add(top + offset);
+            }
+            TessellatedShapeBuilder builder = new TessellatedShapeBuilder { LogString = "Cylinder" };
+            builder.OpenConnectedFaceSet(false);
+            CreateFaces(builder, bottomRing, topRing, CurrentMaterialId);
+            if (bottomCap) {
+                builder.AddFace(new TessellatedFace(bottomRing.AsEnumerable().Reverse().ToList(), CurrentMaterialId));
+            }
+            if (topCap) {
+                builder.AddFace(new TessellatedFace(topRing, CurrentMaterialId));
+            }
+            return FinishBuilder(builder, "Cylinder");
+        }
         public Element Cone(XYZ bottom, VXYZ axis, Length bottomRadius, Length height) {
             Frame frame = FrameFromAxis(bottom, axis.Normalize());
             XYZ p0 = bottom;
@@ -904,26 +927,8 @@ namespace KhepriRevit {
             return ids.ToArray();
         }
 
-        //AML Revit cannot handle walls with curves that are not lines or arcs!!!!
-        /*
-        public ElementId CreateSplineWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool closed) {
-            Wall wall = Wall.Create(doc, HermiteSpline.Create(pts, false), baseLevelId, closed);
-            if (famId != null) {
-                wall.WallType = doc.GetElement(famId) as WallType;
-            }
-            wall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).Set(topLevelId);
-            return wall.Id;
-        }
-        public ElementId CreateSplineCurtainWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool closed) {
-            WallType wallType = new FilteredElementCollector(doc).OfClass(typeof(WallType)).Cast<WallType>().FirstOrDefault(q => q.Name == "M_Storefront");
-            Wall wall = Wall.Create(doc, HermiteSpline.Create(pts, false), baseLevelId, closed);
-            if (famId != null) {
-                wall.WallType = wallType;
-            }
-            wall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).Set(topLevelId);
-            return wall.Id;
-        }
-        */
+        // NOTE: Revit walls only support straight-line and arc location curves, so spline/Hermite
+        // wall location curves are intentionally not implemented (no CreateSplineWall op).
         //Introspection
         public XYZ[] LineWallVertices(Element element) {
             Wall wall = (Wall)element;
