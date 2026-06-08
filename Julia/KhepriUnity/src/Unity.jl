@@ -481,14 +481,35 @@ struct UnityMaterialFamily <: UnityFamily
   name::String
 end
 
-unity_material_family(name, pairs...) = UnityMaterialFamily(name)
+#=
+Unity material/resource families carry only a resource path, no per-family
+parameter map. Unity's wire protocol has no slot for one: the only relevant
+remotes are LoadMaterial(name)/LoadResource(name) and
+InstantiateBIMElement(family, pos, angle)/InstantiateResource(family, pos,
+vx, vy, scale) -- none accepts key/value parameters. Contrast Revit, whose
+RevitFileFamily forwards a family_map through FamilyElement(...) and reads it
+back via _lookup_family_param; Unity has no equivalent RPC.
+
+So we deliberately take *only* `name` and accept no `pairs...` varargs. An
+earlier signature `(name, pairs...)` silently swallowed any parameter map a
+caller passed (CLAUDE.md forbids silently discarding input). Dropping the
+varargs makes a parameter-bearing call raise a clear MethodError at the call
+site instead -- surfacing Unity's capability gap rather than rendering a
+subtly parameter-free result. (Note: KhepriUnreal stores a parameter_map but
+never reads it, so copying that here would only hide the same loss deeper.)
+
+See also: unity_resource_family, RevitFileFamily, _lookup_family_param.
+=#
+unity_material_family(name) = UnityMaterialFamily(name)
 backend_get_family_ref(b::Unity, f::Family, uf::UnityMaterialFamily) = @remote(b, LoadMaterial(uf.name))
 
 struct UnityResourceFamily <: UnityFamily
   name::String
 end
 
-unity_resource_family(name, pairs...) = UnityResourceFamily(name)
+# Like unity_material_family, takes only a path: Unity's InstantiateResource
+# RPC has no per-resource parameter slot. See the prose block above.
+unity_resource_family(name) = UnityResourceFamily(name)
 backend_get_family_ref(b::Unity, f::Family, uf::UnityResourceFamily) = @remote(b, LoadResource(uf.name))
 
 #=
