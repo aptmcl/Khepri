@@ -38,16 +38,33 @@ namespace KhepriBase {
         // expected canonical signature. RMIFor finds, validates, and compiles the method.
         // On success, the new handler is appended and its index (new opcode) is returned.
         // On failure, RMIFor writes the NOTOK error directly.
+        //
+        // The try-catch is the last line of defense for this handler: RMIFor
+        // pre-validates the failure modes it knows about (missing method, canonical
+        // mismatch, missing reader/writer) and answers NOTOK itself, but any exception
+        // escaping here would leave the begun frame unfinished — the caller (Execute)
+        // would never reach EndFrame, no response would ship, and the Julia client,
+        // whose receive() has no timeout, would block forever. The frame is begun by
+        // ReadOperation and ended by Execute, so the catch only writes the NOTOK
+        // record into the buffered response (after resetting any partial bytes) and
+        // lets Execute ship exactly one complete frame, as always.
         public void ProvideOperation(C c, P p) {
-            var name = c.rString();
-            var expectedCanonical = c.rString();
-            var action = RMIfy.RMIFor(c, p, name, expectedCanonical);
-            if (action != null) {
-                operations.Add(action);
-                c.wByte(0);
-                c.wInt32(operations.Count - 1);
+            var name = "<unknown>";
+            try {
+                name = c.rString();
+                var expectedCanonical = c.rString();
+                var action = RMIfy.RMIFor(c, p, name, expectedCanonical);
+                if (action != null) {
+                    operations.Add(action);
+                    c.wByte(0);
+                    c.wInt32(operations.Count - 1);
+                }
+                // Error already written by RMIFor (with NOTOK prefix) when action is null
+            } catch (Exception e) {
+                c.ResetResponse();
+                c.wByte(1);
+                c.wString($"Cannot register '{name}': {e.Message}\n{e.StackTrace}");
             }
-            // Error already written by RMIFor (with NOTOK prefix) when action is null
         }
 
         public int ReadOperation() {
