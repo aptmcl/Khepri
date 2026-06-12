@@ -1,0 +1,17 @@
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+deps/deps.jl
+
+.fake
+
+# Nested independent git repos — each has its own .git and GitHub remote.
+# This root repo versions only the workspace-level files (Docs, Assets,
+# Environments, guidelines).
+/Julia/
+/Plugins/
+/VSCode/
+
+# Stray tool output
+acad.err
+jqerr.txt

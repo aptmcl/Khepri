@@ -1,0 +1,10 @@
+* text=auto
+
+# Never normalize binary render assets (git mis-detects .renv as text,
+# which would corrupt it)
+*.renv binary
+*.exr binary
+*.hdr binary
+*.png binary
+*.jpg binary
+*.pdf binary
