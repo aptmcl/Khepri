@@ -2,7 +2,30 @@ using KhepriThreejs
 using KhepriBase
 using Test
 
+#= KhepriThreejs exports no static backend instance to probe: a THR is only
+   constructed when a browser opens a WebSocket (KhepriThreejs.__init__
+   registers `conn -> THR("Threejs", conn, threejs_api)` per connection), and
+   WebSocketBackend's `websocket` field cannot be faked without a live
+   HTTP.WebSockets.WebSocket. The RPC-conformance check needs only the
+   declared-RPC NamedTuple and a backend name, so we hand it a minimal
+   stand-in Backend carrying `threejs_api` directly — its keys are exactly
+   the keys of a real instance's `:remote` field. =#
+struct THRConformanceProbe <: KhepriBase.Backend{KhepriThreejs.THRKey, KhepriThreejs.THRId}
+    remote::NamedTuple
+end
+KhepriBase.backend_name(::THRConformanceProbe) = "Threejs"
+
 @testset "KhepriThreejs.jl" begin
+    @testset "RPC Conformance (static)" begin
+        # Every @remote/@get_remote RPC the adapter calls must be declared in
+        # the @remote_api block. Catches the undeclared-RPC crash class at CI,
+        # with no browser/WebSocket (parses source + reads threejs_api keys).
+        include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "RPCConformanceTests.jl"))
+        using .RPCConformanceTests
+        run_rpc_conformance_tests(THRConformanceProbe(KhepriThreejs.threejs_api),
+                                  joinpath(dirname(pathof(KhepriThreejs))))
+    end
+
     include("test_encoding.jl")
     include("test_bim.jl")
 
