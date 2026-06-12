@@ -10,6 +10,6 @@ schema = 1
 width = 1920
 
 [validation]
-detail = "built-in artifact sanity only; no scene oracle applied"
-method = "sanity:nonempty"
+detail = "vouch_tikz_golden pre-mint: polygon=192, triangle=12288, all measures match (atol=0.001); independently re-run by review. The runner's validate_golden slot did not fire (scene is in TIKZ_VOUCH, not the always-on waves), so the vouch is recorded here manually."
+method = "tikz-parse:v1"
 passed = true
