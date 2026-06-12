@@ -156,14 +156,19 @@ end
 include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
 using .VisualTests
 
-run_visual_tests(povray,
-  golden_dir = joinpath(@__DIR__, "golden"),
-  reset! = () -> begin delete_all_shapes(); backend(povray) end,
-  compare = text_compare,
-  # The goldens of these two scenes were 23 MB and 9.5 MB of unreviewable
-  # tessellation output and were evicted (TestingStrategy.md §8 step 0).
-  # Without this skip the next run would silently re-mint them; they return
-  # once Tier-1 parse-and-measure validation can vouch for artifacts of that
-  # size (TikZ already skips both names for TeX capacity reasons).
-  skip_tests = ["abrigoEsfericoTubos", "corrimaoCaracol"],
-)
+# The enclosing testset matters: without it the first failing scene's
+# testset finish throws, aborting every later scene and suppressing the
+# missing-sidecar summary (TikZ wraps its run the same way).
+@testset "Visual Regression (POVRay)" begin
+  run_visual_tests(povray,
+    golden_dir = joinpath(@__DIR__, "golden"),
+    reset! = () -> begin delete_all_shapes(); backend(povray) end,
+    compare = text_compare,
+    # The goldens of these two scenes were 23 MB and 9.5 MB of unreviewable
+    # tessellation output and were evicted (TestingStrategy.md §8 step 0).
+    # Without this skip the next run would silently re-mint them; they return
+    # once Tier-1 parse-and-measure validation can vouch for artifacts of that
+    # size (TikZ already skips both names for TeX capacity reasons).
+    skip_tests = ["abrigoEsfericoTubos", "corrimaoCaracol"],
+  )
+end
