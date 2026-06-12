@@ -64,6 +64,7 @@ namespace KhepriBase {
                 c.ResetResponse();
                 c.wByte(1);
                 c.wString($"Cannot register '{name}': {e.Message}\n{e.StackTrace}");
+                c.Flush();
             }
         }
 
