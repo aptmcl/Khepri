@@ -79,6 +79,19 @@ end
       @test occursin("cylinder", output) || occursin("cone", output)
     end
 
+    @testset "b_cylinder capless: `open` precedes the texture" begin
+      # POV-Ray's grammar requires OBJECT_FLAGS (`open`) right after the
+      # radius, BEFORE object modifiers like `texture`. Emitting it after
+      # the texture is a parse error ("No matching } in cylinder").
+      clear_povray_buffer!(povray)
+      KhepriBase.b_cylinder(povray, u0(), 1.0, 2.0, nothing, nothing,
+                            KhepriPOVRay.POVRayDefinition("TMat", "texture", "{ pigment { color rgb 1 } }"))
+      out = get_povray_output(povray)
+      @test occursin("open", out)
+      @test occursin("texture", out)
+      @test first(findfirst("open", out)) < first(findfirst("texture", out))
+    end
+
     @testset "b_trig" begin
       clear_povray_buffer!(povray)
       KhepriBase.b_trig(povray, xyz(0, 0, 0), xyz(1, 0, 0), xyz(0, 1, 0), nothing)

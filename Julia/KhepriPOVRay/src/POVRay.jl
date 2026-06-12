@@ -38,7 +38,16 @@ show(io::IO, ::MIMEPOVRay, c::RGB) =
 show(io::IO, ::MIMEPOVRay, c::RGBA) =
   print(io, "color rgbt <$(Float64(red(c))), $(Float64(green(c))), $(Float64(blue(c))), $(Float64(1-alpha(c)))>")
 
-write_povray_object(f::Function, io::IO, type, material, args...) =
+#=
+`flags` exists because POV-Ray's grammar splits an object body into the
+numeric arguments, then OBJECT_FLAGS (`open`, `sturm`, ...), then object
+modifiers (`texture`, `matrix`, ...) — in that order. Emitting a flag from
+the `f` do-block puts it AFTER the texture written here, and POV-Ray 3.7
+aborts with "No matching } in cylinder, open found instead" (this corrupted
+the extrusion_circle golden). Flags passed here are written right after the
+argument line, before the material, where the grammar requires them.
+=#
+write_povray_object(f::Function, io::IO, type, material, args...; flags=String[]) =
   let mime = MIMEPOVRay()
     write(io, "$(type) {")
     for (i, arg) in enumerate(args)
@@ -50,6 +59,9 @@ write_povray_object(f::Function, io::IO, type, material, args...) =
       show(io, mime, arg)
     end
     write(io, '\n')
+    for flag in flags
+      write(io, "  ", flag, "\n")
+    end
     if ! isnothing(material)
       write_povray_material(io, material)
     end
@@ -59,8 +71,8 @@ write_povray_object(f::Function, io::IO, type, material, args...) =
     end
   end
 
-write_povray_object(io::IO, type, material, args...) =
-  write_povray_object(io, type, material, args...) do
+write_povray_object(io::IO, type, material, args...; flags=String[]) =
+  write_povray_object(io, type, material, args...; flags=flags) do
     -1 # Default id
   end
 
@@ -501,8 +513,10 @@ KhepriBase.b_cylinder(b::POVRay, cb, r, h, bmat, tmat, smat) =
   isnothing(bmat) || isnothing(tmat) ?
     isnothing(bmat) && isnothing(tmat) ?
       let buf = connection(b)
-        write_povray_object(buf, "cylinder", smat, [0,0,0], [0,0,h], r) do
-          write(buf, "  open\n")
+        # `open` is an OBJECT_FLAG: it must precede the texture (see the
+        # flags prose on write_povray_object), so it cannot live in this
+        # do-block, which runs after the material is written.
+        write_povray_object(buf, "cylinder", smat, [0,0,0], [0,0,h], r, flags=["open"]) do
           write_povray_matrix(buf, cb)
         end
         -1
