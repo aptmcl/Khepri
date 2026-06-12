@@ -187,7 +187,12 @@ def serialize_return(c:str, t, e:str)->str:
         return f"__r = {e}; {ok_prefix}; w_{method_name_from_type(t)}(__r, {c})"
 
 def serialize_error(c:str, t, e:str)->str:
-    return f"w_struct(byte_struct, 1, {c}); dump_exception({e}, {c})"
+    # serialize_return writes the 0x00 OK prefix BEFORE the result writers run,
+    # so a writer that throws mid-serialization leaves the OK prefix and partial
+    # result bytes in the response buffer. Discard them first, otherwise the
+    # NOTOK record is appended after that garbage and Julia decodes the frame
+    # as a (corrupt) OK value instead of raising a backend error.
+    return f"{c}.reset_response(); w_struct(byte_struct, 1, {c}); dump_exception({e}, {c})"
 
 def try_serialize(c:str, t, e:str)->str:
     return f"""
@@ -263,6 +268,12 @@ class FrameIO:
     def send(self, data):
         self._write_buf.extend(data)
         return len(data)
+
+    def reset_response(self):
+        # Drop everything buffered for the response frame. Used by the
+        # generated error path (see serialize_error) to replace a partially
+        # written OK record with a clean NOTOK one.
+        self._write_buf.clear()
 
     def flush_response(self):
         resp = bytes(self._write_buf)
