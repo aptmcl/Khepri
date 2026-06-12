@@ -225,6 +225,62 @@ namespace KhepriBase {
             return $"{ret}({parms})";
         }
 
+        /*
+         * Pre-validation of the Channel reader/writer lookups that codegen performs.
+         *
+         * GenerateRMIFor resolves a Channel `r<Type>` method for every parameter type
+         * (BuildReader) and a `w<Type>` method for the return type (BuildWriter)
+         * eagerly, while building the expression tree. Those lookups go through
+         * GetMethod, which throws a plain Exception when the Channel lacks the
+         * reader/writer — e.g. a Primitives method declared to return a type for
+         * which nobody wrote a `w<Type>`. If that exception escaped RMIFor, the
+         * NOTOK response would never be written, the begun frame would never be
+         * completed, and the Julia client — whose receive() has no timeout — would
+         * hang forever with the real error visible only on the CAD side.
+         *
+         * These helpers walk the exact same types in the exact same way as
+         * BuildReader/BuildWriter (including the array recursion and the
+         * rInt32/wInt32 length prefix), so a method that passes validation cannot
+         * fail the subsequent codegen lookups, and a method that fails surfaces in
+         * Julia as a clean BackendError naming the missing method.
+         *
+         * See also: BuildReader, BuildWriter (the codegen counterparts whose
+         * lookups these mirror) and RMIFor (the only caller).
+         */
+        static void ValidateReader(Type channelType, Type t) {
+            if (t.IsArray) {
+                GetMethod(channelType, "rInt32");
+                ValidateReader(channelType, t.GetElementType());
+            } else {
+                GetMethod(channelType, "r" + t.Name);
+            }
+        }
+
+        static void ValidateWriter(Type channelType, Type t) {
+            if (t.IsArray) {
+                GetMethod(channelType, "wInt32", typeof(int));
+                ValidateWriter(channelType, t.GetElementType());
+            } else {
+                GetMethod(channelType, "w" + t.Name, t);
+            }
+        }
+
+        // Returns null when every parameter type has a reader and the return type a
+        // writer on the channel type; otherwise returns the lookup error message.
+        static String ReaderWriterLookupError(Type channelType, MethodInfo f) {
+            try {
+                foreach (var pr in f.GetParameters()) {
+                    ValidateReader(channelType, pr.ParameterType);
+                }
+                if (f.ReturnType != typeof(void)) {
+                    ValidateWriter(channelType, f.ReturnType);
+                }
+                return null;
+            } catch (Exception e) {
+                return e.Message;
+            }
+        }
+
         public static Action<C,P> RMIFor<C,P>(C channel, P primitives, String name, String expectedCanonical) where C : Channel {
             String error;
             MethodInfo f = TryGetMethod(primitives.GetType(), name, out error);
@@ -238,6 +294,15 @@ namespace KhepriBase {
             if (expectedCanonical != actualCanonical) {
                 channel.wByte(1);
                 channel.wString($"Signature mismatch for '{name}': Julia expects {expectedCanonical} but C# has {actualCanonical}");
+                channel.Flush();
+                return null;
+            }
+            // Validate against typeof(C), the same type GenerateRMIFor binds its
+            // channel parameter to, so validation and codegen see the same methods.
+            var lookupError = ReaderWriterLookupError(typeof(C), f);
+            if (lookupError != null) {
+                channel.wByte(1);
+                channel.wString($"Cannot register '{name}': {lookupError}");
                 channel.Flush();
                 return null;
             }
