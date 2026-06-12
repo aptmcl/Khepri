@@ -117,6 +117,32 @@ namespace KhepriBase {
         }
 
         /*
+         * Discards everything buffered so far for the current response frame.
+         *
+         * Between BeginFrame and EndFrame the response lives entirely in
+         * writeFrameStream; nothing has touched the network yet, and BeginFrame
+         * writes no header bytes into the buffer (the Int32 length prefix is
+         * computed and written by EndFrame itself), so truncating the buffer is a
+         * complete rewind — there is nothing to re-write afterwards.
+         *
+         * Error paths need this because a handler can throw after partially
+         * serializing a result (e.g. the 0x00 OK status byte plus half an array:
+         * writers are not pure — wEntity-style writers mutate the host document and
+         * can fail). Without the rewind, appending the 0x01 NOTOK record would
+         * leave the partial OK bytes in front of it and the Julia side would decode
+         * garbage as a success. SetLength(0) also resets Position (MemoryStream
+         * clamps Position to the new length), exactly as BeginFrame relies on when
+         * it reuses the stream.
+         *
+         * Only meaningful while a frame is in progress (after BeginFrame, before
+         * EndFrame); outside a frame there is no buffered response to reset.
+         *
+         * See also: RMIfy.SerializeErrors and Processor.ProvideOperation, the two
+         * error paths that rely on this.
+         */
+        public void ResetResponse() => writeFrameStream.SetLength(0);
+
+        /*
          * We use, as convention, that the name of the reader is 'r' + type
          * and the name of the writer is 'w' + type
          * WARNING: This is used by the code generation part

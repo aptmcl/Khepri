@@ -170,9 +170,19 @@ namespace KhepriBase {
         // prefix followed by the error message and stack trace. The Julia side reads the
         // prefix byte first and either decodes the return value (0x00) or throws a
         // BackendError (0x01).
+        //
+        // The catch must FIRST reset the buffered response: SerializeReturn writes the
+        // 0x00 OK prefix before the return-value writer runs, and writers are not pure
+        // (they can mutate the host document and throw mid-serialization). Without the
+        // reset, the NOTOK record would be appended after the partial OK bytes and Julia
+        // would read prefix 0x00 and decode garbage. The response is buffered in memory
+        // until EndFrame (see Channel.ResetResponse), so the rewind is cheap and yields
+        // a clean NOTOK frame.
         static Expression SerializeErrors(ParameterExpression c, ParameterInfo p, Expression e) {
+            var resetResponseMethod = GetMethod(c.Type, "ResetResponse");
             var wByteMethod = GetMethod(c.Type, "wByte", typeof(byte));
             var wStringMethod = GetMethod(c.Type, "wString", typeof(string));
+            var resetResponse = Expression.Call(c, resetResponseMethod);
             var notokPrefix = Expression.Call(c, wByteMethod, Expression.Constant((byte)1));
             var ex = Expression.Parameter(typeof(Exception), "ex");
             var errorMsg = Expression.Call(
@@ -182,7 +192,7 @@ namespace KhepriBase {
                 Expression.Property(ex, "StackTrace"));
             return Expression.TryCatch(e,
                 Expression.Catch(ex,
-                    Expression.Block(notokPrefix, Expression.Call(c, wStringMethod, errorMsg))));
+                    Expression.Block(resetResponse, notokPrefix, Expression.Call(c, wStringMethod, errorMsg))));
         }
 
         // Composes the full delegate: DeserializeParams → Call → SerializeReturn (OK prefix)
