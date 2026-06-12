@@ -249,11 +249,17 @@ end
   #   end
   # end
 
+  # Shared visual-test corpus, Tier-1 artifact oracle, and parser tests.
+  # TikZOracle.jl defines validate_tikz_golden (and pulls in the analytic
+  # SceneExpectations); test_tikz_parser.jl runs the dialect/round-trip
+  # tests plus the always-on fresh-artifact validation testset.
+  include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
+  using .VisualTests
+  include("TikZOracle.jl")
+  include("test_tikz_parser.jl")
+
   # Visual regression tests
   @testset "Visual Regression (TikZ)" begin
-    include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
-    using .VisualTests
-
     run_visual_tests(tikz,
       golden_dir = joinpath(@__DIR__, "golden"),
       reset! = () -> begin
@@ -263,6 +269,9 @@ end
       end,
       compare = text_compare,
       skip = [:csg],
+      # Tier-1 parse-and-measure validation when (re)minting a golden;
+      # comparison runs against existing goldens are unaffected.
+      validate_golden = validate_tikz_golden,
       # These tests generate millions of triangles that exceed TeX's capacity
       skip_tests = ["abacus", "arvores3D", "cidadeEspacial",
                      "abrigoEsfericoTubos", "corrimaoCaracol"]

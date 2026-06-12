@@ -6,6 +6,7 @@ using Latexify
 include(khepribase_interface_file())
 
 include("TikZ.jl")
+include("TikZParser.jl")
 
 function __init__()
   add_current_backend(tikz)
