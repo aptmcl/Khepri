@@ -178,7 +178,7 @@ namespace KhepriGrasshopper {
      * end
      */
 
-    public class GrasshopperToKhepriComponent : GH_Component, IGH_VariableParameterComponent {
+    public class KhepriComponent : GH_Component, IGH_VariableParameterComponent {
 
         private static bool initialized = false;
         private static bool trace = true;
@@ -542,7 +542,7 @@ cylinder(tc, tr, tc+(tc-bc))";
                     Instances.ActiveCanvas.Document.SolutionEnd += Document_SolutionEnd;
                     if (ForDefinitions()) {
                         foreach (IGH_DocumentObject obj in Instances.ActiveCanvas.Document.Objects) {
-                            if ((obj is GrasshopperToKhepriComponent) && (obj != this)) {
+                            if ((obj is KhepriComponent) && (obj != this)) {
                                 obj.ExpireSolution(true);
                             }
                         }
@@ -607,7 +607,7 @@ cylinder(tc, tr, tc+(tc-bc))";
                 }
             }
         }
-        public GrasshopperToKhepriComponent() : base("Khepri", "Khepri", "Allows the use of the Khepri portable API.", "Maths", "Script") {
+        public KhepriComponent() : base("Khepri", "Khepri", "Allows the use of the Khepri portable API.", "Maths", "Script") {
             LocalId = counter++;
             if (!initialized) {
                 string juliaParentFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"..\Local\Programs\");
@@ -1261,9 +1261,9 @@ cylinder(tc, tr, tc+(tc-bc))";
 
     class JuliaEditorAttribute : GH_ComponentAttributes {
 
-        GrasshopperToKhepriComponent component;
+        KhepriComponent component;
 
-        public JuliaEditorAttribute(GrasshopperToKhepriComponent owner) : base(owner) {
+        public JuliaEditorAttribute(KhepriComponent owner) : base(owner) {
             this.component = owner;
         }
 

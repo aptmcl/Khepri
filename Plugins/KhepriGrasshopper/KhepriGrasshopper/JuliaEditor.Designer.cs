@@ -16,9 +16,9 @@
             base.Dispose(disposing);
         }
 
-        private GrasshopperToKhepriComponent component;
+        private KhepriComponent component;
 
-        public void EditScript(GrasshopperToKhepriComponent component) {
+        public void EditScript(KhepriComponent component) {
             this.component = component;
             juliaBuffer.Text = component.Script;
         }
