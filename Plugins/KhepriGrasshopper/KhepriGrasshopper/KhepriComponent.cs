@@ -29,8 +29,11 @@ namespace KhepriGrasshopper {
     }
 
     internal static class NativeMethods {
-        [DllImport("kernel32.dll", SetLastError = true)]
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         internal static extern bool SetDllDirectory(string lpPathName);
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        internal static extern IntPtr LoadLibrary(string lpFileName);
 
         [DllImport("libjulia.dll", CallingConvention = CallingConvention.Cdecl)]
         internal static extern void jl_init();
@@ -579,13 +582,110 @@ cylinder(tc, tr, tc+(tc-bc))";
         public bool ForDefinitions() =>
              toJLConverters.Count == 0 && fromJLConverters.Count == 0;
 
-        static string FindJuliaPath(string juliaParentFolder, Regex regex) =>
-            Directory.GetDirectories(juliaParentFolder)
-                    .Select(f => Tuple.Create(f, regex.Match(f)))
-                    .Where(t => t.Item2.Success)
-                    .Select(t => Tuple.Create(t.Item1, Version.Parse(t.Item2.Groups[1].Value)))
-                    .OrderByDescending(t => t.Item2)
-                    .Select(t => t.Item1).FirstOrDefault();
+        static readonly Regex JuliaVersionPattern =
+            new Regex(@"^(?:Julia[- ]?|julia-)([0-9]+(?:\.[0-9]+){0,3})", RegexOptions.IgnoreCase);
+
+        static readonly string[] JuliaBinEnvironmentVariables = {
+            "KHEPRI_JULIA_BINDIR",
+            "JULIA_BINDIR"
+        };
+
+        static string FindJuliaBinDirectory() =>
+            CandidateJuliaBinDirectories()
+                .Select(NormalizeJuliaBinDirectory)
+                .FirstOrDefault(IsJuliaBinDirectory);
+
+        static IEnumerable<string> CandidateJuliaBinDirectories() {
+            foreach (string variable in JuliaBinEnvironmentVariables) {
+                string value = Environment.GetEnvironmentVariable(variable);
+                if (!string.IsNullOrWhiteSpace(value)) {
+                    yield return value;
+                }
+            }
+
+            string juliaDirectory = Environment.GetEnvironmentVariable("JULIA_DIR");
+            if (!string.IsNullOrWhiteSpace(juliaDirectory)) {
+                yield return Path.Combine(juliaDirectory, "bin");
+            }
+
+            foreach (string root in JuliaInstallRoots()) {
+                foreach (string directory in VersionedJuliaDirectories(root)) {
+                    yield return Path.Combine(directory, "bin");
+                }
+            }
+
+            string path = Environment.GetEnvironmentVariable("PATH") ?? "";
+            foreach (string entry in path.Split(Path.PathSeparator)) {
+                if (!string.IsNullOrWhiteSpace(entry)) {
+                    yield return entry;
+                }
+            }
+        }
+
+        static IEnumerable<string> JuliaInstallRoots() {
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (string.IsNullOrWhiteSpace(userProfile)) {
+                userProfile = Environment.GetEnvironmentVariable("USERPROFILE");
+            }
+
+            yield return Path.Combine(userProfile ?? "", @".julia\juliaup");
+            yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs");
+            yield return Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            yield return Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        }
+
+        static IEnumerable<string> VersionedJuliaDirectories(string root) {
+            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) {
+                yield break;
+            }
+
+            foreach (var candidate in Directory.GetDirectories(root)
+                .Select(directory => Tuple.Create(directory, JuliaVersionPattern.Match(Path.GetFileName(directory))))
+                .Where(candidate => candidate.Item2.Success)
+                .Select(candidate => Tuple.Create(candidate.Item1, ParseVersion(candidate.Item2.Groups[1].Value)))
+                .Where(candidate => candidate.Item2 != null)
+                .OrderByDescending(candidate => candidate.Item2)) {
+                yield return candidate.Item1;
+            }
+        }
+
+        static Version ParseVersion(string value) {
+            Version version;
+            return Version.TryParse(value, out version) ? version : null;
+        }
+
+        static string NormalizeJuliaBinDirectory(string directory) {
+            if (string.IsNullOrWhiteSpace(directory)) {
+                return null;
+            }
+
+            directory = directory.Trim().Trim('"');
+            if (IsJuliaBinDirectory(directory)) {
+                return Path.GetFullPath(directory);
+            }
+
+            return Path.GetFullPath(Path.Combine(directory, "bin"));
+        }
+
+        static bool IsJuliaBinDirectory(string directory) =>
+            !string.IsNullOrWhiteSpace(directory)
+            && Directory.Exists(directory)
+            && File.Exists(Path.Combine(directory, "libjulia.dll"));
+
+        static void LoadJuliaRuntime(string juliaBinDirectory) {
+            string libJuliaPath = Path.Combine(juliaBinDirectory, "libjulia.dll");
+            JLInfo($"Loading Julia runtime from {libJuliaPath}");
+
+            if (!NativeMethods.SetDllDirectory(juliaBinDirectory)) {
+                int error = Marshal.GetLastWin32Error();
+                JLError($"Failed to add Julia bin directory to the DLL search path: {juliaBinDirectory} (Win32 error {error})");
+            }
+
+            if (NativeMethods.LoadLibrary(libJuliaPath) == IntPtr.Zero) {
+                int error = Marshal.GetLastWin32Error();
+                JLError($"Failed to load {libJuliaPath} (Win32 error {error}). Make sure Julia is installed for 64-bit Windows and its bin directory contains libjulia.dll.");
+            }
+        }
 
         static void UsePackage(string name, string package) {
             NativeMethods.jl_eval_string($"using {name}");
@@ -610,16 +710,11 @@ cylinder(tc, tr, tc+(tc-bc))";
         public KhepriComponent() : base("Khepri", "Khepri", "Allows the use of the Khepri portable API.", "Maths", "Script") {
             LocalId = counter++;
             if (!initialized) {
-                string juliaParentFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"..\Local\Programs\");
-                Regex regex = new Regex(@"Julia.([0-9.]+)");
-                JLInfo($"Searching for Julia in {juliaParentFolder}");
-                var juliaPath = FindJuliaPath(juliaParentFolder, regex);
-                if (juliaPath == null) {
-                    JLError($"Could not find an acceptable Julia version in {juliaParentFolder}");
+                string juliaBinDirectory = FindJuliaBinDirectory();
+                if (juliaBinDirectory == null) {
+                    JLError("Could not find libjulia.dll. Set KHEPRI_JULIA_BINDIR to Julia's bin directory.");
                 } else {
-                    JLInfo($"Using Julia folder {juliaPath}");
-                    string juliaDLLPath = Path.Combine(juliaPath, "bin");
-                    NativeMethods.SetDllDirectory(juliaDLLPath);
+                    LoadJuliaRuntime(juliaBinDirectory);
                     NativeMethods.jl_init();
                     DefineBase();
                     //We cannot yet use JLEvaluate because it depends on using Khepri
@@ -628,7 +723,7 @@ cylinder(tc, tr, tc+(tc-bc))";
                     //Now that we have KhepriGrasshopper we can rely on JLEvaluate
                     //JLEvaluate("KhepriGrasshopper.is_collecting_shapes(true)");
                     DefineKhepri();
-                    externalEditor = Path.Combine(juliaParentFolder, @"Microsoft VS Code\Code.exe");
+                    externalEditor = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Microsoft VS Code\Code.exe");
                     //Uncomment for Reverse Traceability
                     //SetTimer();
                     initialized = true;
