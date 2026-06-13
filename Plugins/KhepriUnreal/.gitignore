@@ -30,3 +30,10 @@ Plugins/*/Intermediate/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Unreal starter/example content (engine-regenerable)
+Content/
+/Plugins/Khepri/Content/
+
+# Plugin icon resources (not referenced by .uplugin)
+/Plugins/Khepri/Resources/
