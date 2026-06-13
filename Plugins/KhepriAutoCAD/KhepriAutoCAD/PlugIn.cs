@@ -5,6 +5,7 @@ using System;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Xml.Linq;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Application;
 
 namespace KhepriAutoCAD {
@@ -50,13 +51,19 @@ namespace KhepriAutoCAD {
         Processor processor;
         Action currentAction;
         bool idleSubscribed = false;
+        bool loadedMessageWritten = false;
 
         public void Initialize() {
             syncCtrl = new System.Windows.Forms.Control();
             syncCtrl.CreateControl();
+            WriteLoadedMessageWhenReady();
+            if (!loadedMessageWritten) {
+                AcadApp.Idle += WriteLoadedMessageOnIdle;
+            }
         }
 
         public void Terminate() {
+            AcadApp.Idle -= WriteLoadedMessageOnIdle;
             UnsubscribeIdle();
             try { server?.Stop(); } catch { }
             server = null;
@@ -65,6 +72,37 @@ namespace KhepriAutoCAD {
         [CommandMethod("KHEPRI")]
         public void KHEPRI() {
             StartServer();
+        }
+
+        void WriteLoadedMessageOnIdle(object sender, EventArgs e) {
+            WriteLoadedMessageWhenReady();
+            if (loadedMessageWritten) {
+                AcadApp.Idle -= WriteLoadedMessageOnIdle;
+            }
+        }
+
+        void WriteLoadedMessageWhenReady() {
+            if (loadedMessageWritten) return;
+            if (AcadApp.DocumentManager.MdiActiveDocument == null) return;
+            WriteMessage("Khepri " + KhepriVersion() + " loaded.\n");
+            loadedMessageWritten = true;
+        }
+
+        static string KhepriVersion() {
+            try {
+                string dllPath = typeof(PlugIn).Assembly.Location;
+                string contentsDir = Path.GetDirectoryName(dllPath);
+                DirectoryInfo bundleDir = Directory.GetParent(contentsDir);
+                if (bundleDir != null) {
+                    string packagePath = Path.Combine(bundleDir.FullName, "PackageContents.xml");
+                    if (File.Exists(packagePath)) {
+                        XDocument doc = XDocument.Load(packagePath);
+                        string version = doc.Root?.Attribute("AppVersion")?.Value;
+                        if (!String.IsNullOrEmpty(version)) return version;
+                    }
+                }
+            } catch { }
+            return typeof(PlugIn).Assembly.GetName().Version.ToString();
         }
 
         void StartServer() {
