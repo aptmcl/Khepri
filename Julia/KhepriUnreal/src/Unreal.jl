@@ -172,8 +172,17 @@ KhepriBase.b_arc(b::UE, c, r, α, Δα, mat) =
     @remote(b, Primitive__Line(pts, mat))
   end
 
+#=
+The control points of a spline are (in general) NOT on the curve, so shipping
+them straight to Primitive__Line drew the control polygon and ignored the v0/v1
+end tangents entirely. Unreal is a mesh engine with no native spline, so we defer
+to the KhepriBase default, which evaluates the actual curve (cubic Hermite with
+the given tangents, or a fitted NURBS) at a chord-proportional sampling and then
+calls b_line -- a tube that passes through the intended points.
+See also: b_arc (same sample-then-Line strategy), b_line.
+=#
 KhepriBase.b_spline(b::UE, ps, v0, v1, mat) =
-  @remote(b, Primitive__Line(collect(ps), mat))
+  invoke(KhepriBase.b_spline, Tuple{KhepriBase.Backend, Any, Any, Any, Any}, b, ps, v0, v1, mat)
 
 KhepriBase.b_closed_spline(b::UE, ps, mat) =
   @remote(b, Primitive__ClosedLine(collect(ps), mat))
