@@ -87,3 +87,9 @@ using Test
         @test t[3,3] ≈ 1.0
     end
 end
+
+@testset "Resource Request Paths" begin
+    @test KhepriThreejs.resource_request_path((; target="/resources/textures/wood.png")) == "textures/wood.png"
+    @test KhepriThreejs.resource_request_path((; target="/resources/textures/%2e%2e/Project.toml")) == "textures/../Project.toml"
+    @test KhepriThreejs.resource_request_path((; target="/index.html")) == ""
+end

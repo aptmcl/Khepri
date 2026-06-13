@@ -164,16 +164,26 @@ const THR = WebSocketBackend{THRKey, THRId}
 
 backend_name(b::THR) = b.name
 
+resource_request_path(request) =
+  try
+    let target_path = HTTP.URI(request.target).path,
+        decoded_path = HTTP.URIs.unescapeuri(target_path),
+        parts = split(decoded_path, "/", keepempty=false)
+      length(parts) < 2 || parts[1] != "resources" ?
+        "" :
+        join(parts[2:end], "/")
+    end
+  catch
+    ""
+  end
+
 register_handlers!(server=khepri_websocket_server()) =
   let files = ["index.html", "assets/index.js", "assets/index.css"],
       root = joinpath(@__DIR__, "..", "KhepriThree.js", "dist"),
       root_read_file(file) = http_response_with_file(joinpath(root, file)),
       router = server.router
-    HTTP.register!(router, "GET", "/resources/**", request -> 
-      let subpath = split(request.target, "/", keepempty=false)[2:end], # drop first 'resources'
-          path = joinpath(subpath...)
-        http_response_with_resource_file(path)
-      end)
+    HTTP.register!(router, "GET", "/resources/**", request ->
+      http_response_with_resource_file(resource_request_path(request)))
     for file in files
       HTTP.register!(router, "GET", "/$(file)", req -> root_read_file(file))
     end
@@ -446,7 +456,11 @@ KhepriBase.b_cone_frustum(b::THR, cb, rb, h, rt, bmat, tmat, smat) =
   @remote(b, cylinder(add_z(cb, h/2), rb, rt, h, false, smat))
 
 KhepriBase.b_cylinder(b::THR, cb, r, h, bmat, tmat, smat) =
-  @remote(b, cylinder(add_z(cb, h/2), r, r, h, false, smat))
+  isnothing(bmat) && isnothing(tmat) ?
+    @remote(b, cylinder(add_z(cb, h/2), r, r, h, true, smat)) :
+  isnothing(bmat) || isnothing(tmat) ?
+    b_cylinder_surfaces(b, cb, r, h, bmat, tmat, smat) :
+    @remote(b, cylinder(add_z(cb, h/2), r, r, h, false, smat))
 
 KhepriBase.b_box(b::THR, c, dx, dy, dz, mat) =
     @remote(b, box(add_xyz(c, dx/2, dy/2, dz/2), dx, dy, dz, mat))
@@ -516,7 +530,7 @@ KhepriBase.b_wall_no_openings(b::THR, w_path, w_height, l_thickness, r_thickness
   path_length(w_path) < coincidence_tolerance() ? void_ref(b) :
   let r_vs = path_vertices(offset(w_path, -r_thickness)),
       l_vs = path_vertices(offset(w_path, l_thickness)),
-      h = Float32(w_height * wall_z_fighting_factor),
+      h = w_height * wall_z_fighting_factor,
       closed = is_closed_path(w_path)
     @remote(b, wall(r_vs, l_vs, h, closed,
                     material_ref(b, rmat), material_ref(b, lmat), material_ref(b, smat)))
@@ -634,12 +648,12 @@ KhepriBase.b_spiral_stair(b::THR, center, radius, start_angle, included_angle,
   let bottom_h = level_height(b, bottom_level),
       top_h = level_height(b, top_level),
       total_h = top_h - bottom_h,
-      n_steps = Int32(round(total_h / family.riser_height)),
-      riser_h = Float32(total_h / n_steps)
-    @remote(b, spiralStair(in_world(center), Float32(radius),
-                           Float32(start_angle), Float32(included_angle),
-                           clockwise, Float32(bottom_h), n_steps, riser_h,
-                           Float32(family.width),
+      n_steps = stair_step_count(total_h, family.riser_height),
+      riser_h = total_h / n_steps
+    @remote(b, spiralStair(in_world(center), radius,
+                           start_angle, included_angle,
+                           clockwise, bottom_h, n_steps, riser_h,
+                           family.width,
                            material_ref(b, family.tread_material)))
   end
 
@@ -702,7 +716,7 @@ KhepriBase.b_create_layer_from_ref_value(b::THR, r) =
 KhepriBase.b_set_layer_visible(b::THR, layer, visible) =
   @remote(b, setLayerVisible(ref_value(b, layer), visible))
 KhepriBase.b_set_layer_opacity(b::THR, layer, opacity) =
-  @remote(b, setLayerOpacity(ref_value(b, layer), convert(Float32, opacity)))
+  @remote(b, setLayerOpacity(ref_value(b, layer), opacity))
 KhepriBase.b_delete_all_shapes_in_layer(b::THR, layer) =
   @warn "KhepriThreejs: per-layer shape deletion not supported; use delete_all_shapes() instead"
 
