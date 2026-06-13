@@ -66,6 +66,10 @@ using Test
     @test KhepriGrasshopper.in_gh(:Foo) === :GHFoo
   end
 
+  @testset "Plugin management imports" begin
+    @test isdefined(KhepriGrasshopper, Symbol("copy_plugin_files!"))
+  end
+
   @testset "kgh_forms parser" begin
     forms = KhepriGrasshopper.kgh_forms("1 + 2")
     @test !isempty(forms)
