@@ -200,8 +200,10 @@ tikz_arc(out::IO, c::Loc, r::Real, ai::Real, af::Real, filled::Bool, options=not
     tikz_cm(out, r)
     print(out, ")")
     if filled
-      tikz_e(out, "--cycle")    end
-    println(out, ";")
+      tikz_e(out, "--cycle")
+    else
+      println(out, ";")
+    end
   end
 
 tikz_maybe_arc(out::IO, c::Loc, r::Real, ai::Real, da::Real, filled::Bool, options=nothing) =
@@ -364,6 +366,40 @@ tikz_hobby_closed_spline(out::IO, pts::Locs, filled::Bool=false) =
       tikz_coord(out, pt)
     end
     tikz_e(out, "}")
+  end
+
+#=
+TikZ has no Hermite/Catmull-Rom curve primitive, but it draws cubic Béziers
+natively with `(p0) .. controls (c1) and (c2) .. (p1)`. We render an interpolating
+spline (a point list plus Khepri's two end tangents) as a chain of such segments
+via the Catmull-Rom construction: the velocity at an interior point Pi is
+(P_{i+1} − P_{i−1})/2, and segment Pi→P_{i+1} carries controls
+c1 = Pi + T_i/3 and c2 = P_{i+1} − T_{i+1}/3 — the unique cubic whose endpoint
+derivatives equal those velocities. Khepri's b_spline convention makes v0 the
+forward tangent at the start and v1 the *outgoing* tangent at the end (its
+auto-derived value is ps[end-1]-ps[end]), so we set T_1 = v0 and T_n = −v1, which
+reduces to the natural Catmull-Rom end tangents when no explicit tangents are
+given. The result is a smooth analytic curve, not a sampled polyline.
+See also: tikz_spline (tangent-free smooth plot), b_spline, b_bezier_curve.
+=#
+tikz_interp_spline(out::IO, ps::Locs, v0, v1, options=nothing) =
+  let n = length(ps),
+      ts = [i == 1 ? v0 :
+            i == n ? -v1 :
+            (ps[i + 1] - ps[i - 1]) / 2
+            for i in 1:n]
+    tikz_draw(out, false)
+    tikz_options(out, options)
+    tikz_coord(out, ps[1])
+    for i in 1:n - 1
+      print(out, "..controls")
+      tikz_coord(out, ps[i] + ts[i] / 3)
+      print(out, "and")
+      tikz_coord(out, ps[i + 1] - ts[i + 1] / 3)
+      print(out, "..")
+      tikz_coord(out, ps[i + 1])
+    end
+    println(out, ";")
   end
 
 tikz_rectangle(out::IO, p::Loc, w::Real, h::Real, filled::Bool=false) =
@@ -551,9 +587,9 @@ function KhepriBase.b_spline(b::TikZ, ps, v0, v1, mat)
     #tikz_hobby_spline(connection(b), ps, false)
     tikz_spline(connection(b), ps, false)
   elseif (v0 != false) && (v1 != false)
-    TikZInterpSpline(connection(b), ps, v0, v1)
+    tikz_interp_spline(connection(b), ps, v0, v1)
   else
-    TikZInterpSpline(connection(b),
+    tikz_interp_spline(connection(b),
                      ps,
                      v0 == false ? ps[2] - ps[1] : v0,
                      v1 == false ? ps[end-1] - ps[end] : v1)
@@ -563,9 +599,46 @@ end
 KhepriBase.b_closed_spline(b::TikZ, ps, mat) =
   tikz_hobby_closed_spline(connection(b), ps)
 
+#=
+A Khepri BezierPath is a chain of BezierSpans (each a control-point list). A cubic
+span (4 control points) maps one-to-one onto TikZ's native cubic-Bézier syntax
+`(p0) .. controls (c1) and (c2) .. (p3)`, so we emit it directly rather than
+sampling the curve to a polyline. Spans of other degrees have no native TikZ form,
+so we defer the whole path to the KhepriBase sampled default. All spans share one
+`\draw`, so they join seamlessly.
+See also: tikz_interp_spline, b_spline.
+=#
+KhepriBase.b_bezier_curve(b::TikZ, path::BezierPath, mat) =
+  all(seg -> length(seg.control_points) == 4, path.spans) ?
+    let out = connection(b)
+      tikz_draw(out, false)
+      tikz_coord(out, path.spans[1].control_points[1])
+      for seg in path.spans
+        cps = seg.control_points
+        print(out, "..controls")
+        tikz_coord(out, cps[2])
+        print(out, "and")
+        tikz_coord(out, cps[3])
+        print(out, "..")
+        tikz_coord(out, cps[4])
+      end
+      println(out, ";")
+      void_ref(b)
+    end :
+    invoke(KhepriBase.b_bezier_curve,
+           Tuple{KhepriBase.Backend, KhepriBase.BezierPath, Any}, b, path, mat)
+
 KhepriBase.b_circle(b::TikZ, c, r, mat) =
   withTikZXForm(b, c, mat) do out, cc
     tikz_circle(out, cc, r)
+  end
+
+# A Khepri ellipse carries its rotation in c.cs, which withTikZXForm already
+# applies, so we draw it at the local origin with angle 0 via TikZ's native
+# `ellipse(rx and ry)` instead of the default 64-point Hobby-spline sampling.
+KhepriBase.b_ellipse(b::TikZ, c, rx, ry, mat) =
+  withTikZXForm(b, c, mat) do out, cc
+    tikz_ellipse(out, cc, rx, ry, 0, false)
   end
 
 KhepriBase.b_arc(b::TikZ, c, r, α, Δα, mat) =
@@ -664,20 +737,43 @@ end
 
 KhepriBase.b_surface_polygon(b::TikZ, ps, mat) =
   tikz_closed_line(connection(b), ps, true, mat)
-  #=
 
-KhepriBase.b_surface_polygon_with_holes(b::TikZ, ps, qss, mat) =
-  tikz_closed_lines(connection(b), [ps, qss...], true)
-
+# Filled conics render as native TikZ vector fills (\fill circle/arc/ellipse) —
+# exact, compact output — but only in the 2D top view. TikZ has no depth buffer,
+# so in a 3D view the backend paints faces back-to-front from the collected
+# b.triangles list (paint_trig); a single native \fill would not take part in
+# that ordering and could occlude incorrectly. There we keep the KhepriBase
+# triangulated default (via invoke), which feeds the depth-sorted pipeline.
+# See also: paint_trig, b_surface_polygon, tikz_circle, tikz_ellipse.
 KhepriBase.b_surface_circle(b::TikZ, c, r, mat) =
-  withTikZXForm(b, c, mat) do out, cc
-    tikz_circle(out, cc, r, true)
-  end
+  b.view.is_top_view ?
+    withTikZXForm(b, c, mat) do out, cc
+      tikz_circle(out, cc, r, true)
+    end :
+    invoke(KhepriBase.b_surface_circle,
+           Tuple{KhepriBase.Backend, Any, Any, Any}, b, c, r, mat)
 
 KhepriBase.b_surface_arc(b::TikZ, c, r, α, Δα, mat) =
-  withTikZXForm(b, c, mat) do out, cc
-    tikz_maybe_arc(out, cc, r, α, Δα, true)
-  end
+  b.view.is_top_view ?
+    withTikZXForm(b, c, mat) do out, cc
+      tikz_maybe_arc(out, cc, r, α, Δα, true)
+    end :
+    invoke(KhepriBase.b_surface_arc,
+           Tuple{KhepriBase.Backend, Any, Any, Any, Any, Any}, b, c, r, α, Δα, mat)
+
+KhepriBase.b_surface_ellipse(b::TikZ, c, rx, ry, mat) =
+  b.view.is_top_view ?
+    withTikZXForm(b, c, mat) do out, cc
+      tikz_ellipse(out, cc, rx, ry, 0, true)
+    end :
+    invoke(KhepriBase.b_surface_ellipse,
+           Tuple{KhepriBase.Backend, Any, Any, Any, Any}, b, c, rx, ry, mat)
+
+#= Native holed fill needs TikZ's even-odd rule to clear the inner loops; until
+   that is wired up we keep the triangulated KhepriBase default, which renders
+   holes geometrically.
+KhepriBase.b_surface_polygon_with_holes(b::TikZ, ps, qss, mat) =
+  tikz_closed_lines(connection(b), [ps, qss...], true)
 =#
 # realize(b::TikZ, s::Ellipse) =
 #   withTikZXForm(b, s.center, mat) do out, c

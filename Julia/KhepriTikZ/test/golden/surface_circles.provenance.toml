@@ -1,0 +1,15 @@
+backend = "TikZ"
+compare = "text_compare"
+created = "2026-06-13T09:03:20.533Z"
+golden = "surface_circles.tex"
+height = 1080
+julia = "1.12.6"
+khepribase = "0.8.1"
+name = "surface_circles"
+schema = 1
+width = 1920
+
+[validation]
+detail = "all measures match (atol=0.001): circle=2"
+method = "tikz-parse:v1"
+passed = true
