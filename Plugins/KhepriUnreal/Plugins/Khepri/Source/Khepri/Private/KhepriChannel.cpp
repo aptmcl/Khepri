@@ -145,6 +145,14 @@ void FKhepriChannel::EndFrame()
   bInFrame = false;
 }
 
+void FKhepriChannel::ResetResponse()
+{
+  // Mirrors KhepriBase.Channel.ResetResponse: clears the buffered response so a NOTOK
+  // record can replace a partially written OK response. EndFrame derives the frame
+  // length from WriteBuffer, so emptying it here is sufficient.
+  WriteBuffer.Reset();
+}
+
 // =============================================================================
 // Primitive reads (little-endian, matching Julia)
 // =============================================================================
@@ -290,10 +298,13 @@ FVector FKhepriChannel::ReadFVector()
 
 FLinearColor FKhepriChannel::ReadFLinearColor()
 {
+  // Canonical 4-float RGBA wire (matches KhepriBase). FLinearColor has an alpha channel,
+  // so alpha is carried now instead of forced to 1.0. See materials design note (P0).
   float R = ReadFloat();
   float G = ReadFloat();
   float B = ReadFloat();
-  return FLinearColor(R, G, B, 1.0f);
+  float A = ReadFloat();
+  return FLinearColor(R, G, B, A);
 }
 
 void FKhepriChannel::WriteFVector(const FVector& Value)
@@ -308,6 +319,7 @@ void FKhepriChannel::WriteFLinearColor(const FLinearColor& Value)
   WriteFloat(Value.R);
   WriteFloat(Value.G);
   WriteFloat(Value.B);
+  WriteFloat(Value.A);
 }
 
 // =============================================================================

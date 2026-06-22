@@ -22,6 +22,10 @@ public:
   // flushes the response as a length-prefixed frame back to the network.
   bool BeginFrame();
   void EndFrame();
+  // Discards bytes already buffered for the current frame's response (e.g. the OK
+  // status byte the dispatcher writes before a handler runs) so a handler can emit a
+  // clean NOTOK frame instead. Only meaningful inside a frame.
+  void ResetResponse();
 
   // --- Primitive reads ---
   uint8 ReadByte();

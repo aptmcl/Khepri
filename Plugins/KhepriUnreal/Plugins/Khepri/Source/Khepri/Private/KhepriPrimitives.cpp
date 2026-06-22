@@ -359,7 +359,6 @@ void KhepriPrimitives::RegisterAllOperations(FKhepriServer& Server)
 
   // Materials & Layers
   Server.RegisterOperation(TEXT("Primitive::LoadMaterial"), &KhepriPrimitives::LoadMaterial);
-  Server.RegisterOperation(TEXT("Primitive::CreateMaterial"), &KhepriPrimitives::CreateMaterial);
   Server.RegisterOperation(TEXT("Primitive::CreatePBRMaterial"), &KhepriPrimitives::CreatePBRMaterial);
   Server.RegisterOperation(TEXT("Primitive::CurrentMaterial"), &KhepriPrimitives::CurrentMaterial);
   Server.RegisterOperation(TEXT("Primitive::SetCurrentMaterial"), &KhepriPrimitives::SetCurrentMaterial);
@@ -367,6 +366,7 @@ void KhepriPrimitives::RegisterAllOperations(FKhepriServer& Server)
   Server.RegisterOperation(TEXT("Primitive::SetCurrentParent"), &KhepriPrimitives::SetCurrentParent);
   Server.RegisterOperation(TEXT("Primitive::CreateParent"), &KhepriPrimitives::CreateParent);
   Server.RegisterOperation(TEXT("Primitive::SetParentVisible"), &KhepriPrimitives::SetParentVisible);
+  Server.RegisterOperation(TEXT("Primitive::SetParentOpacity"), &KhepriPrimitives::SetParentOpacity);
   Server.RegisterOperation(TEXT("Primitive::DeleteAllInParent"), &KhepriPrimitives::DeleteAllInParent);
   Server.RegisterOperation(TEXT("Primitive::LoadResource"), &KhepriPrimitives::LoadResource);
 
@@ -378,6 +378,11 @@ void KhepriPrimitives::RegisterAllOperations(FKhepriServer& Server)
   Server.RegisterOperation(TEXT("Primitive::Unite"), &KhepriPrimitives::Unite);
   Server.RegisterOperation(TEXT("Primitive::Subtract"), &KhepriPrimitives::Subtract);
   Server.RegisterOperation(TEXT("Primitive::Intersect"), &KhepriPrimitives::Intersect);
+
+  // Transformations
+  Server.RegisterOperation(TEXT("Primitive::Move"), &KhepriPrimitives::Move);
+  Server.RegisterOperation(TEXT("Primitive::Scale"), &KhepriPrimitives::Scale);
+  Server.RegisterOperation(TEXT("Primitive::Rotate"), &KhepriPrimitives::Rotate);
 
   // View & Rendering
   Server.RegisterOperation(TEXT("Primitive::SetView"), &KhepriPrimitives::SetView);
@@ -1324,53 +1329,6 @@ void KhepriPrimitives::LoadMaterial(FKhepriChannel& Channel)
   Channel.WriteInt32(Index);
 }
 
-void KhepriPrimitives::CreateMaterial(FKhepriChannel& Channel)
-{
-  float R = Channel.ReadFloat();
-  float G = Channel.ReadFloat();
-  float B = Channel.ReadFloat();
-  float A = Channel.ReadFloat();
-  float Metallic = Channel.ReadFloat();
-  float Specular = Channel.ReadFloat();
-  float Roughness = Channel.ReadFloat();
-  float EmissiveR = Channel.ReadFloat();
-  float EmissiveG = Channel.ReadFloat();
-  float EmissiveB = Channel.ReadFloat();
-  float EmissionStrength = Channel.ReadFloat();
-
-  UMaterial* BaseMaterial = GetOrCreateBaseMaterial();
-  if (!BaseMaterial)
-  {
-    UE_LOG(LogKhepri, Warning, TEXT("Khepri: CreateMaterial - failed to create base material"));
-    Channel.WriteInt32(-1);
-    return;
-  }
-
-  UWorld* World = GetEditorWorld();
-  UMaterialInstanceDynamic* DynMat = UMaterialInstanceDynamic::Create(BaseMaterial, World);
-  if (!DynMat)
-  {
-    UE_LOG(LogKhepri, Warning, TEXT("Khepri: CreateMaterial - failed to create dynamic material instance"));
-    Channel.WriteInt32(-1);
-    return;
-  }
-
-  DynMat->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(R, G, B, A));
-  DynMat->SetScalarParameterValue(TEXT("Metallic"), Metallic);
-  DynMat->SetScalarParameterValue(TEXT("Specular"), Specular);
-  DynMat->SetScalarParameterValue(TEXT("Roughness"), Roughness);
-  DynMat->SetScalarParameterValue(TEXT("Opacity"), A);
-  DynMat->SetVectorParameterValue(TEXT("EmissiveColor"), FLinearColor(EmissiveR, EmissiveG, EmissiveB, 1.0f));
-  DynMat->SetScalarParameterValue(TEXT("EmissionStrength"), EmissionStrength);
-
-  // Prevent garbage collection
-  DynMat->AddToRoot();
-
-  int32 Index = Channel.RegisterMaterial(DynMat);
-  UE_LOG(LogKhepri, Verbose, TEXT("Khepri: CreateMaterial - RGBA(%.2f,%.2f,%.2f,%.2f) Metallic=%.2f Specular=%.2f Roughness=%.2f Emissive=(%.2f,%.2f,%.2f)*%.2f -> index %d"),
-    R, G, B, A, Metallic, Specular, Roughness, EmissiveR, EmissiveG, EmissiveB, EmissionStrength, Index);
-  Channel.WriteInt32(Index);
-}
 
 void KhepriPrimitives::CreatePBRMaterial(FKhepriChannel& Channel)
 {
@@ -1379,8 +1337,8 @@ void KhepriPrimitives::CreatePBRMaterial(FKhepriChannel& Channel)
   float B = Channel.ReadFloat();
   float A = Channel.ReadFloat();
   float Metallic = Channel.ReadFloat();
-  float Specular = Channel.ReadFloat();
   float Roughness = Channel.ReadFloat();
+  float Specular = Channel.ReadFloat();
   float EmissiveR = Channel.ReadFloat();
   float EmissiveG = Channel.ReadFloat();
   float EmissiveB = Channel.ReadFloat();
@@ -1519,6 +1477,46 @@ void KhepriPrimitives::SetParentVisible(FKhepriChannel& Channel)
       if (Child)
       {
         Child->SetActorHiddenInGame(bHidden);
+      }
+    }
+  }
+  Channel.WriteInt32(0);
+}
+
+void KhepriPrimitives::SetParentOpacity(FKhepriChannel& Channel)
+{
+  int32 ParentIndex = Channel.ReadInt32();
+  float Opacity = Channel.ReadFloat();
+
+  AActor* ParentActor = Channel.GetActor(ParentIndex);
+  if (ParentActor)
+  {
+    // Apply to the parent and all (recursively) attached actors, mirroring
+    // SetParentVisible's traversal. Best-effort: sets the "Opacity" scalar on a
+    // dynamic instance of each material slot (KhepriBaseMaterial exposes that
+    // parameter). Visible only where the material's blend mode is translucent;
+    // opaque materials are left unchanged. Promoting opaque->translucent is left
+    // to a future native pass.
+    TArray<AActor*> Actors;
+    Actors.Add(ParentActor);
+    ParentActor->GetAttachedActors(Actors, /*bResetArray=*/false, /*bRecursivelyIncludeAttachedActors=*/true);
+    for (AActor* Actor : Actors)
+    {
+      if (!Actor) continue;
+      TArray<UPrimitiveComponent*> Components;
+      Actor->GetComponents<UPrimitiveComponent>(Components);
+      for (UPrimitiveComponent* Component : Components)
+      {
+        if (!Component) continue;
+        int32 NumMaterials = Component->GetNumMaterials();
+        for (int32 i = 0; i < NumMaterials; i++)
+        {
+          UMaterialInstanceDynamic* DynMat = Component->CreateAndSetMaterialInstanceDynamic(i);
+          if (DynMat)
+          {
+            DynMat->SetScalarParameterValue(TEXT("Opacity"), Opacity);
+          }
+        }
       }
     }
   }
@@ -1684,29 +1682,93 @@ void KhepriPrimitives::Spotlight(FKhepriChannel& Channel)
 
 void KhepriPrimitives::Unite(FKhepriChannel& Channel)
 {
-  int32 Idx1 = Channel.ReadInt32();
-  int32 Idx2 = Channel.ReadInt32();
-
-  UE_LOG(LogKhepri, Warning, TEXT("Khepri: Unite - CSG boolean operations are not fully supported; returning first operand"));
-  Channel.WriteInt32(Idx1);
+  Channel.ReadInt32(); // operand 1 (unused: CSG not supported)
+  Channel.ReadInt32(); // operand 2
+  // The Unreal backend has no CSG yet. Return NOTOK rather than silently producing
+  // wrong geometry (the previous stub returned the first operand and orphaned the
+  // second). The dispatcher already wrote the OK byte, so reset it first.
+  Channel.ResetResponse();
+  Channel.WriteByte(1);
+  Channel.WriteString(TEXT("The Unreal backend does not support the CSG boolean 'unite'."));
 }
 
 void KhepriPrimitives::Subtract(FKhepriChannel& Channel)
 {
-  int32 Idx1 = Channel.ReadInt32();
-  int32 Idx2 = Channel.ReadInt32();
-
-  UE_LOG(LogKhepri, Warning, TEXT("Khepri: Subtract - CSG boolean operations are not fully supported; returning first operand"));
-  Channel.WriteInt32(Idx1);
+  Channel.ReadInt32(); // operand 1 (unused: CSG not supported)
+  Channel.ReadInt32(); // operand 2
+  // The Unreal backend has no CSG yet. Return NOTOK rather than silently producing
+  // wrong geometry (the previous stub returned the first operand and orphaned the
+  // second). The dispatcher already wrote the OK byte, so reset it first.
+  Channel.ResetResponse();
+  Channel.WriteByte(1);
+  Channel.WriteString(TEXT("The Unreal backend does not support the CSG boolean 'subtract'."));
 }
 
 void KhepriPrimitives::Intersect(FKhepriChannel& Channel)
 {
-  int32 Idx1 = Channel.ReadInt32();
-  int32 Idx2 = Channel.ReadInt32();
+  Channel.ReadInt32(); // operand 1 (unused: CSG not supported)
+  Channel.ReadInt32(); // operand 2
+  // The Unreal backend has no CSG yet. Return NOTOK rather than silently producing
+  // wrong geometry (the previous stub returned the first operand and orphaned the
+  // second). The dispatcher already wrote the OK byte, so reset it first.
+  Channel.ResetResponse();
+  Channel.WriteByte(1);
+  Channel.WriteString(TEXT("The Unreal backend does not support the CSG boolean 'intersect'."));
+}
 
-  UE_LOG(LogKhepri, Warning, TEXT("Khepri: Intersect - CSG boolean operations are not fully supported; returning first operand"));
-  Channel.WriteInt32(Idx1);
+// =============================================================================
+// Transformations
+// =============================================================================
+// Coordinate conversion (Khepri RH metres -> UE LH centimetres: X<->Y swap, x100)
+// happens in the Julia FVector encoder, so the points/vectors below already arrive
+// in UE world space. That swap is orientation-reversing, so a Khepri rotation by
+// +angle becomes -angle about the (already-swapped) axis in UE — mirroring
+// KhepriUnity.Rotate, which negates the angle for the same reason.
+
+void KhepriPrimitives::Move(FKhepriChannel& Channel)
+{
+  int32 Index = Channel.ReadInt32();
+  FVector V = Channel.ReadFVector();
+  AActor* Actor = Channel.GetActor(Index);
+  if (Actor)
+  {
+    Actor->AddActorWorldOffset(V);
+  }
+  Channel.WriteInt32(0);
+}
+
+void KhepriPrimitives::Scale(FKhepriChannel& Channel)
+{
+  int32 Index = Channel.ReadInt32();
+  FVector P = Channel.ReadFVector();
+  float S = Channel.ReadFloat();
+  AActor* Actor = Channel.GetActor(Index);
+  if (Actor)
+  {
+    // Uniform scale about world point P.
+    FVector Loc = Actor->GetActorLocation();
+    Actor->SetActorLocation(P + (Loc - P) * S);
+    Actor->SetActorScale3D(Actor->GetActorScale3D() * S);
+  }
+  Channel.WriteInt32(0);
+}
+
+void KhepriPrimitives::Rotate(FKhepriChannel& Channel)
+{
+  int32 Index = Channel.ReadInt32();
+  FVector P = Channel.ReadFVector();      // world point on the axis
+  FVector Axis = Channel.ReadFVector();   // axis direction (already swapped; normalize)
+  float Angle = Channel.ReadFloat();      // Khepri angle, radians
+  AActor* Actor = Channel.GetActor(Index);
+  if (Actor)
+  {
+    // Negate the angle: the Khepri->UE X<->Y swap is orientation-reversing.
+    FQuat Q(Axis.GetSafeNormal(), -Angle);
+    FVector Loc = Actor->GetActorLocation();
+    Actor->AddActorWorldRotation(Q);
+    Actor->SetActorLocation(P + Q.RotateVector(Loc - P));
+  }
+  Channel.WriteInt32(0);
 }
 
 // =============================================================================

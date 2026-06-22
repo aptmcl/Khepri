@@ -58,7 +58,6 @@ namespace KhepriPrimitives
 
   // --- Materials & Layers ---
   void LoadMaterial(FKhepriChannel& Channel);
-  void CreateMaterial(FKhepriChannel& Channel);
   void CreatePBRMaterial(FKhepriChannel& Channel);
   void CurrentMaterial(FKhepriChannel& Channel);
   void SetCurrentMaterial(FKhepriChannel& Channel);
@@ -66,6 +65,7 @@ namespace KhepriPrimitives
   void SetCurrentParent(FKhepriChannel& Channel);
   void CreateParent(FKhepriChannel& Channel);
   void SetParentVisible(FKhepriChannel& Channel);
+  void SetParentOpacity(FKhepriChannel& Channel);
   void DeleteAllInParent(FKhepriChannel& Channel);
   void LoadResource(FKhepriChannel& Channel);
 
@@ -77,6 +77,11 @@ namespace KhepriPrimitives
   void Unite(FKhepriChannel& Channel);
   void Subtract(FKhepriChannel& Channel);
   void Intersect(FKhepriChannel& Channel);
+
+  // --- Transformations ---
+  void Move(FKhepriChannel& Channel);
+  void Scale(FKhepriChannel& Channel);
+  void Rotate(FKhepriChannel& Channel);
 
   // --- View & Rendering ---
   void SetView(FKhepriChannel& Channel);
