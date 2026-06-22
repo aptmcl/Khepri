@@ -31,5 +31,11 @@ namespace KhepriRhinoceros {
         public void wRhinoObject(RhinoObject obj) => wGuid(obj.Id);
 
         public void wBrep(Brep brep) => wGuid(doc.Objects.AddBrep(brep));
+
+        // Writer for methods returning GeometryBase / GeometryBase[] (e.g.
+        // BaseRectangularTableAndChairs). Without it, RMIFy.ReaderWriterLookupError would
+        // reject registration of any such op. Adds the geometry to the document and writes
+        // its Guid, the same contract as wBrep (and as Clone's doc.Objects.Add).
+        public void wGeometryBase(GeometryBase geo) => wGuid(doc.Objects.Add(geo));
     }
 }

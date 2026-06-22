@@ -125,18 +125,6 @@ namespace KhepriRhinoceros {
             return AddRenderMaterial(RenderMaterial.CreateBasicMaterial(mat, doc));
         }
 
-        public MatId CreateColorMaterial(Color color) {
-            int idx = doc.Materials.Add();
-            Material mat = doc.Materials[idx];
-            mat.DiffuseColor = color;
-            mat.AmbientColor = Color.Black;
-            mat.SpecularColor = Color.White;
-            mat.EmissionColor = Color.FromArgb(color.A, color.R / 3, color.G / 3, color.B / 3);
-            mat.Shine = 0.5;
-            mat.Transparency = ((double)(255 - color.A) / 255.0);
-            mat.CommitChanges();
-            return AddRenderMaterial(RenderMaterial.CreateBasicMaterial(mat, doc));
-        }
 
         public ObjectAttributes WithMaterial(int idx) =>
             idx < 0 ? null : new ObjectAttributes {
@@ -323,7 +311,14 @@ namespace KhepriRhinoceros {
         public Guid ClosedPolyLine(Point3d[] pts) => doc.Objects.AddPolyline(pts.Concat(new[] { pts[0] }));
         public Guid Spline(Point3d[] pts) => doc.Objects.AddCurve(Curve.CreateInterpolatedCurve(pts, 3));
         public Guid SplineTangents(Point3d[] pts, Vector3d start, Vector3d end) => doc.Objects.AddCurve(Curve.CreateInterpolatedCurve(pts, 3, CurveKnotStyle.Chord, start, end));
-        public Guid ClosedSpline(Point3d[] pts) => doc.Objects.AddCurve(Curve.CreateInterpolatedCurve(pts.Concat(new[] { pts[0] }), 3));
+        // A closed spline must be a smooth PERIODIC curve through the fit points, not an
+        // open interpolated curve whose start point is repeated at the end: duplicating
+        // pts[0] and using the default (Uniform, non-periodic) knot style leaves the curve
+        // free to have a tangent discontinuity at the seam, producing a visible kink. Using
+        // a periodic knot style (and NOT repeating the first point) yields C2 continuity all
+        // the way around — four radially-spread points then describe a near-circle, matching
+        // AutoCAD's InterpClosedSpline (new Spline(pts, periodic:true, Chord, degree:3)).
+        public Guid ClosedSpline(Point3d[] pts) => doc.Objects.AddCurve(Curve.CreateInterpolatedCurve(pts, 3, CurveKnotStyle.ChordPeriodic));
         double[] RhinoStyleKnots(double[] knots, int targetCount) {
             if (knots.Length == targetCount) {
                 return knots;
@@ -689,7 +684,13 @@ namespace KhepriRhinoceros {
         public Curve AsCurve(RhinoObject obj) =>
             (obj.Geometry as Curve);
         public Brep AsBrep(RhinoObject obj) =>
-            (obj.Geometry as Brep) ?? (obj.Geometry as Extrusion)?.ToBrep();
+            (obj.Geometry as Brep)
+            ?? (obj.Geometry as Extrusion)?.ToBrep()
+            // b_trig/b_quad/b_surface_mesh produce Mesh objects (cheap for display);
+            // boolean ops need a Brep, so convert on demand here instead of forcing every
+            // triangle to be a NurbsSurface at creation time. CreateFromMesh(.., true)
+            // gives trimmed triangular faces a boolean can consume.
+            ?? ((obj.Geometry is Mesh m) ? Brep.CreateFromMesh(m, true) : null);
 
         public BrepFace AsBrepFace(RhinoObject obj) {
             Brep brep = AsBrep(obj);
@@ -755,7 +756,17 @@ namespace KhepriRhinoceros {
         }
         public Vector3d[] CurveNormalsAt(RhinoObject obj, double[] ts) {
             Curve c = AsCurve(obj);
-            return ts.Select(t => c.DerivativeAt(t, 2)[2]).ToArray();
+            // Unit principal normal. Frenet sign convention: +second-derivative points
+            // toward the centre of curvature. Falls back to a tangent-perpendicular in
+            // XY for straight segments (matching FrameAt). Kept sign- and
+            // length-consistent with KhepriAutoCAD.CurveNormalsAt.
+            return ts.Select(t => {
+                Vector3d[] d = c.DerivativeAt(t, 2);
+                Vector3d vt = d[1];
+                Vector3d vn = d[2];
+                Vector3d v = (vn.Length < 1e-14) ? Vpol(1, SphPhi(vt) + Math.PI / 2) : vn;
+                return v / v.Length;
+            }).ToArray();
         }
         public Plane FrameAt(Curve c, double t) {
             Point3d origin = c.PointAt(t);
@@ -2098,6 +2109,18 @@ def show_vertices(shape):
             }
         }
 
+        // Layer membership of an existing shape (mirrors KhepriAutoCAD's ShapeLayer/
+        // SetShapeLayer, which return/assign Entity.LayerId). In Rhino the object stores
+        // a layer index in its attributes; we translate to/from the layer's Guid so the
+        // Julia side speaks the same layer-reference currency as CreateLayer/CurrentLayer.
+        public Guid ShapeLayer(RhinoObject objId) =>
+            doc.Layers[objId.Attributes.LayerIndex].Id;
+        public void SetShapeLayer(RhinoObject objId, Guid layerId) {
+            ObjectAttributes attrs = objId.Attributes.Duplicate();
+            attrs.LayerIndex = doc.Layers.Find(layerId, true, -1);
+            doc.Objects.ModifyAttributes(objId, attrs, true);
+        }
+
         Curve ArcFromPointsAngle(Point3d p0, Point3d p1, double angle) {
             Vector3d v = p1 - p0;
             double d2 = v.X * v.X + v.Y * v.Y;
@@ -2112,7 +2135,7 @@ def show_vertices(shape):
             return new ArcCurve(new Circle(center, radius), startAngle, angle);
         }
 
-        Guid ClosedPathCurveArray(Point3d[] pts, double[] angles) {
+        public Guid ClosedPathCurveArray(Point3d[] pts, double[] angles) {
             PolyCurve curve = new PolyCurve();
             for (int i = 0; i < pts.Length; i++) {
                 if (angles[i] == 0) {
