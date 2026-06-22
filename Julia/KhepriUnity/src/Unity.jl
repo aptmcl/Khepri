@@ -16,7 +16,9 @@ decode(::Val{:Unity}, t::Val{T}, c::IO) where {T} = decode(Val(:CS), t, c)
 # We need some additional Encoders
 @encode_decode_as(:Unity, Val{:GameObject}, Val{:size})
 @encode_decode_as(:Unity, Val{:Material}, Val{:size})
-@encode_decode_as(:Unity, Val{:Color}, Val{:RGB})
+# :Color uses the canonical 4-float RGBA wire (base, via the :Unity -> :CS delegation).
+# UnityEngine.Color is float RGBA, so alpha is now preserved natively (was dropped by the
+# old :RGB 3-float alias). See the materials design note (P0).
 @encode_decode_as(:Unity, Val{:Goal_}, Val{:int})
 
 encode(::Val{:Unity}, ::Val{:Vector3}, c::IO, p) =
@@ -86,7 +88,7 @@ public void Rotate(GameObject s, Vector3 p, Vector3 n, float a)
 public GameObject SurfaceFromGrid(int m, int n, Vector3[] pts, bool closedM, bool closedN, int level)
 public GameObject LoadResource(String name)
 public Material LoadMaterial(String name)
-public Material CreateMaterial(String name, Color baseColor, float alpha, float metallic, float specular, float roughness, float ior, float transmission, float transmissionRoughness, float clearcoat, float clearcoatRoughness, Color emissionColor, float emissionStrength)
+public Material CreateMaterial(String name, Color baseColor, float alpha, float metallic, float roughness, float specular, float ior, float transmission, float transmissionRoughness, float clearcoat, float clearcoatRoughness, Color emissionColor, float emissionStrength)
 public Material CurrentMaterial()
 public void SetCurrentMaterial(Material material)
 public GameObject InstantiateResource(GameObject family, Vector3 pos, Vector3 vx, Vector3 vy, float scale)
@@ -171,6 +173,8 @@ public void ConfigurePlayer(float flySpeed, float walkSpeed, float lookSpeed, fl
 public void ConfigureHighlighting(int mode, float r, float g, float b, float width)
 public void EnterPlayerMode()
 public void ExitPlayerMode()
+public Vector3 BoundingBoxMin(GameObject obj)
+public Vector3 BoundingBoxMax(GameObject obj)
 """
 
 #= These depend on the editor
@@ -362,7 +366,7 @@ KhepriBase.b_material(b::Unity, name, base_color, metallic, roughness, specular,
                           clearcoat, clearcoat_roughness,
                           emission_color, emission_strength) =
   @remote(b, CreateMaterial(name, base_color, alpha(base_color),
-                            metallic, specular, roughness,
+                            metallic, roughness, specular,
                             ior, transmission, transmission_roughness,
                             clearcoat, clearcoat_roughness,
                             emission_color, emission_strength))
@@ -471,6 +475,21 @@ realize(b::Unity, s::Rotate) =
     r
   end
 
+#=============================================================================
+ Bounding Box
+==============================================================================#
+
+# Aggregated per-axis on the Julia side (after the Khepri<->Unity Y<->Z decode), so
+# the (min, max) corners are correct regardless of the engine's axis swap. Mirrors
+# the KhepriUnreal b_bounding_box convention.
+KhepriBase.b_bounding_box(b::Unity, shapes::Shapes) =
+  let refs = ref_values(b, shapes),
+      mins = [@remote(b, BoundingBoxMin(r)) for r in refs],
+      maxs = [@remote(b, BoundingBoxMax(r)) for r in refs]
+    (xyz(minimum(p -> p.x, mins), minimum(p -> p.y, mins), minimum(p -> p.z, mins)),
+     xyz(maximum(p -> p.x, maxs), maximum(p -> p.y, maxs), maximum(p -> p.z, maxs)))
+  end
+
 # BIM
 
 # Families
@@ -501,7 +520,7 @@ never reads it, so copying that here would only hide the same loss deeper.)
 See also: unity_resource_family, RevitFileFamily, _lookup_family_param.
 =#
 unity_material_family(name) = UnityMaterialFamily(name)
-backend_get_family_ref(b::Unity, f::Family, uf::UnityMaterialFamily) = @remote(b, LoadMaterial(uf.name))
+b_get_family_ref(b::Unity, f::Family, uf::UnityMaterialFamily) = @remote(b, LoadMaterial(uf.name))
 
 struct UnityResourceFamily <: UnityFamily
   name::String
@@ -510,7 +529,7 @@ end
 # Like unity_material_family, takes only a path: Unity's InstantiateResource
 # RPC has no per-resource parameter slot. See the prose block above.
 unity_resource_family(name) = UnityResourceFamily(name)
-backend_get_family_ref(b::Unity, f::Family, uf::UnityResourceFamily) = @remote(b, LoadResource(uf.name))
+b_get_family_ref(b::Unity, f::Family, uf::UnityResourceFamily) = @remote(b, LoadResource(uf.name))
 
 #=
 set_backend_family(default_wall_family(), unity, unity_material_family("Default/Materials/Plaster"))
@@ -534,13 +553,13 @@ set_backend_family(default_curtain_wall_family().transom_frame, unity, unity_mat
 set_backend_family(default_curtain_wall_family().mullion_frame, unity, unity_material_family("Default/Materials/Steel"))
 =#
 
-backend_rectangular_table(b::Unity, c, angle, family) =
+KhepriBase.b_table(b::Unity, c, angle, family) =
     @remote(b, InstantiateBIMElement(family_ref(b, family), c, -angle))
 
-backend_chair(b::Unity, c, angle, family) =
+KhepriBase.b_chair(b::Unity, c, angle, family) =
     @remote(b, InstantiateBIMElement(family_ref(b, family), c, -angle))
 
-backend_rectangular_table_and_chairs(b::Unity, c, angle, family) =
+KhepriBase.b_table_and_chairs(b::Unity, c, angle, family) =
     @remote(b, InstantiateBIMElement(family_ref(b, family), c, -angle))
 
 ############################################
@@ -691,13 +710,6 @@ KhepriBase.b_ieslight(b::Unity, file, loc, dir, alpha, beta, gamma) =
 
 KhepriBase.b_arealight(b::Unity, loc, dir, size, energy, color) =
     @remote(b, PointLight(loc, color, unity_default_light_range, energy))
-#=
-backend_spotlight(b::Unity, loc::Loc, dir::Vec, hotspot::Real, falloff::Real) =
-    @remote(b, SpotLight(loc, hotspot, falloff, loc + dir))
-
-backend_ieslight(b::Unity, file::String, loc::Loc, dir::Vec, alpha::Real, beta::Real, gamma::Real) =
-    @remote(b, IESLight(file, loc, loc + dir, vxyz(alpha, beta, gamma)))
-=#
 
 # User Selection
 
