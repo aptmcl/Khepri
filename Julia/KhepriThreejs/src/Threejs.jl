@@ -160,6 +160,9 @@ const THRIds = Vector{THRId}
 const THRRef = NativeRef{THRKey, THRId}
 const THRRefs = Vector{THRRef}
 const THR = WebSocketBackend{THRKey, THRId}
+# The Three.js camera lives in the browser, so view ops (set_view/get_view/zoom_extents)
+# must dispatch to the frontend variant rather than the default BackendView(). ([H2])
+KhepriBase.view_type(::Type{THR}) = KhepriBase.FrontendView()
 
 
 backend_name(b::THR) = b.name
@@ -248,6 +251,9 @@ KhepriBase.b_material(b::THR, name, base_color, metallic, roughness, specular,
      clearcoatRoughness=clearcoat_roughness,
      emissive=convert(RGB, emission_color),
      emissiveIntensity=emission_strength,
+     # THREE.Color carries no alpha; honor base_color transparency via opacity/transparent
+     opacity=alpha(base_color),
+     transparent=(alpha(base_color) < 1),
      side=2)))
 
 threejs_material(b, color) =

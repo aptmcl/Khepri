@@ -154,6 +154,9 @@ const Vector3d = new CompositeType("Vector3d", [Float32, Float32, Float32], args
 const Point3d = new CompositeType("Point3d", [Float32, Float32, Float32], args => new THREE.Vector3(...args));
 const Point2d = new CompositeType("Point2d", [Float32, Float32], args => new THREE.Vector2(...args));
 const RGB = new CompositeType("FLoat3", [Float32, Float32, Float32], args => new THREE.Color(...args));
+// 4-float RGBA wire (KhepriBase unified Color codec). THREE.Color is RGB-only, so the alpha is
+// read off the stream and dropped here (material opacity is sent separately as a Dict field).
+const RGBA = new CompositeType("Float4", [Float32, Float32, Float32, Float32], args => new THREE.Color(args[0], args[1], args[2]));
 
 /*
 function typeSize(t: TypeOrTypeArray): number {
@@ -231,8 +234,9 @@ class IODataView {
       case TypeCode.String:
         return this.readString();
       case TypeCode.RGB:
-      case TypeCode.RGBA:
         return RGB.read(this);
+      case TypeCode.RGBA:
+        return RGBA.read(this);
       case TypeCode.Dict:
         return this.readDict();
       case TypeCode.ArrInt32:
