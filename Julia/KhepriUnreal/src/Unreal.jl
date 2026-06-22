@@ -56,7 +56,10 @@ decode(::Val{:UE}, ::Val{:FVector}, c::IO) =
 # Additional type mappings
 @encode_decode_as(:UE, Val{:AActor_array}, Vector{Val{:AActor}})
 @encode_decode_as(:UE, Val{:std__vector_double_}, Vector{Float64})
-@encode_decode_as(:UE, Val{:FLinearColor}, Val{RGB})
+# FLinearColor uses the canonical 4-float RGBA wire. (Was Val{RGB} — the RGB *type*,
+# which has no encoder; now the :RGBA symbol encoder => 4 floats.) FLinearColor has an
+# alpha channel, so alpha is carried instead of forced to 1.0. See materials design note (P0).
+@encode_decode_as(:UE, Val{:FLinearColor}, Val{:RGBA})
 @encode_decode_as(:UE, Val{:TArray_FVector_}, Vector{Val{:FVector}})
 @encode_decode_as(:UE, Val{:TArray_AActor_}, Vector{Val{:AActor}})
 @encode_decode_as(:UE, Val{:TArray_TArray_FVector__}, Vector{Vector{Val{:FVector}}})
@@ -113,8 +116,7 @@ public FVector Primitive::BoundingBoxMin(AActor ac)
 public FVector Primitive::BoundingBoxMax(AActor ac)
 public int Primitive::DisableUpdate()
 public int Primitive::EnableUpdate()
-public UMaterial Primitive::CreateMaterial(float r, float g, float b, float a, float metallic, float specular, float roughness, float emissiveR, float emissiveG, float emissiveB, float emissionStrength)
-public UMaterial Primitive::CreatePBRMaterial(float r, float g, float b, float a, float metallic, float specular, float roughness, float emissiveR, float emissiveG, float emissiveB, float emissionStrength, float ior, float transmission, float transmissionRoughness, float clearcoat, float clearcoatRoughness)
+public UMaterial Primitive::CreatePBRMaterial(float r, float g, float b, float a, float metallic, float roughness, float specular, float emissiveR, float emissiveG, float emissiveB, float emissionStrength, float ior, float transmission, float transmissionRoughness, float clearcoat, float clearcoatRoughness)
 public AActor Primitive::CreateParent(String name)
 public int Primitive::SetParentVisible(AActor parent, int visible)
 public int Primitive::SetParentOpacity(AActor parent, float opacity)
@@ -126,6 +128,9 @@ public int Primitive::ViewSize(int width, int height)
 public String Primitive::ShapeType(AActor actor)
 public void Primitive::GetShape(String prompt)
 public void Primitive::GetShapes(String prompt)
+public int Primitive::Move(AActor ac, FVector v)
+public int Primitive::Scale(AActor ac, FVector p, float s)
+public int Primitive::Rotate(AActor ac, FVector p, FVector axis, float angle)
 """
 
 #=============================================================================
@@ -304,7 +309,7 @@ end
 unreal_material_family(name, pairs...) =
   UEMaterialFamily(name, IdDict{Backend, Any}())
 
-backend_get_family_ref(b::UE, f::Family, uf::UEMaterialFamily) =
+b_get_family_ref(b::UE, f::Family, uf::UEMaterialFamily) =
   get!(uf.ref, b) do
     @remote(b, Primitive__LoadMaterial(uf.name))
   end
@@ -318,7 +323,7 @@ end
 unreal_resource_family(name, pairs...) =
   UEResourceFamily(name, Dict(pairs...), IdDict{Backend, Any}())
 
-backend_get_family_ref(b::UE, f::Family, uf::UEResourceFamily) =
+b_get_family_ref(b::UE, f::Family, uf::UEResourceFamily) =
   get!(uf.ref, b) do
     @remote(b, Primitive__LoadResource(uf.name))
   end
@@ -363,6 +368,37 @@ KhepriBase.b_beam(b::UE, c, h, angle, family) =
         b_extruded_surface(b, region(profile), vz(h, c.cs), c, mat, mat, mat)
       end
     end
+  end
+
+#=============================================================================
+ Geometric transformations
+==============================================================================#
+
+realize(b::UE, s::Move) =
+  let r = map_ref(b, s.shape) do r
+            @remote(b, Primitive__Move(r, s.v))
+            r
+          end
+    mark_deleted(b, s.shape)
+    r
+  end
+
+realize(b::UE, s::Scale) =
+  let r = map_ref(b, s.shape) do r
+            @remote(b, Primitive__Scale(r, s.p, s.s))
+            r
+          end
+    mark_deleted(b, s.shape)
+    r
+  end
+
+realize(b::UE, s::Rotate) =
+  let r = map_ref(b, s.shape) do r
+            @remote(b, Primitive__Rotate(r, s.p, s.v, s.angle))
+            r
+          end
+    mark_deleted(b, s.shape)
+    r
   end
 
 #=============================================================================
@@ -416,7 +452,7 @@ KhepriBase.b_material(b::UE, name, base_color, metallic, roughness, specular,
                            emission_color, emission_strength) =
   @remote(b, Primitive__CreatePBRMaterial(
     red(base_color), green(base_color), blue(base_color), alpha(base_color),
-    metallic, specular, roughness,
+    metallic, roughness, specular,
     red(emission_color), green(emission_color), blue(emission_color),
     emission_strength,
     ior, transmission, transmission_roughness,
@@ -567,7 +603,7 @@ KhepriBase.b_render_and_save_view(b::UE, path::String) =
  Bounding Box
 ==============================================================================#
 
-backend_bounding_box(b::UE, shapes::Shapes) =
+KhepriBase.b_bounding_box(b::UE, shapes::Shapes) =
   let refs = ref_values(b, shapes),
       mins = [@remote(b, Primitive__BoundingBoxMin(r)) for r in refs],
       maxs = [@remote(b, Primitive__BoundingBoxMax(r)) for r in refs]
