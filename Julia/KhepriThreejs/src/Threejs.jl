@@ -707,6 +707,16 @@ KhepriBase.b_set_environment(b::THR, env_name, set_background) =
 KhepriBase.b_set_view(b::THR, camera, target, lens, aperture) =
   @remote(b, setView(camera, target, lens, aperture))
 
+# Native Three.js lights (added to currentLayer, sharing its Z-up->Y-up rotation). The point
+# light carries energy + color; the spot light uses the viewer's defaults for intensity/color
+# (the Khepri b_spotlight contract supplies only geometry + cone angles). b_arealight/b_ieslight
+# reach these via the KhepriBase defaults. ([MC11])
+KhepriBase.b_pointlight(b::THR, loc, energy, color) =
+  @remote(b, pointLight(loc, energy, convert(RGB, color)))
+
+KhepriBase.b_spotlight(b::THR, loc, dir, hotspot, falloff) =
+  @remote(b, spotLight(loc, loc + dir, hotspot, falloff))
+
 KhepriBase.b_delete_ref(b::THR, r::THRId) =
   @remote(b, delete(r))
 

@@ -2381,6 +2381,27 @@ typedFunction("MeshPhysicalMaterial", [Dict], MatId, (params: { [key: string]: a
 typedFunction("MeshStandardMaterial", [Dict], MatId, (params: { [key: string]: any }) =>
   new THREE.MeshStandardMaterial(params));
 
+// Lights. Returned with type Id, so addObject3D() puts them in currentLayer and they inherit its
+// Z-up->Y-up rotation — positions/targets are raw Khepri coords, like geometry. These add to the
+// scene's default hemisphere/ambient lighting. (Intensities mirror Khepri energy; tune if needed.)
+typedFunction("pointLight", [Point3d, Float32, RGB], Id,
+  (loc: THREE.Vector3, energy: number, color: THREE.Color) => {
+    const light = new THREE.PointLight(color, energy);
+    light.position.copy(loc);
+    return light;
+  });
+
+typedFunction("spotLight", [Point3d, Point3d, Float32, Float32], Id,
+  (loc: THREE.Vector3, target: THREE.Vector3, hotspot: number, falloff: number) => {
+    const light = new THREE.SpotLight(0xffffff);
+    light.position.copy(loc);
+    light.angle = Math.min(falloff, Math.PI / 2 - 1e-3);          // outer cone half-angle (rad)
+    light.penumbra = falloff > 0 ? Math.min(1, Math.max(0, 1 - hotspot / falloff)) : 0;
+    light.target.position.copy(target);
+    currentLayer.add(light.target);   // target must live in the (rotated) scene graph for aiming
+    return light;
+  });
+
 typedFunction("MeshPhongMaterial", [Dict], MatId, (params: { [key: string]: any }) =>
   new THREE.MeshPhongMaterial(params));
 
