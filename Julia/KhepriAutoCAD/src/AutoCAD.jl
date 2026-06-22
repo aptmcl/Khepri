@@ -280,19 +280,10 @@ decode(ns::Val{:ACAD}, ::Val{:Frame3d}, c::IO) =
       decode(ns, Val(:Vector3d), c),
       decode(ns, Val(:Vector3d), c)))
 
-# AutoCAD's colors do not support the alpha channel
-encode(ns::Val{:ACAD}, ::Val{:Color}, c::IO, v) =
-  let v = convert(RGB{ColorTypes.N0f8}, v)
-    encode(ns, Val(:byte), c, reinterpret(UInt8, v.r))
-    encode(ns, Val(:byte), c, reinterpret(UInt8, v.g))
-    encode(ns, Val(:byte), c, reinterpret(UInt8, v.b))
-  end
-decode(ns::Val{:ACAD}, ::Val{:Color}, c::IO) =
-  let r = reinterpret(ColorTypes.N0f8, decode(ns, Val(:byte), c)),
-      g = reinterpret(ColorTypes.N0f8, decode(ns, Val(:byte), c)),
-      b = reinterpret(ColorTypes.N0f8, decode(ns, Val(:byte), c))
-    RGB(r, g, b)
-  end
+# AutoCAD colors have no alpha channel, but :Color now uses the canonical 4-float RGBA
+# wire (base, reached via the :ACAD -> :CS delegation above). The alpha is sent and
+# dropped at AutoCAD's Autodesk.AutoCAD.Colors.Color endpoint (C# rColor/wColor). No
+# per-backend :Color override needed. See the materials design note (P0).
 
 acad_api = @remote_api :ACAD """
 public Entity QuadStrip(Point3d[] bpts, Point3d[] tpts, int smoothLevel, ObjectId matId)
@@ -337,6 +328,7 @@ public Point3d CircleCenter(Entity ent)
 public Vector3d CircleNormal(Entity ent)
 public double CircleRadius(Entity ent)
 public Entity Ellipse(Point3d c, Vector3d n, Vector3d majorAxis, double radiusRatio)
+public Entity EllipticArc(Point3d c, Vector3d n, Vector3d majorAxis, double radiusRatio, double startAngle, double endAngle)
 public Point3d EllipseCenter(Entity ent)
 public Vector3d EllipseNormal(Entity ent)
 public Vector3d EllipseMajorAxis(Entity ent)
@@ -668,6 +660,22 @@ KhepriBase.b_ellipse(b::ACAD, c, rx, ry, mat) =
     @remote(b, Ellipse(c, vz(1, c.cs), vxyz(0, ry, 0, c.cs), rx/ry))
   end
 
+#=
+AutoCAD's Ellipse entity is also its elliptic-arc entity: the 6-arg constructor
+takes start/end *parametric* angles (measured from the major axis), matching
+Khepri's own cos/sin parameterisation. We still pass the LONGER semi-axis as the
+major axis (AutoCAD requires radiusRatio = minor/major <= 1), exactly as b_ellipse
+does. When rx >= ry the major axis is x and the angle maps 1:1. When rx < ry the
+major axis is y; equating c + rx*cos(phi)*x + ry*sin(phi)*y to AutoCAD's
+c + a*cos(theta)*M + a*k*sin(theta)*(n x M) gives theta = phi - pi/2. This replaces
+the KhepriBase default, which samples the arc into an 8-64 point NURBS spline.
+See also: b_ellipse, b_arc.
+=#
+KhepriBase.b_elliptic_arc(b::ACAD, c, rx, ry, α, Δα, mat) =
+  rx >= ry ?
+    @remote(b, EllipticArc(c, vz(1, c.cs), vxyz(rx, 0, 0, c.cs), ry/rx, α, α + Δα)) :
+    @remote(b, EllipticArc(c, vz(1, c.cs), vxyz(0, ry, 0, c.cs), rx/ry, α - π/2, α + Δα - π/2))
+
 KhepriBase.b_trig(b::ACAD, p1, p2, p3, mat) =
   @remote(b, Mesh([p1, p2, p3], [[0, 1, 2, 2]], 0, mat))
 
@@ -912,12 +920,12 @@ KhepriBase.b_surface(b::ACAD, frontier::Shapes, mat) =
     end
     ids
   end
-backend_surface_boundary(b::ACAD, s::Shape2D) =
+b_surface_boundary(b::ACAD, s::Shape2D) =
     map(c -> b_shape_from_ref(b, c), @remote(b, CurvesFromSurface(ref_value(b, s))))
 
 # Iterating over curves and surfaces
 
-backend_map_division(b::ACAD, f::Function, s::Shape1D, n::Int) =
+b_map_division(b::ACAD, f::Function, s::Shape1D, n::Int) =
   let r = ref_value(b, s),
       (t1, t2) = @remote(b, CurveDomain(r)),
       ti = division(t1, t2, n),
@@ -957,10 +965,10 @@ rotation_minimizing_frames(u0, xs, ts) =
 #
 
 
-backend_surface_domain(b::ACAD, s::Shape2D) =
+b_surface_domain(b::ACAD, s::Shape2D) =
     tuple(@remote(b, SurfaceDomain(ref_value(b, s)))...)
 
-backend_map_division(b::ACAD, f::Function, s::Shape2D, nu::Int, nv::Int) =
+b_map_division(b::ACAD, f::Function, s::Shape2D, nu::Int, nv::Int) =
   let conn = connection(b)
       r = ref_value(b, s)
       (u1, u2, v1, v2) = @remote(b, SurfaceDomain(r))
@@ -973,7 +981,7 @@ backend_map_division(b::ACAD, f::Function, s::Shape2D, nu::Int, nv::Int) =
 
 # The previous method cannot be applied to meshes in AutoCAD, which are created by surface_grid
 
-backend_map_division(b::ACAD, f::Function, s::SurfaceGrid, nu::Int, nv::Int) =
+b_map_division(b::ACAD, f::Function, s::SurfaceGrid, nu::Int, nv::Int) =
   let conn = connection(b)
       r = ref_value(b, s)
       (u1, u2, v1, v2) = @remote(b, SurfaceDomain(r))
@@ -1318,31 +1326,31 @@ realize(b::ACAD, s::Thicken) =
     end,
     s.shape)
 
-# backend_frame_at
-backend_frame_at(b::ACAD, s::Circle, t::Real) = add_pol(s.center, s.radius, t)
+# b_frame_at
+b_frame_at(b::ACAD, s::Circle, t::Real) = add_pol(s.center, s.radius, t)
 
-backend_frame_at(b::ACAD, c::Shape1D, t::Real) = @remote(b, CurveFrameAt(ref_value(b, c), t))
+b_frame_at(b::ACAD, c::Shape1D, t::Real) = @remote(b, CurveFrameAt(ref_value(b, c), t))
 
-#backend_frame_at(b::ACAD, s::Surface, u::Real, v::Real) =
+#b_frame_at(b::ACAD, s::Surface, u::Real, v::Real) =
     #What should we do with v?
-#    backend_frame_at(b, s.frontier[1], u)
+#    b_frame_at(b, s.frontier[1], u)
 
-#backend_frame_at(b::ACAD, s::SurfacePolygon, u::Real, v::Real) =
+#b_frame_at(b::ACAD, s::SurfacePolygon, u::Real, v::Real) =
 
-backend_frame_at(b::ACAD, s::Shape2D, u::Real, v::Real) = @remote(b, SurfaceFrameAt(ref_value(b, s), u, v))
+b_frame_at(b::ACAD, s::Shape2D, u::Real, v::Real) = @remote(b, SurfaceFrameAt(ref_value(b, s), u, v))
 
 # BIM
 realize(b::ACAD, f::TableFamily) =
     let bf = get(f.implemented_as, typeof(b), nothing)
       isnothing(bf) ?
         @remote(b, CreateRectangularTableFamily(f.length, f.width, f.height, f.top_thickness, f.leg_thickness)) :
-        backend_get_family_ref(b, f, bf)
+        b_get_family_ref(b, f, bf)
     end
 realize(b::ACAD, f::ChairFamily) =
     let bf = get(f.implemented_as, typeof(b), nothing)
       isnothing(bf) ?
         @remote(b, CreateChairFamily(f.length, f.width, f.height, f.seat_height, f.thickness)) :
-        backend_get_family_ref(b, f, bf)
+        b_get_family_ref(b, f, bf)
     end
 realize(b::ACAD, f::TableChairFamily) =
     let bf = get(f.implemented_as, typeof(b), nothing)
@@ -1352,7 +1360,7 @@ realize(b::ACAD, f::TableChairFamily) =
             f.table_family.length, f.table_family.width,
             f.chairs_top, f.chairs_bottom, f.chairs_right, f.chairs_left,
             f.spacing)) :
-        backend_get_family_ref(b, f, bf)
+        b_get_family_ref(b, f, bf)
     end
 
 KhepriBase.b_table(b::ACAD, c, angle, family) =
@@ -1366,8 +1374,14 @@ KhepriBase.b_table_and_chairs(b::ACAD, c, angle, family) =
 
 ############################################
 
-# KhepriBase.b_bounding_box(b::ACAD, shapes::Shapes) =
-#   @remote(b, BoundingBox(ref_values(shapes)))
+# Re-enabled with the current 2-arg ref_values and the (min, max) tuple return that
+# b_bounding_box expects (the old commented form used the removed 1-arg ref_values and
+# returned the raw array). C# BoundingBox returns {min, max}; AutoCAD is RH Z-up like
+# Khepri, so no per-axis re-aggregation is needed (cf. Rhino).
+KhepriBase.b_bounding_box(b::ACAD, shapes::Shapes) =
+  let pts = @remote(b, BoundingBox(ref_values(b, shapes)))
+    (pts[1], pts[2])
+  end
 
 KhepriBase.b_set_view(b::ACAD, camera::Loc, target::Loc, lens::Real, aperture::Real) =
   @remote(b, SetViewCamera(camera, target, lens, true))
@@ -1462,16 +1476,11 @@ backend_set_length_unit(b::ACAD, unit::String) = @remote(b, SetLengthUnit(unit))
 
 const ACADDimensionStyles = Dict(:architectural => "_ARCHTICK", :mechanical => "")
 
-#b_dimension(b::Backend, p, q, str, size, mat) =
-
-backend_dimension(b::ACAD, p0::Loc, p1::Loc, p::Loc, scale::Real, style::Symbol) =
-  @remote(b, CreateAlignedDimension("FooBar", p0, p1, p, scale, ACADDimensionStyles[style]))
-
-backend_dimension(b::ACAD, p0::Loc, p1::Loc, sep::Real, scale::Real, style::Symbol) =
-  let v = p1 - p0,
-      angle = pol_phi(v)
-      dimension(p0, p1, add_pol(p0, sep, angle + pi/2), scale, style, b)
-  end
+# Removed two dead `backend_dimension(b::ACAD, ...)` defs: the live hook is the
+# 7-arg `b_dimension(b, p, q, str, size, offset, mat)` (KhepriBase/src/Backend.jl).
+# Those used a stale (p0,p1,p/sep,scale,style) signature, were dispatched from
+# nowhere, and one recursed into the user-facing `dimension` ctor. AutoCAD-native
+# dimensions, if desired, want a fresh KhepriBase.b_dimension(b::ACAD, ...) override.
 
 no_props = Dict{String,Any}()
 #illustration_color = rgb(127/255,191/255,255/255)
@@ -1648,7 +1657,16 @@ KhepriBase.b_arealight(b::ACAD, loc, dir, size, energy, color) =
 
 # User Selection
 
-KhepriBase.b_create_shape_from_ref_value(b::ACAD, r) = 
+# `b_shape_from_ref` (used by interactive selection via maybe_existing_shape_from_ref and
+# by captured_shape replay) and `b_create_shape_from_ref_value` (used by the caching
+# get_or_create_shape_from_ref_value path) are two hooks for the same job. AutoCAD only
+# implemented the latter, so b_shape_from_ref hit the throwing `b::Backend` default —
+# breaking captured_shape replay and select_shape of any untraced shape. Delegate
+# b_shape_from_ref to the caching path so the single b_create_shape_from_ref_value below
+# serves both.
+KhepriBase.b_shape_from_ref(b::ACAD, r) = get_or_create_shape_from_ref_value(b, r)
+
+KhepriBase.b_create_shape_from_ref_value(b::ACAD, r) =
   let code = @remote(b, ShapeCode(r))
     if code == 1 # Point
         point(@remote(b, PointPosition(r)))
@@ -1780,16 +1798,16 @@ KhepriBase.b_select_shape(b::ACAD, prompt::String) =
 KhepriBase.b_select_shapes(b::ACAD, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetShapes)
 
-backend_captured_shape(b::ACAD, handle) =
+KhepriBase.captured_shape(b::ACAD, handle) =
   b_shape_from_ref(b, @remote(b, GetShapeFromHandle(handle)))
-backend_captured_shapes(b::ACAD, handles) =
+KhepriBase.captured_shapes(b::ACAD, handles) =
   map(handles) do handle
       b_shape_from_ref(b, @remote(b, GetShapeFromHandle(handle)))
   end
 
-backend_generate_captured_shape(b::ACAD, s::Shape) =
+b_generate_captured_shape(b::ACAD, s::Shape) =
     println("captured_shape(autocad, $(@remote(b, GetHandleFromShape(ref_value(b, s)))))")
-backend_generate_captured_shapes(b::ACAD, ss::Shapes) =
+b_generate_captured_shapes(b::ACAD, ss::Shapes) =
   begin
     print("captured_shapes(autocad, [")
     for s in ss
