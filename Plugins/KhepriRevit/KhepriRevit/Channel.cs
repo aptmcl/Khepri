@@ -57,7 +57,7 @@ namespace KhepriRevit {
                 (id == -1L) ? ElementId.InvalidElementId :
                 new ElementId(id);
         }
-        public void wElementId(ElementId id) => wInt64((int)id.Value);
+        public void wElementId(ElementId id) => wInt64(id == null ? 0L : id.Value);
 
         public Element rElement() => uiApp.ActiveUIDocument.Document.GetElement(rElementId());
         public void wElement(Element e) { using (e) { wElementId(e.Id); } }
@@ -67,6 +67,18 @@ namespace KhepriRevit {
 
         public Material rMaterial() => rElement() as Material;
         public void wMaterial(Material m) => wElement(m);
+
+        // Canonical 4-float RGBA wire (KhepriBase P0), read into Revit's native
+        // Autodesk.Revit.DB.Color. That type has no alpha channel (Material.Transparency
+        // carries transparency separately), so alpha is read-and-dropped / written as 1.0.
+        public new Color rColor() {
+            float r = rSingle(), g = rSingle(), b = rSingle();
+            rSingle(); // alpha: not part of Autodesk.Revit.DB.Color
+            return new Color(UnitFloatToByte(r), UnitFloatToByte(g), UnitFloatToByte(b));
+        }
+        public void wColor(Color c) {
+            wSingle(c.Red / 255f); wSingle(c.Green / 255f); wSingle(c.Blue / 255f); wSingle(1.0f);
+        }
 
 
         // Keep a reverse lookup so RPCs receiving a Family can resolve the long id

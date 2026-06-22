@@ -378,18 +378,50 @@ namespace KhepriRevit {
             return ds;
         }
 
-        public Element Sphere(XYZ centre, Length radius) {
+        // Per-element world AABB corners (aggregated per-axis on the Julia side).
+        // get_BoundingBox(null) returns a box in its own coordinate space, so all
+        // eight corners are transformed to world before taking the min/max.
+        void ComputeWorldBounds(Element e, out XYZ worldMin, out XYZ worldMax) {
+            BoundingBoxXYZ bb = e.get_BoundingBox(null);
+            if (bb == null) { worldMin = XYZ.Zero; worldMax = XYZ.Zero; return; }
+            Transform t = bb.Transform;
+            double minX = double.PositiveInfinity, minY = double.PositiveInfinity, minZ = double.PositiveInfinity;
+            double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
+            for (int i = 0; i < 8; i++) {
+                XYZ corner = new XYZ(
+                    (i & 1) == 0 ? bb.Min.X : bb.Max.X,
+                    (i & 2) == 0 ? bb.Min.Y : bb.Max.Y,
+                    (i & 4) == 0 ? bb.Min.Z : bb.Max.Z);
+                XYZ wc = t.OfPoint(corner);
+                minX = Math.Min(minX, wc.X); minY = Math.Min(minY, wc.Y); minZ = Math.Min(minZ, wc.Z);
+                maxX = Math.Max(maxX, wc.X); maxY = Math.Max(maxY, wc.Y); maxZ = Math.Max(maxZ, wc.Z);
+            }
+            worldMin = new XYZ(minX, minY, minZ);
+            worldMax = new XYZ(maxX, maxY, maxZ);
+        }
+        public XYZ BoundingBoxMin(Element e) {
+            ComputeWorldBounds(e, out XYZ worldMin, out _);
+            return worldMin;
+        }
+        public XYZ BoundingBoxMax(Element e) {
+            ComputeWorldBounds(e, out _, out XYZ worldMax);
+            return worldMax;
+        }
+
+        public Element Sphere(XYZ centre, Length radius, ElementId materialId) {
             Frame frame = new Frame(centre, XYZ.BasisX, XYZ.BasisY, XYZ.BasisZ);
             XYZ p0 = centre - radius * frame.BasisZ;
             XYZ p1 = centre + radius * frame.BasisZ;
             Arc arc = Arc.Create(p0, p1, centre + radius * XYZ.BasisX);
             Line line = Line.CreateBound(p1, p0);
+            // materialId bakes the current material onto the solid (InvalidElementId = none).
             return ElementFromSolid("Sphere", GeometryCreationUtilities.CreateRevolvedGeometry(
                 frame,
                 new List<CurveLoop>() { CurveLoop.Create(new List<Curve>(2) { arc, line }) },
-                0, 2 * Math.PI));
+                0, 2 * Math.PI,
+                new SolidOptions(materialId, ElementId.InvalidElementId)));
         }
-        public Element ConeFrustumNamed(string name, XYZ bottom, VXYZ axis, Length bottomRadius, Length height, Length topRadius) {
+        public Element ConeFrustumNamed(string name, XYZ bottom, VXYZ axis, Length bottomRadius, Length height, Length topRadius, ElementId materialId) {
             Frame frame = FrameFromAxis(bottom, axis.Normalize());
             XYZ p0 = bottom;
             XYZ p1 = p0 + frame.BasisX * bottomRadius;
@@ -400,16 +432,19 @@ namespace KhepriRevit {
                 Line.CreateBound(p1, p2),
                 Line.CreateBound(p2, p3),
                 Line.CreateBound(p3, p0) };
+            // Single material on the revolved solid (InvalidElementId = none). Per-face
+            // cap materials are a future refinement. See materials design note (P2).
             return ElementFromSolid(name, GeometryCreationUtilities.CreateRevolvedGeometry(
                 frame,
                 new CurveLoop[] { CurveLoop.Create(profile) },
-                0, 2 * Math.PI));
+                0, 2 * Math.PI,
+                new SolidOptions(materialId, ElementId.InvalidElementId)));
         }
-        public Element ConeFrustum(XYZ bottom, VXYZ axis, Length bottomRadius, Length height, Length topRadius) =>
-            ConeFrustumNamed("ConeFrustum", bottom, axis, bottomRadius, height, topRadius);
-        public Element Cylinder(XYZ bottom, VXYZ axis, Length radius, Length height) =>
-            ConeFrustumNamed("Cylinder", bottom, axis, radius, height, radius);
-        public Element CylinderWithCaps(XYZ bottom, VXYZ axis, Length radius, Length height, bool bottomCap, bool topCap) {
+        public Element ConeFrustum(XYZ bottom, VXYZ axis, Length bottomRadius, Length height, Length topRadius, ElementId materialId) =>
+            ConeFrustumNamed("ConeFrustum", bottom, axis, bottomRadius, height, topRadius, materialId);
+        public Element Cylinder(XYZ bottom, VXYZ axis, Length radius, Length height, ElementId materialId) =>
+            ConeFrustumNamed("Cylinder", bottom, axis, radius, height, radius, materialId);
+        public Element CylinderWithCaps(XYZ bottom, VXYZ axis, Length radius, Length height, bool bottomCap, bool topCap, ElementId materialId) {
             const int segments = 64;
             Frame frame = FrameFromAxis(bottom, axis.Normalize());
             XYZ top = bottom + frame.BasisZ * height;
@@ -423,16 +458,16 @@ namespace KhepriRevit {
             }
             TessellatedShapeBuilder builder = new TessellatedShapeBuilder { LogString = "Cylinder" };
             builder.OpenConnectedFaceSet(false);
-            CreateFaces(builder, bottomRing, topRing, CurrentMaterialId);
+            CreateFaces(builder, bottomRing, topRing, materialId);
             if (bottomCap) {
-                builder.AddFace(new TessellatedFace(bottomRing.AsEnumerable().Reverse().ToList(), CurrentMaterialId));
+                builder.AddFace(new TessellatedFace(bottomRing.AsEnumerable().Reverse().ToList(), materialId));
             }
             if (topCap) {
-                builder.AddFace(new TessellatedFace(topRing, CurrentMaterialId));
+                builder.AddFace(new TessellatedFace(topRing, materialId));
             }
             return FinishBuilder(builder, "Cylinder");
         }
-        public Element Cone(XYZ bottom, VXYZ axis, Length bottomRadius, Length height) {
+        public Element Cone(XYZ bottom, VXYZ axis, Length bottomRadius, Length height, ElementId materialId) {
             Frame frame = FrameFromAxis(bottom, axis.Normalize());
             XYZ p0 = bottom;
             XYZ p1 = p0 + frame.BasisX * bottomRadius;
@@ -444,7 +479,8 @@ namespace KhepriRevit {
             return ElementFromSolid("Cone", GeometryCreationUtilities.CreateRevolvedGeometry(
                 frame,
                 new CurveLoop[] { CurveLoop.Create(profile) },
-                0, 2 * Math.PI));
+                0, 2 * Math.PI,
+                new SolidOptions(materialId, ElementId.InvalidElementId)));
         }
         private Element Cylinder2(XYZ bottom, VXYZ axis, Length radius, Length height) {
             Frame frame = FrameFromAxis(bottom, axis.Normalize());
@@ -481,6 +517,28 @@ namespace KhepriRevit {
               .CreateExtrusionGeometry(
                 new CurveLoop[] { curveLoop },
                 XYZ.BasisZ, d3, options);
+        }
+
+        // Native axis-aligned box as a true extrusion Solid (a corner-based prism),
+        // replacing the tessellated PyramidFrustum path b_box used before. basePts are
+        // the 4 base corners in CCW order as seen from the +height side (i.e. c's
+        // frame); the box extrudes from that base plane by `height` along the base
+        // plane normal, computed from the corners so a rotated c.cs extrudes along its
+        // own up-axis.
+        public Element Box(XYZ[] basePts, Length height, ElementId materialId) {
+            List<Curve> profile = new List<Curve>();
+            int n = basePts.Length;
+            for (int i = 0; i < n; i++) {
+                profile.Add(Line.CreateBound(basePts[i], basePts[(i + 1) % n]));
+            }
+            CurveLoop loop = CurveLoop.Create(profile);
+            XYZ dir = (basePts[1] - basePts[0]).CrossProduct(basePts[2] - basePts[1]).Normalize();
+            // materialId bakes the current material onto the solid's faces (InvalidElementId
+            // = no material). See materials design note (P2).
+            SolidOptions options = new SolidOptions(materialId, ElementId.InvalidElementId);
+            Solid solid = GeometryCreationUtilities.CreateExtrusionGeometry(
+                new CurveLoop[] { loop }, dir, height, options);
+            return ElementFromSolid("Box", solid);
         }
 
         Solid SolidFromElement(Element e) {
@@ -569,6 +627,30 @@ namespace KhepriRevit {
             new FilteredElementCollector(doc)
                 .WherePasses(new ElementClassFilter(typeof(Material)))
                 .Cast<Material>().FirstOrDefault(e => e.Name.ToString().Equals(name));
+
+        // Material.Create throws on a duplicate name, so derive a unique one.
+        string UniqueMaterialName(string baseName) {
+            var existing = new HashSet<string>(
+                new FilteredElementCollector(doc).OfClass(typeof(Material))
+                    .Cast<Material>().Select(m => m.Name));
+            if (!existing.Contains(baseName)) return baseName;
+            int i = 1;
+            while (existing.Contains(baseName + " " + i)) i++;
+            return baseName + " " + i;
+        }
+
+        // Conservative Revit material: a Material element with Color + Transparency
+        // (no AppearanceAsset yet). `color` arrives as Autodesk.Revit.DB.Color via the
+        // unified 4-float color codec (Channel.rColor); transparency is Revit's 0-100
+        // channel. See the materials
+        // design note (P2). PBR fields (metallic/roughness/etc.) are not mapped here.
+        public Element CreateMaterial(string name, Color color, int transparency) {
+            ElementId id = Material.Create(doc, UniqueMaterialName(name));
+            Material mat = doc.GetElement(id) as Material;
+            mat.Color = color;
+            mat.Transparency = Math.Max(0, Math.Min(100, transparency));
+            return mat;
+        }
 
         public String InstalledLibraryPath(String kind) {
             string libraryPath = "";
@@ -725,7 +807,7 @@ namespace KhepriRevit {
         }
         public ElementId CreatePolygonalRoof(XYZ[] pts, Level level, ElementId famId) {
             RoofType roofType = null;
-            if (famId != null) {
+            if (famId != null && famId != ElementId.InvalidElementId) {
                 roofType = doc.GetElement(famId) as RoofType;
             } else {
                 var roofTypeList = new FilteredElementCollector(doc).OfClass(typeof(RoofType));
@@ -742,7 +824,7 @@ namespace KhepriRevit {
         }
         public ElementId CreatePathRoof(XYZ[] pts, double[] angles, Level level, ElementId famId) {
             RoofType roofType = null;
-            if (famId != null) {
+            if (famId != null && famId != ElementId.InvalidElementId) {
                 roofType = doc.GetElement(famId) as RoofType;
             } else {
                 var roofTypeList = new FilteredElementCollector(doc).OfClass(typeof(RoofType));
@@ -769,7 +851,7 @@ namespace KhepriRevit {
         }
 
         public Element CreateColumn(XYZ location, Level level0, Level level1, ElementId famId) {
-            FamilySymbol symbol = (famId == null) ?
+            FamilySymbol symbol = (famId == null || famId == ElementId.InvalidElementId) ?
                 GetFirstSymbol(FindCategoryFamilies(doc, BuiltInCategory.OST_Columns).FirstOrDefault()) :
                 doc.GetElement(famId) as FamilySymbol;
             EnsureActive(symbol);
@@ -789,7 +871,7 @@ namespace KhepriRevit {
         }
         public ElementId CreateBeam(XYZ p0, XYZ p1, double rotationAngle, ElementId famId) {
             FamilySymbol symbol = null;
-            if (famId == null) {
+            if (famId == null || famId == ElementId.InvalidElementId) {
                 Family defaultBeamFam = FindCategoryFamilies(doc, BuiltInCategory.OST_StructuralFraming).First();
                 symbol = doc.GetElement(defaultBeamFam.GetFamilySymbolIds().First()) as FamilySymbol;
             } else {
@@ -830,7 +912,7 @@ namespace KhepriRevit {
             ElementId[] ids = new ElementId[pts.Length - 1];
             for (int i = 0; i < pts.Length - 1; i++) {
                 Wall wall = Wall.Create(doc, Line.CreateBound(pts[i], pts[i + 1]), baseLevelId, false);
-                if (famId != null) {
+                if (famId != null && famId != ElementId.InvalidElementId) {
                     wall.WallType = doc.GetElement(famId) as WallType;
                 }
                 wall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).Set(topLevelId);
@@ -847,7 +929,7 @@ namespace KhepriRevit {
             ElementId[] ids = new ElementId[pts.Length - 1];
             for (int i = 0; i < pts.Length - 1; i++) {
                 Wall wall = Wall.Create(doc, Line.CreateBound(pts[i], pts[i + 1]), wallTypeId, baseLevelId, height, 0, false, false);
-                if (famId != null) {
+                if (famId != null && famId != ElementId.InvalidElementId) {
                     wall.WallType = doc.GetElement(famId) as WallType;
                 }
                 ids[i] = wall.Id;
@@ -874,7 +956,7 @@ namespace KhepriRevit {
             ElementId[] ids = new ElementId[curves.Count];
             for (int i = 0; i < curves.Count; i++) {
                 Wall wall = Wall.Create(doc, curves[i], baseLevelId, isStructural);
-                if (famId != null) {
+                if (famId != null && famId != ElementId.InvalidElementId) {
                     wall.WallType = doc.GetElement(famId) as WallType;
                 }
                 wall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).Set(topLevelId);
@@ -947,7 +1029,7 @@ namespace KhepriRevit {
             XYZ start = locCurve.Curve.GetEndPoint(0);
             XYZ dir = locCurve.Curve.GetEndPoint(1) - start;
             XYZ location = start + dir.Normalize() * deltaFromStart;
-            FamilySymbol symbol = (familyId == null) ?
+            FamilySymbol symbol = (familyId == null || familyId == ElementId.InvalidElementId) ?
                 GetFirstSymbol(FindCategoryFamilies(doc, BuiltInCategory.OST_Doors).FirstOrDefault()) :
                 doc.GetElement(familyId) as FamilySymbol;
             EnsureActive(symbol);
@@ -967,7 +1049,7 @@ namespace KhepriRevit {
             XYZ start = locCurve.Curve.GetEndPoint(0);
             XYZ dir = locCurve.Curve.GetEndPoint(1) - start;
             XYZ location = start + dir.Normalize() * deltaFromStart.Value;
-            FamilySymbol symbol = (familyId == null) ?
+            FamilySymbol symbol = (familyId == null || familyId == ElementId.InvalidElementId) ?
                 GetFirstSymbol(FindCategoryFamilies(doc, BuiltInCategory.OST_Doors).FirstOrDefault()) :
                 doc.GetElement(familyId) as FamilySymbol;
             symbol = EnsureSymbolForTypeParams(symbol, names, values);
@@ -1131,7 +1213,7 @@ namespace KhepriRevit {
             XYZ start = locCurve.Curve.GetEndPoint(0);
             XYZ dir = locCurve.Curve.GetEndPoint(1) - start;
             XYZ location = start + dir.Normalize() * deltaFromStart.Value;
-            FamilySymbol symbol = (familyId == null) ?
+            FamilySymbol symbol = (familyId == null || familyId == ElementId.InvalidElementId) ?
                 GetFirstSymbol(FindCategoryFamilies(doc, BuiltInCategory.OST_Windows).FirstOrDefault()) :
                 doc.GetElement(familyId) as FamilySymbol;
             symbol = EnsureSymbolForTypeParams(symbol, names, values);
@@ -1151,7 +1233,7 @@ namespace KhepriRevit {
         // geometry from the host) but a sensible anchor is still required. Prefer
         // CreateLineRailing / CreatePolygonRailing whenever a path is available.
         public Element InsertRailingAt(XYZ location, Element host, ElementId familyId) {
-            FamilySymbol symbol = (familyId == null) ?
+            FamilySymbol symbol = (familyId == null || familyId == ElementId.InvalidElementId) ?
                 GetFirstSymbol(FindCategoryFamilies(doc, BuiltInCategory.OST_StairsRailing).FirstOrDefault()) :
                 doc.GetElement(familyId) as FamilySymbol;
             EnsureActive(symbol);
