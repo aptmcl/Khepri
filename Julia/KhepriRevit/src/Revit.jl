@@ -184,16 +184,19 @@ decode(ns::Val{:RVT}, t::Union{Val{:ElementId},Val{:Element},Val{:Level},Val{:Fa
 revit_api = @remote_api :RVT """
 public bool ConvertIFCFile(string file)
 public bool LoadRVTFile(string file)
-public Element Sphere(XYZ centre, Length radius)
-public Element ConeFrustumNamed(string name, XYZ bottom, VXYZ axis, Length bottomRadius, Length height, Length topRadius)
-public Element ConeFrustum(XYZ bottom, VXYZ axis, Length bottomRadius, Length height, Length topRadius)
-public Element Cylinder(XYZ bottom, VXYZ axis, Length radius, Length height)
-public Element CylinderWithCaps(XYZ bottom, VXYZ axis, Length radius, Length height, bool bottomCap, bool topCap)
-public Element Cone(XYZ bottom, VXYZ axis, Length bottomRadius, Length height)
+public Element Sphere(XYZ centre, Length radius, ElementId materialId)
+public Element ConeFrustumNamed(string name, XYZ bottom, VXYZ axis, Length bottomRadius, Length height, Length topRadius, ElementId materialId)
+public Element ConeFrustum(XYZ bottom, VXYZ axis, Length bottomRadius, Length height, Length topRadius, ElementId materialId)
+public Element Cylinder(XYZ bottom, VXYZ axis, Length radius, Length height, ElementId materialId)
+public Element CylinderWithCaps(XYZ bottom, VXYZ axis, Length radius, Length height, bool bottomCap, bool topCap, ElementId materialId)
+public Element Cone(XYZ bottom, VXYZ axis, Length bottomRadius, Length height, ElementId materialId)
 public ElementId SurfaceFromGrid(int m, int n, XYZ[] pts, bool closedM, bool closedN, int level)
 public Element PyramidFrustumNamed(String name, XYZ[] ps, XYZ[] qs, ElementId materialId)
 public Element PyramidFrustumWithMaterial(XYZ[] ps, XYZ[] qs, ElementId materialId)
 public Element PyramidFrustum(XYZ[] ps, XYZ[] qs)
+public Element Box(XYZ[] basePts, Length height, ElementId materialId)
+public XYZ BoundingBoxMin(Element e)
+public XYZ BoundingBoxMax(Element e)
 public Element ExtrudedContourNamed(string name, XYZ[] contour, bool smoothContour, XYZ[][] holes, bool[] smoothHoles, XYZ v, ElementId materialId)
 public Element ExtrudedContourWithMaterial(XYZ[] contour, bool smoothContour, XYZ[][] holes, bool[] smoothHoles, VXYZ v, ElementId materialId)
 public Element ExtrudedContour(XYZ[] contour, bool smoothContour, XYZ[][] holes, bool[] smoothHoles, VXYZ v)
@@ -328,6 +331,7 @@ public XYZ StairDirection(Element element)
 public Element[] DocRailings()
 public XYZ[] RailingPath(Element element)
 public ElementId RailingLevel(Element element)
+public Element CreateMaterial(String name, Color color, int transparency)
 """
 
 abstract type RVTKey end
@@ -469,7 +473,7 @@ revit_system_family(family_map=(), instance_map=(), location_transform=(f, p)->p
     Dict(instance_map...),
     location_transform)
 
-backend_get_family_ref(b::RVT, f::Family, rvtf::RevitSystemFamily) =
+b_get_family_ref(b::RVT, f::Family, rvtf::RevitSystemFamily) =
   let param_map = rvtf.family_map,
       params = keys(param_map)
     isempty(params) ?
@@ -491,7 +495,7 @@ revit_file_family(path, family_map=(), instance_map=(), location_transform=(f, p
     Dict(instance_map...),
     location_transform)
 
-backend_get_family_ref(b::RVT, f::Family, rvtf::RevitFileFamily) =
+b_get_family_ref(b::RVT, f::Family, rvtf::RevitFileFamily) =
   let family_id = @remote(b, LoadFamily(rvtf.path)),
       param_map = rvtf.family_map,
       params = keys(param_map)
@@ -541,7 +545,7 @@ end
 # Without this, dispatching family_ref on a RevitInPlaceFamily would fall through
 # to the abstract method and raise a confusing MethodError deep inside realization.
 # Surface a clear, actionable error at the family-resolution boundary instead.
-backend_get_family_ref(b::RVT, f::Family, rvtf::RevitInPlaceFamily) =
+b_get_family_ref(b::RVT, f::Family, rvtf::RevitInPlaceFamily) =
   error("RevitInPlaceFamily is not yet implemented. Use revit_file_family with " *
         "a saved .rfa, or revit_system_family for built-in types.")
 
@@ -1094,37 +1098,53 @@ realize(b::RVT, s::TrussBar) =
 # Choose Metric Generic Model
 
 
-# Revit does not use materials!
-#KhepriBase.material_ref(b::RVT, m::Material) = nothing
+# Conservative Revit materials: realize a PbrMaterial as a Revit Material element with
+# Color + Transparency (Material.Create; no AppearanceAsset yet). Honors base_color and
+# transparency; metallic/roughness/specular/ior/clearcoat/emission are not mapped (they
+# need an AppearanceAssetElement — future). Revit has a single 0-100 transparency channel,
+# so opacity (1-alpha) and transmission are collapsed into it. See materials design note (P2).
+KhepriBase.b_material(b::RVT, name, base_color, metallic, roughness, specular,
+                      ior, transmission, transmission_roughness,
+                      clearcoat, clearcoat_roughness,
+                      emission_color, emission_strength) =
+  @remote(b, CreateMaterial(name, base_color,
+                            round(Int, clamp(max(1 - alpha(base_color), transmission), 0, 1) * 100)))
 
 
-# Revit has no native Box/Pyramid/CenteredBox RPCs; express them via the
-# PyramidFrustum element it does support. A box is a frustum with identical bottom
-# and top rectangles; an apex pyramid is a frustum whose top polygon collapses to
-# the apex (one apex copy per base vertex). b_right_cuboid is left to the KhepriBase
-# default, which centers and delegates to b_box.
+# Pyramids use the PyramidFrustum element Revit supports (an apex pyramid is a
+# frustum whose top polygon collapses to the apex, one apex copy per base vertex).
+# Box is a native extrusion Solid (see b_box -> Box below), not a tessellated frustum.
+# b_right_cuboid is left to the KhepriBase default, which centers and delegates to b_box.
 KhepriBase.b_pyramid(b::RVT, bs, t, bmat, smat) =
   b_pyramid_frustum(b, bs, fill(t, length(bs)), bmat, smat, smat)
 KhepriBase.b_pyramid_frustum(b::RVT, bs, ts, bmat, tmat, smat) =
   @remote(b, PyramidFrustum(bs, ts))
 KhepriBase.b_box(b::RVT, c, dx, dy, dz, mat) =
-  let pb0 = c, pb1 = add_x(c, dx), pb2 = add_xy(c, dx, dy), pb3 = add_y(c, dy)
-    b_pyramid_frustum(b,
-      [pb0, pb1, pb2, pb3],
-      [add_z(pb0, dz), add_z(pb1, dz), add_z(pb2, dz), add_z(pb3, dz)],
-      mat, mat, mat)
-  end
+  @remote(b, Box([c, add_x(c, dx), add_xy(c, dx, dy), add_y(c, dy)], dz, mat))
+# Single-material Revit solids: pick the first available material id (side dominates);
+# -1 (InvalidElementId) = no material. Per-face cap materials are a future refinement (P2).
+rvt_material(ms...) = something(ms..., -1)
 KhepriBase.b_cone(b::RVT, cb, r, h, bmat, smat) =
-  @remote(b, Cone(cb, vz(1, cb.cs), r, h))
+  @remote(b, Cone(cb, vz(1, cb.cs), r, h, rvt_material(smat, bmat)))
 KhepriBase.b_cone_frustum(b::RVT, cb, rb, h, rt, bmat, tmat, smat) =
-  @remote(b, ConeFrustum(cb, vz(1, cb.cs), rb, h, rt))
+  @remote(b, ConeFrustum(cb, vz(1, cb.cs), rb, h, rt, rvt_material(smat, bmat, tmat)))
 KhepriBase.b_cylinder(b::RVT, cb, r, h, bmat, tmat, smat) =
   isnothing(bmat) || isnothing(tmat) ?
-    @remote(b, CylinderWithCaps(cb, vz(1, cb.cs), r, h, !isnothing(bmat), !isnothing(tmat))) :
-    @remote(b, Cylinder(cb, vz(1, cb.cs), r, h))
+    @remote(b, CylinderWithCaps(cb, vz(1, cb.cs), r, h, !isnothing(bmat), !isnothing(tmat), rvt_material(smat, bmat, tmat))) :
+    @remote(b, Cylinder(cb, vz(1, cb.cs), r, h, rvt_material(smat, bmat, tmat)))
 #Experiment with private Element Cylinder2(XYZ bottom, VXYZ axis, Length radius, Length height) {
 KhepriBase.b_sphere(b::RVT, c, r, mat) =
-  @remote(b, Sphere(c, r))
+  @remote(b, Sphere(c, r, mat))
+
+# Per-element world AABB corners, aggregated per-axis on the Julia side. Mirrors the
+# KhepriUnreal/KhepriUnity b_bounding_box convention.
+KhepriBase.b_bounding_box(b::RVT, shapes::Shapes) =
+  let refs = ref_values(b, shapes),
+      mins = [@remote(b, BoundingBoxMin(r)) for r in refs],
+      maxs = [@remote(b, BoundingBoxMax(r)) for r in refs]
+    (xyz(minimum(p -> p.x, mins), minimum(p -> p.y, mins), minimum(p -> p.z, mins)),
+     xyz(maximum(p -> p.x, maxs), maximum(p -> p.y, maxs), maximum(p -> p.z, maxs)))
+  end
 # Torus has no native Revit RPC; the KhepriBase default (b_torus -> b_surface_grid,
 # which Revit implements) tessellates it.
 
