@@ -81,7 +81,17 @@ namespace KhepriAutoCAD {
                 try {
                     while (true) {
                         if (op == -1) return false;
-                        operations[op](channel, primitives);
+                        // Guard a stale/desynced opcode (mirrors base Processor.Execute):
+                        // indexing operations[] out of range would throw before the RMI
+                        // delegate's error handler runs, so no NOTOK frame would ship and
+                        // the timeout-less Julia client would block. Write a clean NOTOK
+                        // and keep the batch alive instead.
+                        if (op < 0 || op >= operations.Count) {
+                            channel.wByte(1);
+                            channel.wString($"Unknown opcode {op}");
+                        } else {
+                            operations[op](channel, primitives);
+                        }
                         channel.EndFrame();
                         count++;
                         if (count > MaxRepeated) break;

@@ -90,8 +90,19 @@ namespace KhepriAutoCAD {
             }
         }
 
-        public new Color rColor() => Color.FromRgb(rByte(), rByte(), rByte());
-        public void wColor(Color c) { wByte(c.Red); wByte(c.Green); wByte(c.Blue); }
+        // Canonical 4-float RGBA wire (matches KhepriBase). Read/write the floats directly
+        // into Autodesk.AutoCAD.Colors.Color, which has no alpha (alpha is read-and-dropped
+        // / written as 1.0). We deliberately avoid Color.FromColor / ColorValue: those route
+        // through System.Drawing.Color and drag in a System.Windows.Media.Color overload that
+        // forces a PresentationCore (WPF) reference. See materials design note (P0).
+        public new Color rColor() {
+            float r = rSingle(), g = rSingle(), b = rSingle();
+            rSingle(); // alpha: no alpha channel in Autodesk.AutoCAD.Colors.Color
+            return Color.FromRgb(UnitFloatToByte(r), UnitFloatToByte(g), UnitFloatToByte(b));
+        }
+        public void wColor(Color c) {
+            wSingle(c.Red / 255f); wSingle(c.Green / 255f); wSingle(c.Blue / 255f); wSingle(1.0f);
+        }
 
         public Transaction tr {
             get => processor.tr;

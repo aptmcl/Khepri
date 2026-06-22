@@ -401,6 +401,11 @@ namespace KhepriAutoCAD {
 
         public Entity Ellipse(Point3d c, Vector3d n, Vector3d majorAxis, double radiusRatio) =>
             new Ellipse(c, n, majorAxis, radiusRatio, 0, 2 * Math.PI);
+        // Trimmed elliptic arc: the same AutoCAD Ellipse entity, but with the
+        // start/end parametric angles exposed instead of a hardcoded full 0..2pi.
+        public Entity EllipticArc(Point3d c, Vector3d n, Vector3d majorAxis,
+                                  double radiusRatio, double startAngle, double endAngle) =>
+            new Ellipse(c, n, majorAxis, radiusRatio, startAngle, endAngle);
         public Point3d EllipseCenter(Entity ent) => ((Ellipse)ent).Center;
         public Vector3d EllipseNormal(Entity ent) => ((Ellipse)ent).Normal;
         public Vector3d EllipseMajorAxis(Entity ent) => ((Ellipse)ent).MajorAxis;
@@ -756,6 +761,10 @@ namespace KhepriAutoCAD {
             Region outer = regions[0];
             for (int i = 1; i < regions.Length; i++) {
                 outer.BooleanOperation(BooleanOperationType.BoolSubtract, regions[i]);
+                // The hole operand is consumed by the subtract and is not DB-resident
+                // (it came from SurfaceFromCurve/RegionFromPoints); dispose it so its
+                // unmanaged geometry is freed. Only `outer` survives (appended by wEntity).
+                regions[i].Dispose();
             }
             return WithMaterial(outer, matId);
         }
@@ -767,6 +776,10 @@ namespace KhepriAutoCAD {
             Region outer = regions[0];
             for (int i = 1; i < regions.Length; i++) {
                 outer.BooleanOperation(BooleanOperationType.BoolSubtract, regions[i]);
+                // The hole operand is consumed by the subtract and is not DB-resident
+                // (it came from SurfaceFromCurve/RegionFromPoints); dispose it so its
+                // unmanaged geometry is freed. Only `outer` survives (appended by wEntity).
+                regions[i].Dispose();
             }
             return WithMaterial(outer, matId);
         }
@@ -899,7 +912,16 @@ namespace KhepriAutoCAD {
         }
         public Vector3d[] CurveNormalsAt(Entity ent, double[] ts) {
             Curve c = ent as Curve;
-            return ts.Select(t => -c.GetSecondDerivative(t)).ToArray();
+            // Unit principal normal. Frenet sign convention: +second-derivative points
+            // toward the centre of curvature. Falls back to a tangent-perpendicular in
+            // XY for straight segments (matching CurveFrameAt). Kept sign- and
+            // length-consistent with KhepriRhinoceros.CurveNormalsAt.
+            return ts.Select(t => {
+                Vector3d vt = c.GetFirstDerivative(t);
+                Vector3d vn = c.GetSecondDerivative(t);
+                Vector3d v = (vn.Length < 1e-14) ? vpol(1, sphPhi(vt) + Math.PI / 2) : vn;
+                return v / v.Length;
+            }).ToArray();
         }
         public double CurveLength(Entity ent) {
             Curve c = ent as Curve;
@@ -909,7 +931,11 @@ namespace KhepriAutoCAD {
             Curve c = ent as Curve;
             Point3d origin = c.GetPointAtParameter(t);
             Vector3d vt = c.GetFirstDerivative(t);
-            Vector3d vn = -c.GetSecondDerivative(t);
+            // Frenet sign: +second-derivative points toward the centre of curvature.
+            // Must match KhepriRhino's FrameAt so b_frame_at / rotation_minimizing_frames
+            // produce the same frame outcome on both backends (their Julia sides call
+            // CurveFrameAt directly, with no per-backend sign compensation).
+            Vector3d vn = c.GetSecondDerivative(t);
             // Probably, a bad idea. It should only be attempted if interpolating from neighboring frames does not help
             Vector3d vx = (vn.Length < 1e-14) ? vpol(1, sphPhi(vt) + Math.PI / 2) : vn;
             Vector3d vy = vt.CrossProduct(vx);
@@ -1165,6 +1191,9 @@ namespace KhepriAutoCAD {
             } else {
                 ((Solid3d)ent0).BooleanOperation(op, (Solid3d)ent1);
             }
+            // The boolean consumes ent1, leaving a stray empty/degenerate entity in the
+            // model space; erase it so it does not accumulate across operations.
+            ent1.Erase();
             CommitAndStartOpenCloseTransaction();
             return ent0.Id;
         }
@@ -1180,7 +1209,13 @@ namespace KhepriAutoCAD {
             Entity ent1 = tr.GetObject(objId1, OpenMode.ForRead) as Entity;
             Point3dCollection points = new Point3dCollection();
             ent0.IntersectWith(ent1, Autodesk.AutoCAD.DatabaseServices.Intersect.OnBothOperands, points, IntPtr.Zero, IntPtr.Zero);
-            return points.Cast<Point3d>().ToArray();
+            Point3d[] result = points.Cast<Point3d>().ToArray();
+            // Restore the batch's OpenClose transaction (mirrors BooleanOperation): the
+            // opening CommitAndStartTransaction switched the batch to a regular
+            // transaction; without this, subsequent ops in the batch run under the wrong
+            // transaction type.
+            CommitAndStartOpenCloseTransaction();
+            return result;
         }
         public void Slice(ObjectId id, Point3d p, Vector3d n) {
             Solid3d obj = tr.GetObject(id, OpenMode.ForWrite) as Solid3d;
