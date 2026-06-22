@@ -48,8 +48,11 @@ namespace KhepriUnity {
         public Vector3 rVector3() => new Vector3(rSingle(), rSingle(), rSingle());
         public void wVector3(Vector3 p) { w.Write(p.x); w.Write(p.y); w.Write(p.z); }
 
-        new public Color rColor() => new Color(rSingle(), rSingle(), rSingle());
-        public void wColor(Color c) { w.Write(c.r); w.Write(c.g); w.Write(c.b); }
+        // Canonical 4-float RGBA wire (matches KhepriBase). UnityEngine.Color is float
+        // RGBA, so alpha is carried natively now (the old 3-float form dropped it).
+        // See the materials design note (P0).
+        new public Color rColor() => new Color(rSingle(), rSingle(), rSingle(), rSingle());
+        public void wColor(Color c) { w.Write(c.r); w.Write(c.g); w.Write(c.b); w.Write(c.a); }
 
         public Quaternion rQuaternion() {
             float m11 = rSingle();

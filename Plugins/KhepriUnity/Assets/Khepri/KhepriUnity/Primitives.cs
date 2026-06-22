@@ -242,6 +242,10 @@ namespace KhepriUnity {
             if (sun == null) {
                 sun = GameObject.FindWithTag("Sun");
             }
+            if (sun == null) {
+                Debug.LogWarning("Primitives: Cannot SetSun - no GameObject tagged 'Sun' in the scene.");
+                return;
+            }
             sun.transform.rotation = Quaternion.Euler(altitude, azimuth, 0);
         }
 
@@ -302,6 +306,13 @@ namespace KhepriUnity {
         }
         */
         public Vector3 GetSunRotation() {
+            if (sun == null) {
+                sun = GameObject.FindWithTag("Sun");
+            }
+            if (sun == null) {
+                Debug.LogWarning("Primitives: Cannot GetSunRotation - no GameObject tagged 'Sun' in the scene.");
+                return Vector3.zero;
+            }
             return sun.transform.rotation.eulerAngles;
         }
         #endregion
@@ -608,7 +619,9 @@ namespace KhepriUnity {
             foreach (var renderer in renderers) {
                 List<Material> newMaterials = new List<Material>();
                 foreach (var material in renderer.sharedMaterials) {
-                    if (!material.name.Equals("__layer_color__"))
+                    // A material slot can be empty (None); keep it, and only drop the
+                    // overlay added by SetLayerColor. Guard avoids an NRE on material.name.
+                    if (material == null || !material.name.Equals("__layer_color__"))
                         newMaterials.Add(material);
                 }
                 renderer.sharedMaterials = newMaterials.ToArray();
@@ -862,6 +875,43 @@ namespace KhepriUnity {
             return MakeStatic(solid);
         }
 
+        // World-space AABB of a shape (and its children). Computed by transforming
+        // each child mesh's local bounds corners through localToWorld — Renderer.bounds
+        // is unreliable in batchmode (can fall back to a box that wraps the world
+        // origin), so we use MeshFilter.sharedMesh.bounds (see Solidify). Aggregated
+        // per-axis across shapes on the Julia side, which is robust to the
+        // Khepri<->Unity Y<->Z axis swap.
+        void ComputeWorldBounds(GameObject obj, out Vector3 worldMin, out Vector3 worldMax) {
+            worldMin = Vector3.positiveInfinity;
+            worldMax = Vector3.negativeInfinity;
+            if (obj != null) {
+                foreach (var r in obj.GetComponentsInChildren<Renderer>()) {
+                    var mf = r.GetComponent<MeshFilter>();
+                    if (mf == null || mf.sharedMesh == null) continue;
+                    var localBounds = mf.sharedMesh.bounds;
+                    var l2w = r.transform.localToWorldMatrix;
+                    for (int i = 0; i < 8; i++) {
+                        Vector3 corner = new Vector3(
+                            (i & 1) == 0 ? localBounds.min.x : localBounds.max.x,
+                            (i & 2) == 0 ? localBounds.min.y : localBounds.max.y,
+                            (i & 4) == 0 ? localBounds.min.z : localBounds.max.z);
+                        Vector3 wc = l2w.MultiplyPoint3x4(corner);
+                        worldMin = Vector3.Min(worldMin, wc);
+                        worldMax = Vector3.Max(worldMax, wc);
+                    }
+                }
+            }
+            if (float.IsInfinity(worldMin.x)) { worldMin = Vector3.zero; worldMax = Vector3.zero; }
+        }
+        public Vector3 BoundingBoxMin(GameObject obj) {
+            ComputeWorldBounds(obj, out Vector3 worldMin, out _);
+            return worldMin;
+        }
+        public Vector3 BoundingBoxMax(GameObject obj) {
+            ComputeWorldBounds(obj, out _, out Vector3 worldMax);
+            return worldMax;
+        }
+
         T EnsureNonNull<T>(T arg) {
             if (arg == null) throw new NullReferenceException();
             return arg;
@@ -894,7 +944,7 @@ namespace KhepriUnity {
         }
 
         public Material CreateMaterial(String name, Color baseColor, float alpha,
-                                       float metallic, float specular, float roughness,
+                                       float metallic, float roughness, float specular,
                                        float ior, float transmission, float transmissionRoughness,
                                        float clearcoat, float clearcoatRoughness,
                                        Color emissionColor, float emissionStrength) {
