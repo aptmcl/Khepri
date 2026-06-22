@@ -69,7 +69,6 @@ public double ViewLens()
 public string DefaultMaterialsFolder()
 public MatId LoadRenderMaterialFromPath(string path)
 public MatId CreateMaterial(string name, Color diffuse, Color specular, Color ambient, Color emission, Color reflection, double reflectivity, double reflectionGlossiness, double refractionIndex, double transparency)
-public MatId CreateColorMaterial(Color color)
 public Guid Point(Point3d p)
 public Point3d PointPosition(Guid ent)
 public Guid PolyLine(Point3d[] pts)
@@ -134,7 +133,7 @@ public Plane CurveFrameAt(RhinoObject obj, double t)
 public Plane CurveFrameAtLength(RhinoObject obj, double l)
 public double[] SurfaceDomain(RhinoObject obj)
 public Plane SurfaceFrameAt(RhinoObject obj, double u, double v)
-public Point3d[] BoundingBox(ObjectId[] ids)
+public Point3d[] BoundingBox(RhinoObject[] ids)
 public Brep Extrusion(RhinoObject obj, Vector3d dir)
 public Brep[] SweepPathProfile(RhinoObject path, RhinoObject profile, double rotation, double scale)
 public Brep Revolve(RhinoObject profile, Point3d p, Vector3d n, double startAngle, double amplitude)
@@ -166,7 +165,6 @@ public bool IsText(RhinoObject e)
 public byte ShapeCode(RhinoObject id)
 public Guid ClosedPathCurveArray(Point3d[] pts, double[] angles)
 public Brep[] PathWall(RhinoObject obj, double lThickness, double rThickness, double height)
-public Brep RectangularTable(Point3d c, double angle, double length, double width, double height, double top_thickness, double leg_thickness)
 public Brep[] BaseRectangularTable(double length, double width, double height, double top_thickness, double leg_thickness)
 public int CreateRectangularTableFamily(double length, double width, double height, double top_thickness, double leg_thickness)
 public Guid Table(Point3d c, double angle, int family)
@@ -817,7 +815,7 @@ KhepriBase.b_mirror_material(b::RH, name, color) =
                               1.0, 1.0, 1.0, 0.0))
   end
 
-backend_map_division(b::RH, f::Function, s::Shape1D, n::Int) =
+b_map_division(b::RH, f::Function, s::Shape1D, n::Int) =
   let conn = connection(b),
       r = ref_value(b, s),
       (t1, t2) = @remote(b, CurveDomain(r)),
@@ -829,10 +827,10 @@ backend_map_division(b::RH, f::Function, s::Shape1D, n::Int) =
     map(f, frames)
   end
 
-backend_surface_domain(b::RH, s::Shape2D) =
+b_surface_domain(b::RH, s::Shape2D) =
     tuple(@remote(b, SurfaceDomain(ref(b, s).value))...)
 
-backend_map_division(b::RH, f::Function, s::Shape2D, nu::Int, nv::Int) =
+b_map_division(b::RH, f::Function, s::Shape2D, nu::Int, nv::Int) =
     let conn = connection(b)
         r = ref_value(b, s)
         (u1, u2, v1, v2) = @remote(b, SurfaceDomain(r))
@@ -1037,13 +1035,13 @@ realize(b::RH, f::TableFamily) =
     let bf = get(f.implemented_as, typeof(b), nothing)
       isnothing(bf) ?
         @remote(b, CreateRectangularTableFamily(f.length, f.width, f.height, f.top_thickness, f.leg_thickness)) :
-        backend_get_family_ref(b, f, bf)
+        b_get_family_ref(b, f, bf)
     end
 realize(b::RH, f::ChairFamily) =
     let bf = get(f.implemented_as, typeof(b), nothing)
       isnothing(bf) ?
         @remote(b, CreateChairFamily(f.length, f.width, f.height, f.seat_height, f.thickness)) :
-        backend_get_family_ref(b, f, bf)
+        b_get_family_ref(b, f, bf)
     end
 realize(b::RH, f::TableChairFamily) =
     let bf = get(f.implemented_as, typeof(b), nothing)
@@ -1053,7 +1051,7 @@ realize(b::RH, f::TableChairFamily) =
             f.table_family.length, f.table_family.width,
             f.chairs_top, f.chairs_bottom, f.chairs_right, f.chairs_left,
             f.spacing)) :
-        backend_get_family_ref(b, f, bf)
+        b_get_family_ref(b, f, bf)
     end
 
 KhepriBase.b_table(b::RH, c, angle, family) =
@@ -1164,8 +1162,13 @@ KhepriBase.b_arealight(b::RH, loc, dir, size, energy, color) =
 
 ############################################
 
-# KhepriBase.b_bounding_box(b::RH, shapes::Shapes) =
-#   @remote(b, BoundingBox(ref_values(b, shapes)))
+# `bounding_box(shapes)` dispatches to `b_bounding_box` (Shapes.jl). The C#
+# `BoundingBox(RhinoObject[])` returns the {min, max} corners; return them as a
+# (min, max) Loc tuple, matching KhepriUnreal's convention.
+KhepriBase.b_bounding_box(b::RH, shapes::Shapes) =
+  let pts = @remote(b, BoundingBox(ref_values(b, shapes)))
+    (pts[1], pts[2])
+  end
 
 KhepriBase.b_set_view(b::RH, camera, target, lens, aperture) =
   @remote(b, SetView(camera, target, lens))
@@ -1251,6 +1254,11 @@ KhepriBase.b_create_layer_from_ref_value(b::RH, r) =
       visible = @remote(b, LayerVisible(r))
     layer(name, visible, rgb(c.r, c.g, c.b))
   end
+
+# Like AutoCAD: b_shape_from_ref delegates to the caching reconstruction path
+# (get_or_create_shape_from_ref_value -> b_create_shape_from_ref_value) so the single
+# implementation below serves both captured_shape replay and selection of untraced shapes.
+KhepriBase.b_shape_from_ref(b::RH, r) = get_or_create_shape_from_ref_value(b, r)
 
 KhepriBase.b_create_shape_from_ref_value(b::RH, r) =
   let code = @remote(b, ShapeCode(r))
@@ -1342,17 +1350,17 @@ KhepriBase.b_select_shape(b::RH, prompt::String) =
 KhepriBase.b_select_shapes(b::RH, prompt::String) =
   select_many_with_prompt(prompt, b, @get_remote b GetShapes)
 
-backend_captured_shape(b::RH, handle) =
-  backend_shape_from_ref(b, handle)
+KhepriBase.captured_shape(b::RH, handle) =
+  b_shape_from_ref(b, handle)
 #
-backend_captured_shapes(b::RH, handles) =
+KhepriBase.captured_shapes(b::RH, handles) =
   map(handles) do handle
-      backend_shape_from_ref(b, handle)
+      b_shape_from_ref(b, handle)
   end
 
-backend_generate_captured_shape(b::RH, s::Shape) =
+b_generate_captured_shape(b::RH, s::Shape) =
     println("captured_shape(rhino, $(ref(b, s).value))")
-backend_generate_captured_shapes(b::RH, ss::Shapes) =
+b_generate_captured_shapes(b::RH, ss::Shapes) =
   begin
     print("captured_shapes(rhino, [")
     for s in ss
@@ -1408,7 +1416,7 @@ end
 rhino_layer_family(name, color::RGB=rgb(1,1,1); visible::Bool=true) =
   RhinoLayerFamily(name, visible, color, IdDict{Backend, Any}())
 
-backend_get_family_ref(b::RH, f::Family, af::RhinoLayerFamily) =
+b_get_family_ref(b::RH, f::Family, af::RhinoLayerFamily) =
   b_layer(b, af.name, af.visible, af.color)
 
 KhepriBase.b_realistic_sky(b::RH, date, latitude, longitude, elevation, meridian, turbidity, sun) =
