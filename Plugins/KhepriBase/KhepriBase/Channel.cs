@@ -234,9 +234,16 @@ namespace KhepriBase {
 
 
 
-        public Color rColor() => Color.FromArgb(rByte(), rByte(), rByte(), rByte());
+        // Canonical color wire format: 4xFloat32 RGBA, alpha-last (was packed 4-byte
+        // ARGB). The endpoint stays System.Drawing.Color; only the wire changes. See the
+        // materials design note (P0). Backends whose native color type is non-byte
+        // (Unity, Unreal) override with the SAME 4-float layout.
+        public Color rColor() {
+            float r = rSingle(), g = rSingle(), b = rSingle(), a = rSingle();
+            return Color.FromArgb(UnitFloatToByte(a), UnitFloatToByte(r), UnitFloatToByte(g), UnitFloatToByte(b));
+        }
         public void wColor(Color c) {
-            wByte(c.A); wByte(c.R); wByte(c.G); wByte(c.B);
+            wSingle(c.R / 255f); wSingle(c.G / 255f); wSingle(c.B / 255f); wSingle(c.A / 255f);
         }
 
         public DateTime rDateTime() => new DateTime(rInt64(), DateTimeKind.Local);
