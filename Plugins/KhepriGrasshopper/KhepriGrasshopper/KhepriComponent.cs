@@ -420,7 +420,11 @@ namespace KhepriGrasshopper {
                 return asPoint3d(ptr);
             } else if (JLIsaVXYZ(ptr)) {
                 return asVector3d(ptr);
+            } else if (JLIsaNothing(ptr) || JLIsaMssing(ptr)) {
+                return null;
             } else {
+                // Opaque Julia value (e.g. a shape ref): pass the pointer through so
+                // asJLDynamic can round-trip it back unchanged.
                 return ptr;
             }
         }
@@ -519,6 +523,11 @@ cylinder(tc, tr, tc+(tc-bc))";
         List<Func<IGH_DataAccess, IntPtr, bool>> toJLConverters = new List<Func<IGH_DataAccess, IntPtr, bool>>();
         List<Action<IGH_DataAccess, IntPtr>> fromJLConverters = new List<Action<IGH_DataAccess, IntPtr>>();
         private JuliaEditor editor = null;
+        // "Edit in Editor" external-edit session: one watcher + temp file per component,
+        // torn down before a new session and on removal so repeated clicks do not leak
+        // watchers or temp files.
+        private FileSystemWatcher editWatcher = null;
+        private string editTempPath = null;
         private static System.Timers.Timer aTimer;
 
         private void SetTimer() {
@@ -910,7 +919,7 @@ cylinder(tc, tr, tc+(tc-bc))";
                 case "Integer":
                     toJLConverters.Add((da, ptr) => ToJLInt64(i, da, ptr));
                     if (!JLIsaNothing(value)) {
-                        ((Param_Integer)newParam).PersistentData.Append(new GH_Integer((int)asLong(value)));
+                        ((Param_Integer)newParam).PersistentData.Append(new GH_Integer(checked((int)asLong(value))));
                     }
                     break;
                 case "Number":
@@ -1031,7 +1040,7 @@ cylinder(tc, tr, tc+(tc-bc))";
                     fromJLConverters.Add((da, ptr) => da.SetData(i, asBool(JLGetIndex0(ptr, i))));
                     break;
                 case "Integer":
-                    fromJLConverters.Add((da, ptr) => da.SetData(i, (int)asLong(JLGetIndex0(ptr, i))));
+                    fromJLConverters.Add((da, ptr) => da.SetData(i, checked((int)asLong(JLGetIndex0(ptr, i)))));
                     break;
                 case "Number":
                     fromJLConverters.Add((da, ptr) => da.SetData(i, asDouble(JLGetIndex0(ptr, i))));
@@ -1185,7 +1194,7 @@ cylinder(tc, tr, tc+(tc-bc))";
         }
         bool ToJLStringss(int i, IGH_DataAccess DA, IntPtr arrPtr) => ToJLTypess<string, GH_String>(asJLString, "String", i, DA, arrPtr);
         bool ToJLBoolss(int i, IGH_DataAccess DA, IntPtr arrPtr) => ToJLTypess<bool, GH_Boolean>(asJLBool, "Bool", i, DA, arrPtr);
-        bool ToJLInt64ss(int i, IGH_DataAccess DA, IntPtr arrPtr) => ToJLTypess<int, GH_Number>(x => asJLInt64(x), "Int64", i, DA, arrPtr);
+        bool ToJLInt64ss(int i, IGH_DataAccess DA, IntPtr arrPtr) => ToJLTypess<int, GH_Integer>(x => asJLInt64(x), "Int64", i, DA, arrPtr);
         bool ToJLFloat64ss(int i, IGH_DataAccess DA, IntPtr arrPtr) => ToJLTypess<double, GH_Number>(asJLFloat64, "Float64", i, DA, arrPtr);
         bool ToJLLocss(int i, IGH_DataAccess DA, IntPtr arrPtr) => ToJLTypess<Point3d, GH_Point>(asJLLoc, "KhepriBase.Loc", i, DA, arrPtr);
         bool ToJLVecss(int i, IGH_DataAccess DA, IntPtr arrPtr) => ToJLTypess<Vector3d, GH_Vector>(asJLVec, "KhepriBase.Vec", i, DA, arrPtr);
@@ -1219,6 +1228,7 @@ cylinder(tc, tr, tc+(tc-bc))";
             if (editor != null) {
                 editor.Dispose();
             }
+            DisposeEditWatcher();
             base.RemovedFromDocument(document);
         }
 
@@ -1273,9 +1283,13 @@ cylinder(tc, tr, tc+(tc-bc))";
         }
 
         private void Menu_EditInEditorClicked(ToolStripDropDown menu) {
+            // Tear down any previous external-edit session so repeated clicks do not
+            // accumulate watchers/temp files.
+            DisposeEditWatcher();
             // Dump contents on file
             string path = Path.ChangeExtension(Path.GetTempFileName(), "jl");
             File.WriteAllText(path, script);
+            editTempPath = path;
             // Create a new FileSystemWatcher and set its properties.
             FileSystemWatcher watcher = new FileSystemWatcher {
                 Path = Path.GetDirectoryName(path),
@@ -1285,7 +1299,7 @@ cylinder(tc, tr, tc+(tc-bc))";
             // Add event handlers.
             watcher.Changed += new FileSystemEventHandler((source, e) => {
                 menu.Invoke(new Action(() => {
-                    //Unfortunately, Windows is stupid and the file might 
+                    //Unfortunately, Windows is stupid and the file might
                     //still be locked when the watcher is informed
                     for (int numTries = 0; numTries < 10; numTries++) {
                         try {
@@ -1299,7 +1313,27 @@ cylinder(tc, tr, tc+(tc-bc))";
             });
             // Begin watching.
             watcher.EnableRaisingEvents = true;
+            editWatcher = watcher;
             Process.Start(externalEditor, path);
+        }
+
+        // Disposes the active external-edit watcher and deletes its temp file, if any.
+        private void DisposeEditWatcher() {
+            if (editWatcher != null) {
+                editWatcher.EnableRaisingEvents = false;
+                editWatcher.Dispose();
+                editWatcher = null;
+            }
+            if (editTempPath != null) {
+                try {
+                    if (File.Exists(editTempPath)) {
+                        File.Delete(editTempPath);
+                    }
+                } catch (IOException) {
+                    // Best-effort: the editor may still hold the file; leave it to the OS.
+                }
+                editTempPath = null;
+            }
         }
 
         private void Menu_ToggleTraceabilityClicked(ToolStripDropDown menu) {
