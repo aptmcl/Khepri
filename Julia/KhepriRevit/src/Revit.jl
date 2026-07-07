@@ -321,6 +321,7 @@ public void ExportFamilyToOBJ(string familyPath, string objPath)
 public void ExportAllFamiliesToOBJ(string folderPath)
 public string[] ExportFamilyToOBJWithMetadata(string familyPath, string objPath)
 public string[][] ExportAllFamiliesToOBJWithMetadata(string folderPath)
+public string[] ExportElementsToOBJ(ElementId[] ids, string folderPath)
 public Element[] DocRoofs()
 public XYZ[] RoofBoundaryVertices(Element element)
 public ElementId RoofLevel(Element element)
@@ -1801,9 +1802,27 @@ introspect_model(; b::RVT=revit) =
     for fx in fixtures _store_element_family_meta!(fx, b, family_meta) end
     for st in stairs _store_element_family_meta!(st, b, family_meta) end
     for rl in railings _store_element_family_meta!(rl, b, family_meta) end
+    # Mesh-fallback (Phase 6): every renderable document element that NO reader consumed becomes an
+    # obj_model, so nothing is silently dropped (curtain panels/mullions, MEP, topography, mass, in-place,
+    # degenerate/sloped elements). Claim reconstructed shape refs + hosted door/window ids + group
+    # instances/members, then complement against DocElements (all material-bearing elements). The
+    # fallback_meshes vector is filled in-place by _attach_fallback_meshes! (post-introspection).
+    claimed = Set{RVTId}()
+    for coll in (walls, floors, columns, beams, ceilings, roofs, fixtures, stairs, railings)
+      for s in coll
+        let r = ref_value(b, s); r != RVTVoidId && push!(claimed, r) end
+      end
+    end
+    for info in vcat(all_doors(b), all_windows(b)); push!(claimed, info.ref) end
+    for g in group_instances
+      push!(claimed, g.ref)
+      for id in g.member_ids; push!(claimed, id) end
+    end
+    fallback_ids = collect(setdiff(Set{RVTId}(@remote(b, DocElements())), claimed))
     (levels=levels, walls=walls, floors=floors, columns=columns,
      beams=beams, ceilings=ceilings, roofs=roofs, fixtures=fixtures,
-     stairs=stairs, railings=railings, groups=groups, family_meta=family_meta)
+     stairs=stairs, railings=railings, groups=groups, family_meta=family_meta,
+     fallback_ids=fallback_ids, fallback_meshes=ObjModel[])
   end
   end
 
@@ -1863,9 +1882,40 @@ function _attach_obj_families!(model, b, obj_folder)
   model
 end
 
+# The mesh-fallback obj_models are for cross-backend reproduction (KhepriThreejs renders them via the
+# default b_obj_model → b_surface_mesh path). Revit has the real elements and no mesh primitive
+# (b_trig/b_surface_mesh unimplemented), so skip obj_models on the Revit rebuild rather than erroring.
+# (Rendering them as DirectShape meshes on Revit is a possible follow-up.)
+KhepriBase.b_obj_model(b::RVT, path, location, scale, material) = void_ref(b)
+
+# Mesh-fallback pass (Phase 6): tessellate the fallback elements (those no parametric reader consumed) to
+# per-element WORLD-space OBJ and stamp an obj_model into the model, so un-parametrizable elements
+# reproduce as meshes instead of being silently dropped. Mirrors _attach_obj_families!; best-effort (a
+# failed export just omits meshes). The OBJ is world-space, so each obj_model is placed at u0().
+function _attach_fallback_meshes!(model, b, obj_folder)
+  isempty(model.fallback_ids) && return model
+  paths = try
+    @remote(b, ExportElementsToOBJ(model.fallback_ids, obj_folder))
+  catch e
+    @warn "Mesh-fallback export failed; un-parametrized elements omitted" exception=e
+    return model
+  end
+  # Construct the obj_model shapes under with_introspection so they are NOT realized here (Revit has no
+  # b_trig/b_surface_mesh; these shapes exist only to be meta_program'd into the generated code).
+  with_introspection(b) do
+    for p in paths
+      isempty(p) || push!(model.fallback_meshes, obj_model(p, u0()))
+    end
+  end
+  @info "Mesh-fallback: $(length(model.fallback_meshes)) element(s) emitted as obj_model (of $(length(model.fallback_ids)) unclaimed)"
+  model
+end
+
 function generate_khepri_code(output_path::String; b::RVT=revit, export_obj::Bool=true)
   let model = introspect_model(b=b),
       _ = export_obj ? _attach_obj_families!(model, b,
+              joinpath(dirname(abspath(output_path)), "khepri_obj_models")) : model,
+      _fb = export_obj ? _attach_fallback_meshes!(model, b,
               joinpath(dirname(abspath(output_path)), "khepri_obj_models")) : model,
       raw_expr = model_to_expr(model),
       fmap = family_expr_map(model),
