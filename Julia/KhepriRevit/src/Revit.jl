@@ -257,7 +257,7 @@ public Element[] DocWallsAtLevel(Level level)
 public XYZ[] LineWallVertices(Element element)
 public ElementId ElementLevel(Element element)
 public ElementId WallTopLevel(Element element)
-public double WallHeight(Element element)
+public Length WallHeight(Element element)
 public void HighlightElement(ElementId id)
 public ElementId[] GetSelectedElements()
 public bool IsProject()
@@ -1266,12 +1266,29 @@ all_levels(b::RVT) =
     [level_from_ref(r, b) for r in @remote(b, DocLevels())]
   end
 
+# Cache of the model's base level, resolved once per introspection (reset in introspect_model).
+const _base_level_cache = Parameter{Any}(nothing)
+
+# An element not associated with a Revit level (unhosted furniture/plumbing fixture, orphan railing)
+# reports a void level id. The old fallback default_level() (height 0) floated such elements ~226m BELOW
+# a model at site elevation. Fall back instead to the model's lowest real level so they sit with the
+# building; never worse than 0 (if the model genuinely has a level at 0, that stays the base).
+_base_level(b::RVT) =
+  _base_level_cache() !== nothing ? _base_level_cache() :
+  let levels = [level_from_ref(id, b) for id in @remote(b, DocLevels())]
+    if isempty(levels)
+      default_level()
+    else
+      let base = argmin(l -> l.height, levels)
+        _base_level_cache(base)
+        base
+      end
+    end
+  end
+
 level_from_ref(r, b::RVT) =
-  # An element not associated with a Revit level (e.g. an unhosted furniture/plumbing fixture or a
-  # railing) reports a void level id. Fall back to the default level (0) so introspection completes
-  # instead of crashing — the element's own location still carries its true position.
   r == RVTVoidId ?
-    default_level() :
+    _base_level(b) :
     let s = level(@remote(b, GetLevelElevation(r)))
       ref!(b, s, r)
       s
@@ -1660,6 +1677,7 @@ _window_family_with_dims(key, w, h, type_name) =
 
 introspect_model(; b::RVT=revit) =
   with_introspection(b) do
+  _base_level_cache(nothing)   # reset the per-introspection base-level fallback cache
   let family_meta = IdDict{Family, FamilyMeta}(),
       # Groups — collect instances and introspect one representative per type.
       # DocWalls/DocFloors/etc. already exclude group members (filtered in C#),
