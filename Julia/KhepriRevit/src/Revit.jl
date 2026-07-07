@@ -288,6 +288,7 @@ public ElementId[] WallInserts(Element element)
 public XYZ[] FloorBoundaryVertices(Element element)
 public string FloorTypeName(Element element)
 public ElementId FloorLevel(Element element)
+public double[] ElementMaterial(Element element)
 public Element[] DocColumns()
 public XYZ ColumnLocation(Element element)
 public double ColumnRotation(Element element)
@@ -1294,6 +1295,15 @@ all_walls_at_level(level::Level, b::RVT) =
     [wall_from_ref(r, b) for r in @remote(b, DocWallsAtLevel(ref(level).value))]
   end
 
+# Map a Revit element material [r,g,b,transparency(0-100),shininess(0-128),smoothness(0-100)] to a
+# Khepri PbrMaterial, so system-family elements carry their real appearance for non-BIM backends.
+_material_from_revit(m) =
+  length(m) < 6 ? material_plaster :
+  pbr_material(base_color=rgba(m[1], m[2], m[3], 1 - m[4]/100),
+               roughness=clamp(1 - m[6]/100, 0.0, 1.0),
+               specular=clamp(m[5]/128, 0.0, 1.0),
+               transmission=clamp(m[4]/100, 0.0, 1.0))
+
 wall_from_ref(r, b::RVT) =
   let curve_type = @remote(b, WallCurveType(r)),
       is_curtain = @remote(b, WallIsCurtainWall(r)),
@@ -1317,7 +1327,10 @@ wall_from_ref(r, b::RVT) =
              end,
       s = is_curtain ?
             curtain_wall(path, bottom_level=bottom_level, top_level=top_level) :
-            wall(path, bottom_level=bottom_level, top_level=top_level)
+            let mat = _material_from_revit(@remote(b, ElementMaterial(r)))
+              wall(path, bottom_level=bottom_level, top_level=top_level,
+                   family=wall_family(right_material=mat, left_material=mat, side_material=mat))
+            end
     ref!(b, s, r)
     s
   end
@@ -1356,11 +1369,13 @@ _rebase_to_level(verts, lvl) =
 floor_from_ref(r, b::RVT) =
   let level_id = @remote(b, FloorLevel(r)),
       lvl = level_from_ref(level_id, b),
-      verts = _rebase_to_level(_clean_boundary(@remote(b, FloorBoundaryVertices(r))), lvl)
+      verts = _rebase_to_level(_clean_boundary(@remote(b, FloorBoundaryVertices(r))), lvl),
+      mat = _material_from_revit(@remote(b, ElementMaterial(r)))
     if length(verts) < 3
       nothing
     else
-      let s = slab(closed_polygonal_path(verts), level=lvl)
+      let s = slab(closed_polygonal_path(verts), level=lvl,
+                   family=slab_family(top_material=mat, bottom_material=mat, side_material=mat))
         ref!(b, s, r)
         s
       end
@@ -1382,7 +1397,9 @@ column_from_ref(r, b::RVT) =
       top_level = top_level_id == RVTVoidId ?
                     base_level :
                     level_from_ref(top_level_id, b),
-      s = column(loc, angle=angle, bottom_level=base_level, top_level=top_level)
+      mat = _material_from_revit(@remote(b, ElementMaterial(r))),
+      s = column(loc, angle=angle, bottom_level=base_level, top_level=top_level,
+                 family=column_family(material=mat))
     ref!(b, s, r)
     s
   end
@@ -1398,9 +1415,10 @@ beam_from_ref(r, b::RVT) =
       p0 = endpoints[1],
       p1 = endpoints[2],
       angle = @remote(b, BeamRotation(r)),
+      mat = _material_from_revit(@remote(b, ElementMaterial(r))),
       # Two-point form: preserves the beam's orientation (the old beam(p0, h) collapsed horizontal
       # beams to ~zero height). Pairs with meta_program(::Beam), which re-emits the two endpoints.
-      s = beam(p0, p1, angle=angle)
+      s = beam(p0, p1, angle=angle, family=beam_family(material=mat))
     ref!(b, s, r)
     s
   end
@@ -1455,11 +1473,13 @@ all_windows(b::RVT) =
 ceiling_from_ref(r, b::RVT) =
   let level_id = @remote(b, CeilingLevel(r)),
       lvl = level_from_ref(level_id, b),
-      verts = _rebase_to_level(_clean_boundary(@remote(b, CeilingBoundaryVertices(r))), lvl)
+      verts = _rebase_to_level(_clean_boundary(@remote(b, CeilingBoundaryVertices(r))), lvl),
+      mat = _material_from_revit(@remote(b, ElementMaterial(r)))
     if length(verts) < 3
       nothing
     else
-      let s = ceiling(closed_polygonal_path(verts), level=lvl)
+      let s = ceiling(closed_polygonal_path(verts), level=lvl,
+                      family=ceiling_family(bottom_material=mat, top_material=mat, side_material=mat))
         ref!(b, s, r)
         s
       end
@@ -1475,11 +1495,13 @@ all_ceilings(b::RVT) =
 roof_from_ref(r, b::RVT) =
   let level_id = @remote(b, RoofLevel(r)),
       lvl = level_from_ref(level_id, b),
-      verts = _rebase_to_level(_clean_boundary(@remote(b, RoofBoundaryVertices(r))), lvl)
+      verts = _rebase_to_level(_clean_boundary(@remote(b, RoofBoundaryVertices(r))), lvl),
+      mat = _material_from_revit(@remote(b, ElementMaterial(r)))
     if length(verts) < 3
       nothing
     else
-      let s = roof(closed_polygonal_path(verts), level=lvl)
+      let s = roof(closed_polygonal_path(verts), level=lvl,
+                   family=roof_family(bottom_material=mat, top_material=mat, side_material=mat))
         ref!(b, s, r)
         s
       end
