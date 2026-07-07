@@ -1058,8 +1058,11 @@ namespace KhepriRevit {
         // Walls can have unconnected height
         public ElementId WallTopLevel(Element element) => 
             element.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).AsElementId();
-        public double WallHeight(Element element) =>
-            element.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM).AsDouble();
+        // Wrap in Length so the channel converts Revit-internal feet → metres; returning a bare double
+        // sent the raw feet value, which wall_from_ref then added to a metre level height (a ~3.28x-too-
+        // tall "spike" wall for unconnected-top walls).
+        public Length WallHeight(Element element) =>
+            new Length(element.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM).AsDouble());
 
         public Element InsertDoor(Length deltaFromStart, Length deltaFromGround, Element host, ElementId familyId) {
             LocationCurve locCurve = host.Location as LocationCurve;
