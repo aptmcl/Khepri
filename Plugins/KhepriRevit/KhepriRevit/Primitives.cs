@@ -2317,6 +2317,40 @@ namespace KhepriRevit {
             }
         }
 
+        // Mesh-fallback (Phase 6): tessellate specific elements (by id) to per-element WORLD-space OBJ
+        // files, so elements with no parametric reader (curtain panels, MEP, topography, in-place, sloped/
+        // degenerate) reproduce as meshes instead of being silently dropped. CollectGeometry recurses
+        // GeometryInstance.GetInstanceGeometry() (world) and WriteOBJ writes metres, so the Julia side
+        // places each obj_model at u0() (identity). Returns a parallel array of obj paths ("" = no solid).
+        public string[] ExportElementsToOBJ(ElementId[] ids, string folderPath) {
+            Directory.CreateDirectory(folderPath);
+            var options = new Options { ComputeReferences = false, DetailLevel = ViewDetailLevel.Fine };
+            var result = new string[ids.Length];
+            for (int i = 0; i < ids.Length; i++) {
+                result[i] = "";
+                try {
+                    Element elem = doc.GetElement(ids[i]);
+                    if (elem == null || (elem is GenericForm gf && !gf.IsSolid)) continue;
+                    GeometryElement geomElem = elem.get_Geometry(options);
+                    if (geomElem == null) continue;
+                    var vertices = new List<XYZ>();
+                    var normals = new List<XYZ>();
+                    var uvs = new List<UV>();
+                    var groups = new List<Tuple<string, List<int[][]>>>();
+                    var materials = new Dictionary<string, Autodesk.Revit.DB.Color>();
+                    var materialTransparency = new Dictionary<string, int>();
+                    CollectGeometry(doc, geomElem, vertices, normals, uvs, groups, materials, materialTransparency);
+                    if (vertices.Count == 0) continue;
+                    string objPath = Path.Combine(folderPath, ids[i].Value + ".obj");
+                    string mtlPath = Path.ChangeExtension(objPath, ".mtl");
+                    WriteOBJ(objPath, Path.GetFileName(mtlPath), vertices, normals, uvs, groups);
+                    WriteMTL(mtlPath, materials, materialTransparency);
+                    result[i] = objPath;
+                } catch { }
+            }
+            return result;
+        }
+
         public void ExportFamilyToOBJ(string familyPath, string objPath) {
             CommitAndDisposeTransaction();
             Document famDoc = uiapp.Application.OpenDocumentFile(familyPath);
