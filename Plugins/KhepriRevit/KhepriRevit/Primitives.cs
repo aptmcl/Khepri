@@ -1605,6 +1605,34 @@ namespace KhepriRevit {
             ((Wall)element).FindInserts(true, false, false, false).ToArray();
 
         // Floor introspection
+        // All boundary loops (outer + inner openings) of an element's horizontal face, so floor/ceiling/
+        // roof openings/shafts survive reconstruction as region holes. The *BoundaryVertices methods
+        // return only loop 0 (the outer), dropping openings.
+        XYZ[][] AllHorizontalBoundaryLoops(Element element) {
+            GeometryElement geo = element.get_Geometry(new Options());
+            if (geo == null) return new XYZ[0][];
+            foreach (GeometryObject obj in geo) {
+                Solid solid = obj as Solid;
+                if (solid == null || solid.Faces.Size == 0) continue;
+                foreach (Face face in solid.Faces) {
+                    PlanarFace pf = face as PlanarFace;
+                    if (pf != null && Math.Abs(pf.FaceNormal.Z) > 0.9) {
+                        var result = new List<XYZ[]>();
+                        foreach (EdgeArray loop in pf.EdgeLoops) {
+                            var pts = new List<XYZ>();
+                            foreach (Edge edge in loop) pts.Add(edge.AsCurve().GetEndPoint(0));
+                            if (pts.Count >= 3) result.Add(pts.ToArray());
+                        }
+                        if (result.Count > 0) return result.ToArray();
+                    }
+                }
+            }
+            return new XYZ[0][];
+        }
+        public XYZ[][] FloorBoundaryLoops(Element element) => AllHorizontalBoundaryLoops(element);
+        public XYZ[][] CeilingBoundaryLoops(Element element) => AllHorizontalBoundaryLoops(element);
+        public XYZ[][] RoofBoundaryLoops(Element element) => AllHorizontalBoundaryLoops(element);
+
         public XYZ[] FloorBoundaryVertices(Element element) {
             Floor floor = (Floor)element;
             Options opt = new Options();
