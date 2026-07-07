@@ -1344,10 +1344,19 @@ _clean_boundary(verts; tol=0.005) =
     out
   end
 
+# Khepri places horizontal BIM elements RELATIVE to their level, but Revit returns absolute geometry Z
+# (at site elevation, ~226 m below the internal origin for this model, but generally offset from the
+# level). Rebase the contour Z to be relative to the element's level so realization (which re-adds the
+# level height) reproduces the correct absolute Z on every backend and the generated code is portable.
+_rebase_to_level(verts, lvl) =
+  let h = lvl.height
+    [xyz(cx(v), cy(v), cz(v) - h) for v in verts]
+  end
+
 floor_from_ref(r, b::RVT) =
-  let verts = _clean_boundary(@remote(b, FloorBoundaryVertices(r))),
-      level_id = @remote(b, FloorLevel(r)),
-      lvl = level_from_ref(level_id, b)
+  let level_id = @remote(b, FloorLevel(r)),
+      lvl = level_from_ref(level_id, b),
+      verts = _rebase_to_level(_clean_boundary(@remote(b, FloorBoundaryVertices(r))), lvl)
     if length(verts) < 3
       nothing
     else
@@ -1444,9 +1453,9 @@ all_windows(b::RVT) =
 
 # Ceiling introspection
 ceiling_from_ref(r, b::RVT) =
-  let verts = _clean_boundary(@remote(b, CeilingBoundaryVertices(r))),
-      level_id = @remote(b, CeilingLevel(r)),
-      lvl = level_from_ref(level_id, b)
+  let level_id = @remote(b, CeilingLevel(r)),
+      lvl = level_from_ref(level_id, b),
+      verts = _rebase_to_level(_clean_boundary(@remote(b, CeilingBoundaryVertices(r))), lvl)
     if length(verts) < 3
       nothing
     else
@@ -1464,9 +1473,9 @@ all_ceilings(b::RVT) =
 
 # Roof introspection
 roof_from_ref(r, b::RVT) =
-  let verts = _clean_boundary(@remote(b, RoofBoundaryVertices(r))),
-      level_id = @remote(b, RoofLevel(r)),
-      lvl = level_from_ref(level_id, b)
+  let level_id = @remote(b, RoofLevel(r)),
+      lvl = level_from_ref(level_id, b),
+      verts = _rebase_to_level(_clean_boundary(@remote(b, RoofBoundaryVertices(r))), lvl)
     if length(verts) < 3
       nothing
     else
