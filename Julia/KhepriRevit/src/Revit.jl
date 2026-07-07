@@ -554,7 +554,10 @@ export revit_casement_window_family
 revit_casement_window_family(path;
                               width_param="Width",
                               sill_param="Default Sill Height",
-                              width=f->to_revit(f.width),
+                              # width goes in the family_map → FamilyElement(Length[]) already converts
+                              # m→feet; do NOT to_revit it (that double-converts). sill is instance_map
+                              # (SetParameters raw doubles) so it DOES need to_revit.
+                              width=f->f.width,
                               sill=f->to_revit(0.9),
                               location_transform=(f, p)->p+vx(f.width/2, p.cs)) =
   revit_file_family(path,
@@ -825,8 +828,9 @@ KhepriBase.b_ramp(b::RVT, path, bottom_level, top_level, family) =
       p1 = in_world(path_end(path)),
       bottom_h = level_height(b, bottom_level),
       top_h = level_height(b, top_level)
-    @remote(b, CreateRamp(p0, p1, width, thickness,
-                          ref_value(b, bottom_level), 0.0, top_h - bottom_h))
+    # Lengths cross to the plugin as bare doubles (used as Revit feet), so convert m→feet with to_revit.
+    @remote(b, CreateRamp(p0, p1, to_revit(width), to_revit(thickness),
+                          ref_value(b, bottom_level), 0.0, to_revit(top_h - bottom_h)))
   end
 
 # Stair
@@ -834,7 +838,7 @@ KhepriBase.b_stair(b::RVT, base_point, direction, bottom_level, top_level, famil
   let rvtf = backend_family(b, family),
       width = _lookup_family_param(rvtf, "width", f -> f.width)(family)
     @remote(b, CreateStraightStair(
-      base_point, direction, width,
+      base_point, direction, to_revit(width),
       ref_value(b, bottom_level), ref_value(b, top_level), family_ref(b, family)))
   end
 
@@ -843,7 +847,7 @@ KhepriBase.b_spiral_stair(b::RVT, center, radius, start_angle, included_angle,
   let rvtf = backend_family(b, family),
       width = _lookup_family_param(rvtf, "width", f -> f.width)(family)
     @remote(b, CreateSpiralStair(
-      center, radius, start_angle, included_angle, clockwise, width,
+      center, to_revit(radius), start_angle, included_angle, clockwise, to_revit(width),
       ref_value(b, bottom_level), ref_value(b, top_level), family_ref(b, family)))
   end
 
@@ -875,7 +879,7 @@ realize_wall_path(b::RVT, s::Wall, path::OpenPolygonalPath) =
     @remote(b, CreateUnconnectedLineWall(
         path.vertices,
         ref_value(b, s.bottom_level),
-        s.top_level.height - s.bottom_level.height,
+        to_revit(s.top_level.height - s.bottom_level.height),
         family_ref(b, s.family)))
   else
     @remote(b, CreateLineWall(
@@ -903,7 +907,7 @@ realize_wall_path(b::RVT, s::Wall, path::ArcPath) =
       @remote(b, CreateUnconnectedArcWall(
           center, radius, start_angle, end_angle,
           ref_value(b, s.bottom_level),
-          s.top_level.height - s.bottom_level.height,
+          to_revit(s.top_level.height - s.bottom_level.height),
           family_ref(b, s.family)))
     else
       @remote(b, CreateArcWall(
@@ -920,7 +924,7 @@ realize_wall_path(b::RVT, s::Wall, path) =
       @remote(b, CreateUnconnectedPathWall(
           locs, arcs,
           ref_value(b, s.bottom_level),
-          s.top_level.height - s.bottom_level.height,
+          to_revit(s.top_level.height - s.bottom_level.height),
           family_ref(b, s.family)))
     else
       @remote(b, CreatePathWall(
@@ -1101,7 +1105,7 @@ KhepriBase.b_panel(b::RVT, region::Region, family) =
 KhepriBase.b_panel(b::RVT, contour::ClosedPolygonalPath, family) =
   let rvtf = backend_family(b, family),
       thickness = _lookup_family_param(rvtf, "thickness", f -> f.thickness)(family)
-    @remote(b, CreatePanelExtrusion(contour.vertices, Float64[], thickness, RVTId(0)))
+    @remote(b, CreatePanelExtrusion(contour.vertices, Float64[], to_revit(thickness), RVTId(0)))
   end
 
 KhepriBase.b_panel(b::RVT, contour::RectangularPath, family) =
@@ -1111,7 +1115,7 @@ KhepriBase.b_panel(b::RVT, contour::ClosedPath, family) =
   let rvtf = backend_family(b, family),
       thickness = _lookup_family_param(rvtf, "thickness", f -> f.thickness)(family),
       (locs, arcs) = locs_and_arcs(contour)
-    @remote(b, CreatePanelExtrusion(locs, arcs, thickness, RVTId(0)))
+    @remote(b, CreatePanelExtrusion(locs, arcs, to_revit(thickness), RVTId(0)))
   end
 
 realize(b::RVT, s::TrussNode) =
