@@ -78,6 +78,10 @@ using Test
     @test KhepriBase.has_boolean_ops(KhepriRevit.RVT) isa KhepriBase.HasBooleanOps{true}
   end
 
+  # Headless golden tests for the backend-agnostic BIM→Julia codegen pipeline (KhepriBase/CodeGen.jl),
+  # driven through the Revit family/module hooks so the golden matches real KhepriRevit output.
+  include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "test_codegen.jl"))
+
   # Live family-placement tests run against a real Revit instance. They are
   # gated on KHEPRI_REVIT_TESTS=1 so the static suite above stays cheap and
   # cross-platform; sibling backends (KhepriAutoCAD, KhepriRhino) use the

@@ -19,14 +19,21 @@ export
     all_railings,
     generate_khepri_code,
     introspect_model,
-    model_to_expr,
-    expr_to_string,
     wall_with_openings,
     RevitSystemFamily,
     RevitFileFamily,
     RevitInPlaceFamily,
     revit_system_family,
-    revit_file_family
+    revit_file_family,
+    revit_opening_file_family
+
+# The backend-agnostic codegen pipeline lives in KhepriBase (CodeGen.jl). Import the internals used
+# by introspect_model / generate_khepri_code below; the Revit-specific pipeline hooks
+# (b_native_family_expr, b_codegen_module) are defined further down, after RVT and the family types.
+using KhepriBase: model_to_expr, expr_to_string, extract_levels, extract_families,
+  add_backend_families, loop_rerolling, detect_level_repetition, add_header,
+  family_expr_map, FamilyMeta, _shape_family_category, _dedup_slabs, is_curtain_wall,
+  guarded_backend_family_expr
 
 #=
 We need to ensure the Revit plugin is properly installed.
@@ -255,6 +262,8 @@ public void HighlightElement(ElementId id)
 public ElementId[] GetSelectedElements()
 public bool IsProject()
 public void DeleteAllElements()
+public void DeleteElement(Element element)
+public ElementId CreateGroup(ElementId[] ids)
 public void SetView(XYZ camera, XYZ target, int width, int height, double lens)
 public XYZ GetCamera()
 public XYZ GetTarget()
@@ -265,7 +274,7 @@ public void EnergyAnalysis()
 public ElementId CreatePolygonalCeiling(XYZ[] pts, Level level, ElementId famId)
 public ElementId CreatePathCeiling(XYZ[] pts, double[] angles, Level level, ElementId famId)
 public ElementId CreateRamp(XYZ p0, XYZ p1, double width, double thickness, Level baseLevel, double baseOffset, double topOffset)
-public Element CreateStraightStair(XYZ basePoint, VXYZ direction, double width, Level baseLevel, Level topLevel, ElementId familyId)
+public ElementId CreateStraightStair(XYZ basePoint, VXYZ direction, double width, Level baseLevel, Level topLevel, ElementId familyId)
 public Element CreateSpiralStair(XYZ center, double radius, double startAngle, double includedAngle, bool clockwise, double width, Level baseLevel, Level topLevel, ElementId familyId)
 public string WallCurveType(Element element)
 public XYZ[] ArcWallVertices(Element element)
@@ -495,8 +504,25 @@ revit_file_family(path, family_map=(), instance_map=(), location_transform=(f, p
     Dict(instance_map...),
     location_transform)
 
+# A loadable door/window family that keeps the standard Width/Height instance mapping and opening
+# offset (matching default_window_family/default_door_family), so a reconstructed opening loads its
+# real .rfa yet still receives its introspected width/height rather than the .rfa's default type.
+# Lets codegen emit `revit_opening_file_family(raw"…")` without printing any lambdas.
+revit_opening_file_family(path) =
+  revit_file_family(path, [],
+    ["Width" => f -> to_revit(f.width), "Height" => f -> to_revit(f.height)],
+    (f, p) -> p + vx(f.width/2, p.cs))
+
 b_get_family_ref(b::RVT, f::Family, rvtf::RevitFileFamily) =
-  let family_id = @remote(b, LoadFamily(rvtf.path)),
+  let family_id = try
+        @remote(b, LoadFamily(rvtf.path))
+      catch e
+        # Never let a missing/unloadable .rfa abort the reconstruction: fall back to the system family
+        # (id 0), exactly as RevitSystemFamily does. So reconstructed programs stay robust even when an
+        # exported/native family file isn't present at rebuild time.
+        @warn "could not load family from .rfa; using system family instead" path=rvtf.path
+        0
+      end,
       param_map = rvtf.family_map,
       params = keys(param_map)
     @remote(b, FamilyElement(family_id, collect(params), [param_map[param](f) for param in params]))
@@ -1160,8 +1186,9 @@ KhepriBase.b_surface_grid(b::RVT, ptss, closed_u, closed_v, smooth_u, smooth_v, 
         0))
 
 # Groups
-# Revit doesn't expose a programmatic group creation API, so we emulate groups
-# by re-creating member shapes at each instance location via the factory function.
+# Each instance re-creates its member shapes at the instance location via the factory, then groups
+# them into a real Revit group (doc.Create.NewGroup). Grouping keeps the members out of DocWalls/etc.
+# so a round-tripped model's element counts match the source, rather than leaving loose duplicates.
 
 realize(b::RVT, s::Group) =
   void_ref(b)  # container only; shapes created via GroupInstance
@@ -1172,7 +1199,7 @@ realize(b::RVT, s::GroupInstance) =
       if factory !== nothing
         let shapes = collecting_shapes(factory),
             refs = ref_values(b, shapes)
-          isempty(refs) ? void_ref(b) : refs[1]
+          isempty(refs) ? void_ref(b) : @remote(b, CreateGroup(refs))
         end
       else
         void_ref(b)
@@ -1224,6 +1251,12 @@ KhepriBase.b_render_and_save_view(b::RVT, path::String) =
 KhepriBase.b_delete_all_shape_refs(b::RVT) =
   @remote(b, DeleteAllElements())
 
+# Single-element delete — needed by delete_shape (e.g. add_door/add_window delete + re-realize the
+# host wall to insert the opening). Revit previously implemented only delete-all. `r::RVTId` typing
+# makes this strictly more specific than KhepriBase's generic b_delete_ref(b::Backend{K,T}, r::T).
+KhepriBase.b_delete_ref(b::RVT, r::RVTId) =
+  @remote(b, DeleteElement(r))
+
 # prompt_position removed: the Revit plugin has no GetPoint RPC (only
 # GetSelectedElements). Interactive position picking is not supported on Revit.
 
@@ -1233,12 +1266,15 @@ all_levels(b::RVT) =
   end
 
 level_from_ref(r, b::RVT) =
-  let s = level(r == RVTVoidId ?
-                  error("Level for unconnected height") :
-                  @remote(b, GetLevelElevation(r)))
-    ref!(b, s, r)
-    s
-  end
+  # An element not associated with a Revit level (e.g. an unhosted furniture/plumbing fixture or a
+  # railing) reports a void level id. Fall back to the default level (0) so introspection completes
+  # instead of crashing — the element's own location still carries its true position.
+  r == RVTVoidId ?
+    default_level() :
+    let s = level(@remote(b, GetLevelElevation(r)))
+      ref!(b, s, r)
+      s
+    end
 
 unconnected_level(h::Real, b::RVT) =
   let s = level(h)
@@ -1287,11 +1323,32 @@ wall_from_ref(r, b::RVT) =
   end
 
 # Floor introspection
+# Drop consecutive coincident boundary vertices (and a final vertex equal to the first) so a
+# reconstructed slab/ceiling/roof has no zero-length edges — Revit rejects those ("Curve length is too
+# small for Revit's tolerance"). Fewer than 3 distinct vertices ⇒ degenerate, so the caller skips it.
+_clean_boundary(verts; tol=0.005) =
+  isempty(verts) ? verts :
+  # Floors/ceilings/roofs are planar: project the boundary to a single Z (the first vertex's) so a
+  # slightly non-planar boundary read from the source (e.g. a stepped/sloped floor edge) yields a
+  # valid planar profile — Revit's Floor.Create rejects a non-planar profile ("Parameter name:
+  # profile"). Then drop consecutive coincident vertices (and a closing dup) to avoid zero-length
+  # edges ("Curve length is too small"). Fewer than 3 distinct vertices ⇒ degenerate, caller skips it.
+  let z0 = cz(verts[1]),
+      out = empty(verts)
+    for v0 in verts
+      let v = xyz(cx(v0), cy(v0), z0)
+        (isempty(out) || distance(v, out[end]) > tol) && push!(out, v)
+      end
+    end
+    length(out) > 2 && distance(out[end], out[1]) <= tol && pop!(out)
+    out
+  end
+
 floor_from_ref(r, b::RVT) =
-  let verts = @remote(b, FloorBoundaryVertices(r)),
+  let verts = _clean_boundary(@remote(b, FloorBoundaryVertices(r))),
       level_id = @remote(b, FloorLevel(r)),
       lvl = level_from_ref(level_id, b)
-    if isempty(verts)
+    if length(verts) < 3
       nothing
     else
       let s = slab(closed_polygonal_path(verts), level=lvl)
@@ -1309,13 +1366,14 @@ all_floors(b::RVT) =
 # Column introspection
 column_from_ref(r, b::RVT) =
   let loc = @remote(b, ColumnLocation(r)),
+      angle = @remote(b, ColumnRotation(r)),
       base_level_id = @remote(b, ColumnBaseLevel(r)),
       top_level_id = @remote(b, ColumnTopLevel(r)),
       base_level = level_from_ref(base_level_id, b),
       top_level = top_level_id == RVTVoidId ?
                     base_level :
                     level_from_ref(top_level_id, b),
-      s = column(loc, bottom_level=base_level, top_level=top_level)
+      s = column(loc, angle=angle, bottom_level=base_level, top_level=top_level)
     ref!(b, s, r)
     s
   end
@@ -1330,9 +1388,10 @@ beam_from_ref(r, b::RVT) =
   let endpoints = @remote(b, BeamEndpoints(r)),
       p0 = endpoints[1],
       p1 = endpoints[2],
-      h = p1.z - p0.z,
       angle = @remote(b, BeamRotation(r)),
-      s = beam(p0, h, angle=angle)
+      # Two-point form: preserves the beam's orientation (the old beam(p0, h) collapsed horizontal
+      # beams to ~zero height). Pairs with meta_program(::Beam), which re-emits the two endpoints.
+      s = beam(p0, p1, angle=angle)
     ref!(b, s, r)
     s
   end
@@ -1385,10 +1444,10 @@ all_windows(b::RVT) =
 
 # Ceiling introspection
 ceiling_from_ref(r, b::RVT) =
-  let verts = @remote(b, CeilingBoundaryVertices(r)),
+  let verts = _clean_boundary(@remote(b, CeilingBoundaryVertices(r))),
       level_id = @remote(b, CeilingLevel(r)),
       lvl = level_from_ref(level_id, b)
-    if isempty(verts)
+    if length(verts) < 3
       nothing
     else
       let s = ceiling(closed_polygonal_path(verts), level=lvl)
@@ -1405,10 +1464,10 @@ all_ceilings(b::RVT) =
 
 # Roof introspection
 roof_from_ref(r, b::RVT) =
-  let verts = @remote(b, RoofBoundaryVertices(r)),
+  let verts = _clean_boundary(@remote(b, RoofBoundaryVertices(r))),
       level_id = @remote(b, RoofLevel(r)),
       lvl = level_from_ref(level_id, b)
-    if isempty(verts)
+    if length(verts) < 3
       nothing
     else
       let s = roof(closed_polygonal_path(verts), level=lvl)
@@ -1455,7 +1514,8 @@ stair_from_ref(r, b::RVT) =
       top_level_id = @remote(b, StairTopLevel(r)),
       base_level = level_from_ref(base_level_id, b),
       top_level = top_level_id == RVTVoidId ? base_level : level_from_ref(top_level_id, b),
-      s = stair(base, direction=dir, bottom_level=base_level, top_level=top_level)
+      # StairDirection comes back as an XYZ point; stair() wants a horizontal direction vector (VXY).
+      s = stair(base, direction=vxy(cx(dir), cy(dir)), bottom_level=base_level, top_level=top_level)
     ref!(b, s, r)
     s
   end
@@ -1531,146 +1591,45 @@ _member_from_ref_by_category(id, cat, b::RVT) =
   end
 
 # ═══════════════════════════════════════════════════════════════════
-# Code Generation — Multi-Pass Pipeline
+# Introspection (Revit-specific)
 # ═══════════════════════════════════════════════════════════════════
-#
-# Architecture (inspired by Tomás Grelha da Cunha's MSc thesis,
-# "Refactoring for Dynamic Languages: The Julia Case", IST 2020):
-#
-# 1. Introspect: Query Revit model → Khepri shape objects
-# 2. meta_program: Convert shapes → raw Julia Expr (AST)
-# 3. Transform: Apply refactoring passes (extract variables, loop rerolling, …)
-# 4. Print: Pretty-print final Expr → .jl file
-#
-# Each transform pass is a function Expr → Expr, composed in sequence.
+# The backend-agnostic code-generation pipeline (model_to_expr, transform passes,
+# expr_to_string) now lives in KhepriBase/src/CodeGen.jl. Below is only the
+# Revit-specific introspection that produces the portable Khepri BIM model.
 
-# ─── Utilities ────────────────────────────────────────────────────
-
-sanitize_name(name) =
-  let s = replace(lowercase(strip(name)), r"[^a-z0-9_]" => "_"),
-      s = replace(s, r"_+" => "_"),
-      s = strip(s, '_')
-    isempty(s) ? "unnamed" : (isdigit(s[1]) ? "_" * s : s)
-  end
-
-# Detect regular grid pattern in a set of values
-function detect_regular_spacing(vals; tol=0.01)
-  sorted = sort(unique(vals))
-  length(sorted) < 2 && return nothing
-  spacing = sorted[2] - sorted[1]
-  spacing < tol && return nothing
-  for i in 2:length(sorted)-1
-    abs((sorted[i+1] - sorted[i]) - spacing) > tol && return nothing
-  end
-  (first=sorted[1], step=spacing, last=sorted[end], count=length(sorted))
-end
-
-# Bottom-up map over an Expr tree
-map_expr(f, e::Expr) = f(Expr(e.head, map(x -> map_expr(f, x), e.args)...))
-map_expr(f, x) = f(x)
-
-# Collect all sub-expressions matching a predicate
-collect_exprs(pred, x) = pred(x) ? [x] : []
-collect_exprs(pred, e::Expr) =
-  let result = pred(e) ? [e] : []
-    for a in e.args
-      append!(result, collect_exprs(pred, a))
-    end
-    result
-  end
-
-# Compare two Exprs structurally, returning list of (path, val1, val2) diffs.
-# path is a vector of arg indices.
-expr_diff(e1, e2) = e1 == e2 ? [] : [([],  e1, e2)]
-expr_diff(e1::Expr, e2::Expr) =
-  if e1.head != e2.head || length(e1.args) != length(e2.args)
-    [([], e1, e2)]
-  else
-    let diffs = []
-      for (i, (a1, a2)) in enumerate(zip(e1.args, e2.args))
-        for (path, v1, v2) in expr_diff(a1, a2)
-          push!(diffs, (vcat([i], path), v1, v2))
-        end
-      end
-      diffs
-    end
-  end
-
-# Replace the value at a path in an Expr with a new value
-expr_replace_at(e, path, val) =
-  isempty(path) ? val :
-  let args = collect(e.args)
-    args[path[1]] = expr_replace_at(args[path[1]], path[2:end], val)
-    Expr(e.head, args...)
-  end
-
-# ─── Phase 1: Introspection ───────────────────────────────────────
-
-# Metadata attached to shapes during introspection for use by transform passes.
-# Stored as a Dict keyed by shape identity (objectid).
-const _introspection_meta = Dict{UInt, NamedTuple}()
-
-_set_meta!(shape, meta::NamedTuple) = _introspection_meta[objectid(shape)] = meta
-_get_meta(shape) = get(_introspection_meta, objectid(shape), NamedTuple())
-
-
-# Deduplicate slabs whose boundary vertices are the same set (different order)
-_dedup_slabs(members) =
-  let seen_slab_verts = Set{Set{Tuple{Float64,Float64,Float64}}}(),
-      result = []
-    for m in members
-      if m isa Slab
-        let verts = m.region isa Region ?
-              (m.region.paths[1] isa ClosedPolygonalPath ?
-                Set((round(cx(v), digits=4), round(cy(v), digits=4), round(cz(v), digits=4))
-                    for v in m.region.paths[1].vertices) :
-                Set{Tuple{Float64,Float64,Float64}}()) :
-              Set{Tuple{Float64,Float64,Float64}}()
-          if isempty(verts) || verts ∉ seen_slab_verts
-            push!(seen_slab_verts, verts)
-            push!(result, m)
-          end
-        end
-      else
-        push!(result, m)
-      end
-    end
-    result
-  end
-
-_shape_family_category(m) =
-  m isa Wall ? (is_curtain_wall(m) ? :curtain_wall : :wall) :
-  m isa Slab ? :slab :
-  m isa Column ? :column :
-  m isa FreeColumn ? :column :
-  m isa Beam ? :beam :
-  m isa Ceiling ? :ceiling :
-  m isa Roof ? :roof :
-  m isa Stair ? :stair :
-  m isa Railing ? :railing :
-  m isa Table ? :table :
-  m isa Chair ? :chair :
-  m isa Toilet ? :toilet :
-  m isa Sink ? :sink :
-  m isa Closet ? :closet :
-  m isa FamilyElement ? :family_element : :other
-
-_store_element_family_meta!(m, b::RVT) =
+_store_element_family_meta!(m, b::RVT, family_meta) =
   let mref = ref_value(b, m),
       fam_name = @remote(b, ElementFamilyName(mref)),
       type_name = @remote(b, ElementTypeName(mref)),
       is_sys = @remote(b, IsSystemFamily(mref)),
       fam_path = (m isa Column || m isa FreeColumn || m isa Beam || m isa Stair || m isa Railing) ?
                    @remote(b, ElementFamilyPath(mref)) : ""
-    _set_meta!(m.family, (family_key="$fam_name:$type_name",
-                         family_name=fam_name, type_name=type_name,
-                         is_system=is_sys, path=fam_path,
-                         category=_shape_family_category(m)))
+    family_meta[m.family] = FamilyMeta(category=_shape_family_category(m),
+                                       family_name=fam_name, type_name=type_name,
+                                       is_system=is_sys, path=fam_path)
+  end
+
+# A few Revit family types (notably plain wall openings, "Door-Opening:…") report 0 width/height via
+# DoorWindowDimensions. Recover the size from the "…W x Hmm" type name when possible, else fall back to
+# the family default — so introspection never emits a 0-width opening, which Revit rejects ("cannot
+# make wall") when the reconstructed program re-inserts it into its host wall.
+_opening_dims(w, h, type_name) =
+  (w > 0 && h > 0) ? (w, h) :
+  let m = match(r"(\d{2,5})\s*[xX]\s*(\d{2,5})", type_name)
+    m === nothing ? nothing : (parse(Int, m[1]) / 1000, parse(Int, m[2]) / 1000)
+  end
+_door_family_with_dims(key, w, h, type_name) =
+  let d = _opening_dims(w, h, type_name)
+    d === nothing ? door_family(key) : door_family(key, d[1], d[2])
+  end
+_window_family_with_dims(key, w, h, type_name) =
+  let d = _opening_dims(w, h, type_name)
+    d === nothing ? window_family(key) : window_family(key, d[1], d[2])
   end
 
 introspect_model(; b::RVT=revit) =
   with_introspection(b) do
-  let _ = empty!(_introspection_meta),
+  let family_meta = IdDict{Family, FamilyMeta}(),
       # Groups — collect instances and introspect one representative per type.
       # DocWalls/DocFloors/etc. already exclude group members (filtered in C#),
       # so we use ElementCategoryName to classify each group member by type.
@@ -1695,25 +1654,23 @@ introspect_model(; b::RVT=revit) =
               if m isa Wall && !is_curtain_wall(m)
                 let mref = ref_value(b, m)
                   for d in filter(d -> d.host_wall_id == mref, door_infos)
-                    let dfam = door_family()
-                      _set_meta!(dfam, (family_key="$(d.family_name):$(d.type_name)",
-                                       family_name=d.family_name, type_name=d.type_name,
-                                       is_system=d.is_system, path="", category=:door))
+                    let dfam = _door_family_with_dims("$(d.family_name):$(d.type_name)", d.width, d.height, d.type_name)
+                      family_meta[dfam] = FamilyMeta(category=:door, family_name=d.family_name,
+                                                     type_name=d.type_name, is_system=d.is_system)
                       push!(m.doors, door(m, xy(d.delta_from_start, d.sill_height), family=dfam))
                     end
                   end
                   for wn in filter(w -> w.host_wall_id == mref, window_infos)
-                    let wfam = window_family()
-                      _set_meta!(wfam, (family_key="$(wn.family_name):$(wn.type_name)",
-                                       family_name=wn.family_name, type_name=wn.type_name,
-                                       is_system=wn.is_system, path="", category=:window))
+                    let wfam = _window_family_with_dims("$(wn.family_name):$(wn.type_name)", wn.width, wn.height, wn.type_name)
+                      family_meta[wfam] = FamilyMeta(category=:window, family_name=wn.family_name,
+                                                     type_name=wn.type_name, is_system=wn.is_system)
                       push!(m.windows, window(m, xy(wn.delta_from_start, wn.sill_height), family=wfam))
                     end
                   end
                 end
               end
               # Collect family metadata for group members
-              _store_element_family_meta!(m, b)
+              _store_element_family_meta!(m, b, family_meta)
             end
             # Collect all instances of this group type (skip empty groups)
             if !isempty(members)
@@ -1746,25 +1703,23 @@ introspect_model(; b::RVT=revit) =
                         ww = get(wall_to_windows, wref, HostedElementInfo[])
                       for d in wd
                         let dkey = "$(d.family_name):$(d.type_name)",
-                            dfam = door_family()
-                          _set_meta!(dfam, (family_key=dkey, family_name=d.family_name,
-                                           type_name=d.type_name, is_system=d.is_system, path="",
-                                           category=:door))
+                            dfam = _door_family_with_dims(dkey, d.width, d.height, d.type_name)
+                          family_meta[dfam] = FamilyMeta(category=:door, family_name=d.family_name,
+                                                         type_name=d.type_name, is_system=d.is_system)
                           push!(w.doors, door(w, xy(d.delta_from_start, d.sill_height), family=dfam))
                         end
                       end
                       for wn in ww
                         let wkey = "$(wn.family_name):$(wn.type_name)",
-                            wfam = window_family()
-                          _set_meta!(wfam, (family_key=wkey, family_name=wn.family_name,
-                                           type_name=wn.type_name, is_system=wn.is_system, path="",
-                                           category=:window))
+                            wfam = _window_family_with_dims(wkey, wn.width, wn.height, wn.type_name)
+                          family_meta[wfam] = FamilyMeta(category=:window, family_name=wn.family_name,
+                                                         type_name=wn.type_name, is_system=wn.is_system)
                           push!(w.windows, window(w, xy(wn.delta_from_start, wn.sill_height), family=wfam))
                         end
                       end
                     end
                   end
-                  _store_element_family_meta!(w, b)
+                  _store_element_family_meta!(w, b, family_meta)
                 end
                 wall_shapes
               end,
@@ -1785,677 +1740,88 @@ introspect_model(; b::RVT=revit) =
       stairs = [stair_from_ref(r, b) for r in @remote(b, DocStairs())],
       railings = filter(!isnothing, [railing_from_ref(r, b) for r in @remote(b, DocRailings())])
     # Collect family metadata for all element types
-    for f in floors _store_element_family_meta!(f, b) end
-    for c in columns _store_element_family_meta!(c, b) end
-    for bm in beams _store_element_family_meta!(bm, b) end
-    for ce in ceilings _store_element_family_meta!(ce, b) end
-    for rf in roofs _store_element_family_meta!(rf, b) end
-    for fx in fixtures _store_element_family_meta!(fx, b) end
-    for st in stairs _store_element_family_meta!(st, b) end
-    for rl in railings _store_element_family_meta!(rl, b) end
+    for f in floors _store_element_family_meta!(f, b, family_meta) end
+    for c in columns _store_element_family_meta!(c, b, family_meta) end
+    for bm in beams _store_element_family_meta!(bm, b, family_meta) end
+    for ce in ceilings _store_element_family_meta!(ce, b, family_meta) end
+    for rf in roofs _store_element_family_meta!(rf, b, family_meta) end
+    for fx in fixtures _store_element_family_meta!(fx, b, family_meta) end
+    for st in stairs _store_element_family_meta!(st, b, family_meta) end
+    for rl in railings _store_element_family_meta!(rl, b, family_meta) end
     (levels=levels, walls=walls, floors=floors, columns=columns,
      beams=beams, ceilings=ceilings, roofs=roofs, fixtures=fixtures,
-     stairs=stairs, railings=railings, groups=groups)
+     stairs=stairs, railings=railings, groups=groups, family_meta=family_meta)
   end
   end
 
-is_curtain_wall(w) = w isa CurtainWall
 
-# ─── Phase 2: Model → Expr ───────────────────────────────────────
+# generate_khepri_code composes the KhepriBase codegen pipeline over the Revit model.
 
-# Side-channel: maps family Expr (from meta_program) to its introspection metadata.
-# Populated by model_to_expr, consumed by extract_families and add_backend_families.
-const _family_expr_meta = Dict{Expr, NamedTuple}()
+# Revit-specific hooks the KhepriBase codegen pipeline calls back into.
+KhepriBase.b_codegen_module(b::RVT) = :KhepriRevit
 
-# Register a family's meta_program Expr with its metadata
-_register_family_expr!(family) =
-  let m = _get_meta(family)
-    if !isempty(m)
-      _family_expr_meta[meta_program(family)] = m
-    end
+# Emit the family's backend mappings as guarded statements so the SAME generated program reproduces the
+# family natively in Revit AND (when an OBJ mesh was extracted) as that mesh in KhepriThreejs, without
+# either mapping erroring in the other's session. `revit`: a loadable `.rfa` if we captured its path,
+# else the built-in system family. `threejs`: the extracted OBJ family, only when one exists.
+KhepriBase.b_native_family_expr(b::RVT, var, meta) =
+  let rfa_str = Expr(:macrocall, Symbol("@raw_str"), nothing, meta.path),
+      revit_native = (meta.is_system || isempty(meta.path)) ?
+        Expr(:call, :revit_system_family) :
+        # Doors/windows carry their dimensions on the instance, so use the opening-specific loader that
+        # preserves the Width/Height mapping; other loadable families load the .rfa directly.
+        (meta.category in (:door, :window) ?
+           Expr(:call, :revit_opening_file_family, rfa_str) :
+           Expr(:call, :revit_file_family, rfa_str)),
+      stmts = Any[guarded_backend_family_expr(var, :revit, revit_native)]
+    isempty(meta.obj_name) ||
+      push!(stmts, guarded_backend_family_expr(var, :threejs, Expr(:call, :obj_family, meta.obj_name)))
+    stmts
   end
 
-function model_to_expr(model)
-  empty!(_family_expr_meta)
-  stmts = Expr[]
-  for l in model.levels
-    push!(stmts, meta_program(l))
+# Match the C# SanitizeMaterialName used to name exported OBJ files (family name → OBJ file stem).
+_sanitize_family(name) = replace(name, ' ' => '_', '/' => '_', '\\' => '_')
+
+# Export loadable families to OBJ (best-effort) and stamp each family's metadata with its OBJ name, so
+# codegen emits a KhepriThreejs mesh mapping alongside the Revit-native one. Runs as a post-introspection
+# pass; never affects the Revit-native reconstruction (the threejs mapping is @isdefined-guarded), so a
+# failed or partial export simply omits some cross-backend meshes.
+function _attach_obj_families!(model, b, obj_folder)
+  exported = try
+    Dict(_sanitize_family(row[1]) => (obj=row[1], rfa=(length(row) >= 5 ? row[5] : ""))
+         for row in @remote(b, ExportAllFamiliesToOBJWithMetadata(obj_folder)))
+  catch e
+    @warn "OBJ/RFA family export failed; cross-backend mappings omitted" exception=e
+    return model
   end
-  for w in model.walls
-    _register_family_expr!(w.family)
-    if !is_curtain_wall(w)
-      for d in w.doors _register_family_expr!(d.family) end
-      for wn in w.windows _register_family_expr!(wn.family) end
-    end
-    push!(stmts, meta_program(w))
-  end
-  for f in model.floors
-    _register_family_expr!(f.family)
-    push!(stmts, meta_program(f))
-  end
-  for c in model.columns
-    _register_family_expr!(c.family)
-    push!(stmts, meta_program(c))
-  end
-  for bm in model.beams
-    _register_family_expr!(bm.family)
-    push!(stmts, meta_program(bm))
-  end
-  for ce in model.ceilings
-    _register_family_expr!(ce.family)
-    push!(stmts, meta_program(ce))
-  end
-  for rf in model.roofs
-    _register_family_expr!(rf.family)
-    push!(stmts, meta_program(rf))
-  end
-  for fx in model.fixtures
-    _register_family_expr!(fx.family)
-    push!(stmts, meta_program(fx))
-  end
-  for st in model.stairs
-    _register_family_expr!(st.family)
-    push!(stmts, meta_program(st))
-  end
-  for rl in model.railings
-    _register_family_expr!(rl.family)
-    push!(stmts, meta_program(rl))
-  end
-  # Groups: emit group definitions and group_instance placements
-  for g in model.groups
-    let grp_name = sanitize_name("group_$(g.type_name)"),
-        grp_var = Symbol(grp_name),
-        factory_var = Symbol("$(grp_name)_factory"),
-        # Compute group origin from first instance location
-        origin = g.instances[1],
-        # Build member shape expressions, translated to be group-relative
-        member_stmts = Expr[]
-      for m in g.members
-        _register_family_expr!(m.family)
-        if m isa Wall && !is_curtain_wall(m)
-          for d in m.doors _register_family_expr!(d.family) end
-          for wn in m.windows _register_family_expr!(wn.family) end
-        end
-        push!(member_stmts, meta_program(m))
-      end
-      body_expr = Expr(:block, member_stmts...)
-      translated_body = translate_xyz_expr(body_expr, cx(origin), cy(origin), cz(origin))
-      # Emit: factory function
-      push!(stmts, Expr(:function, Expr(:call, factory_var), translated_body))
-      # Emit: grp_var = group("name", factory=factory_var)
-      push!(stmts, Expr(:(=), grp_var,
-        Expr(:call, :group,
-          Expr(:parameters,
-            Expr(:kw, :factory, factory_var)),
-          grp_name)))
-      # Emit: group_instance(grp_var, xyz(...))
-      for loc in g.instances
-        push!(stmts, Expr(:call, :group_instance, grp_var,
-          Expr(:call, :xyz,
-            meta_program(cx(loc)), meta_program(cy(loc)), meta_program(cz(loc)))))
+  for (fam, meta) in collect(model.family_meta)
+    let exp = get(exported, _sanitize_family(meta.family_name), nothing)
+      if exp !== nothing && (isempty(meta.obj_name) || isempty(meta.path))
+        model.family_meta[fam] = FamilyMeta(
+          category=meta.category, family_name=meta.family_name, type_name=meta.type_name,
+          is_system=meta.is_system,
+          # The exported .rfa lets the reconstruction load the real native family in Revit; keep the
+          # existing path if we already had one, else fall back to a system family when no .rfa exists.
+          path=isempty(meta.path) ? exp.rfa : meta.path,
+          obj_name=isempty(meta.obj_name) ? exp.obj : meta.obj_name)
       end
     end
   end
-  Expr(:block, stmts...)
+  model
 end
 
-# Translate all xyz/xy calls in an Expr tree by subtracting an offset.
-# Skips door/window positions (wall-relative, not world coords).
-translate_xyz_expr(x, dx, dy, dz) = x
-translate_xyz_expr(e::Expr, dx, dy, dz) =
-  if e.head == :kw && e.args[1] in (:doors, :windows)
-    e  # door/window positions are wall-relative; don't translate
-  elseif e.head == :call && e.args[1] == :xyz && length(e.args) == 4 &&
-     all(a -> a isa Real, e.args[2:4])
-    Expr(:call, :xyz,
-      meta_program(e.args[2] - dx),
-      meta_program(e.args[3] - dy),
-      meta_program(e.args[4] - dz))
-  elseif e.head == :call && e.args[1] == :xy && length(e.args) == 3 &&
-         all(a -> a isa Real, e.args[2:3])
-    Expr(:call, :xy,
-      meta_program(e.args[2] - dx),
-      meta_program(e.args[3] - dy))
-  else
-    Expr(e.head, [translate_xyz_expr(a, dx, dy, dz) for a in e.args]...)
-  end
-
-# ─── Phase 3: Transform Passes ───────────────────────────────────
-
-# 3.1 Extract levels: deduplicate level(h) calls into named variables
-function extract_levels(e::Expr)
-  level_calls = collect_exprs(
-    x -> x isa Expr && x.head == :call && x.args[1] == :level && length(x.args) == 2,
-    e)
-  unique_levels = unique(level_calls)
-  isempty(unique_levels) && return e
-  # Sort by height value
-  sorted = sort(unique_levels, by=x -> x.args[2] isa Real ? x.args[2] : 0.0)
-  assignments = Expr[]
-  replacements = Dict{Expr, Symbol}()
-  for (i, lc) in enumerate(sorted)
-    var = Symbol("level_$(i-1)")
-    push!(assignments, Expr(:(=), var, lc))
-    replacements[lc] = var
-  end
-  body = map_expr(x -> get(replacements, x, x), e)
-  # Filter out bare symbols left over from replacing standalone level() calls
-  level_syms = Set(values(replacements))
-  body_stmts = filter(s -> !(s isa Symbol && s in level_syms), body.args)
-  Expr(:block, assignments..., body_stmts...)
-end
-
-# 3.2 Extract families: deduplicate family constructors into named variables
-function extract_families(e::Expr)
-  family_fns = Set([:wall_family, :curtain_wall_family, :slab_family, :ceiling_family,
-                    :column_family, :beam_family, :door_family, :window_family,
-                    :roof_family, :family_element_family, :table_family, :chair_family,
-                    :toilet_family, :sink_family, :closet_family,
-                    :stair_family, :railing_family])
-  family_calls = collect_exprs(
-    x -> x isa Expr && x.head == :call && x.args[1] in family_fns,
-    e)
-  unique_families = unique(family_calls)
-  isempty(unique_families) && return e
-  assignments = Expr[]
-  replacements = Dict{Expr, Symbol}()
-  for fc in unique_families
-    # Use introspection metadata for descriptive variable names
-    meta = get(_family_expr_meta, fc, nothing)
-    var = if meta !== nothing
-      Symbol(sanitize_name("$(meta.category)_$(meta.family_name)_$(meta.type_name)"))
-    else
-      let cat = replace(string(fc.args[1]), "_family" => "")
-        Symbol("$(cat)_fam_$(length(assignments)+1)")
-      end
-    end
-    push!(assignments, Expr(:(=), var, fc))
-    replacements[fc] = var
-  end
-  stmts = e.head == :block ? e.args : [e]
-  # Find where levels end and elements start
-  first_non_assign = findfirst(
-    s -> !(s isa Expr && s.head == :(=) && s.args[2] isa Expr &&
-           s.args[2].head == :call && s.args[2].args[1] == :level),
-    stmts)
-  insert_pos = first_non_assign === nothing ? length(stmts) + 1 : first_non_assign
-  body = map_expr(x -> get(replacements, x, x), Expr(:block, stmts...))
-  Expr(:block, body.args[1:insert_pos-1]..., assignments..., body.args[insert_pos:end]...)
-end
-
-# 3.3 Add backend family mappings
-# Uses _family_expr_meta populated by model_to_expr
-add_backend_families(model) = (e::Expr) ->
-  let stmts = e.head == :block ? collect(e.args) : [e],
-      family_fns = Set([:wall_family, :curtain_wall_family, :slab_family, :ceiling_family,
-                        :column_family, :beam_family, :door_family, :window_family,
-                        :roof_family, :family_element_family, :table_family, :chair_family,
-                        :toilet_family, :sink_family, :closet_family,
-                        :stair_family, :railing_family]),
-      # Build var→meta lookup: when extract_families created `var = XXX_family(...)`,
-      # the RHS Expr should be a key in _family_expr_meta
-      new_stmts = Any[]
-    for s in stmts
-      push!(new_stmts, s)
-      if s isa Expr && s.head == :(=) &&
-         s.args[2] isa Expr && s.args[2].head == :call &&
-         s.args[2].args[1] in family_fns
-        let var = s.args[1],
-            rhs = s.args[2],
-            meta = get(_family_expr_meta, rhs, nothing)
-          if meta !== nothing
-            let backend_call = if meta.is_system || isempty(meta.path)
-                  Expr(:call, :set_backend_family, var, :revit,
-                       Expr(:call, :revit_system_family))
-                else
-                  Expr(:call, :set_backend_family, var, :revit,
-                       Expr(:call, :revit_file_family, Expr(:macrocall, Symbol("@raw_str"), nothing, meta.path)))
-                end
-              push!(new_stmts, backend_call)
-            end
-          end
-        end
-      end
-    end
-    Expr(:block, new_stmts...)
-  end
-
-# 3.4 Loop rerolling: detect repeated shape calls forming grid patterns
-loop_rerolling(e::Expr) =
-  let stmts = e.head == :block ? collect(e.args) : [e],
-      result = Any[],
-      # Group consecutive statements by their "template" (shape call with same structure)
-      i = 1
-    while i <= length(stmts)
-      let s = stmts[i]
-        if s isa Expr && s.head == :call
-          # Try to find a run of structurally similar calls
-          let run_end = i,
-              template = s
-            for j in (i+1):length(stmts)
-              let sj = stmts[j]
-                if sj isa Expr && sj.head == :call && sj.args[1] == template.args[1] &&
-                   length(sj.args) == length(template.args)
-                  let diffs = expr_diff(template, sj)
-                    # Only consider if all diffs are at leaf values (numbers, symbols)
-                    all(d -> !(d[2] isa Expr) && !(d[3] isa Expr), diffs) || break
-                    run_end = j
-                  end
-                else
-                  break
-                end
-              end
-            end
-            if run_end - i + 1 >= 4  # Need at least 4 similar statements
-              let run = stmts[i:run_end],
-                  rerolled = _try_reroll(run)
-                if rerolled !== nothing
-                  push!(result, rerolled)
-                  i = run_end + 1
-                  continue
-                end
-              end
-            end
-          end
-        end
-        push!(result, s)
-        i += 1
-      end
-    end
-    Expr(:block, result...)
-  end
-
-function _try_reroll(stmts)
-  length(stmts) < 4 && return nothing
-  template = stmts[1]
-  all_diffs = [expr_diff(template, s) for s in stmts[2:end]]
-  isempty(all_diffs) && return nothing
-  ref_paths = Set([d[1] for d in all_diffs[1]])
-  all(ds -> Set([d[1] for d in ds]) == ref_paths, all_diffs) || return nothing
-  paths = sort(collect(ref_paths))
-  isempty(paths) && return nothing
-  # Collect value sequences for each varying path
-  value_lists = Dict{Vector{Int}, Vector{Any}}()
-  for p in paths
-    value_lists[p] = [_get_diff_value(template, p)]
-  end
-  for ds in all_diffs
-    for (p, _, v2) in ds
-      push!(value_lists[p], v2)
-    end
-  end
-  # Try to detect 2D grid pattern (two varying paths)
-  if length(paths) == 2
-    _try_reroll_2d(template, paths, value_lists)
-  elseif length(paths) == 1
-    _try_reroll_1d(template, paths[1], value_lists[paths[1]])
-  else
-    nothing
-  end
-end
-
-_get_diff_value(e::Expr, path) =
-  isempty(path) ? e : _get_diff_value(e.args[path[1]], path[2:end])
-_get_diff_value(x, path) = isempty(path) ? x : error("path too deep")
-
-function _try_reroll_1d(template, path, values)
-  range = _try_make_range(values)
-  range === nothing && return nothing
-  let var = gensym_short(:i),
-      body = expr_replace_at(template, path, var)
-    Expr(:for, Expr(:(=), var, range), Expr(:block, body))
-  end
-end
-
-# Detect if v1, v2 form a nested grid pattern, returning path info
-function _detect_nesting(v1, v2, n, p1, p2)
-  let inner_unique = unique(v2), m = length(inner_unique)
-    if n % m == 0
-      let k = n ÷ m
-        if all(i -> v2[i] == inner_unique[((i-1) % m) + 1], 1:n)
-          let outer_unique = [v1[(i-1)*m + 1] for i in 1:k]
-            if all(i -> all(j -> v1[(i-1)*m + j] == outer_unique[i], 1:m), 1:k)
-              return (p1, outer_unique, p2, inner_unique)
-            end
-          end
-        end
-      end
-    end
-    # Try swapped
-    let inner_unique = unique(v1), m = length(inner_unique)
-      if n % m == 0
-        let k = n ÷ m
-          if all(i -> v1[i] == inner_unique[((i-1) % m) + 1], 1:n)
-            let outer_unique = [v2[(i-1)*m + 1] for i in 1:k]
-              if all(i -> all(j -> v2[(i-1)*m + j] == outer_unique[i], 1:m), 1:k)
-                return (p2, outer_unique, p1, inner_unique)
-              end
-            end
-          end
-        end
-      end
-    end
-    nothing
-  end
-end
-
-function _try_reroll_2d(template, paths, value_lists)
-  let p1 = paths[1], p2 = paths[2],
-      v1 = value_lists[p1], v2 = value_lists[p2],
-      n = length(v1),
-      nested = _detect_nesting(v1, v2, n, p1, p2)
-    nested === nothing && return nothing
-    let (outer_path, outer_vals, inner_path, inner_vals) = nested,
-        outer_range = _try_make_range(outer_vals),
-        inner_range = _try_make_range(inner_vals)
-      (outer_range === nothing || inner_range === nothing) && return nothing
-      let outer_var = gensym_short(:x),
-          inner_var = gensym_short(:y),
-          body = expr_replace_at(
-                   expr_replace_at(template, outer_path, outer_var),
-                   inner_path, inner_var)
-        Expr(:for, Expr(:(=), outer_var, outer_range),
-             Expr(:block,
-                  Expr(:for, Expr(:(=), inner_var, inner_range),
-                       Expr(:block, body))))
-      end
-    end
-  end
-end
-
-gensym_short(base::Symbol) =
-  let names = Dict(:x => :x, :y => :y, :z => :z, :i => :i, :j => :j)
-    get(names, base, base)
-  end
-
-# Try to convert a value list to a range expression
-function _try_make_range(vals)
-  n = length(vals)
-  n < 2 && return Expr(:vect, vals...)
-  sorted = sort(vals)
-  spacing = sorted[2] - sorted[1]
-  if spacing > 0 && all(i -> abs((sorted[i] - sorted[i-1]) - spacing) < 0.001, 2:n)
-    let first_v = meta_program(sorted[1]),
-        step_v = meta_program(spacing),
-        last_v = meta_program(sorted[end])
-      if step_v == 1
-        Expr(:call, :(:), first_v, last_v)
-      else
-        Expr(:call, :(:), first_v, step_v, last_v)
-      end
-    end
-  else
-    Expr(:vect, map(meta_program, sorted)...)
-  end
-end
-
-# 3.5 Detect level repetition: identical floor plans across levels → for loop
-detect_level_repetition(e::Expr) =
-  let stmts = e.head == :block ? collect(e.args) : [e]
-    # Group shape calls by their level reference
-    # This is a complex analysis — for now, return unchanged
-    # TODO: Implement when models with repeated floor plans are available
-    e
-  end
-
-# 3.6 Add header
-add_header(e::Expr) =
-  Expr(:block,
-       Expr(:toplevel_comment, "Auto-generated Khepri code from Revit model"),
-       Expr(:toplevel_comment, "Generated on: $(Dates.now())"),
-       Expr(:using, Expr(:., :KhepriRevit)),
-       stmts_of(e)...)
-
-stmts_of(e::Expr) = e.head == :block ? e.args : [e]
-
-# ─── Phase 4: Pretty-Printing ────────────────────────────────────
-
-function expr_to_string(e::Expr; indent=0)
-  let ind = "  " ^ indent,
-      io = IOBuffer()
-    _print_block(io, e, indent)
-    String(take!(io))
-  end
-end
-
-function _print_block(io, e::Expr, indent)
-  let stmts = e.head == :block ? e.args : [e],
-      prev_section = :none
-    for (i, s) in enumerate(stmts)
-      let cur_section = _stmt_section(s)
-        # Add blank line between sections
-        if i > 1 && cur_section != prev_section && prev_section != :none
-          println(io)
-        end
-        _print_stmt(io, s, indent)
-        println(io)
-        prev_section = cur_section
-      end
-    end
-  end
-end
-
-_stmt_section(s) =
-  if s isa Expr
-    if s.head == :toplevel_comment
-      :header
-    elseif s.head == :using
-      :header
-    elseif s.head == :(=) && s.args[2] isa Expr
-      let rhs = s.args[2]
-        if rhs.head == :call && rhs.args[1] == :level
-          :levels
-        elseif rhs.head == :call && rhs.args[1] in (:wall_family, :curtain_wall_family,
-            :slab_family, :ceiling_family, :column_family, :beam_family,
-            :door_family, :window_family, :roof_family, :family_element_family,
-            :table_family, :chair_family, :toilet_family, :sink_family, :closet_family,
-            :stair_family, :railing_family)
-          :families
-        else
-          :elements
-        end
-      end
-    elseif s.head == :call && s.args[1] == :set_backend_family
-      :families
-    elseif s.head == :function
-      :groups
-    elseif s.head == :(=) && s.args[2] isa Expr && s.args[2].head == :call &&
-           s.args[2].args[1] == :group
-      :groups
-    elseif s.head == :call && s.args[1] == :group_instance
-      :groups
-    elseif s.head == :for
-      :elements
-    elseif s.head == :call
-      :elements
-    else
-      :other
-    end
-  else
-    :other
-  end
-
-# Check if an Expr contains a :do block (for pretty-printing with do...end)
-_has_do_block(e::Expr) = e.head == :call && any(a -> a isa Expr && a.head == :do, e.args) ||
-                          e.head == :do ||
-                          (e.head == :call && any(a -> a isa Expr && _has_do_block(a), e.args))
-_has_do_block(x) = false
-
-# Print a call expression that contains a do block:
-# fn(args..., inner_fn() do\n  body\nend)
-function _print_do_call(io, e::Expr, indent)
-  let ind = "  " ^ indent
-    if e.head == :call
-      # Find do-block argument
-      let do_idx = findfirst(a -> a isa Expr && a.head == :do, e.args),
-          fn = e.args[1],
-          regular_args = [a for (i, a) in enumerate(e.args[2:end]) if i + 1 != do_idx]
-        if do_idx !== nothing
-          let do_expr = e.args[do_idx],
-              do_call = do_expr.args[1],  # the inner function call (e.g., collecting_shapes)
-              do_lambda = do_expr.args[2], # the -> with body
-              do_body = do_lambda.args[2]  # the block body
-            if isempty(regular_args)
-              print(io, "$(_expr_str(fn))($(_expr_str(do_call))) do")
-            else
-              print(io, "$(_expr_str(fn))($(join(map(_expr_str, regular_args), ", ")), $(_expr_str(do_call))) do")
-            end
-            println(io)
-            _print_block(io, do_body, indent + 1)
-            print(io, "$(ind)end")
-          end
-        else
-          print(io, _expr_str(e))
-        end
-      end
-    else
-      print(io, _expr_str(e))
-    end
-  end
-end
-
-function _print_stmt(io, s::Expr, indent)
-  let ind = "  " ^ indent
-    if s.head == :toplevel_comment
-      print(io, "$(ind)# $(s.args[1])")
-    elseif s.head == :using
-      print(io, "$(ind)using $(join(map(_expr_str, s.args), ", "))")
-    elseif s.head == :(=)
-      let rhs = s.args[2]
-        if _has_do_block(rhs)
-          print(io, "$(ind)$(s.args[1]) = ")
-          _print_do_call(io, rhs, indent)
-        else
-          print(io, "$(ind)$(s.args[1]) = $(_expr_str(rhs))")
-        end
-      end
-    elseif s.head == :function
-      let sig = s.args[1],
-          body = s.args[2]
-        print(io, "$(ind)function $(_expr_str(sig))")
-        println(io)
-        _print_block(io, body, indent + 1)
-        print(io, "$(ind)end")
-      end
-    elseif s.head == :for
-      let binding = s.args[1],
-          body = s.args[2]
-        print(io, "$(ind)for $(_expr_str(binding))")
-        println(io)
-        _print_block(io, body, indent + 1)
-        print(io, "$(ind)end")
-      end
-    elseif s.head == :call
-      _print_call(io, s, ind)
-    else
-      print(io, "$(ind)$(_expr_str(s))")
-    end
-  end
-end
-
-_print_stmt(io, s, indent) = print(io, "  " ^ indent, _expr_str(s))
-
-function _print_call(io, e::Expr, ind)
-  let fn = e.args[1],
-      args = e.args[2:end],
-      # Extract keyword args from :parameters block if present
-      params_block = findfirst(a -> a isa Expr && a.head == :parameters, args),
-      extra_kw = params_block !== nothing ? args[params_block].args : Expr[],
-      rest = params_block !== nothing ? [args[1:params_block-1]..., args[params_block+1:end]...] : args,
-      pos_args = filter(a -> !(a isa Expr && a.head == :kw), rest),
-      kw_args = vcat(filter(a -> a isa Expr && a.head == :kw, rest), extra_kw),
-      short = _expr_str(e)
-    if length(short) + length(ind) <= 80
-      print(io, "$(ind)$(short)")
-    else
-      # Multi-line format
-      print(io, "$(ind)$(fn)(")
-      let parts = vcat(map(_expr_str, pos_args), map(_kw_str, kw_args)),
-          first_line = "$(fn)("
-        for (i, p) in enumerate(parts)
-          if i == 1
-            print(io, p)
-          else
-            print(io, ",\n$(ind)  $(p)")
-          end
-        end
-        print(io, ")")
-      end
-    end
-  end
-end
-
-_kw_str(e::Expr) = "$(e.args[1])=$(_expr_str(e.args[2]))"
-
-function _expr_str(e::Expr)
-  if e.head == :call
-    let fn = e.args[1],
-        args = e.args[2:end],
-        # Extract keyword args from :parameters block if present
-        params_block = findfirst(a -> a isa Expr && a.head == :parameters, args),
-        extra_kw = params_block !== nothing ? args[params_block].args : Expr[],
-        rest = params_block !== nothing ? [args[1:params_block-1]..., args[params_block+1:end]...] : args,
-        pos = filter(a -> !(a isa Expr && a.head == :kw), rest),
-        kw = vcat(filter(a -> a isa Expr && a.head == :kw, rest), extra_kw),
-        parts = vcat(map(_expr_str, pos), map(_kw_str, kw))
-      "$(fn)($(join(parts, ", ")))"
-    end
-  elseif e.head == :(=)
-    "$(_expr_str(e.args[1])) = $(_expr_str(e.args[2]))"
-  elseif e.head == :kw
-    "$(e.args[1])=$(_expr_str(e.args[2]))"
-  elseif e.head == :vect
-    "[$(join(map(_expr_str, e.args), ", "))]"
-  elseif e.head == :tuple
-    "($(join(map(_expr_str, e.args), ", ")))"
-  elseif e.head == :ref
-    "$(_expr_str(e.args[1]))[$(join(map(_expr_str, e.args[2:end]), ", "))]"
-  elseif e.head == :.
-    join(map(a -> a isa QuoteNode ? string(a.value) : _expr_str(a), e.args), ".")
-  elseif e.head == :macrocall
-    let macro_name = string(e.args[1])
-      if macro_name == "@raw_str"
-        "raw\"$(e.args[end])\""
-      else
-        string(e)
-      end
-    end
-  elseif e.head == :using
-    "using $(join(map(_expr_str, e.args), ", "))"
-  elseif e.head == :do
-    # do block: args[1] is the call, args[2] is the -> lambda
-    let call_str = _expr_str(e.args[1]),
-        body = e.args[2].args[2],
-        body_stmts = body.head == :block ? body.args : [body]
-      "$(call_str) do; $(join(map(_expr_str, body_stmts), "; ")); end"
-    end
-  elseif e.head == :block
-    join(map(_expr_str, e.args), "; ")
-  else
-    string(e)
-  end
-end
-
-_expr_str(s::Symbol) = string(s)
-_expr_str(x::Real) = string(meta_program(x))
-_expr_str(x::Int) = string(x)
-_expr_str(x::AbstractString) = repr(x)
-_expr_str(x::Bool) = string(x)
-_expr_str(x::QuoteNode) = string(x.value)
-_expr_str(::Nothing) = "nothing"
-_expr_str(x) = string(x)
-
-# ─── Phase 5: Main Entry Point ───────────────────────────────────
-
-function generate_khepri_code(output_path::String; b::RVT=revit)
+function generate_khepri_code(output_path::String; b::RVT=revit, export_obj::Bool=true)
   let model = introspect_model(b=b),
+      _ = export_obj ? _attach_obj_families!(model, b,
+              joinpath(dirname(abspath(output_path)), "khepri_obj_models")) : model,
       raw_expr = model_to_expr(model),
+      fmap = family_expr_map(model),
       passes = [extract_levels,
-                extract_families,
-                add_backend_families(model),
+                extract_families(fmap),
+                add_backend_families(b, fmap),
                 loop_rerolling,
                 detect_level_repetition,
-                add_header],
+                add_header(b)],
       refined_expr = foldl((e, pass) -> pass(e), passes, init=raw_expr),
       code = expr_to_string(refined_expr)
     open(output_path, "w") do io
