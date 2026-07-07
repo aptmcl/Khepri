@@ -286,6 +286,9 @@ public Length WallBaseOffset(Element element)
 public Length WallTopOffset(Element element)
 public ElementId[] WallInserts(Element element)
 public XYZ[] FloorBoundaryVertices(Element element)
+public XYZ[][] FloorBoundaryLoops(Element element)
+public XYZ[][] CeilingBoundaryLoops(Element element)
+public XYZ[][] RoofBoundaryLoops(Element element)
 public string FloorTypeName(Element element)
 public ElementId FloorLevel(Element element)
 public double[] ElementMaterial(Element element)
@@ -1388,15 +1391,24 @@ _rebase_to_level(verts, lvl) =
     [xyz(cx(v), cy(v), cz(v) - h) for v in verts]
   end
 
+# Build a slab/ceiling/roof region from ALL horizontal boundary loops — the first is the outer boundary,
+# the rest are openings/shafts emitted as region holes (a single-loop element degrades to a plain region).
+_region_from_loops(loops) =
+  region(closed_polygonal_path(loops[1]), [closed_polygonal_path(l) for l in loops[2:end]]...)
+
+_rebased_loops(loops, lvl) =
+  filter(loop -> length(loop) >= 3,
+         [_rebase_to_level(_clean_boundary(loop), lvl) for loop in loops])
+
 floor_from_ref(r, b::RVT) =
   let level_id = @remote(b, FloorLevel(r)),
       lvl = level_from_ref(level_id, b),
-      verts = _rebase_to_level(_clean_boundary(@remote(b, FloorBoundaryVertices(r))), lvl),
+      loops = _rebased_loops(@remote(b, FloorBoundaryLoops(r)), lvl),
       mat = _material_from_revit(@remote(b, ElementMaterial(r)))
-    if length(verts) < 3
+    if isempty(loops)
       nothing
     else
-      let s = slab(closed_polygonal_path(verts), level=lvl,
+      let s = slab(_region_from_loops(loops), level=lvl,
                    family=slab_family(top_material=mat, bottom_material=mat, side_material=mat))
         ref!(b, s, r)
         s
@@ -1495,12 +1507,12 @@ all_windows(b::RVT) =
 ceiling_from_ref(r, b::RVT) =
   let level_id = @remote(b, CeilingLevel(r)),
       lvl = level_from_ref(level_id, b),
-      verts = _rebase_to_level(_clean_boundary(@remote(b, CeilingBoundaryVertices(r))), lvl),
+      loops = _rebased_loops(@remote(b, CeilingBoundaryLoops(r)), lvl),
       mat = _material_from_revit(@remote(b, ElementMaterial(r)))
-    if length(verts) < 3
+    if isempty(loops)
       nothing
     else
-      let s = ceiling(closed_polygonal_path(verts), level=lvl,
+      let s = ceiling(_region_from_loops(loops), level=lvl,
                       family=ceiling_family(bottom_material=mat, top_material=mat, side_material=mat))
         ref!(b, s, r)
         s
@@ -1517,12 +1529,12 @@ all_ceilings(b::RVT) =
 roof_from_ref(r, b::RVT) =
   let level_id = @remote(b, RoofLevel(r)),
       lvl = level_from_ref(level_id, b),
-      verts = _rebase_to_level(_clean_boundary(@remote(b, RoofBoundaryVertices(r))), lvl),
+      loops = _rebased_loops(@remote(b, RoofBoundaryLoops(r)), lvl),
       mat = _material_from_revit(@remote(b, ElementMaterial(r)))
-    if length(verts) < 3
+    if isempty(loops)
       nothing
     else
-      let s = roof(closed_polygonal_path(verts), level=lvl,
+      let s = roof(_region_from_loops(loops), level=lvl,
                    family=roof_family(bottom_material=mat, top_material=mat, side_material=mat))
         ref!(b, s, r)
         s
