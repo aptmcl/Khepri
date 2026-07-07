@@ -994,12 +994,22 @@ namespace KhepriRevit {
             return wall;
         }
         public ElementId[] CreatePathCurtainWall(XYZ[] pts, double[] angles, ElementId baseLevelId, ElementId topLevelId, ElementId famId, bool isStructural) {
-            WallType wallType = new FilteredElementCollector(doc).OfClass(typeof(WallType)).Cast<WallType>().FirstOrDefault(q => q.Name == "M_Storefront");
+            // Resolve the curtain-wall type robustly: prefer the passed family; else any curtain-kind
+            // type ("M_Storefront"/"Curtain Wall"); else the document's default wall type — so this works
+            // on any template, not only ones that happen to contain a type named "M_Storefront".
+            WallType wallType = (famId != null && famId != ElementId.InvalidElementId) ?
+                doc.GetElement(famId) as WallType : null;
+            if (wallType == null) {
+                var types = new FilteredElementCollector(doc).OfClass(typeof(WallType)).Cast<WallType>().ToList();
+                wallType = types.FirstOrDefault(q => q.Name == "M_Storefront")
+                        ?? types.FirstOrDefault(q => q.Kind == WallKind.Curtain)
+                        ?? doc.GetElement(doc.GetDefaultElementTypeId(ElementTypeGroup.WallType)) as WallType;
+            }
             CurveArray curves = PathCurveArray(pts, angles);
             List<ElementId> ids = new List<ElementId>();
             foreach (Curve curve in curves) {
                 Wall wall = Wall.Create(doc, curve, baseLevelId, isStructural);
-                wall.WallType = wallType;
+                if (wallType != null) wall.WallType = wallType;
                 ids.Add(wall.Id);
                 wall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).Set(topLevelId);
             }
@@ -1448,6 +1458,15 @@ namespace KhepriRevit {
                     // Already deleted as a dependent of a prior Delete; safe to ignore.
                 }
             }
+        }
+        public void DeleteElement(Element element) {
+            doc.Delete(element.Id);
+        }
+        // Group the given elements into a real Revit group and return the group instance id, so a
+        // reconstructed Khepri group_instance is a genuine Revit group (its members are excluded from
+        // DocWalls/etc.) rather than loose elements.
+        public ElementId CreateGroup(ElementId[] ids) {
+            return doc.Create.NewGroup(ids.ToList()).Id;
         }
         public static IOrderedEnumerable<Level> FindAndSortLevels(Document doc) =>
             new FilteredElementCollector(doc)
@@ -2145,30 +2164,43 @@ namespace KhepriRevit {
         // document has no open transaction" — the previous code committed the outer
         // transaction and started the StairsEditScope but never opened a Transaction
         // inside the scope.
-        public Element CreateStraightStair(XYZ basePoint, XYZ direction, double width,
-                                            Level baseLevel, Level topLevel, ElementId familyId) {
+        public ElementId CreateStraightStair(XYZ basePoint, XYZ direction, double width,
+                                             Level baseLevel, Level topLevel, ElementId familyId) {
             CurrentTransaction.Commit();
-            ElementId stairsId;
-            using (var scope = new StairsEditScope(doc, "Create Stairs")) {
-                stairsId = scope.Start(baseLevel.Id, topLevel.Id);
-                using (Transaction t = new Transaction(doc, "Add Straight Run")) {
-                    t.Start();
-                    WarningSwallower.KhepriWarnings(t);
-                    XYZ dir = direction.Normalize();
-                    double height = topLevel.Elevation - baseLevel.Elevation;
-                    StairsRun run = StairsRun.CreateStraightRun(doc, stairsId,
-                        Line.CreateBound(basePoint, basePoint + dir * height * 1.6),
-                        StairsRunJustification.Center);
-                    run.ActualRunWidth = width;
-                    t.Commit();
+            ElementId stairsId = ElementId.InvalidElementId;
+            bool ok = false;
+            try {
+                using (var scope = new StairsEditScope(doc, "Create Stairs")) {
+                    stairsId = scope.Start(baseLevel.Id, topLevel.Id);
+                    using (Transaction t = new Transaction(doc, "Add Straight Run")) {
+                        t.Start();
+                        WarningSwallower.KhepriWarnings(t);
+                        // The run's location line must sit AT the base level's elevation, be horizontal,
+                        // and have non-zero length — otherwise StairsRun.CreateStraightRun rejects it
+                        // ("not a valid location path line"). basePoint may be a local/xy point (z=0,
+                        // e.g. inside a group) while the base level is far above, so rebuild the line at
+                        // the level's Z with a guarded horizontal direction and run length.
+                        double height = topLevel.Elevation - baseLevel.Elevation;
+                        XYZ dir = direction.IsZeroLength() ? XYZ.BasisX : new XYZ(direction.X, direction.Y, 0.0);
+                        dir = dir.IsZeroLength() ? XYZ.BasisX : dir.Normalize();
+                        double runLen = Math.Max(Math.Abs(height) * 1.6, doc.Application.ShortCurveTolerance * 4);
+                        XYZ p0 = new XYZ(basePoint.X, basePoint.Y, baseLevel.Elevation);
+                        StairsRun run = StairsRun.CreateStraightRun(doc, stairsId,
+                            Line.CreateBound(p0, p0 + dir * runLen), StairsRunJustification.Center);
+                        run.ActualRunWidth = width;
+                        t.Commit();
+                    }
+                    scope.Commit(new StairsFailurePreprocessor());
+                    ok = true;
                 }
-                scope.Commit(new StairsFailurePreprocessor());
+            } catch (Exception e) {
+                PlugIn.WriteMessage($"CreateStraightStair: skipped a stair that could not be built: {e.Message}");
             }
             CurrentTransaction.Start();
-            if (familyId != null && familyId != ElementId.InvalidElementId) {
+            if (ok && familyId != null && familyId != ElementId.InvalidElementId) {
                 doc.GetElement(stairsId).ChangeTypeId(familyId);
             }
-            return doc.GetElement(stairsId);
+            return ok ? stairsId : ElementId.InvalidElementId;
         }
 
         // Stair (Spiral) — same inner-Transaction requirement as CreateStraightStair.
@@ -2346,22 +2378,39 @@ namespace KhepriRevit {
                 Family family = fi.Symbol.Family;
                 if (family == null || !exportedFamilies.Add(family.Id.Value))
                     continue;
-                string familyName = SanitizeMaterialName(family.Name);
-                string category = fi.Category?.Name ?? "Unknown";
-                Document famDoc = doc.EditFamily(family);
-                if (famDoc == null) continue;
+                // Best-effort per family: some families aren't editable (in-place, certain system-owned
+                // ones) and EditFamily would throw — skip them and keep exporting the rest rather than
+                // aborting the whole batch.
                 try {
-                    string objPath = Path.Combine(folderPath, familyName + ".obj");
-                    ExportDocumentGeometryToOBJ(famDoc, objPath);
-                    double[] dims = GetFamilyDimensions(famDoc);
-                    results.Add(new string[] {
-                        familyName,
-                        dims[0].ToString("G"),
-                        dims[1].ToString("G"),
-                        category
-                    });
-                } finally {
-                    famDoc.Close(false);
+                    if (!family.IsEditable) continue;
+                    string familyName = SanitizeMaterialName(family.Name);
+                    string category = fi.Category?.Name ?? "Unknown";
+                    Document famDoc = doc.EditFamily(family);
+                    if (famDoc == null) continue;
+                    try {
+                        string objPath = Path.Combine(folderPath, familyName + ".obj");
+                        ExportDocumentGeometryToOBJ(famDoc, objPath);
+                        double[] dims = GetFamilyDimensions(famDoc);
+                        // Also save the family as a .rfa so the reconstructed program can load the REAL
+                        // native family in Revit (revit_file_family), not just a system default. Revit
+                        // doesn't retain a loaded family's source path, so we re-materialize one here.
+                        string rfaPath = Path.Combine(folderPath, familyName + ".rfa");
+                        try {
+                            SaveAsOptions opts = new SaveAsOptions { OverwriteExistingFile = true };
+                            famDoc.SaveAs(rfaPath, opts);
+                        } catch { rfaPath = ""; }
+                        results.Add(new string[] {
+                            familyName,
+                            dims[0].ToString("G"),
+                            dims[1].ToString("G"),
+                            category,
+                            rfaPath
+                        });
+                    } finally {
+                        famDoc.Close(false);
+                    }
+                } catch (Exception e) {
+                    PlugIn.WriteMessage($"ExportAllFamiliesToOBJWithMetadata: skipped '{family?.Name}': {e.Message}");
                 }
             }
             EnsureTransaction(uiapp);
