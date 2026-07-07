@@ -2001,3 +2001,18 @@ backend_save_as(b::ACAD, pathname::String, format::String) =
 export autocad_command
 autocad_command(s::String) =
   @remote(autocad, Command("$(s)\n"))
+
+# ── Geometric round-trip (Phase 9) ──────────────────────────────────────────
+# Read the drawing's shapes and emit an equivalent, runnable Khepri program. Curves/points/text/polygon-
+# meshes reconstruct parametrically via b_create_shape_from_ref_value; 3D solids (AutoCAD Solid3d) can't
+# be classified back to a primitive by the API, so they come back as `unknown` and shapes_to_expr skips
+# them. Pure geometry — no levels/families — reusing KhepriBase's codegen pipeline. Accessed qualified
+# (KhepriAutoCAD.generate_khepri_code), matching KhepriRevit.
+# ACAD is a SocketBackend alias, so the default b_codegen_module (parentmodule of the type) resolves to
+# KhepriBase; make generated code load KhepriAutoCAD instead (matches KhepriRevit's b_codegen_module).
+KhepriBase.b_codegen_module(b::ACAD) = :KhepriAutoCAD
+
+introspect_model(; b::ACAD=autocad) = existing_shapes(backend=b)
+
+generate_khepri_code(output_path::String; b::ACAD=autocad) =
+  KhepriBase.shapes_to_khepri_code(introspect_model(b=b), b; output_path=output_path)
