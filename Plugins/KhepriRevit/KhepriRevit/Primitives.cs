@@ -628,6 +628,33 @@ namespace KhepriRevit {
                 .WherePasses(new ElementClassFilter(typeof(Material)))
                 .Cast<Material>().FirstOrDefault(e => e.Name.ToString().Equals(name));
 
+        // Read the "primary" material of a system element (wall/floor/…) for material round-trip: the
+        // compound structure's core-layer material, else the element's largest-area material. Returned as
+        // [r, g, b, transparency(0-100), shininess(0-128), smoothness(0-100)]; a neutral grey when none.
+        public double[] ElementMaterial(Element element) {
+            Material mat = null;
+            try {
+                ElementId matId = ElementId.InvalidElementId;
+                var hostType = doc.GetElement(element.GetTypeId()) as HostObjAttributes;
+                if (hostType != null) {
+                    CompoundStructure cs = hostType.GetCompoundStructure();
+                    if (cs != null && cs.LayerCount > 0) {
+                        int core = cs.GetFirstCoreLayerIndex();
+                        matId = cs.GetMaterialId(core >= 0 && core < cs.LayerCount ? core : 0);
+                    }
+                }
+                if (matId == ElementId.InvalidElementId) {
+                    var mids = element.GetMaterialIds(false);
+                    if (mids.Count > 0) matId = mids.First();
+                }
+                if (matId != ElementId.InvalidElementId) mat = doc.GetElement(matId) as Material;
+            } catch { }
+            if (mat == null) return new double[] { 0.6, 0.6, 0.6, 0, 64, 50 };
+            Color c = mat.Color;
+            return new double[] { c.Red / 255.0, c.Green / 255.0, c.Blue / 255.0,
+                                  mat.Transparency, mat.Shininess, mat.Smoothness };
+        }
+
         // Material.Create throws on a duplicate name, so derive a unique one.
         string UniqueMaterialName(string baseName) {
             var existing = new HashSet<string>(
