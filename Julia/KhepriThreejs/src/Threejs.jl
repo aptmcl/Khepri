@@ -237,6 +237,20 @@ KhepriBase.has_boolean_ops(::Type{THR}) = HasBooleanOps{false}()
 
 KhepriBase.void_ref(b::THR) = -1 % Int32
 
+# Groups have no native KhepriThreejs representation; realize a group instance by realizing its member
+# shapes at the instance location (the group itself is just a container). Mirrors Revit's group
+# flattening minus the native CreateGroup, so grouped rooms/furniture render on the mesh backend.
+KhepriBase.realize(b::THR, s::KhepriBase.Group) = KhepriBase.void_ref(b)
+KhepriBase.realize(b::THR, s::KhepriBase.GroupInstance) =
+  KhepriBase.with(KhepriBase.current_cs,
+      KhepriBase.translated_cs(KhepriBase.current_cs(),
+          KhepriBase.cx(s.loc), KhepriBase.cy(s.loc), KhepriBase.cz(s.loc))) do
+    let factory = s.group.factory
+      factory === nothing ? KhepriBase.void_ref(b) :
+        (KhepriBase.ref_values(b, KhepriBase.collecting_shapes(factory)); KhepriBase.void_ref(b))
+    end
+  end
+
 KhepriBase.b_material(b::THR, name, base_color, metallic, roughness, specular,
                        ior, transmission, transmission_roughness,
                        clearcoat, clearcoat_roughness,
