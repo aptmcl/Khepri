@@ -129,6 +129,22 @@ namespace KhepriRevit {
             }
         }
 
+        // Commit the current top-level transaction, run work that Revit forbids inside an open
+        // transaction (StairsEditScope, ExportImage, view switching), then ALWAYS reopen a fresh
+        // transaction — even if the work throws. Without the guaranteed restart, an exception in the
+        // work leaves CurrentTransaction committed-but-non-null, so EnsureTransaction (which only opens
+        // a new one when the field is null) stays a no-op and every later write in the read-burst is
+        // silently dropped. No catch here: the exception still reaches the RPC caller, where RMIfy
+        // turns it into a clean BackendError — so a failure restores the transaction AND informs Julia.
+        private void WithSuspendedTransaction(Action action) {
+            CurrentTransaction.Commit();
+            try {
+                action();
+            } finally {
+                CurrentTransaction.Start();
+            }
+        }
+
         public bool ConvertIFCFile(string ifcpath) {
             string rvtpath = Path.ChangeExtension(ifcpath, "rvt");
             // If the file is open, it must be closed first
@@ -1272,13 +1288,13 @@ namespace KhepriRevit {
 
         //Family Creation
         public void CreateFamily(string familyTemplatesPath, string familyTemplateName, string familyName) {
-            CurrentTransaction.Commit();
-            Family family = new FilteredElementCollector(doc)
-                .OfClass(typeof(Family)).Cast<Family>()
-                .FirstOrDefault<Family>(e => e.Name.Equals(familyName));
-            familyDoc = family?.Document ??
-                uiapp.Application.NewFamilyDocument(Path.Combine(familyTemplatesPath, familyTemplateName + familyTemplateExt));
-            CurrentTransaction.Start();
+            WithSuspendedTransaction(() => {
+                Family family = new FilteredElementCollector(doc)
+                    .OfClass(typeof(Family)).Cast<Family>()
+                    .FirstOrDefault<Family>(e => e.Name.Equals(familyName));
+                familyDoc = family?.Document ??
+                    uiapp.Application.NewFamilyDocument(Path.Combine(familyTemplatesPath, familyTemplateName + familyTemplateExt));
+            });
         }
 
         public void CreateFamilyExtrusionTest(XYZ[] pts, double height) {
@@ -1392,13 +1408,13 @@ namespace KhepriRevit {
             up = forward.CrossProduct(up).CrossProduct(forward);
             view3D.SetOrientation(new ViewOrientation3D(eye, up, forward));
             view3D.CropBoxActive = false;
-            CurrentTransaction.Commit();
-            uiapp.ActiveUIDocument.ActiveView = view3D;
-            uiapp.ActiveUIDocument.RefreshActiveView();
-            UIDocument uidoc = uiapp.ActiveUIDocument;
-            UIView uiview = uidoc.GetOpenUIViews().First(uv=>uv.ViewId.Equals(view3D.Id));
-            uiview.ZoomSheetSize();
-            CurrentTransaction.Start();
+            WithSuspendedTransaction(() => {
+                uiapp.ActiveUIDocument.ActiveView = view3D;
+                uiapp.ActiveUIDocument.RefreshActiveView();
+                UIDocument uidoc = uiapp.ActiveUIDocument;
+                UIView uiview = uidoc.GetOpenUIViews().First(uv => uv.ViewId.Equals(view3D.Id));
+                uiview.ZoomSheetSize();
+            });
         }
 
         public void ViewSize(int width, int height) {
@@ -1411,15 +1427,15 @@ namespace KhepriRevit {
             view.DetailLevel = ViewDetailLevel.Fine;
             view.SunAndShadowSettings.SunAndShadowType = SunAndShadowType.Lighting;
             view.SetBackground(ViewDisplayBackground.CreateSky());
-            CurrentTransaction.Commit();
-            var options = new ImageExportOptions();
-            options.ExportRange = ExportRange.VisibleRegionOfCurrentView;
-            options.FilePath = path;
-            options.ShadowViewsFileType = (Path.GetExtension(path) == ".png") ? 
-                ImageFileType.PNG : 
-                ImageFileType.JPEGLossless;
-            doc.ExportImage(options);
-            CurrentTransaction.Start();
+            WithSuspendedTransaction(() => {
+                var options = new ImageExportOptions();
+                options.ExportRange = ExportRange.VisibleRegionOfCurrentView;
+                options.FilePath = path;
+                options.ShadowViewsFileType = (Path.GetExtension(path) == ".png") ?
+                    ImageFileType.PNG :
+                    ImageFileType.JPEGLossless;
+                doc.ExportImage(options);
+            });
         }
 
         public List<Element> AllElements() {
@@ -2175,22 +2191,26 @@ namespace KhepriRevit {
         public Element CreateSpiralStair(XYZ center, double radius, double startAngle,
                                           double includedAngle, bool clockwise, double width,
                                           Level baseLevel, Level topLevel, ElementId familyId) {
-            CurrentTransaction.Commit();
-            ElementId stairsId;
-            using (var scope = new StairsEditScope(doc, "Create Spiral Stairs")) {
-                stairsId = scope.Start(baseLevel.Id, topLevel.Id);
-                using (Transaction t = new Transaction(doc, "Add Spiral Run")) {
-                    t.Start();
-                    WarningSwallower.KhepriWarnings(t);
-                    StairsRun run = StairsRun.CreateSpiralRun(doc, stairsId,
-                        center, radius, startAngle, includedAngle,
-                        clockwise, StairsRunJustification.Center);
-                    run.ActualRunWidth = width;
-                    t.Commit();
+            // Element return has no clean null wire sentinel (wElement would NRE on null), so an
+            // un-buildable stair must PROPAGATE its exception, not return null. WithSuspendedTransaction's
+            // finally guarantees the restart; RMIfy turns the throw into a clean BackendError.
+            ElementId stairsId = ElementId.InvalidElementId;
+            WithSuspendedTransaction(() => {
+                using (var scope = new StairsEditScope(doc, "Create Spiral Stairs")) {
+                    stairsId = scope.Start(baseLevel.Id, topLevel.Id);
+                    using (Transaction t = new Transaction(doc, "Add Spiral Run")) {
+                        t.Start();
+                        WarningSwallower.KhepriWarnings(t);
+                        StairsRun run = StairsRun.CreateSpiralRun(doc, stairsId,
+                            center, radius, startAngle, includedAngle,
+                            clockwise, StairsRunJustification.Center);
+                        run.ActualRunWidth = width;
+                        t.Commit();
+                    }
+                    scope.Commit(new StairsFailurePreprocessor());
                 }
-                scope.Commit(new StairsFailurePreprocessor());
-            }
-            CurrentTransaction.Start();
+            });
+            // Reached only on the success path (a throw above skips these).
             if (familyId != null && familyId != ElementId.InvalidElementId) {
                 doc.GetElement(stairsId).ChangeTypeId(familyId);
             }
