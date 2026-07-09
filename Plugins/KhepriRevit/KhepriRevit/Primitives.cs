@@ -558,18 +558,20 @@ namespace KhepriRevit {
         }
 
         Solid SolidFromElement(Element e) {
-            Options opt = new Options();
-            GeometryElement geo = e.get_Geometry(opt);
-            Solid union = null;
-            foreach (GeometryObject obj in geo) {
-                Solid solid = obj as Solid;
-                union = union == null ?
-                    solid :
-                    BooleanOperationsUtils.ExecuteBooleanOperation(
-                        union, solid,
-                        BooleanOperationsType.Union);
+            using (Options opt = new Options())
+            using (GeometryElement geo = e.get_Geometry(opt)) {
+                Solid union = null;
+                foreach (GeometryObject obj in geo) {
+                    Solid solid = obj as Solid;
+                    if (solid == null || solid.Faces.Size == 0) continue;   // skip non-solids / empty solids
+                    union = union == null ?
+                        SolidUtils.Clone(solid) :   // clone so the result outlives the disposed GeometryElement
+                        BooleanOperationsUtils.ExecuteBooleanOperation(union, solid, BooleanOperationsType.Union);
+                }
+                if (union == null)
+                    throw new InvalidOperationException($"BooleanOperation: element {e?.Id} has no solid geometry");
+                return union;
             }
-            return union;
         }
 
         public Element BooleanOperation(string name, ElementId idA, ElementId idB, BooleanOperationsType op) {
@@ -669,7 +671,12 @@ namespace KhepriRevit {
                     if (mids.Count > 0) matId = mids.First();
                 }
                 if (matId != ElementId.InvalidElementId) mat = doc.GetElement(matId) as Material;
-            } catch { }
+            } catch (Autodesk.Revit.Exceptions.ApplicationException ex) {
+                // A genuine Revit read failure — log with element identity so it is visible during model
+                // read, then fall through to grey. A non-ApplicationException (a programming bug) is NOT
+                // caught here and propagates as an RPC error rather than silently becoming grey.
+                PlugIn.WriteMessage($"ElementMaterial: could not read material for element {element?.Id}: {ex.Message}");
+            }
             if (mat == null) return new double[] { 0.6, 0.6, 0.6, 0, 64, 50 };
             Color c = mat.Color;
             return new double[] { c.Red / 255.0, c.Green / 255.0, c.Blue / 255.0,
@@ -2245,10 +2252,11 @@ namespace KhepriRevit {
         // inside the scope.
         public ElementId CreateStraightStair(XYZ basePoint, XYZ direction, double width,
                                              Level baseLevel, Level topLevel, ElementId familyId) {
-            CurrentTransaction.Commit();
+            // Let a build failure PROPAGATE (RMIfy → clean BackendError) instead of swallowing it and
+            // returning InvalidElementId under an OK reply. WithSuspendedTransaction's finally always
+            // restarts the transaction — matching the CreateSpiralStair sibling.
             ElementId stairsId = ElementId.InvalidElementId;
-            bool ok = false;
-            try {
+            WithSuspendedTransaction(() => {
                 using (var scope = new StairsEditScope(doc, "Create Stairs")) {
                     stairsId = scope.Start(baseLevel.Id, topLevel.Id);
                     using (Transaction t = new Transaction(doc, "Add Straight Run")) {
@@ -2270,16 +2278,13 @@ namespace KhepriRevit {
                         t.Commit();
                     }
                     scope.Commit(new StairsFailurePreprocessor());
-                    ok = true;
                 }
-            } catch (Exception e) {
-                PlugIn.WriteMessage($"CreateStraightStair: skipped a stair that could not be built: {e.Message}");
-            }
-            CurrentTransaction.Start();
-            if (ok && familyId != null && familyId != ElementId.InvalidElementId) {
+            });
+            // Reached only on the success path (a throw above skips these).
+            if (familyId != null && familyId != ElementId.InvalidElementId) {
                 doc.GetElement(stairsId).ChangeTypeId(familyId);
             }
-            return ok ? stairsId : ElementId.InvalidElementId;
+            return stairsId;
         }
 
         // Stair (Spiral) — same inner-Transaction requirement as CreateStraightStair.
