@@ -609,10 +609,15 @@ namespace KhepriRevit {
         private static FamilySymbol GetFirstSymbol(Family family) =>
             family.Document.GetElement(family.GetFamilySymbolIds().First()) as FamilySymbol;
 
+        // Two levels are "the same" within this tolerance (feet, ~0.03 mm): larger than the drift from the
+        // 3.28084 metre↔feet constant / ULPs, far smaller than any real level spacing. Exact == here spawned
+        // duplicate Levels (each with its own FloorPlan + CeilingPlan view) via FindOrCreate/UpperLevel.
+        const double LevelElevationTolerance = 1e-4; // feet
         public Level FindLevelAtElevation(Length elevation) =>
             new FilteredElementCollector(doc)
                 .WherePasses(new ElementClassFilter(typeof(Level), false))
-                .Cast<Level>().FirstOrDefault(e => e.Elevation == elevation);
+                .Cast<Level>()
+                .FirstOrDefault(e => Math.Abs(e.Elevation - elevation.Value) < LevelElevationTolerance);
 
         public Level CreateLevelAtElevation(Length elevation) {
             Level level = Level.Create(doc, elevation);
