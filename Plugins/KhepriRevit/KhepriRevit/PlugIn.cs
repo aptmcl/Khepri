@@ -147,6 +147,15 @@ namespace KhepriRevit {
                 WriteMessage($"OnStartup: KhepriRevit plugin loading. Revit={application.ControlledApplication.VersionNumber}, AssemblyLocation={typeof(PlugIn).Assembly.Location}");
                 application.ControlledApplication.DocumentCreated += OnDocumentCreated;
                 application.ControlledApplication.DocumentOpened += OnDocumentOpened;
+                // App-level warning swallower: covers EVERY transaction, including the mid-operation
+                // CurrentTransaction.Commit()/Start() restarts (wall-then-door, etc.) that the
+                // per-transaction WarningSwallower doesn't re-attach to. Benign warnings (overlapping
+                // walls, etc.) are auto-dismissed dialog-free; errors are left to surface to Julia.
+                application.ControlledApplication.FailuresProcessing += OnFailuresProcessing;
+                // Auto-dismiss startup/task dialogs (version-upgrade prompts, missing links/worksets,
+                // etc.) so a script-launched Revit reaches a usable state without manual clicks.
+                // Registered on the UI app at startup so it fires for document-open dialogs too.
+                application.DialogBoxShowing += OnDialogBoxShowing;
                 WriteMessage("OnStartup: event handlers registered, returning Result.Succeeded");
                 return Result.Succeeded;
             } catch (Exception e) {
@@ -185,6 +194,41 @@ namespace KhepriRevit {
         void OnDocumentOpened(object sender, DocumentOpenedEventArgs e) {
             WriteMessage($"OnDocumentOpened: doc='{e.Document?.Title}'");
             OnDocumentOpenedOrCreated(sender);
+        }
+
+        // Delete every Warning-severity failure across all transactions so script-driven rebuilds are
+        // dialog-free. Errors are left alone (Continue) so they still surface as exceptions on the
+        // Julia side rather than being silently dropped.
+        void OnFailuresProcessing(object sender, Autodesk.Revit.DB.Events.FailuresProcessingEventArgs e) {
+            Autodesk.Revit.DB.FailuresAccessor fa = e.GetFailuresAccessor();
+            bool deleted = false, hasError = false;
+            foreach (Autodesk.Revit.DB.FailureMessageAccessor f in fa.GetFailureMessages()) {
+                if (f.GetSeverity() == Autodesk.Revit.DB.FailureSeverity.Warning) {
+                    fa.DeleteWarning(f);
+                    deleted = true;
+                } else {
+                    hasError = true;
+                }
+            }
+            e.SetProcessingResult((deleted && !hasError)
+                ? Autodesk.Revit.DB.FailureProcessingResult.ProceedWithCommit
+                : Autodesk.Revit.DB.FailureProcessingResult.Continue);
+        }
+
+        // Dismiss any dialog Revit tries to show (upgrade prompts, missing links, worksets, audit
+        // notices, etc.) by overriding its result with a "proceed/close" value, so an automated,
+        // script-launched Revit never blocks on a modal. The DialogId is logged for diagnosis.
+        void OnDialogBoxShowing(object sender, Autodesk.Revit.UI.Events.DialogBoxShowingEventArgs e) {
+            try {
+                WriteMessage($"OnDialogBoxShowing: auto-dismissing dialog id='{e.DialogId}'");
+                if (e is Autodesk.Revit.UI.Events.TaskDialogShowingEventArgs td) {
+                    td.OverrideResult((int)TaskDialogResult.Ok);
+                } else {
+                    e.OverrideResult(1); // IDOK
+                }
+            } catch (Exception ex) {
+                WriteMessage($"OnDialogBoxShowing: failed for '{e.DialogId}': {ex.Message}");
+            }
         }
 
         public Result OnShutdown(UIControlledApplication application) {
