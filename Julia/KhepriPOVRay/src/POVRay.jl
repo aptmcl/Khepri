@@ -591,11 +591,13 @@ See also: b_pointlight, KhepriBase.pointlight.
 "Reference luminous intensity (candela) that maps a point light to full colour."
 const povray_default_candela = 1500
 
-KhepriBase.b_pointlight(b::POVRay, loc::Loc, color::RGB, intensity::Real, range::Real) =
+# Signature must match the canonical b_pointlight(b, loc, energy, color) (Backend.jl) or it never
+# dispatches and POVRay point lights silently fall through to the ignoring default.
+KhepriBase.b_pointlight(b::POVRay, loc, energy, color) =
   write_povray_pointlight(connection(b), loc,
-    rgb(red(color)*intensity/povray_default_candela,
-        green(color)*intensity/povray_default_candela,
-        blue(color)*intensity/povray_default_candela))
+    rgb(red(color)*energy/povray_default_candela,
+        green(color)*energy/povray_default_candela,
+        blue(color)*energy/povray_default_candela))
 
 KhepriBase.b_ieslight(b::POVRay, file, loc, dir, alpha, beta, gamma) =
   write_povray_pointlight(connection(b), loc, rgb(1, 1, 1))
