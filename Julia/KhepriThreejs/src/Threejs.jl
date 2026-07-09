@@ -149,6 +149,8 @@ typedFunction("spiralStair", [Point3d, Float32, Float32, Float32, Bool, Float32,
 typedFunction("groupedMesh", [[MeshPart]], Id, (parts: any[]) => {
 typedFunction("wallWithOpenings", [[Point3d], [Point3d], [Point3d], Float32, Bool, [Float32], [Float32], [Float32], [Float32], MatId, MatId, MatId], Id, (rightVs: THREE.Vector3[], leftVs: THREE.Vector3[], centerVs: THREE.Vector3[], height: number, closed: boolean, opStarts: number[], opBaseHeights: number[], opWidths: number[], opHeights: number[], rightMat: THREE.Material, leftMat: THREE.Material, sideMat: THREE.Material) => {
 typedFunction("railing", [[Point3d], Float32, Float32, Float32, Float32, MatId], Id, (pathVs: THREE.Vector3[], baseHeight: number, height: number, postSpacing: number, postRadius: number, mat: THREE.Material) => {
+typedFunction("pointLight", [Point3d, Float32, RGB], Id, (loc: THREE.Vector3, energy: number, color: THREE.Color) => {
+typedFunction("spotLight", [Point3d, Point3d, Float32, Float32], Id, (loc: THREE.Vector3, target: THREE.Vector3, hotspot: number, falloff: number) => {
 """
 
 
