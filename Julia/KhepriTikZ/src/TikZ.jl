@@ -1140,7 +1140,7 @@ to_pdf(texpath) =
                              devnull),
                     wait=true)
               catch e
-                error("Could not process $texname to generate $pdfname.")
+                KhepriBase.rethrow_with_context("Could not process $texname to generate $pdfname.", e)
               end
             end
           end
