@@ -110,11 +110,22 @@ namespace KhepriAutoCAD {
         }
 
         public void CommitAndStop() {
-            try {
-                tr?.Commit();
-                tr?.Dispose();
-                doc?.Editor.Regen();
-            } catch { /* best effort during cleanup */ }
+            var t = tr;
+            tr = null;   // clear first so a disposed transaction can never be reused
+            if (t != null) {
+                try {
+                    t.Commit();
+                } catch (System.Exception e) {
+                    // A failed commit must NOT be silent — the client already received per-op OK
+                    // frames, so its geometry would vanish with no signal — and must NOT skip the
+                    // Dispose below, which would leak the transaction and keep the document lock.
+                    // Report it to the command line and still dispose.
+                    doc?.Editor.WriteMessage("\nKhepri: transaction commit failed: " + e.Message + "\n");
+                } finally {
+                    t.Dispose();
+                }
+            }
+            try { doc?.Editor.Regen(); } catch { /* Regen is a cosmetic redraw; never let it break the batch */ }
         }
 
         public void CommitAndStartTransaction() {

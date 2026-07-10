@@ -585,8 +585,16 @@ namespace KhepriAutoCAD {
             using (curve)
             using (DBObjectCollection coll = new DBObjectCollection()) {
                 coll.Add(curve);
-                DBObjectCollection curves = Region.CreateFromCurves(coll);
-                return WithMaterial((Entity)curves[0], matId);
+                using (DBObjectCollection curves = Region.CreateFromCurves(coll)) {
+                    // CreateFromCurves can return more than one region; keep the first (its ownership
+                    // passes to the caller when it is added to the database) and dispose the rest,
+                    // else their unmanaged DBObject handles leak. Disposing the collection frees only
+                    // the wrapper, not the kept entity.
+                    Entity result = WithMaterial((Entity)curves[0], matId);
+                    for (int i = 1; i < curves.Count; i++)
+                        (curves[i] as DBObject)?.Dispose();
+                    return result;
+                }
             }
         }
         public Entity SurfaceCircle(Point3d c, Vector3d n, double r, ObjectId matId) =>
