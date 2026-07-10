@@ -82,6 +82,14 @@ namespace KhepriRevit {
         static private Dictionary<Family, Dictionary<string, FamilySymbol>> loadedFamiliesSymbols =
             new Dictionary<Family, Dictionary<string, FamilySymbol>>();
 
+        // Family / FamilySymbol objects are document-scoped; drop the caches when the active
+        // document changes so the new document loads its own families (see EnsureTransaction).
+        static private void InvalidateFamilyCaches() {
+            pathToFamily.Clear();
+            loadedFamiliesSymbols.Clear();
+            Channel.InvalidateFamilyCache();
+        }
+
         public Primitives(UIApplication app) : base() {
             uiapp = app;
             doc = uiapp.ActiveUIDocument.Document;
@@ -104,7 +112,16 @@ namespace KhepriRevit {
         public void EnsureTransaction(UIApplication app) {
             Document activeDoc = app.ActiveUIDocument.Document;
             if (CurrentTransaction == null || !activeDoc.Equals(doc)) {
+                bool docChanged = !activeDoc.Equals(doc);
                 CommitAndDisposeTransaction();
+                if (docChanged) {
+                    // The active document changed (LoadRVTFile, or the user switched project tabs).
+                    // Family / FamilySymbol objects and the id->Family reverse map are DOCUMENT-SCOPED,
+                    // so caches built against the previous document are invalid here — drop them so the
+                    // new document loads its own families rather than reusing stale cross-document refs.
+                    // Only on an actual switch, so within-document caching is preserved.
+                    InvalidateFamilyCaches();
+                }
                 doc = activeDoc;
                 CurrentTransaction = new Transaction(doc, "Execute");
                 CurrentTransaction.Start();

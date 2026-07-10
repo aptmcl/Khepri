@@ -104,6 +104,12 @@ namespace KhepriRevit {
             loadedFamilies[i] = f;
             wInt64(i);
         }
+        // Called when the active document changes (Primitives.EnsureTransaction): the id->Family
+        // reverse map is document-scoped, so drop it (keeping the id-0 -> null sentinel).
+        public static void InvalidateFamilyCache() {
+            loadedFamilies.Clear();
+            loadedFamilies[0L] = null;
+        }
 
 
         /*
