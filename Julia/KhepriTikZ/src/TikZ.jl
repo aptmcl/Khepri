@@ -245,18 +245,6 @@ tikz_polar_segment(out::IO, p::Loc, v::VPol, options) =
     println(out, ";")
   end
 
-tikz_dimension(out::IO, p::Loc, q::Loc, text::AbstractString) =
-  begin
-    error("Bum")
-    print(out, "\\dimline{")
-    tikz_coord(out, p)
-    print(out, "}{")
-    tikz_coord(out, q)
-    print(out, "}{;")
-    print(out, text)
-    println(out, "};")
-  end
-
 tikz_dim_line(out::IO, p::Loc, q::Loc, text::AbstractString, outside) =
   begin
     print(out, "\\draw[dimension,latex-latex]")
@@ -964,8 +952,6 @@ add_tikz(str) =
 ###
 # Dimensioning
 
-#backend_dimension(b::TikZ, pa, pb, sep, scale, style) =
-#  tikz_dimension(connection(b), pa, pb, )
 
 #=openpdf()
       pdfname = makepdf(latex)
