@@ -131,7 +131,7 @@ typedFunction("meshIndexed", [ArrayFloat32, ArrayInt32, MatId], Id, (vs: Float32
 typedFunction("quadStrip", [[Point3d], [Point3d], Bool, MatId], Id, (ps: THREE.Vector3[], qs: THREE.Vector3[], smooth: boolean, mat: THREE.Material) => {
 typedFunction("surfaceGrid", [[[Point3d]], Bool, Bool, Bool, Bool, MatId], Id, (points: THREE.Vector3[][], uClosed: boolean, vClosed: boolean, uSmooth: boolean, vSmooth: boolean, mat: THREE.Material) => {    
 typedFunction("extrudedSurface", [Matrix4x4, [Point2d], Bool, [[Point2d]], [Bool], Vector3d, MatId], Id, (m: THREE.Matrix4, ps: THREE.Vector2[], _smooth: boolean, qss: THREE.Vector2[][], _smoothHoles: boolean, v: THREE.Vector3, mat: THREE.Material) => {
-typedFunction("meshObjFmt", [Str, Str, Matrix4x4], Id, (path: string, name: string, m: THREE.Matrix4) => {
+typedAsyncFunction("meshObjFmt", [Str, Str, Matrix4x4], Id, (path: string, name: string, m: THREE.Matrix4, cont: Function) =>
 typedFunction("MeshPhysicalMaterial", [Dict], MatId, (params: { [key: string]: any }) =>
 typedFunction("MeshPbrMaterial", [Dict], MatId, (params: { [key: string]: any }) =>
 typedFunction("MeshPhongMaterial", [Dict], MatId, (params: { [key: string]: any }) =>

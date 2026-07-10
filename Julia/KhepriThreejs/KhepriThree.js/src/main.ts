@@ -808,19 +808,30 @@ function getObject3D(idx: number) {
   return obj ? obj : error(`Requested non-existent Object3D with id '${idx}'.`);
 }
 
+// Recursively free the GPU resources of an object and ALL its descendants. The previous shallow
+// `obj instanceof THREE.Mesh` check missed the children of a THREE.Group (OBJ models, instanced
+// groups, ...), leaking their geometry (and any per-sprite material/texture). Shared materials —
+// the ones tracked in the `materials` array and freed by delMaterial — are left alone; only
+// per-object geometry and per-sprite material/map are disposed.
+function disposeObject3D(obj: THREE.Object3D) {
+  obj.traverse(child => {
+    if (child instanceof THREE.Mesh) {
+      child.geometry.dispose();
+    } else if (child instanceof THREE.Sprite) {
+      if (child.material instanceof THREE.SpriteMaterial && child.material.map) {
+        child.material.map.dispose();
+      }
+      child.material.dispose();
+      child.geometry.dispose();
+    }
+  });
+}
+
 function delObject3D(idx: number) {
   const obj = objects.get(idx);
   if (obj) {
     obj.removeFromParent();
-    if (obj instanceof THREE.Mesh) {
-      obj.geometry.dispose();
-    } else if (obj instanceof THREE.Sprite) {
-      if (obj.material instanceof THREE.SpriteMaterial && obj.material.map) {
-        obj.material.map.dispose();
-      }
-      obj.material.dispose();
-      obj.geometry.dispose();
-    }
+    disposeObject3D(obj);
     objects.delete(idx);
     delete obj.userData.Object3DId;
     return idx;
@@ -834,9 +845,7 @@ function delAllObject3Ds() {
   objects.forEach((obj, _id) => {
     removeGhostFromObject(obj);
     obj.removeFromParent();
-    if (obj instanceof THREE.Mesh) {
-      obj.geometry.dispose();
-    }
+    disposeObject3D(obj);
     delete obj.userData.Object3DId;
   });
   objects.clear();
@@ -1389,6 +1398,17 @@ function addSprite(pos: THREE.Vector3, _title: string, content: string) {
 
 
 function delAllSprites() {
+  // Sprites live in the scene (currentLayer) AND own a DOM label div, so clearing the array alone
+  // leaks the scene node, the DOM element, and the GPU geometry/material/texture. Dispose each
+  // fully. Iterate a COPY because Annotation.removeFromParent() splices `sprites` as it runs.
+  for (const sprite of [...sprites]) {
+    if (sprite.material instanceof THREE.SpriteMaterial && sprite.material.map) {
+      sprite.material.map.dispose();
+    }
+    sprite.material.dispose();
+    sprite.geometry.dispose();
+    sprite.removeFromParent();   // splices `sprites`, removes the DOM div and the scene node
+  }
   sprites.length = 0;
 }
 
@@ -2358,11 +2378,19 @@ typedFunction("groupedMesh", [[MeshPart]], Id,
     return group;
   });
 
-typedFunction("meshObjFmt", [Str, Str, Matrix4x4], Id, (path: string, name: string, m: THREE.Matrix4) => {
+typedAsyncFunction("meshObjFmt", [Str, Str, Matrix4x4], Id, (path: string, name: string, m: THREE.Matrix4, cont: Function) => {
+  // typedAsyncFunction supplies a continuation (cont) that ships the result frame; call it only
+  // AFTER the MTL+OBJ load resolves, and route a load failure to sendError instead of swallowing it
+  // into console.error. Previously this was a sync typedFunction that returned an EMPTY Object3D
+  // immediately, so the timeout-less Julia client got a valid id for a mesh that never loaded — and a
+  // failed load was silent.
   const parent = new THREE.Object3D();
-  new MTLLoader().setPath(path).loadAsync(`${name}.mtl`).then(materials => {
-    materials.preload();
-    new OBJLoader().setPath(path).setMaterials(materials).loadAsync(`${name}.obj`).then(object => {
+  new MTLLoader().setPath(path).loadAsync(`${name}.mtl`)
+    .then(materials => {
+      materials.preload();
+      return new OBJLoader().setPath(path).setMaterials(materials).loadAsync(`${name}.obj`);
+    })
+    .then(object => {
       object.traverse(child => {
         if (child instanceof THREE.Mesh && child.material) {
           const mats = Array.isArray(child.material) ? child.material : [child.material];
@@ -2370,9 +2398,9 @@ typedFunction("meshObjFmt", [Str, Str, Matrix4x4], Id, (path: string, name: stri
         }
       });
       parent.add(object);
-    }).catch(err => console.error(err));
-  }).catch(err => console.error(err));
-  return withTransform(m, parent);
+      cont(withTransform(m, parent));
+    })
+    .catch(err => sendError(err instanceof Error ? err.message + "\n" + err.stack : String(err)));
 });
 
 typedFunction("MeshPhysicalMaterial", [Dict], MatId, (params: { [key: string]: any }) =>

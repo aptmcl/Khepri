@@ -37049,6 +37049,7 @@ const Vector3d = new CompositeType("Vector3d", [Float32, Float32, Float32], (arg
 const Point3d = new CompositeType("Point3d", [Float32, Float32, Float32], (args) => new Vector3(...args));
 const Point2d = new CompositeType("Point2d", [Float32, Float32], (args) => new Vector2(...args));
 const RGB = new CompositeType("FLoat3", [Float32, Float32, Float32], (args) => new Color(...args));
+const RGBA = new CompositeType("Float4", [Float32, Float32, Float32, Float32], (args) => new Color(args[0], args[1], args[2]));
 class IODataView {
   constructor(dataView, offset = 0) {
     this.dataView = dataView;
@@ -37119,8 +37120,9 @@ class IODataView {
       case 6:
         return this.readString();
       case 7:
-      case 8:
         return RGB.read(this);
+      case 8:
+        return RGBA.read(this);
       case 9:
         return this.readDict();
       case 10:
@@ -37568,19 +37570,24 @@ function getObject3D(idx) {
   const obj = objects.get(idx);
   return obj ? obj : error(`Requested non-existent Object3D with id '${idx}'.`);
 }
+function disposeObject3D(obj) {
+  obj.traverse((child) => {
+    if (child instanceof Mesh) {
+      child.geometry.dispose();
+    } else if (child instanceof Sprite) {
+      if (child.material instanceof SpriteMaterial && child.material.map) {
+        child.material.map.dispose();
+      }
+      child.material.dispose();
+      child.geometry.dispose();
+    }
+  });
+}
 function delObject3D(idx) {
   const obj = objects.get(idx);
   if (obj) {
     obj.removeFromParent();
-    if (obj instanceof Mesh) {
-      obj.geometry.dispose();
-    } else if (obj instanceof Sprite) {
-      if (obj.material instanceof SpriteMaterial && obj.material.map) {
-        obj.material.map.dispose();
-      }
-      obj.material.dispose();
-      obj.geometry.dispose();
-    }
+    disposeObject3D(obj);
     objects.delete(idx);
     delete obj.userData.Object3DId;
     return idx;
@@ -37593,9 +37600,7 @@ function delAllObject3Ds() {
   objects.forEach((obj, _id2) => {
     removeGhostFromObject(obj);
     obj.removeFromParent();
-    if (obj instanceof Mesh) {
-      obj.geometry.dispose();
-    }
+    disposeObject3D(obj);
     delete obj.userData.Object3DId;
   });
   objects.clear();
@@ -37706,6 +37711,14 @@ function addSprite(pos, _title, content) {
   return sprites.push(sprite) - 1;
 }
 function delAllSprites() {
+  for (const sprite of [...sprites]) {
+    if (sprite.material instanceof SpriteMaterial && sprite.material.map) {
+      sprite.material.map.dispose();
+    }
+    sprite.material.dispose();
+    sprite.geometry.dispose();
+    sprite.removeFromParent();
+  }
   sprites.length = 0;
 }
 let selected = [];
@@ -38600,24 +38613,48 @@ typedFunction(
     return group;
   }
 );
-typedFunction("meshObjFmt", [Str, Str, Matrix4x4], Id, (path, name, m2) => {
+typedAsyncFunction("meshObjFmt", [Str, Str, Matrix4x4], Id, (path, name, m2, cont) => {
   const parent = new Object3D();
   new MTLLoader().setPath(path).loadAsync(`${name}.mtl`).then((materials2) => {
     materials2.preload();
-    new OBJLoader().setPath(path).setMaterials(materials2).loadAsync(`${name}.obj`).then((object) => {
-      object.traverse((child) => {
-        if (child instanceof Mesh && child.material) {
-          const mats = Array.isArray(child.material) ? child.material : [child.material];
-          mats.forEach((mat) => mat.side = DoubleSide);
-        }
-      });
-      parent.add(object);
-    }).catch((err) => console.error(err));
-  }).catch((err) => console.error(err));
-  return withTransform(m2, parent);
+    return new OBJLoader().setPath(path).setMaterials(materials2).loadAsync(`${name}.obj`);
+  }).then((object) => {
+    object.traverse((child) => {
+      if (child instanceof Mesh && child.material) {
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        mats.forEach((mat) => mat.side = DoubleSide);
+      }
+    });
+    parent.add(object);
+    cont(withTransform(m2, parent));
+  }).catch((err) => sendError(err instanceof Error ? err.message + "\n" + err.stack : String(err)));
 });
 typedFunction("MeshPhysicalMaterial", [Dict], MatId, (params) => new MeshPhysicalMaterial(params));
 typedFunction("MeshStandardMaterial", [Dict], MatId, (params) => new MeshStandardMaterial(params));
+typedFunction(
+  "pointLight",
+  [Point3d, Float32, RGB],
+  Id,
+  (loc, energy, color) => {
+    const light2 = new PointLight(color, energy);
+    light2.position.copy(loc);
+    return light2;
+  }
+);
+typedFunction(
+  "spotLight",
+  [Point3d, Point3d, Float32, Float32],
+  Id,
+  (loc, target, hotspot, falloff) => {
+    const light2 = new SpotLight(16777215);
+    light2.position.copy(loc);
+    light2.angle = Math.min(falloff, Math.PI / 2 - 1e-3);
+    light2.penumbra = falloff > 0 ? Math.min(1, Math.max(0, 1 - hotspot / falloff)) : 0;
+    light2.target.position.copy(target);
+    currentLayer.add(light2.target);
+    return light2;
+  }
+);
 typedFunction("MeshPhongMaterial", [Dict], MatId, (params) => new MeshPhongMaterial(params));
 typedFunction("MeshLambertMaterial", [Dict], MatId, (params) => new MeshLambertMaterial(params));
 typedFunction("LineBasicMaterial", [Dict], MatId, (params) => new LineBasicMaterial(params));
