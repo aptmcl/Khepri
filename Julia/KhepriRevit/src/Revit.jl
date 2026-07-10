@@ -449,7 +449,18 @@ convert_ifc_file(path) =
   @remote(revit, ConvertIFCFile(path))
 export load_rvt_file
 load_rvt_file(path) =
-  @remote(revit, LoadRVTFile(path))
+  let r = @remote(revit, LoadRVTFile(path))
+    # The active document just changed. Revit Family/FamilySymbol objects (and their ElementIds)
+    # are DOCUMENT-SCOPED, so any family ref cached against the previous document is stale here.
+    # Clear them so a reused family object re-resolves against the new document — mirroring the C#
+    # side, which drops its family caches in EnsureTransaction on the same switch. In an interactive
+    # REPL this is what lets `f = <family>` created before the switch keep working afterwards.
+    # (Only the EXPLICIT switch is visible to Julia; a switch made in the Revit UI is not, and would
+    # still return a stale ref on the first reuse of a family created before it.)
+    KhepriBase.invalidate_family_refs(revit)
+    empty!(KhepriBase.family_refs_storage(revit))
+    r
+  end
 
 export convert_and_load_ifc_file
 convert_and_load_ifc_file(path) =
