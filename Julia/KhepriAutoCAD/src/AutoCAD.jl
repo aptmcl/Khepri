@@ -303,7 +303,7 @@ public Point3d ViewTarget()
 public double ViewLens()
 public void ViewSize(int width, int height)
 public ObjectId GetMaterialNamed(String Name)
-public ObjectId CreateMaterialNamed(String name, String textureMapPath, double uScale, double vScale, double uOffset, double vOffset, int projection, int uTiling, int vTiling, Color diffuseColor, double refractionIndex, double opacity, double reflectivity, double translucence, int illuminationModel)
+public ObjectId CreateMaterialNamed(String name, double uScale, double vScale, double uOffset, double vOffset, int projection, int uTiling, int vTiling, Color diffuseColor, String diffuseMapPath, String bumpMapPath, double refractionIndex, double opacity, double reflectivity, double translucence, int illuminationModel)
 public ObjectId CreateColoredMaterialNamed(String name, Color color, double reflectivity, double translucence)
 public void SetSkyFromDateLocation(DateTime date, double latitude, double longitude, double meridian, double elevation)
 public byte Sync()
@@ -881,15 +881,13 @@ export autocad_basic_material
 autocad_basic_material = AutoCADBasicMaterial
 
 KhepriBase.b_get_material(b::ACAD, m::AutoCADBasicMaterial) =
-  # CreateMaterialNamed (see its @remote_api declaration above) takes exactly one
-  # textureMapPath plus 13 scalar/color params, in this order: name, textureMapPath,
-  # uScale, vScale, uOffset, vOffset, projection, uTiling, vTiling, diffuseColor,
-  # refractionIndex, opacity, reflectivity, translucence, illuminationModel. The
-  # diffuse texture map is carried by `diffuse_blend_map_source`; the struct's other
-  # blend_* fields are not exposed by this RPC.
+  # CreateMaterialNamed (see its @remote_api declaration above) — args MUST match the C#
+  # method (Primitives.cs) in this order: name, uScale, vScale, uOffset, vOffset, projection,
+  # uTiling, vTiling, diffuseColor, diffuseMapPath, bumpMapPath, refractionIndex, opacity,
+  # reflectivity, translucence, illuminationModel. The diffuse texture map is carried by
+  # `diffuse_blend_map_source`, the bump map by `blend_blend_map_source`.
   @remote(b, CreateMaterialNamed(
     m.name,
-    m.diffuse_blend_map_source,
     m.u_scale,
     m.v_scale,
     m.u_offset,
@@ -898,6 +896,8 @@ KhepriBase.b_get_material(b::ACAD, m::AutoCADBasicMaterial) =
     m.u_tiling,
     m.v_tiling,
     m.diffuse_color,
+    m.diffuse_blend_map_source,
+    m.blend_blend_map_source,
     m.refraction_index,
     m.opacity,
     m.reflectivity,
