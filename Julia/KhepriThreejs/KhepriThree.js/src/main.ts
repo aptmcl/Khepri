@@ -429,6 +429,13 @@ class IODataView {
         return decoder.decode(new DataView(this.dataView.buffer, this.offset - size, size));
       } else {
         shift += 7;
+        // A varint length for a 32-bit size occupies at most 5 bytes (shift 0..28). Past that the
+        // continuation bit never cleared: JS `<<` masks the shift to 5 bits, so the length would be
+        // silently mis-decoded (and could read past the buffer). Reject the malformed frame instead
+        // (thrown, caught by the typedFunction/typedAsyncFunction handler → NOTOK, not a hang).
+        if (shift >= 35) {
+          error("readString: malformed varint length (continuation bit still set after 5 bytes)");
+        }
       }
     }
   }
@@ -572,10 +579,12 @@ function getOperation(idx: number) {
 
 function typedFunction<T>(name: string, argTypes: TypeOrTypeArray[], retType: Type<T>, func: Function): Function {
   const tf = (io: IODataView) => {
-    const args = argTypes.map(t => io.readType(t));
-    //console.log("Calling", name, "with args", args);
-    io.checkExhausted();
     try {
+      // Decode INSIDE the try: a malformed frame (bad arg bytes / leftover data) must ship a NOTOK
+      // frame, not escape the handler — the timeout-less Julia client would otherwise block forever.
+      const args = argTypes.map(t => io.readType(t));
+      //console.log("Calling", name, "with args", args);
+      io.checkExhausted();
       sendValue(retType, func(...args));
     } catch (e) {
       sendError(e instanceof Error ? e.message + "\n" + e.stack : String(e));
@@ -586,10 +595,13 @@ function typedFunction<T>(name: string, argTypes: TypeOrTypeArray[], retType: Ty
 
 function typedAsyncFunction<T>(name: string, argTypes: TypeOrTypeArray[], retType: Type<T>, func: Function): Function {
   const tf = (io: IODataView) => {
-    const args = argTypes.map(t => io.readType(t));
-    io.checkExhausted();
-    const continuation = (res: any) => sendValue(retType, res);
     try {
+      // Decode INSIDE the try (see typedFunction): a malformed frame must ship a NOTOK frame, not
+      // escape and hang the timeout-less client. Errors AFTER func returns are the callee's job (it
+      // holds the continuation) — e.g. a loader onError must call sendError itself.
+      const args = argTypes.map(t => io.readType(t));
+      io.checkExhausted();
+      const continuation = (res: any) => sendValue(retType, res);
       func(...args, continuation);
     } catch (e) {
       sendError(e instanceof Error ? e.message + "\n" + e.stack : String(e));
@@ -2444,7 +2456,12 @@ function extractMaterialFromPolyHavenGLTF(gltf: GLTF) {
 }
 
 typedAsyncFunction("glTFMaterial", [Str], MatId, (path: string, cont: Function) =>
-  new GLTFLoader().load(path, (gltf) => cont(extractMaterialFromPolyHavenGLTF(gltf))));
+  new GLTFLoader().load(path,
+    (gltf) => cont(extractMaterialFromPolyHavenGLTF(gltf)),
+    undefined,
+    // Without onError a failed/missing .glTF never calls the continuation, so the timeout-less Julia
+    // client blocks forever. Ship the error instead.
+    (err: unknown) => sendError(`glTFMaterial: failed to load ${path}: ${(err as any)?.message ?? err}`)));
 
 typedAsyncFunction("setEnvironment", [Str, Bool], None, (path: string, setBackground: boolean, cont: Function) =>
   new HDRLoader().load(path, function (texture) {
@@ -2458,7 +2475,11 @@ typedAsyncFunction("setEnvironment", [Str, Bool], None, (path: string, setBackgr
       removeStandardSceneLighting();
     }
     cont()
-  }));
+  },
+  undefined,
+  // Without onError a failed/missing .hdr never calls the continuation → the timeout-less Julia
+  // client blocks forever. Ship the error instead.
+  (err: unknown) => sendError(`setEnvironment: failed to load ${path}: ${(err as any)?.message ?? err}`)));
 
 typedFunction("setView", [Point3d, Point3d, Float32, Float32], None,
   (position: THREE.Vector3, target: THREE.Vector3, lens: number, _aperture: number) => {

@@ -37324,6 +37324,9 @@ class IODataView {
         return decoder.decode(new DataView(this.dataView.buffer, this.offset - size, size));
       } else {
         shift += 7;
+        if (shift >= 35) {
+          error("readString: malformed varint length (continuation bit still set after 5 bytes)");
+        }
       }
     }
   }
@@ -37423,9 +37426,9 @@ function getOperation(idx) {
 }
 function typedFunction(name, argTypes, retType, func) {
   const tf = (io) => {
-    const args = argTypes.map((t3) => io.readType(t3));
-    io.checkExhausted();
     try {
+      const args = argTypes.map((t3) => io.readType(t3));
+      io.checkExhausted();
       sendValue(retType, func(...args));
     } catch (e2) {
       sendError(e2 instanceof Error ? e2.message + "\n" + e2.stack : String(e2));
@@ -37435,10 +37438,10 @@ function typedFunction(name, argTypes, retType, func) {
 }
 function typedAsyncFunction(name, argTypes, retType, func) {
   const tf = (io) => {
-    const args = argTypes.map((t3) => io.readType(t3));
-    io.checkExhausted();
-    const continuation = (res) => sendValue(retType, res);
     try {
+      const args = argTypes.map((t3) => io.readType(t3));
+      io.checkExhausted();
+      const continuation = (res) => sendValue(retType, res);
       func(...args, continuation);
     } catch (e2) {
       sendError(e2 instanceof Error ? e2.message + "\n" + e2.stack : String(e2));
@@ -38661,17 +38664,31 @@ typedFunction("LineBasicMaterial", [Dict], MatId, (params) => new LineBasicMater
 function extractMaterialFromPolyHavenGLTF(gltf) {
   return gltf.scene.children[0].material;
 }
-typedAsyncFunction("glTFMaterial", [Str], MatId, (path, cont) => new GLTFLoader().load(path, (gltf) => cont(extractMaterialFromPolyHavenGLTF(gltf))));
-typedAsyncFunction("setEnvironment", [Str, Bool], None, (path, setBackground, cont) => new HDRLoader().load(path, function(texture) {
-  texture.mapping = EquirectangularReflectionMapping;
-  scene.environment = texture;
-  scene.background = setBackground ? texture : null;
-  renderer.toneMapping = ACESFilmicToneMapping;
-  if (setBackground) {
-    removeStandardSceneLighting();
-  }
-  cont();
-}));
+typedAsyncFunction("glTFMaterial", [Str], MatId, (path, cont) => new GLTFLoader().load(
+  path,
+  (gltf) => cont(extractMaterialFromPolyHavenGLTF(gltf)),
+  void 0,
+  // Without onError a failed/missing .glTF never calls the continuation, so the timeout-less Julia
+  // client blocks forever. Ship the error instead.
+  (err) => sendError(`glTFMaterial: failed to load ${path}: ${(err == null ? void 0 : err.message) ?? err}`)
+));
+typedAsyncFunction("setEnvironment", [Str, Bool], None, (path, setBackground, cont) => new HDRLoader().load(
+  path,
+  function(texture) {
+    texture.mapping = EquirectangularReflectionMapping;
+    scene.environment = texture;
+    scene.background = setBackground ? texture : null;
+    renderer.toneMapping = ACESFilmicToneMapping;
+    if (setBackground) {
+      removeStandardSceneLighting();
+    }
+    cont();
+  },
+  void 0,
+  // Without onError a failed/missing .hdr never calls the continuation → the timeout-less Julia
+  // client blocks forever. Ship the error instead.
+  (err) => sendError(`setEnvironment: failed to load ${path}: ${(err == null ? void 0 : err.message) ?? err}`)
+));
 typedFunction(
   "setView",
   [Point3d, Point3d, Float32, Float32],
