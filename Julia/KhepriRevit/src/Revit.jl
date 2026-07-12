@@ -1946,7 +1946,6 @@ function generate_khepri_code(output_path::String; b::RVT=revit, export_obj::Boo
                 extract_families(fmap),
                 add_backend_families(b, fmap),
                 loop_rerolling,
-                detect_level_repetition,
                 add_header(b)],
       refined_expr = foldl((e, pass) -> pass(e), passes, init=raw_expr),
       code = expr_to_string(refined_expr)
