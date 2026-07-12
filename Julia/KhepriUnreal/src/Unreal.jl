@@ -237,9 +237,9 @@ KhepriBase.b_surface_mesh(b::UE, verts, faces, mat) =
 
 KhepriBase.b_mesh_obj_fmt(b::UE, obj_name, transform) =
   let path = obj_file_path(obj_name),
-      (verts, faces) = read_obj_mesh(path),
+      (verts, faces, _face_mats) = read_obj_mesh(path),
       world_verts = transform_obj_vertices(verts, transform),
-      zero_faces = [Int32.(f .- 1) for f in faces]
+      zero_faces = [Int32.(f .- 1) for f in faces]   # OBJ-native 1-based → Unreal's 0-based
     @remote(b, Primitive__SurfaceMesh(world_verts, zero_faces, void_ref(b)))
   end
 
