@@ -89,12 +89,15 @@ namespace KhepriRhinoceros {
 
         readonly List<RenderMaterial> renderMaterials = new List<RenderMaterial>();
         public int AddRenderMaterial(RenderMaterial mat) {
+            if (mat == null) return -1;   // void material — a missing/invalid library file must not crash
             doc.RenderMaterials.Add(mat);
             renderMaterials.Add(mat);
             return renderMaterials.Count - 1;
         }
-        public MatId LoadRenderMaterialFromPath(string path) => 
-            AddRenderMaterial(RenderContent.LoadFromFile(path) as RenderMaterial);
+        // Null-safe: a path that does not exist (e.g. a material library reorganized across Rhino
+        // versions) loads as the void material (-1) instead of throwing/hanging the connection.
+        public MatId LoadRenderMaterialFromPath(string path) =>
+            File.Exists(path) ? AddRenderMaterial(RenderContent.LoadFromFile(path) as RenderMaterial) : -1;
 
         public string DefaultMaterialsFolder() => 
             Path.GetFullPath(Path.Combine(Rhino.ApplicationSettings.FileSettings.TemplateFolder, @"..\Render Content\"));
