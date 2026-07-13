@@ -1,11 +1,11 @@
 backend = "POVRay"
 compare = "text_compare"
-created = "2026-07-13T06:36:41.929Z"
-golden = "florCirculosExtrudidos.pov"
+created = "2026-07-13T06:36:39.948Z"
+golden = "extrusaoSolido.pov"
 height = 1080
 julia = "1.12.5"
 khepribase = "0.8.1"
-name = "florCirculosExtrudidos"
+name = "extrusaoSolido"
 schema = 1
 width = 1920
 
