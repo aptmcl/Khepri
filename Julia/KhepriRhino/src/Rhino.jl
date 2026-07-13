@@ -674,8 +674,11 @@ function KhepriBase.b_classify_geometry(b::RH, surface::SurfaceGeometry, p::Loc,
 end
 
 KhepriBase.b_surface_mesh(b::RH, vertices, faces, mat) =
+  # Faces are canonically 0-based (KhepriBase convention) and Rhino's Mesh API is also 0-based, so pass
+  # them through unshifted. The prior `face.-1` assumed 1-based input and turned a 0-based mesh's
+  # vertex-0 references into invalid negative indices.
   let ensure_4(v) = length(v) == 4 ? v : [v..., v[3]]
-    @remote(b, Mesh(vertices, map(face->ensure_4(face.-1), faces), mat))
+    @remote(b, Mesh(vertices, map(ensure_4, faces), mat))
   end
 
 # OBJ/MTL file import — uses Rhino's native import via ImportOBJ API.
