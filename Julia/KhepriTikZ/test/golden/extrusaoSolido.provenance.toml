@@ -1,11 +1,11 @@
 backend = "TikZ"
 compare = "text_compare"
-created = "2026-07-13T06:33:32.77Z"
-golden = "florCirculosExtrudidos.tex"
+created = "2026-07-13T06:33:30.528Z"
+golden = "extrusaoSolido.tex"
 height = 1080
 julia = "1.12.5"
 khepribase = "0.8.1"
-name = "florCirculosExtrudidos"
+name = "extrusaoSolido"
 schema = 1
 width = 1920
 
