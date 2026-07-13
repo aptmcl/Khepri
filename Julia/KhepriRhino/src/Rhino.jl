@@ -291,13 +291,15 @@ KhepriBase.after_connecting(b::RH) =
   	else
 	    let v = VersionNumber(m[1])
 	      if v >= v"6.0"
-		  	# Apparently, materials are not yet working in Rhino 6!!!!
+		  	# Rhino 6/7/8 share the same Render Content library layout; each path is a `<name>.rmtl`
+			  	# under DefaultMaterialsFolder(). A path that does not resolve loads as the void
+			  	# material (null-safe LoadRenderMaterialFromPath) instead of hanging the connection.
 	        set_material(RH, material_metal, rhino_default_material(raw"Metal\Matte\Matte Silver"))
 	        set_material(RH, material_glass, rhino_default_material(raw"Glass\Clear Glass"))
 	        set_material(RH, material_wood, rhino_default_material(raw"Wood\Pear polished"))
 	        set_material(RH, material_concrete, rhino_default_material(raw"Ceramics\Stoneware"))
 	        set_material(RH, material_plaster, rhino_default_material(raw"White Matte"))
-	        set_material(RH, material_grass, rhino_default_material(raw"Textures\Grass"))
+	        set_material(RH, material_grass, rhino_default_material(raw"Organic\Grass\Realistic grass"))  # grass is a material here, not Textures\Grass (a .png)
 	      elseif v >= v"5.0"
             set_material(RH, material_metal, rhino_default_material(raw"Metal\Silver"))
             set_material(RH, material_glass, rhino_default_material(raw"Transparent\Glass"))
