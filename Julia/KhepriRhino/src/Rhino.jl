@@ -272,7 +272,7 @@ const RHNativeRef = NativeRef{RHKey, RHId}
 const RHNativeRefs = NativeRefs{RHKey, RHId}
 const RH = SocketBackend{RHKey, RHId}
 
-KhepriBase.shape_storage_type(::Type{RH}) = RemoteShapeStorage()
+KhepriBase.shape_storage_type(::Type{<:RH}) = RemoteShapeStorage()
 
 KhepriBase.void_ref(::RH) = 0 % UInt128
 
@@ -316,10 +316,10 @@ KhepriBase.after_connecting(b::RH) =
 
 const rhino = RH("Rhino", rhino_port, rhino_api)
 
-KhepriBase.has_boolean_ops(::Type{RH}) = HasBooleanOps{false}()
-KhepriBase.curve_geometry_capabilities(::Type{RH}) =
+KhepriBase.has_boolean_ops(::Type{<:RH}) = HasBooleanOps{false}()
+KhepriBase.curve_geometry_capabilities(::Type{<:RH}) =
   CurveGeometryCapabilities{true,true,true,true,true}()
-KhepriBase.surface_geometry_capabilities(::Type{RH}) =
+KhepriBase.surface_geometry_capabilities(::Type{<:RH}) =
   SurfaceGeometryCapabilities{true,true,true,false}()
 KhepriBase.backend(::RHRef) = rhino
 
