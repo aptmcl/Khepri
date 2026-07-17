@@ -276,7 +276,7 @@ set_default_materials() = nothing
 
 const blender = BLR("Blender", blender_port, blender_api)
 
-KhepriBase.has_boolean_ops(::Type{BLR}) = HasBooleanOps{true}()
+KhepriBase.has_boolean_ops(::Type{<:BLR}) = HasBooleanOps{true}()
 
 KhepriBase.backend(::BLRRef) = blender
 KhepriBase.void_ref(b::BLR) = -1 % Int32
