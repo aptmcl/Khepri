@@ -2091,8 +2091,11 @@ namespace KhepriRevit {
         // Generic FamilyInstance introspection helpers
         public XYZ FamilyInstanceLocation(Element element) =>
             (element.Location as LocationPoint)?.Point ?? XYZ.Zero;
-        public double FamilyInstanceRotation(Element element) =>
-            (element.Location as LocationPoint)?.Rotation ?? 0.0;
+        public double FamilyInstanceRotation(Element element) {
+            // Hosted instances expose a LocationPoint whose Rotation getter throws.
+            try { return (element.Location as LocationPoint)?.Rotation ?? 0.0; }
+            catch (Autodesk.Revit.Exceptions.InvalidOperationException) { return 0.0; }
+        }
         public ElementId FamilyInstanceLevel(Element element) => element.LevelId;
         public ElementId FamilyInstanceHost(Element element) {
             FamilyInstance fi = element as FamilyInstance;
