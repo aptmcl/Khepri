@@ -149,7 +149,7 @@ const UE = SocketBackend{UEKey, UEId}
 KhepriBase.void_ref(b::UE) = -1
 
 # View managed by Unreal editor
-KhepriBase.view_type(::Type{UE}) = BackendView()
+KhepriBase.view_type(::Type{<:UE}) = BackendView()
 
 # Connection hooks
 KhepriBase.before_connecting(b::UE) = nothing
