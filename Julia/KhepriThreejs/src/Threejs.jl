@@ -164,7 +164,7 @@ const THRRefs = Vector{THRRef}
 const THR = WebSocketBackend{THRKey, THRId}
 # The Three.js camera lives in the browser, so view ops (set_view/get_view/zoom_extents)
 # must dispatch to the frontend variant rather than the default BackendView(). ([H2])
-KhepriBase.view_type(::Type{THR}) = KhepriBase.FrontendView()
+KhepriBase.view_type(::Type{<:THR}) = KhepriBase.FrontendView()
 
 
 backend_name(b::THR) = b.name
@@ -235,7 +235,7 @@ set_default_materials() =
 
 KhepriBase.b_get_material(b::THR, f::Function) = f(b)
 
-KhepriBase.has_boolean_ops(::Type{THR}) = HasBooleanOps{false}()
+KhepriBase.has_boolean_ops(::Type{<:THR}) = HasBooleanOps{false}()
 
 KhepriBase.void_ref(b::THR) = -1 % Int32
 
