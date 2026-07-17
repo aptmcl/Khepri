@@ -500,7 +500,7 @@ const ACADRefs = Vector{ACADRef}
 const ACADNativeRef = NativeRef{ACADKey, ACADId}
 const ACAD = SocketBackend{ACADKey, ACADId}
 
-KhepriBase.shape_storage_type(::Type{ACAD}) = RemoteShapeStorage()
+KhepriBase.shape_storage_type(::Type{<:ACAD}) = RemoteShapeStorage()
 
 #=
 `before_connecting` should be reattach-friendly. Now that `start_autocad`
@@ -549,9 +549,9 @@ KhepriBase.after_connecting(b::ACAD) =
 const autocad = ACAD("AutoCAD", autocad_port, acad_api)
 
 KhepriBase.void_ref(b::ACAD) = -1
-KhepriBase.curve_geometry_capabilities(::Type{ACAD}) =
+KhepriBase.curve_geometry_capabilities(::Type{<:ACAD}) =
   CurveGeometryCapabilities{true,true,true,true,true}()
-KhepriBase.surface_geometry_capabilities(::Type{ACAD}) =
+KhepriBase.surface_geometry_capabilities(::Type{<:ACAD}) =
   SurfaceGeometryCapabilities{true,true,true,false}()
 
 # Primitives
