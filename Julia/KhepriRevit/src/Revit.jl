@@ -357,7 +357,7 @@ const RVTVoidId = RVTId(-1)
 
 KhepriBase.void_ref(b::RVT) = RVTVoidId
 
-KhepriBase.has_boolean_ops(::Type{RVT}) = HasBooleanOps{true}()
+KhepriBase.has_boolean_ops(::Type{<:RVT}) = HasBooleanOps{true}()
 
 # SocketBackend has no current_layer field; override to avoid field-access crash
 KhepriBase.b_current_layer_ref(b::RVT) = nothing
@@ -1560,9 +1560,17 @@ all_roofs(b::RVT) =
 
 # Fixture introspection (furniture, plumbing, casework, generic models, specialty equipment)
 
+# Hosted family instances have a LocationPoint whose Rotation property throws in the Revit API.
+_family_instance_rotation(r, b) =
+  try
+    @remote(b, FamilyInstanceRotation(r))
+  catch
+    0.0
+  end
+
 fixture_from_ref(r, b::RVT) =
   let loc = @remote(b, FamilyInstanceLocation(r)),
-      angle = @remote(b, FamilyInstanceRotation(r)),
+      angle = _family_instance_rotation(r, b),
       level_id = @remote(b, FamilyInstanceLevel(r)),
       lvl = level_from_ref(level_id, b),
       s = family_element(loc, angle=angle, level=lvl)
