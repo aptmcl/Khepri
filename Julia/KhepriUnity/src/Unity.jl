@@ -206,7 +206,7 @@ const unity = Unity("Unity", unity_port, unity_api)
 # Traits
 #has_boolean_ops(::Type{Unity}) = HasBooleanOps{true}()
 #KhepriBase.backend_name(b::Unity) = "Unity"
-KhepriBase.has_boolean_ops(::Type{Unity}) = HasBooleanOps{false}()
+KhepriBase.has_boolean_ops(::Type{<:Unity}) = HasBooleanOps{false}()
 #KhepriBase.backend(::UnityRef) = Unity
 
 (backend::Unity)(; apply_materials=true, apply_colliders=true) =
