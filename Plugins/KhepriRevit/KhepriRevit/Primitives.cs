@@ -2946,51 +2946,88 @@ namespace KhepriRevit {
             }
         }
 
+        // Per-TYPE export. The family DOCUMENT's geometry is the family's canonical envelope
+        // (its default flex dims — e.g. a 4 m-wide window family whose used type is 1300mm),
+        // so meshes exported via EditFamily render at the WRONG SIZE on mesh backends. A
+        // placed instance's GetSymbolGeometry() is the type-flexed geometry in FAMILY-LOCAL
+        // coordinates — exactly what a portable mesh needs. One OBJ+MTL per family:type
+        // (from the first instance found; mirrored instances export unmirrored), one .rfa
+        // per family (EditFamily is slow and throws for non-editable families; a missing
+        // .rfa only downgrades the Revit-native mapping, never the mesh).
+        // Row: [objBaseName, "0", "0", category, rfaPath, rawFamilyName, rawTypeName].
         public string[][] ExportAllFamiliesToOBJWithMetadata(string folderPath) {
             CommitAndDisposeTransaction();
             Directory.CreateDirectory(folderPath);
             var results = new List<string[]>();
-            var exportedFamilies = new HashSet<long>();
-            var instances = new FilteredElementCollector(doc)
-                .OfClass(typeof(FamilyInstance))
-                .Cast<FamilyInstance>();
-            foreach (FamilyInstance fi in instances) {
-                Family family = fi.Symbol.Family;
-                if (family == null || !exportedFamilies.Add(family.Id.Value))
-                    continue;
-                // Best-effort per family: some families aren't editable (in-place, certain system-owned
-                // ones) and EditFamily would throw — skip them and keep exporting the rest rather than
-                // aborting the whole batch.
+            var exportedSymbols = new HashSet<long>();
+            var familyRfas = new Dictionary<long, string>();
+            var options = new Options { ComputeReferences = false, DetailLevel = ViewDetailLevel.Fine };
+            foreach (FamilyInstance fi in new FilteredElementCollector(doc)
+                         .OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>()) {
+                FamilySymbol symbol = fi.Symbol;
+                Family family = symbol?.Family;
+                if (family == null || !exportedSymbols.Add(symbol.Id.Value)) continue;
                 try {
-                    if (!family.IsEditable) continue;
                     string familyName = SanitizeMaterialName(family.Name);
+                    string typeName = SanitizeMaterialName(symbol.Name);
+                    string objBase = familyName + "_" + typeName;
                     string category = fi.Category?.Name ?? "Unknown";
-                    Document famDoc = doc.EditFamily(family);
-                    if (famDoc == null) continue;
-                    try {
-                        string objPath = Path.Combine(folderPath, familyName + ".obj");
-                        ExportDocumentGeometryToOBJ(famDoc, objPath);
-                        double[] dims = GetFamilyDimensions(famDoc);
-                        // Also save the family as a .rfa so the reconstructed program can load the REAL
-                        // native family in Revit (revit_file_family), not just a system default. Revit
-                        // doesn't retain a loaded family's source path, so we re-materialize one here.
-                        string rfaPath = Path.Combine(folderPath, familyName + ".rfa");
+                    string rfaPath;
+                    if (!familyRfas.TryGetValue(family.Id.Value, out rfaPath)) {
+                        rfaPath = "";
                         try {
-                            SaveAsOptions opts = new SaveAsOptions { OverwriteExistingFile = true };
-                            famDoc.SaveAs(rfaPath, opts);
-                        } catch { rfaPath = ""; }
-                        results.Add(new string[] {
-                            familyName,
-                            dims[0].ToString("G"),
-                            dims[1].ToString("G"),
-                            category,
-                            rfaPath
-                        });
-                    } finally {
-                        famDoc.Close(false);
+                            if (family.IsEditable) {
+                                Document famDoc = doc.EditFamily(family);
+                                if (famDoc != null) {
+                                    try {
+                                        string p = Path.Combine(folderPath, familyName + ".rfa");
+                                        famDoc.SaveAs(p, new SaveAsOptions { OverwriteExistingFile = true });
+                                        rfaPath = p;
+                                    } finally { famDoc.Close(false); }
+                                }
+                            }
+                        } catch { }
+                        familyRfas[family.Id.Value] = rfaPath;
                     }
+                    var vertices = new List<XYZ>();
+                    var normals = new List<XYZ>();
+                    var uvs = new List<UV>();
+                    var groups = new List<Tuple<string, List<int[][]>>>();
+                    var materials = new Dictionary<string, Autodesk.Revit.DB.Color>();
+                    var materialTransparency = new Dictionary<string, int>();
+                    var materialPbr = new Dictionary<string, double[]>();
+                    GeometryElement ge = fi.get_Geometry(options);
+                    if (ge == null) continue;
+                    foreach (GeometryObject go in ge) {
+                        if (go is GeometryInstance gi) {
+                            CollectGeometry(doc, gi.GetSymbolGeometry(), vertices, normals, uvs,
+                                            groups, materials, materialTransparency, materialPbr);
+                        }
+                    }
+                    if (vertices.Count == 0) continue;
+                    // Doors/windows: the symbol geometry bakes the TYPE's default sill
+                    // height, but placement adds the INSTANCE's sill parameter — normalize
+                    // the mesh to sill-relative (base at z=0) so `level + sill` lands it
+                    // exactly. Fixtures keep their family origin (a wall cabinet's
+                    // geometry legitimately floats above it).
+                    if (fi.Category != null &&
+                        (fi.Category.Id.Value == (long)BuiltInCategory.OST_Doors ||
+                         fi.Category.Id.Value == (long)BuiltInCategory.OST_Windows)) {
+                        double zmin = vertices.Min(v => v.Z);
+                        if (Math.Abs(zmin) > 1e-9)
+                            for (int i = 0; i < vertices.Count; i++)
+                                vertices[i] = new XYZ(vertices[i].X, vertices[i].Y, vertices[i].Z - zmin);
+                    }
+                    string mtlName = objBase + ".mtl";
+                    WriteOBJ(Path.Combine(folderPath, objBase + ".obj"), mtlName,
+                             vertices, normals, uvs, groups);
+                    WriteMTL(Path.Combine(folderPath, mtlName),
+                             materials, materialTransparency, materialPbr);
+                    results.Add(new string[] {
+                        objBase, "0", "0", category, rfaPath, family.Name, symbol.Name
+                    });
                 } catch (Exception e) {
-                    PlugIn.WriteMessage($"ExportAllFamiliesToOBJWithMetadata: skipped '{family?.Name}': {e.Message}");
+                    PlugIn.WriteMessage($"ExportAllFamiliesToOBJWithMetadata: skipped '{family?.Name}:{symbol?.Name}': {e.Message}");
                 }
             }
             EnsureTransaction(uiapp);
