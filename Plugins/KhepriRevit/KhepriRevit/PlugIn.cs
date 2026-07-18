@@ -2,6 +2,7 @@ using Autodesk.Revit.DB.Events;
 using Autodesk.Revit.UI;
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
@@ -152,6 +153,7 @@ namespace KhepriRevit {
                 // per-transaction WarningSwallower doesn't re-attach to. Benign warnings (overlapping
                 // walls, etc.) are auto-dismissed dialog-free; errors are left to surface to Julia.
                 application.ControlledApplication.FailuresProcessing += OnFailuresProcessing;
+                application.ControlledApplication.DocumentChanged += OnDocumentChanged;
                 // Auto-dismiss startup/task dialogs (version-upgrade prompts, missing links/worksets,
                 // etc.) so a script-launched Revit reaches a usable state without manual clicks.
                 // Registered on the UI app at startup so it fires for document-open dialogs too.
@@ -196,23 +198,50 @@ namespace KhepriRevit {
             OnDocumentOpenedOrCreated(sender);
         }
 
-        // Delete every Warning-severity failure across all transactions so script-driven rebuilds are
-        // dialog-free. Errors are left alone (Continue) so they still surface as exceptions on the
-        // Julia side rather than being silently dropped.
+        // Deletion forensics: element ids silently disappearing (failure resolutions, rollbacks,
+        // join cascades) are otherwise undiagnosable. Logs at most 30 ids per change event.
+        void OnDocumentChanged(object sender, Autodesk.Revit.DB.Events.DocumentChangedEventArgs e) {
+            try {
+                var del = e.GetDeletedElementIds();
+                if (del.Count > 0)
+                    WriteMessage("OnDocumentChanged: txn='" + string.Join(",", e.GetTransactionNames()) +
+                        "' deleted " + del.Count + ": " +
+                        string.Join(",", del.Take(30).Select(id => id.Value)));
+            } catch { }
+        }
+
+        // Delete every Warning-severity failure so script-driven rebuilds are dialog-free, and
+        // RESOLVE error-severity failures with their default resolution. Leaving errors alone
+        // (Continue) does NOT surface them to the caller: the RPC replies were already sent when
+        // the batched 'Execute' transaction commits, so Revit rolls the whole transaction back
+        // SILENTLY, evaporating every element created in the batch (observed: a group whose
+        // member walls overlap collinearly lost all its members with no deletion events).
+        // Resolving instead applies a targeted fix (typically deleting one offending element).
         void OnFailuresProcessing(object sender, Autodesk.Revit.DB.Events.FailuresProcessingEventArgs e) {
             Autodesk.Revit.DB.FailuresAccessor fa = e.GetFailuresAccessor();
-            bool deleted = false, hasError = false;
+            bool deleted = false, hasError = false, resolved = true;
             foreach (Autodesk.Revit.DB.FailureMessageAccessor f in fa.GetFailureMessages()) {
                 if (f.GetSeverity() == Autodesk.Revit.DB.FailureSeverity.Warning) {
                     fa.DeleteWarning(f);
                     deleted = true;
                 } else {
                     hasError = true;
+                    try {
+                        WriteMessage("OnFailuresProcessing: error '" + f.GetDescriptionText() +
+                            "' resolutions=" + f.HasResolutions());
+                    } catch { }
+                    if (f.HasResolutions())
+                        fa.ResolveFailure(f);
+                    else
+                        resolved = false;
                 }
             }
-            e.SetProcessingResult((deleted && !hasError)
-                ? Autodesk.Revit.DB.FailureProcessingResult.ProceedWithCommit
-                : Autodesk.Revit.DB.FailureProcessingResult.Continue);
+            e.SetProcessingResult(
+                hasError
+                    ? (resolved ? Autodesk.Revit.DB.FailureProcessingResult.ProceedWithCommit
+                                : Autodesk.Revit.DB.FailureProcessingResult.Continue)
+                    : (deleted ? Autodesk.Revit.DB.FailureProcessingResult.ProceedWithCommit
+                               : Autodesk.Revit.DB.FailureProcessingResult.Continue));
         }
 
         // Dismiss any dialog Revit tries to show (upgrade prompts, missing links, worksets, audit

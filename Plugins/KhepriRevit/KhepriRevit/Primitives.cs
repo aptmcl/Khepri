@@ -994,16 +994,106 @@ namespace KhepriRevit {
                     "No family symbol available for hosted-instance placement (famId was null and the project has no family symbols at all).");
             }
             EnsureActive(symbol);
-            FamilyInstance elem = (host is Level lvl)
-                ? doc.Create.NewFamilyInstance(location, symbol, lvl, StructuralType.NonStructural)
-                : doc.Create.NewFamilyInstance(location, symbol, direction, host, StructuralType.NonStructural);
+            FamilyInstance elem;
+            if (host is Level lvl) {
+                // location.Z is measured from the level. Prefer the UNHOSTED overload at the world
+                // point: the Level overload silently zeroes XY for wall/face-hosted symbols placed
+                // without a host (and resists MoveElement). Hosted-only symbols that reject the
+                // unhosted overload fall back to the Level overload.
+                XYZ world = new XYZ(location.X, location.Y, location.Z + lvl.Elevation);
+                try {
+                    elem = doc.Create.NewFamilyInstance(world, symbol, StructuralType.NonStructural);
+                } catch {
+                    elem = doc.Create.NewFamilyInstance(location, symbol, lvl, StructuralType.NonStructural);
+                }
+                try {
+                    doc.Regenerate();
+                    XYZ actual = (elem.Location as LocationPoint)?.Point;
+                    if (actual != null && actual.DistanceTo(world) > 0.5) {
+                        // Wall-based symbols ignore the point in both point overloads (xy collapses
+                        // to the symbol origin) — they place correctly ONLY via the wall-host
+                        // overload. Find the nearest wall and re-place hosted on it.
+                        Wall hostWall = null;
+                        double best = 3.0;   // feet (~0.9 m)
+                        foreach (Wall w in new FilteredElementCollector(doc).OfClass(typeof(Wall)).Cast<Wall>()) {
+                            var wlc = w.Location as LocationCurve;
+                            if (wlc == null) continue;
+                            // Horizontal distance: the location curve lies at the wall's base
+                            // elevation while the instance point may be high on the wall (upper
+                            // cabinets); a 3D distance would reject the host for tall placements.
+                            // But walls on OTHER storeys share the same vertical plane, so the
+                            // point must also fall within the wall's vertical span.
+                            double baseZ = wlc.Curve.GetEndPoint(0).Z;
+                            XYZ flat = new XYZ(world.X, world.Y, baseZ);
+                            double dh = wlc.Curve.Distance(flat);
+                            double topZ = baseZ +
+                                (w.get_Parameter(BuiltInParameter.WALL_USER_HEIGHT_PARAM)?.AsDouble() ?? 0.0);
+                            double dz = world.Z < baseZ ? baseZ - world.Z :
+                                        world.Z > topZ ? world.Z - topZ : 0.0;
+                            double d = Math.Sqrt(dh * dh + dz * dz);
+                            if (d < best) { best = d; hostWall = w; }
+                        }
+                        if (hostWall != null) {
+                            FamilyInstance TryVerify(Func<FamilyInstance> mk) {
+                                try {
+                                    FamilyInstance cand = mk();
+                                    if (cand == null) return null;
+                                    doc.Regenerate();
+                                    XYZ a2 = (cand.Location as LocationPoint)?.Point;
+                                    // Verify horizontally; hosted overloads may snap Z to the
+                                    // symbol's default elevation, corrected below.
+                                    if (a2 != null && new XYZ(a2.X, a2.Y, world.Z).DistanceTo(world) <= 1.5) {
+                                        if (Math.Abs(a2.Z - world.Z) > 1e-4)
+                                            try { ElementTransformUtils.MoveElement(doc, cand.Id, new XYZ(0, 0, world.Z - a2.Z)); } catch { }
+                                        return cand;
+                                    }
+                                    doc.Delete(cand.Id);
+                                } catch { }
+                                return null;
+                            }
+                            Level wlvl = doc.GetElement(hostWall.LevelId) as Level;
+                            FamilyInstance re =
+                                TryVerify(() => doc.Create.NewFamilyInstance(
+                                    world, symbol, hostWall, wlvl, StructuralType.NonStructural))
+                                ?? TryVerify(() => {
+                                    var sideRefs = HostObjectUtils.GetSideFaces(hostWall, ShellLayerType.Interior);
+                                    if (sideRefs.Count == 0)
+                                        sideRefs = HostObjectUtils.GetSideFaces(hostWall, ShellLayerType.Exterior);
+                                    if (sideRefs.Count == 0) return null;
+                                    Face face = hostWall.GetGeometryObjectFromReference(sideRefs[0]) as Face;
+                                    XYZ onFace = world;
+                                    if (face != null) {
+                                        var proj = face.Project(world);
+                                        if (proj != null) onFace = proj.XYZPoint;
+                                    }
+                                    var wc = (hostWall.Location as LocationCurve).Curve;
+                                    XYZ tangent = (wc.GetEndPoint(1) - wc.GetEndPoint(0)).Normalize();
+                                    return doc.Create.NewFamilyInstance(sideRefs[0], onFace, tangent, symbol) as FamilyInstance;
+                                });
+                            if (re != null) {
+                                doc.Delete(elem.Id);
+                                return re;
+                            }
+                        }
+                        try { ElementTransformUtils.MoveElement(doc, elem.Id, world - actual); } catch { }
+                    }
+                } catch { }
+            } else {
+                elem = doc.Create.NewFamilyInstance(location, symbol, direction, host, StructuralType.NonStructural);
+            }
             return elem;
         }
+        // Group-member creation runs with auto-join suppressed: joining a member into the
+        // surrounding loose geometry can fail regeneration (overlapping collinear walls next to a
+        // parallel wall), and Revit then rolls the whole transaction back, silently deleting the
+        // members. CreateGroup unjoins any cross-boundary joins anyway.
+        private bool autoJoinEnabled = true;
+        public void EnableAutoJoin(bool enable) { autoJoinEnabled = enable; }
         void MaybeAutoJoin() {
             // doc.AutoJoinElements() joins EVERYTHING, including walls inside groups — and editing
             // a grouped element outside group-edit mode makes Revit delete the group (silently,
             // because the failure processor dismisses warnings). Once groups exist, skip the join.
-            if (!new FilteredElementCollector(doc).OfClass(typeof(Group)).Any())
+            if (autoJoinEnabled && !new FilteredElementCollector(doc).OfClass(typeof(Group)).Any())
                 doc.AutoJoinElements();
         }
 
@@ -1126,6 +1216,9 @@ namespace KhepriRevit {
             Line l = (wall.Location as LocationCurve).Curve as Line;
             return new XYZ[] { l.GetEndPoint(0), l.GetEndPoint(1) };
         }
+        // Instance name of any element (e.g. a Level's "Piso 1") — level HEIGHTS alone cannot
+        // distinguish named storeys for selective execution.
+        public string ElementName(Element element) => element.Name ?? "";
         public ElementId ElementLevel(Element element) => element.LevelId;
         // Walls can have unconnected height
         public ElementId WallTopLevel(Element element) => 
@@ -1567,6 +1660,9 @@ namespace KhepriRevit {
         // Group the given elements into a real Revit group and return the group instance id, so a
         // reconstructed Khepri group_instance is a genuine Revit group (its members are excluded from
         // DocWalls/etc.) rather than loose elements.
+        // Diagnostic: how many of these ids no longer resolve to a live element.
+        public int CountDeadElements(ElementId[] ids) =>
+            ids.Count(id => doc.GetElement(id) == null);
         public ElementId CreateGroup(ElementId[] ids) {
             // A grouped stair drags its auto-generated railings in via Revit's parent resolution
             // (shouldElementBeAddedToGroupByParent), which crashes when they are not in the list —
@@ -1583,33 +1679,70 @@ namespace KhepriRevit {
                 }
             }
             var members = all.Distinct().ToList();
-            // A member wall still geometry-joined to a NON-member is the classic trigger for the
-            // native crash inside NewGroup's parent resolution — and semantically a grouped wall
-            // should not stay joined across the group boundary anyway.
-            var memberSet = new HashSet<ElementId>(members);
-            foreach (var id in members) {
-                if (doc.GetElement(id) is Wall w) {
-                    foreach (var otherId in JoinGeometryUtils.GetJoinedElements(doc, w).ToList()) {
-                        if (!memberSet.Contains(otherId)) {
-                            var other = doc.GetElement(otherId);
-                            if (other != null)
-                                try { JoinGeometryUtils.UnjoinGeometry(doc, w, other); } catch { }
-                        }
+            ElementId TryNewGroup(List<ElementId> ids2) {
+                using (SubTransaction st = new SubTransaction(doc)) {
+                    st.Start();
+                    try {
+                        var g = doc.Create.NewGroup(ids2);
+                        st.Commit();
+                        return g.Id;
+                    } catch (Exception ex) {
+                        st.RollBack();
+                        try {
+                            System.IO.File.AppendAllText(
+                                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "KhepriRevit.log"),
+                                "[NewGroup] " + ids2.Count + " members: " + ex.GetType().Name + ": " + ex.Message + "\n");
+                        } catch { }
+                        return ElementId.InvalidElementId;
                     }
                 }
             }
-            try { return doc.Create.NewGroup(members).Id; }
-            catch {
-                // Leave-one-out retry: some member combinations crash Revit's internal parent
-                // resolution; dropping the single poison member (which stays a loose element)
-                // preserves the rest of the group. n is small, so O(n^2) is fine.
-                for (int skip = 0; skip < members.Count; skip++) {
-                    var subset = members.Where((_, idx) => idx != skip).ToList();
-                    if (subset.Count == 0) continue;
-                    try { return doc.Create.NewGroup(subset).Id; } catch { }
+            // A member still geometry-joined to a NON-member is the classic trigger for the
+            // native crash inside NewGroup's parent resolution — and semantically a grouped
+            // element should not stay joined across the group boundary anyway. This applies to
+            // every joinable member (walls AND floors/slabs/roofs: AutoJoin during creation joins
+            // a group's slab to adjacent loose elements just as readily as its walls).
+            var memberSet = new HashSet<ElementId>(members);
+            foreach (var id in members) {
+                var el = doc.GetElement(id);
+                if (el == null) continue;
+                ICollection<ElementId> joined;
+                try { joined = JoinGeometryUtils.GetJoinedElements(doc, el); } catch { continue; }
+                foreach (var otherId in joined.ToList()) {
+                    if (!memberSet.Contains(otherId)) {
+                        var other = doc.GetElement(otherId);
+                        if (other != null)
+                            try { JoinGeometryUtils.UnjoinGeometry(doc, el, other); } catch { }
+                    }
                 }
-                return ElementId.InvalidElementId;
             }
+            // Regeneration between creation and deferred finalize can invalidate members (join
+            // merges, hosted-element cascades); a dead id inside NewGroup is a native crash, not
+            // a managed exception. Group what still exists.
+            members = members.Where(id => doc.GetElement(id) != null).ToList();
+            ElementId first = TryNewGroup(members);
+            if (first != ElementId.InvalidElementId) return first;
+            try {
+                var roster = string.Join("; ", members.Select(id => {
+                    var el = doc.GetElement(id);
+                    return id.Value + ":" + (el == null ? "DEAD" :
+                        el.GetType().Name + "/" + (el.Category?.Name ?? "?") + "@lvl" + el.LevelId.Value);
+                }));
+                System.IO.File.AppendAllText(
+                    System.IO.Path.Combine(System.IO.Path.GetTempPath(), "KhepriRevit.log"),
+                    "[NewGroup] roster: " + roster + "\n");
+            } catch { }
+            // Leave-one-out retry: some member combinations crash Revit's internal parent
+            // resolution; dropping the single poison member (which stays a loose element)
+            // preserves the rest of the group. Each attempt is sub-transaction isolated so a
+            // thrown NewGroup cannot leave members partially mutated.
+            for (int skip = 0; skip < members.Count; skip++) {
+                var subset = members.Where((_, idx) => idx != skip).ToList();
+                if (subset.Count == 0) continue;
+                ElementId gid = TryNewGroup(subset);
+                if (gid != ElementId.InvalidElementId) return gid;
+            }
+            return ElementId.InvalidElementId;
         }
         // Additional instance of an existing group type (source models share one GroupType across
         // repeated instances; recreating each instance as its own NewGroup broke that identity).
