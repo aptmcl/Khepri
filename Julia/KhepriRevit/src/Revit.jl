@@ -278,7 +278,7 @@ public ElementId CreatePolygonalCeiling(XYZ[] pts, Level level, ElementId famId)
 public ElementId CreatePathCeiling(XYZ[] pts, double[] angles, Level level, ElementId famId)
 public ElementId CreateRamp(XYZ p0, XYZ p1, double width, double thickness, Level baseLevel, double baseOffset, double topOffset)
 public ElementId CreateStraightStair(XYZ basePoint, VXYZ direction, double width, Level baseLevel, Level topLevel, ElementId familyId)
-public ElementId CreateMultiRunStair(XYZ[] pts, double width, Level baseLevel, Level topLevel, ElementId familyId)
+public ElementId CreateMultiRunStair(XYZ[] pts, XYZ[][] landings, double width, Level baseLevel, Level topLevel, ElementId familyId)
 public Element CreateSpiralStair(XYZ center, double radius, double startAngle, double includedAngle, bool clockwise, double width, Level baseLevel, Level topLevel, ElementId familyId)
 public string WallCurveType(Element element)
 public XYZ[] WallCurveVertices(Element element)
@@ -353,6 +353,8 @@ public Element[] DocStairs()
 public ElementId StairBaseLevel(Element element)
 public ElementId StairTopLevel(Element element)
 public XYZ[][] StairRunPaths(Element element)
+public XYZ[][] StairLandingBoundaries(Element element)
+public Length[] StairLandingElevations(Element element)
 public Length[] StairRunElevations(Element element)
 public Length StairWidth(Element element)
 public Length StairRiserHeight(Element element)
@@ -907,11 +909,13 @@ KhepriBase.b_stair(b::RVT, base_point, direction, bottom_level, top_level, famil
       ref_value(b, bottom_level), ref_value(b, top_level), family_ref(b, family)))
   end
 
-KhepriBase.b_multi_run_stair(b::RVT, path, bottom_level, top_level, family) =
+KhepriBase.b_multi_run_stair(b::RVT, path, landings, bottom_level, top_level, family) =
   let rvtf = backend_family(b, family),
       width = _lookup_family_param(rvtf, "width", f -> f.width)(family)
     @remote(b, CreateMultiRunStair(
-      path_vertices(path), to_revit(width),
+      path_vertices(path),
+      landings === nothing ? Vector{Loc}[] : [path_vertices(l) for l in landings],
+      to_revit(width),
       ref_value(b, bottom_level), ref_value(b, top_level), family_ref(b, family)))
   end
 
@@ -1832,13 +1836,22 @@ stair_from_ref(r, b::RVT) =
                          riser_height=riser > 1e-6 ? riser : 0.18,
                          tread_depth=tread > 1e-6 ? tread : 0.28),
       s = if length(runs) >= 2 && length(elevs) == 2 * length(runs)
-            # Multi-run (L/U-shaped) stair: emit the 3D walk centerline; z level-relative.
+            # Multi-run (L/U-shaped) stair: emit the 3D walk centerline plus the EXACT
+            # landing footprints (each vertex at the landing's level-relative elevation);
+            # z level-relative throughout.
             let walk = _stair_walk_verts(runs, elevs, base_level.height),
                 d = length(walk) >= 2 ?
                       vxy(cx(walk[2]) - cx(walk[1]), cy(walk[2]) - cy(walk[1])) :
-                      vxy(cx(dir), cy(dir))
+                      vxy(cx(dir), cy(dir)),
+                lands = @remote(b, StairLandingBoundaries(r)),
+                land_elevs = @remote(b, StairLandingElevations(r)),
+                landings = (isempty(lands) || length(lands) != length(land_elevs)) ? nothing :
+                  [closed_polygonal_path(
+                     [xyz(cx(p), cy(p), land_elevs[k] - base_level.height) for p in lands[k]])
+                   for k in 1:length(lands)]
               stair(walk[1], direction=unitized(d), bottom_level=base_level,
-                    top_level=top_level, family=fam, path=open_polygonal_path(walk))
+                    top_level=top_level, family=fam, path=open_polygonal_path(walk),
+                    landings=landings)
             end
           else
             # StairDirection comes back as an XYZ point; stair() wants a horizontal direction
