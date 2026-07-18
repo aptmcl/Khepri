@@ -1596,17 +1596,29 @@ namespace KhepriRevit {
         public Element[] DocCeilings() => (new FilteredElementCollector(doc).OfClass(typeof(Ceiling)))
             .Where(e => !IsGroupMember(e)).ToArray();
 
+        // The member walls of a stacked wall, so introspection can claim them (the parent represents
+        // them; unclaimed they would double-emit as fallback meshes).
+        public ElementId[] StackedWallMemberIds(Element element) {
+            try {
+                Wall w = element as Wall;
+                return (w != null && w.IsStackedWall) ?
+                    w.GetStackedWallMemberIds().ToArray() : new ElementId[0];
+            } catch { return new ElementId[0]; }
+        }
+        // Stacked-wall MEMBERS are excluded: the stacked parent already carries the full curve and
+        // height, so reading members too duplicates every stacked wall's geometry (inflated counts,
+        // overlapping walls on rebuild).
         public Element[] DocWalls() =>
             (new FilteredElementCollector(doc).OfClass(typeof(Wall)))
             .Cast<Wall>()
-            .Where(w => w.Location is LocationCurve && !IsGroupMember(w))
+            .Where(w => w.Location is LocationCurve && !IsGroupMember(w) && !w.IsStackedWallMember)
             .Cast<Element>()
             .ToArray();
         public Element[] DocWallsAtLevel(Level level) =>
             (new FilteredElementCollector(doc).OfClass(typeof(Wall)))
             .WherePasses(new ElementLevelFilter(level.Id))
             .Cast<Wall>()
-            .Where(w => w.Location is LocationCurve)
+            .Where(w => w.Location is LocationCurve && !w.IsStackedWallMember)
             .Cast<Element>()
             .ToArray();
 
@@ -1618,6 +1630,16 @@ namespace KhepriRevit {
             if (curve is Line) return "Line";
             if (curve is Arc) return "Arc";
             return "Other";
+        }
+        // Tessellated polyline for walls whose curve is neither Line nor Arc
+        // (WallCurveType == "Other") so they can be rebuilt as polygonal walls.
+        public XYZ[] WallCurveVertices(Element element) {
+            try {
+                Curve curve = (element.Location as LocationCurve)?.Curve;
+                return curve == null ? new XYZ[0] : curve.Tessellate().ToArray();
+            } catch {
+                return new XYZ[0];
+            }
         }
         public XYZ[] ArcWallVertices(Element element) {
             Arc arc = (((Wall)element).Location as LocationCurve).Curve as Arc;
@@ -1648,6 +1670,43 @@ namespace KhepriRevit {
             new Length(element.get_Parameter(BuiltInParameter.WALL_TOP_OFFSET).AsDouble());
         public ElementId[] WallInserts(Element element) =>
             ((Wall)element).FindInserts(true, false, false, false).ToArray();
+        // Curtain-wall children (panels + mullions) so introspection can claim them
+        // and stop them double-emitting as fallback meshes. Empty for non-curtain walls.
+        public ElementId[] CurtainWallChildIds(Element element) {
+            try {
+                CurtainGrid grid = (element as Wall)?.CurtainGrid;
+                return grid == null ?
+                    new ElementId[0] :
+                    grid.GetPanelIds().Concat(grid.GetMullionIds()).ToArray();
+            } catch {
+                return new ElementId[0];
+            }
+        }
+        public double[] CurtainGridUVCounts(Element element) {
+            try {
+                CurtainGrid grid = (element as Wall)?.CurtainGrid;
+                return grid == null ?
+                    new double[] { -1.0, -1.0 } :
+                    new double[] { grid.NumULines, grid.NumVLines };
+            } catch {
+                return new double[] { -1.0, -1.0 };
+            }
+        }
+        // Host-object (wall/floor/ceiling/roof) type thickness; Length so the wire
+        // converts feet to metres. 0 when the type has no compound structure.
+        public Length HostObjTypeThickness(Element element) {
+            try {
+                if (element is Wall wall) return new Length(wall.WallType.Width);
+                if (element is Floor || element is Ceiling || element is RoofBase) {
+                    var hostType = doc.GetElement(element.GetTypeId()) as HostObjAttributes;
+                    CompoundStructure cs = hostType?.GetCompoundStructure();
+                    return new Length(cs == null ? 0 : cs.GetWidth());
+                }
+                return new Length(0);
+            } catch {
+                return new Length(0);
+            }
+        }
 
         // Floor introspection
         // All boundary loops (outer + inner openings) of an element's horizontal face, so floor/ceiling/
@@ -1755,6 +1814,23 @@ namespace KhepriRevit {
         public ElementId ColumnTopLevel(Element element) =>
             element.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_PARAM)?.AsElementId()
             ?? ElementId.InvalidElementId;
+        // Rectangular profile dims (b, h, 0) of a column's symbol, in raw feet —
+        // the channel's wXYZ converts per component. Circular sections report d
+        // for both dims. XYZ.Zero when no known dimension parameters exist.
+        public XYZ ColumnProfileDims(Element element) {
+            try {
+                FamilySymbol sym = (element as FamilyInstance)?.Symbol;
+                if (sym == null) return XYZ.Zero;
+                double? b = LookupParam(sym, "b"), h = LookupParam(sym, "h");
+                if (b.HasValue && h.HasValue) return new XYZ(b.Value, h.Value, 0);
+                b = LookupParam(sym, "Width"); h = LookupParam(sym, "Depth");
+                if (b.HasValue && h.HasValue) return new XYZ(b.Value, h.Value, 0);
+                double? d = LookupParam(sym, "d");
+                return d.HasValue ? new XYZ(d.Value, d.Value, 0) : XYZ.Zero;
+            } catch {
+                return XYZ.Zero;
+            }
+        }
 
         // Beam introspection
         public Element[] DocBeams() =>
