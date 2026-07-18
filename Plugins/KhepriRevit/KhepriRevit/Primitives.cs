@@ -211,13 +211,20 @@ namespace KhepriRevit {
             XYZ chordMid = p0 + v * 0.5;
             double halfChord = Math.Sqrt(v.X * v.X + v.Y * v.Y + v.Z * v.Z) / 2;
             double sagitta = halfChord * Math.Tan(angle / 4);
-            // Perpendicular to chord in the horizontal plane, pointing left of p0→p1
+            // Perpendicular to chord in the horizontal plane, pointing left of p0→p1.
             double chordLenXY = Math.Sqrt(v.X * v.X + v.Y * v.Y);
             XYZ perp = chordLenXY > 1e-10
                 ? new XYZ(-v.Y / chordLenXY, v.X / chordLenXY, 0)
                 : new XYZ(0, 1, 0);
-            XYZ arcMid = chordMid + perp * sagitta;
-            return Arc.Create(p0, arcMid, p1);
+            // Khepri's amplitude is CCW-positive around the CENTER, which puts the center LEFT of
+            // the p0→p1 chord and the bulge RIGHT of it — so the sagitta is subtracted along the
+            // left-perpendicular. (Bulging left mirrored every PathCurveArray arc across its chord:
+            // the arc curtain wall rebuilt with the wrong of the two candidate centers.)
+            XYZ arcMid = chordMid - perp * sagitta;
+            // Arc.Create's XYZ overload is (end1, end2, pointOnArc) — the midpoint goes LAST.
+            // Passing it second made the midpoint an endpoint, so the arc ran the long way
+            // around (315° instead of 90°) through the far side of the circle.
+            return Arc.Create(p0, p1, arcMid);
         }
         CurveArray ClosedPathCurveArray(XYZ[] pts, double[] angles) {
             CurveArray profile = new CurveArray();
