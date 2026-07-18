@@ -2390,29 +2390,86 @@ typedFunction("groupedMesh", [[MeshPart]], Id,
     return group;
   });
 
+// Each distinct OBJ/MTL pair is fetched and parsed ONCE; every subsequent placement clones the
+// template, sharing its geometries and materials. Without the cache a family placed N times cost
+// N fetches + N parses (the long-standing per-placement re-parse).
+const objTemplateCache = new Map<string, Promise<THREE.Object3D>>();
+
+// MTLLoader only builds Phong materials and ignores the PBR extension keywords the KhepriRevit
+// exporter writes (Pr roughness, Pm metallic, Ke emission), so build MeshStandardMaterial directly
+// from the parsed materialsInfo. kd/ke arrive as number triples; other keys as raw strings.
+function pbrMaterialsFromMtl(creator: MTLLoader.MaterialCreator): Map<string, THREE.MeshStandardMaterial> {
+  const out = new Map<string, THREE.MeshStandardMaterial>();
+  const infos = (creator as any).materialsInfo as { [name: string]: { [k: string]: any } };
+  for (const name in infos) {
+    const info = infos[name];
+    const mat = new THREE.MeshStandardMaterial();
+    mat.name = name;
+    if (info.kd) mat.color.setRGB(info.kd[0], info.kd[1], info.kd[2], THREE.SRGBColorSpace);
+    if (info.ke) mat.emissive.setRGB(info.ke[0], info.ke[1], info.ke[2], THREE.SRGBColorSpace);
+    if (info.pr !== undefined) {
+      mat.roughness = parseFloat(info.pr);
+    } else if (info.ns !== undefined) {
+      // Blinn-Phong exponent → roughness approximation for MTLs without Pr.
+      mat.roughness = Math.sqrt(2 / (parseFloat(info.ns) + 2));
+    }
+    if (info.pm !== undefined) mat.metalness = parseFloat(info.pm);
+    const d = info.d !== undefined ? parseFloat(info.d) : 1;
+    if (d < 1) {
+      mat.opacity = d;
+      mat.transparent = true;
+    }
+    mat.side = THREE.DoubleSide;
+    out.set(name, mat);
+  }
+  return out;
+}
+
+function loadObjTemplate(path: string, name: string): Promise<THREE.Object3D> {
+  const key = `${path}|${name}`;
+  let template = objTemplateCache.get(key);
+  if (!template) {
+    template = new MTLLoader().setPath(path).loadAsync(`${name}.mtl`)
+      .then(creator => {
+        creator.preload();
+        const pbr = pbrMaterialsFromMtl(creator);
+        return new OBJLoader().setPath(path).setMaterials(creator).loadAsync(`${name}.obj`)
+          .then(object => {
+            object.traverse(child => {
+              if (child instanceof THREE.Mesh && child.material) {
+                const remap = (m: any) =>
+                  pbr.get(m.name) ?? ((m.side = THREE.DoubleSide), m);
+                child.material = Array.isArray(child.material)
+                  ? child.material.map(remap)
+                  : remap(child.material);
+                child.castShadow = true;
+                child.receiveShadow = true;
+              }
+            });
+            return object;
+          });
+      });
+    objTemplateCache.set(key, template);
+  }
+  return template;
+}
+
 typedAsyncFunction("meshObjFmt", [Str, Str, Matrix4x4], Id, (path: string, name: string, m: THREE.Matrix4, cont: Function) => {
   // typedAsyncFunction supplies a continuation (cont) that ships the result frame; call it only
   // AFTER the MTL+OBJ load resolves, and route a load failure to sendError instead of swallowing it
-  // into console.error. Previously this was a sync typedFunction that returned an EMPTY Object3D
-  // immediately, so the timeout-less Julia client got a valid id for a mesh that never loaded — and a
-  // failed load was silent.
-  const parent = new THREE.Object3D();
-  new MTLLoader().setPath(path).loadAsync(`${name}.mtl`)
-    .then(materials => {
-      materials.preload();
-      return new OBJLoader().setPath(path).setMaterials(materials).loadAsync(`${name}.obj`);
-    })
-    .then(object => {
-      object.traverse(child => {
-        if (child instanceof THREE.Mesh && child.material) {
-          const mats = Array.isArray(child.material) ? child.material : [child.material];
-          mats.forEach(mat => mat.side = THREE.DoubleSide);
-        }
-      });
-      parent.add(object);
+  // into console.error. (A sync return of an empty Object3D gave Julia a valid id for a mesh that
+  // never loaded, and a failed load was silent.)
+  loadObjTemplate(path, name)
+    .then(template => {
+      const parent = new THREE.Object3D();
+      parent.add(template.clone(true));
       cont(withTransform(m, parent));
     })
-    .catch(err => sendError(err instanceof Error ? err.message + "\n" + err.stack : String(err)));
+    .catch(err => {
+      // Do not cache a transient fetch failure as a permanently-broken template.
+      objTemplateCache.delete(`${path}|${name}`);
+      sendError(err instanceof Error ? err.message + "\n" + err.stack : String(err));
+    });
 });
 
 typedFunction("MeshPhysicalMaterial", [Dict], MatId, (params: { [key: string]: any }) =>

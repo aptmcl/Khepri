@@ -38616,21 +38616,64 @@ typedFunction(
     return group;
   }
 );
-typedAsyncFunction("meshObjFmt", [Str, Str, Matrix4x4], Id, (path, name, m2, cont) => {
-  const parent = new Object3D();
-  new MTLLoader().setPath(path).loadAsync(`${name}.mtl`).then((materials2) => {
-    materials2.preload();
-    return new OBJLoader().setPath(path).setMaterials(materials2).loadAsync(`${name}.obj`);
-  }).then((object) => {
-    object.traverse((child) => {
-      if (child instanceof Mesh && child.material) {
-        const mats = Array.isArray(child.material) ? child.material : [child.material];
-        mats.forEach((mat) => mat.side = DoubleSide);
-      }
+const objTemplateCache = /* @__PURE__ */ new Map();
+function pbrMaterialsFromMtl(creator) {
+  const out = /* @__PURE__ */ new Map();
+  const infos = creator.materialsInfo;
+  for (const name in infos) {
+    const info = infos[name];
+    const mat = new MeshStandardMaterial();
+    mat.name = name;
+    if (info.kd) mat.color.setRGB(info.kd[0], info.kd[1], info.kd[2], SRGBColorSpace);
+    if (info.ke) mat.emissive.setRGB(info.ke[0], info.ke[1], info.ke[2], SRGBColorSpace);
+    if (info.pr !== void 0) {
+      mat.roughness = parseFloat(info.pr);
+    } else if (info.ns !== void 0) {
+      mat.roughness = Math.sqrt(2 / (parseFloat(info.ns) + 2));
+    }
+    if (info.pm !== void 0) mat.metalness = parseFloat(info.pm);
+    const d3 = info.d !== void 0 ? parseFloat(info.d) : 1;
+    if (d3 < 1) {
+      mat.opacity = d3;
+      mat.transparent = true;
+    }
+    mat.side = DoubleSide;
+    out.set(name, mat);
+  }
+  return out;
+}
+function loadObjTemplate(path, name) {
+  const key = `${path}|${name}`;
+  let template = objTemplateCache.get(key);
+  if (!template) {
+    template = new MTLLoader().setPath(path).loadAsync(`${name}.mtl`).then((creator) => {
+      creator.preload();
+      const pbr = pbrMaterialsFromMtl(creator);
+      return new OBJLoader().setPath(path).setMaterials(creator).loadAsync(`${name}.obj`).then((object) => {
+        object.traverse((child) => {
+          if (child instanceof Mesh && child.material) {
+            const remap = (m2) => pbr.get(m2.name) ?? (m2.side = DoubleSide, m2);
+            child.material = Array.isArray(child.material) ? child.material.map(remap) : remap(child.material);
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+        return object;
+      });
     });
-    parent.add(object);
+    objTemplateCache.set(key, template);
+  }
+  return template;
+}
+typedAsyncFunction("meshObjFmt", [Str, Str, Matrix4x4], Id, (path, name, m2, cont) => {
+  loadObjTemplate(path, name).then((template) => {
+    const parent = new Object3D();
+    parent.add(template.clone(true));
     cont(withTransform(m2, parent));
-  }).catch((err) => sendError(err instanceof Error ? err.message + "\n" + err.stack : String(err)));
+  }).catch((err) => {
+    objTemplateCache.delete(`${path}|${name}`);
+    sendError(err instanceof Error ? err.message + "\n" + err.stack : String(err));
+  });
 });
 typedFunction("MeshPhysicalMaterial", [Dict], MatId, (params) => new MeshPhysicalMaterial(params));
 typedFunction("MeshStandardMaterial", [Dict], MatId, (params) => new MeshStandardMaterial(params));
