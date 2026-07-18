@@ -1639,7 +1639,11 @@ fixture_from_ref(r, b::RVT) =
       level_id = @remote(b, FamilyInstanceLevel(r)),
       lvl = level_from_ref(level_id, b),
       key = "$(@remote(b, ElementFamilyName(r))):$(@remote(b, ElementTypeName(r)))",
-      s = family_element(loc, angle=angle, level=lvl, family=_fixture_family(key))
+      # Level-relative z (like _rebase_to_level for slabs): Revit's NewFamilyInstance(XYZ, symbol,
+      # Level, …) measures the point's Z from the level, so an absolute-z emission rebuilt every
+      # fixture level.height too low. Realization re-adds the level height on every backend.
+      rloc = xyz(cx(loc), cy(loc), cz(loc) - lvl.height),
+      s = family_element(rloc, angle=angle, level=lvl, family=_fixture_family(key))
     ref!(b, s, r)
     s
   end

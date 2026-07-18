@@ -117,17 +117,19 @@ compare_summaries(src::Dict, rebuilt::Dict; allow=Symbol[], count_tol=Dict{Strin
 
 ## Known residual diffs (as of 2026-07-18, GSG tutorial)
 
-A FAIL is a *true statement about fidelity*, not necessarily a regression. Current known
-residuals on `tutorial`:
+`tutorial` currently reports VERDICT: PASS with three allowed WARNs (one blank-template
+level, two stair-auto-generated railings). Previously-failing diffs and their fixes, kept
+here as provenance for the comparator's tolerances:
 
-- **Extra levels** (`count.levels`, `level_elevations`): walls with unconnected tops make
-  introspection mint `level(h)` pseudo-levels (e.g. 6.706, 7.01) that materialize as real
-  Revit levels on rebuild, plus the blank template's own Level 2 (3.0). Fix would be
-  emitting `unconnected_level` walls with a height instead of a named top level.
-- **bbox −y drift (~7.4 m)**: the rebuilt model's re-introspected geometry extends to
-  y=−28.8 vs the source's −21.4 — most plausibly the stair or its auto-generated
-  railings landing offset (source z-range also differs slightly). The only remaining
-  FAIL on `tutorial`; counts, wall length, and slab area all PASS.
+- **Arc walls mirrored/wrapped** — C# ArcFromPointsAngle bulged the sagitta on the wrong
+  side of the chord AND passed the midpoint to Arc.Create in the endpoint slot (the XYZ
+  overload is (end1, end2, pointOnArc)), so arc curtain walls rebuilt mirrored or as the
+  315-degree complement. Both fixed in Primitives.cs.
+- **Fixtures one level-height low** — Revit's NewFamilyInstance(XYZ, symbol, Level, ...)
+  measures the point's Z from the level; fixture_from_ref now emits level-relative z and
+  the KhepriBase b_family_element default lifts by the level height on every backend.
+- **Stacked walls double-read** — DocWalls now excludes stacked-wall members (claimed via
+  their parent), which also removed the phantom unconnected-top pseudo-levels.
 
-When one of these is fixed, the corresponding FAIL line disappearing is the regression
-test that the fix worked.
+The remaining bbox slack (~0.5 m in z-min) is the source model's terrain-adjacent content
+that legitimately does not rebuild (mesh fallback is a no-op on Revit).
