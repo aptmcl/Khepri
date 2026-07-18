@@ -2402,6 +2402,54 @@ namespace KhepriRevit {
         public ElementId StairTopLevel(Element element) =>
             element.get_Parameter(BuiltInParameter.STAIRS_TOP_LEVEL_PARAM)?.AsElementId()
             ?? ElementId.InvalidElementId;
+        // Multi-run stair introspection: one polyline per run (the run's stairs path),
+        // ordered bottom-up. The path curves lie at each run's base elevation, so the
+        // returned z values encode the vertical structure (top of run k = base of run k+1
+        // across a flat landing; the last run tops out at the stair's top level).
+        public XYZ[][] StairRunPaths(Element element) {
+            Stairs stair = element as Stairs;
+            if (stair == null) return new XYZ[0][];
+            var runs = stair.GetStairsRuns()
+                .Select(id => doc.GetElement(id) as StairsRun)
+                .Where(r => r != null)
+                .OrderBy(r => r.BaseElevation)
+                .ToList();
+            return runs.Select(r => {
+                var pts = new List<XYZ>();
+                foreach (Curve c in r.GetStairsPath()) {
+                    if (pts.Count == 0) pts.Add(c.GetEndPoint(0));
+                    pts.Add(c.GetEndPoint(1));
+                }
+                return pts.ToArray();
+            }).Where(a => a.Length >= 2).ToArray();
+        }
+        // Base and top elevation per run, flat [base1, top1, base2, top2, ...] bottom-up.
+        public Length[] StairRunElevations(Element element) {
+            Stairs stair = element as Stairs;
+            if (stair == null) return new Length[0];
+            return stair.GetStairsRuns()
+                .Select(id => doc.GetElement(id) as StairsRun)
+                .Where(r => r != null)
+                .OrderBy(r => r.BaseElevation)
+                .SelectMany(r => new[] { new Length(r.BaseElevation), new Length(r.TopElevation) })
+                .ToArray();
+        }
+        public Length StairWidth(Element element) {
+            Stairs stair = element as Stairs;
+            var run = stair?.GetStairsRuns()
+                .Select(id => doc.GetElement(id) as StairsRun)
+                .FirstOrDefault(r => r != null);
+            return new Length(run != null ? run.ActualRunWidth : 0.0);
+        }
+        public Length StairRiserHeight(Element element) =>
+            new Length(element.get_Parameter(BuiltInParameter.STAIRS_ACTUAL_RISER_HEIGHT)?.AsDouble() ?? 0.0);
+        public Length StairTreadDepth(Element element) =>
+            new Length(element.get_Parameter(BuiltInParameter.STAIRS_ACTUAL_TREAD_DEPTH)?.AsDouble() ?? 0.0);
+        // The railing's host element (stair, floor, ...) or InvalidElementId when unhosted.
+        public ElementId RailingHostElement(Element element) {
+            var railing = element as Autodesk.Revit.DB.Architecture.Railing;
+            return (railing != null && railing.HasHost) ? railing.HostId : ElementId.InvalidElementId;
+        }
         public XYZ StairBasePoint(Element element) {
             Stairs stair = element as Stairs;
             if (stair != null) {
@@ -2595,6 +2643,49 @@ namespace KhepriRevit {
         }
 
         // Stair (Spiral) — same inner-Transaction requirement as CreateStraightStair.
+        // Multi-run stair from the plan centerline (z level-relative, converted to absolute
+        // here): climbing segments become straight runs whose location line sits at the
+        // segment's start elevation; flat segments become landings, created automatically
+        // between the two adjoining runs. Same StairsEditScope discipline as
+        // CreateStraightStair (see WithSuspendedTransaction's comment).
+        public ElementId CreateMultiRunStair(XYZ[] pts, double width,
+                                             Level baseLevel, Level topLevel, ElementId familyId) {
+            ElementId stairsId = ElementId.InvalidElementId;
+            WithSuspendedTransaction(() => {
+                using (var scope = new StairsEditScope(doc, "Create Stairs")) {
+                    stairsId = scope.Start(baseLevel.Id, topLevel.Id);
+                    using (Transaction t = new Transaction(doc, "Add Runs")) {
+                        t.Start();
+                        WarningSwallower.KhepriWarnings(t);
+                        StairsRun prev = null;
+                        double tol = doc.Application.ShortCurveTolerance;
+                        for (int i = 0; i + 1 < pts.Length; i++) {
+                            double dz = pts[i + 1].Z - pts[i].Z;
+                            XYZ a = new XYZ(pts[i].X, pts[i].Y, baseLevel.Elevation + pts[i].Z);
+                            XYZ c = new XYZ(pts[i + 1].X, pts[i + 1].Y, baseLevel.Elevation + pts[i].Z);
+                            if (Math.Abs(dz) < 0.01 || a.DistanceTo(c) < tol)
+                                continue;   // landing (or degenerate) segment: no run
+                            StairsRun run = StairsRun.CreateStraightRun(doc, stairsId,
+                                Line.CreateBound(a, c), StairsRunJustification.Center);
+                            run.ActualRunWidth = width;
+                            doc.Regenerate();
+                            if (prev != null) {
+                                try {
+                                    StairsLanding.CreateAutomaticLanding(doc, prev.Id, run.Id);
+                                } catch { }   // runs that touch directly have no landing gap
+                            }
+                            prev = run;
+                        }
+                        t.Commit();
+                    }
+                    scope.Commit(new StairsFailurePreprocessor());
+                }
+            });
+            if (familyId != null && familyId != ElementId.InvalidElementId) {
+                doc.GetElement(stairsId).ChangeTypeId(familyId);
+            }
+            return stairsId;
+        }
         public Element CreateSpiralStair(XYZ center, double radius, double startAngle,
                                           double includedAngle, bool clockwise, double width,
                                           Level baseLevel, Level topLevel, ElementId familyId) {
