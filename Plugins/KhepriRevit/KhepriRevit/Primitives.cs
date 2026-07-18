@@ -840,20 +840,26 @@ namespace KhepriRevit {
             }
             return familySymbol.Id;
         }
+        // The profile's z is the floor's elevation above its level (a raised threshold slab is above
+        // its floor level). Flatten the loop to the level plane and carry the offset via
+        // FLOOR_HEIGHTABOVELEVEL — otherwise a non-zero contour z is silently dropped on rebuild.
+        XYZ[] FlattenZ(XYZ[] pts) => pts.Select(p => new XYZ(p.X, p.Y, 0)).ToArray();
+        double ProfileOffset(XYZ[] pts) => pts.Length > 0 ? pts[0].Z : 0;
+
         public ElementId CreatePolygonalFloor(XYZ[] pts, Level level, ElementId famId) {
             FloorType floorType = (famId != null && famId != ElementId.InvalidElementId) ?
                 doc.GetElement(famId) as FloorType :
                 new FilteredElementCollector(doc).OfClass(typeof(FloorType)).First() as FloorType;
-            Floor floor = Floor.Create(doc, new List<CurveLoop> { PolygonCurveLoop(pts) }, floorType.Id, level.Id);
-            floor.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM).Set(0); //Below the level line
+            Floor floor = Floor.Create(doc, new List<CurveLoop> { PolygonCurveLoop(FlattenZ(pts)) }, floorType.Id, level.Id);
+            floor.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM).Set(ProfileOffset(pts));
             return floor.Id;
         }
         public ElementId CreatePathFloor(XYZ[] pts, double[] angles, Level level, ElementId famId) {
             FloorType floorType = (famId != null && famId != ElementId.InvalidElementId) ?
                 doc.GetElement(famId) as FloorType :
                 new FilteredElementCollector(doc).OfClass(typeof(FloorType)).First() as FloorType;
-            Floor floor = Floor.Create(doc, new List<CurveLoop> { CurveLoopPath(pts, angles) }, floorType.Id, level.Id);
-            floor.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM).Set(0); //Below the level line
+            Floor floor = Floor.Create(doc, new List<CurveLoop> { CurveLoopPath(FlattenZ(pts), angles) }, floorType.Id, level.Id);
+            floor.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM).Set(ProfileOffset(pts));
             return floor.Id;
         }
         /* Panels in Khepri are a 2D region extruded by a thickness. Revit has no
@@ -978,8 +984,14 @@ namespace KhepriRevit {
                 ? GetFirstSymbol(FindCategoryFamilies(doc, BuiltInCategory.OST_GenericModel).FirstOrDefault())
                 : doc.GetElement(famId) as FamilySymbol;
             if (symbol == null) {
+                // Last resort on templates without generic-model families: any loadable symbol is a
+                // better placeholder than aborting the caller (which may be realizing a whole group).
+                symbol = new FilteredElementCollector(doc).OfClass(typeof(FamilySymbol))
+                    .Cast<FamilySymbol>().FirstOrDefault();
+            }
+            if (symbol == null) {
                 throw new InvalidOperationException(
-                    "No family symbol available for hosted-instance placement (famId was null and no generic-model family was found in the project).");
+                    "No family symbol available for hosted-instance placement (famId was null and the project has no family symbols at all).");
             }
             EnsureActive(symbol);
             FamilyInstance elem = (host is Level lvl)
@@ -987,6 +999,14 @@ namespace KhepriRevit {
                 : doc.Create.NewFamilyInstance(location, symbol, direction, host, StructuralType.NonStructural);
             return elem;
         }
+        void MaybeAutoJoin() {
+            // doc.AutoJoinElements() joins EVERYTHING, including walls inside groups — and editing
+            // a grouped element outside group-edit mode makes Revit delete the group (silently,
+            // because the failure processor dismisses warnings). Once groups exist, skip the join.
+            if (!new FilteredElementCollector(doc).OfClass(typeof(Group)).Any())
+                doc.AutoJoinElements();
+        }
+
         public ElementId[] CreateLineWall(XYZ[] pts, ElementId baseLevelId, ElementId topLevelId, ElementId famId) {
             ElementId[] ids = new ElementId[pts.Length - 1];
             for (int i = 0; i < pts.Length - 1; i++) {
@@ -1000,7 +1020,7 @@ namespace KhepriRevit {
             // Joins coincident wall ends so corner geometry resolves correctly. Required
             // for multi-segment polygonal walls; verified by the multi-segment-wall test
             // in test/family_tests/walls_complex.jl.
-            doc.AutoJoinElements();
+            MaybeAutoJoin();
             return ids;
         }
         public ElementId[] CreateUnconnectedLineWall(XYZ[] pts, ElementId baseLevelId, double height, ElementId famId) {
@@ -1016,7 +1036,7 @@ namespace KhepriRevit {
             // Joins coincident wall ends so corner geometry resolves correctly. Required
             // for multi-segment polygonal walls; verified by the multi-segment-wall test
             // in test/family_tests/walls_complex.jl.
-            doc.AutoJoinElements();
+            MaybeAutoJoin();
             return ids;
         }
         List<Curve> OpenPathCurves(XYZ[] pts, double[] angles) {
@@ -1041,7 +1061,7 @@ namespace KhepriRevit {
                 wall.get_Parameter(BuiltInParameter.WALL_HEIGHT_TYPE).Set(topLevelId);
                 ids[i] = wall.Id;
             }
-            doc.AutoJoinElements();
+            MaybeAutoJoin();
             return ids;
         }
         public ElementId[] CreateUnconnectedPathWall(XYZ[] pts, double[] angles, ElementId baseLevelId, double height, ElementId famId) {
@@ -1053,7 +1073,7 @@ namespace KhepriRevit {
                 Wall wall = Wall.Create(doc, curves[i], wallTypeId, baseLevelId, height, 0, false, false);
                 ids[i] = wall.Id;
             }
-            doc.AutoJoinElements();
+            MaybeAutoJoin();
             return ids;
         }
         public Element CreateArcWall(XYZ center, Length radius, double startAngle, double endAngle, ElementId baseLevelId, ElementId topLevelId, ElementId famId) {
@@ -1094,7 +1114,7 @@ namespace KhepriRevit {
             }
             CurrentTransaction.Commit();
             CurrentTransaction.Start();
-            doc.AutoJoinElements();
+            MaybeAutoJoin();
             return ids.ToArray();
         }
 
@@ -1548,8 +1568,59 @@ namespace KhepriRevit {
         // reconstructed Khepri group_instance is a genuine Revit group (its members are excluded from
         // DocWalls/etc.) rather than loose elements.
         public ElementId CreateGroup(ElementId[] ids) {
-            return doc.Create.NewGroup(ids.ToList()).Id;
+            // A grouped stair drags its auto-generated railings in via Revit's parent resolution
+            // (shouldElementBeAddedToGroupByParent), which crashes when they are not in the list —
+            // include them explicitly. If NewGroup still fails, retry without the stairs (a group
+            // missing its stair beats no group), else give up gracefully with InvalidElementId.
+            var all = new List<ElementId>(ids);
+            foreach (var id in ids) {
+                if (doc.GetElement(id) is Autodesk.Revit.DB.Architecture.Stairs) {
+                    all.AddRange(new FilteredElementCollector(doc)
+                        .OfClass(typeof(Autodesk.Revit.DB.Architecture.Railing))
+                        .Cast<Autodesk.Revit.DB.Architecture.Railing>()
+                        .Where(r => r.HasHost && r.HostId == id)
+                        .Select(r => r.Id));
+                }
+            }
+            var members = all.Distinct().ToList();
+            // A member wall still geometry-joined to a NON-member is the classic trigger for the
+            // native crash inside NewGroup's parent resolution — and semantically a grouped wall
+            // should not stay joined across the group boundary anyway.
+            var memberSet = new HashSet<ElementId>(members);
+            foreach (var id in members) {
+                if (doc.GetElement(id) is Wall w) {
+                    foreach (var otherId in JoinGeometryUtils.GetJoinedElements(doc, w).ToList()) {
+                        if (!memberSet.Contains(otherId)) {
+                            var other = doc.GetElement(otherId);
+                            if (other != null)
+                                try { JoinGeometryUtils.UnjoinGeometry(doc, w, other); } catch { }
+                        }
+                    }
+                }
+            }
+            try { return doc.Create.NewGroup(members).Id; }
+            catch {
+                // Leave-one-out retry: some member combinations crash Revit's internal parent
+                // resolution; dropping the single poison member (which stays a loose element)
+                // preserves the rest of the group. n is small, so O(n^2) is fine.
+                for (int skip = 0; skip < members.Count; skip++) {
+                    var subset = members.Where((_, idx) => idx != skip).ToList();
+                    if (subset.Count == 0) continue;
+                    try { return doc.Create.NewGroup(subset).Id; } catch { }
+                }
+                return ElementId.InvalidElementId;
+            }
         }
+        // Additional instance of an existing group type (source models share one GroupType across
+        // repeated instances; recreating each instance as its own NewGroup broke that identity).
+        public ElementId PlaceGroupInstance(XYZ p, ElementId groupTypeId) {
+            GroupType gt = doc.GetElement(groupTypeId) as GroupType;
+            return doc.Create.PlaceGroup(p, gt).Id;
+        }
+        // The created group's own placement point, so repeat instances can be placed at
+        // first-origin + instance-delta.
+        public XYZ GroupPlacementPoint(Element group) =>
+            (group.Location as LocationPoint)?.Point ?? XYZ.Zero;
         public static IOrderedEnumerable<Level> FindAndSortLevels(Document doc) =>
             new FilteredElementCollector(doc)
             .WherePasses(new ElementClassFilter(typeof(Level), false))
@@ -2141,35 +2212,35 @@ namespace KhepriRevit {
             new FilteredElementCollector(doc)
                 .OfCategory(BuiltInCategory.OST_Furniture)
                 .WhereElementIsNotElementType()
-                .Where(e => !IsGroupMember(e) && e.Location is LocationPoint)
+                .Where(e => !IsGroupMember(e) && e.Location is LocationPoint && (e as FamilyInstance)?.SuperComponent == null)
                 .ToArray();
         // Plumbing fixture introspection
         public Element[] DocPlumbingFixtures() =>
             new FilteredElementCollector(doc)
                 .OfCategory(BuiltInCategory.OST_PlumbingFixtures)
                 .WhereElementIsNotElementType()
-                .Where(e => !IsGroupMember(e) && e.Location is LocationPoint)
+                .Where(e => !IsGroupMember(e) && e.Location is LocationPoint && (e as FamilyInstance)?.SuperComponent == null)
                 .ToArray();
         // Casework introspection
         public Element[] DocCasework() =>
             new FilteredElementCollector(doc)
                 .OfCategory(BuiltInCategory.OST_Casework)
                 .WhereElementIsNotElementType()
-                .Where(e => !IsGroupMember(e) && e.Location is LocationPoint)
+                .Where(e => !IsGroupMember(e) && e.Location is LocationPoint && (e as FamilyInstance)?.SuperComponent == null)
                 .ToArray();
         // Generic model introspection
         public Element[] DocGenericModels() =>
             new FilteredElementCollector(doc)
                 .OfCategory(BuiltInCategory.OST_GenericModel)
                 .WhereElementIsNotElementType()
-                .Where(e => !IsGroupMember(e) && e.Location is LocationPoint)
+                .Where(e => !IsGroupMember(e) && e.Location is LocationPoint && (e as FamilyInstance)?.SuperComponent == null)
                 .ToArray();
         // Specialty equipment introspection
         public Element[] DocSpecialtyEquipment() =>
             new FilteredElementCollector(doc)
                 .OfCategory(BuiltInCategory.OST_SpecialityEquipment)
                 .WhereElementIsNotElementType()
-                .Where(e => !IsGroupMember(e) && e.Location is LocationPoint)
+                .Where(e => !IsGroupMember(e) && e.Location is LocationPoint && (e as FamilyInstance)?.SuperComponent == null)
                 .ToArray();
         // Generic FamilyInstance introspection helpers
         public XYZ FamilyInstanceLocation(Element element) =>
@@ -2461,6 +2532,7 @@ namespace KhepriRevit {
             var groups = new List<Tuple<string, List<int[][]>>>();
             var materials = new Dictionary<string, Autodesk.Revit.DB.Color>();
             var materialTransparency = new Dictionary<string, int>();
+                    var materialPbr = new Dictionary<string, double[]>();
 
             var collector = new FilteredElementCollector(geomDoc);
             foreach (Element elem in collector.WhereElementIsNotElementType()) {
@@ -2469,12 +2541,12 @@ namespace KhepriRevit {
 
                 GeometryElement geomElem = elem.get_Geometry(options);
                 if (geomElem == null) continue;
-                CollectGeometry(geomDoc, geomElem, vertices, normals, uvs, groups, materials, materialTransparency);
+                CollectGeometry(geomDoc, geomElem, vertices, normals, uvs, groups, materials, materialTransparency, materialPbr);
             }
 
             if (vertices.Count > 0) {
                 WriteOBJ(objPath, mtlFileName, vertices, normals, uvs, groups);
-                WriteMTL(mtlPath, materials, materialTransparency);
+                WriteMTL(mtlPath, materials, materialTransparency, materialPbr);
             }
         }
 
@@ -2500,12 +2572,13 @@ namespace KhepriRevit {
                     var groups = new List<Tuple<string, List<int[][]>>>();
                     var materials = new Dictionary<string, Autodesk.Revit.DB.Color>();
                     var materialTransparency = new Dictionary<string, int>();
-                    CollectGeometry(doc, geomElem, vertices, normals, uvs, groups, materials, materialTransparency);
+                    var materialPbr = new Dictionary<string, double[]>();
+                    CollectGeometry(doc, geomElem, vertices, normals, uvs, groups, materials, materialTransparency, materialPbr);
                     if (vertices.Count == 0) continue;
                     string objPath = Path.Combine(folderPath, ids[i].Value + ".obj");
                     string mtlPath = Path.ChangeExtension(objPath, ".mtl");
                     WriteOBJ(objPath, Path.GetFileName(mtlPath), vertices, normals, uvs, groups);
-                    WriteMTL(mtlPath, materials, materialTransparency);
+                    WriteMTL(mtlPath, materials, materialTransparency, materialPbr);
                     result[i] = objPath;
                 } catch { }
             }
@@ -2646,7 +2719,8 @@ namespace KhepriRevit {
             List<XYZ> vertices, List<XYZ> normals, List<UV> uvs,
             List<Tuple<string, List<int[][]>>> groups,
             Dictionary<string, Autodesk.Revit.DB.Color> materials,
-            Dictionary<string, int> materialTransparency) {
+            Dictionary<string, int> materialTransparency,
+            Dictionary<string, double[]> materialPbr) {
 
             foreach (GeometryObject geomObj in geomElem) {
                 if (geomObj is Solid solid) {
@@ -2670,12 +2744,18 @@ namespace KhepriRevit {
                                 if (!materials.ContainsKey(matName)) {
                                     materials[matName] = mat.Color;
                                     materialTransparency[matName] = mat.Transparency;
+                                    // [roughness 0-1, Blinn-Phong exponent 0-1000] from the
+                                    // graphics props (Smoothness 0-100, Shininess 0-128).
+                                    materialPbr[matName] = new double[] {
+                                        1.0 - mat.Smoothness / 100.0,
+                                        mat.Shininess * (1000.0 / 128.0) };
                                 }
                             }
                         }
                         if (!materials.ContainsKey(matName) && matName == "default") {
                             materials["default"] = new Autodesk.Revit.DB.Color(200, 200, 200);
                             materialTransparency["default"] = 0;
+                            materialPbr["default"] = new double[] { 0.5, 30.0 };
                         }
 
                         Mesh mesh = face.Triangulate();
@@ -2720,7 +2800,7 @@ namespace KhepriRevit {
                 } else if (geomObj is GeometryInstance geomInst) {
                     GeometryElement instGeom = geomInst.GetInstanceGeometry();
                     if (instGeom != null) {
-                        CollectGeometry(famDoc, instGeom, vertices, normals, uvs, groups, materials, materialTransparency);
+                        CollectGeometry(famDoc, instGeom, vertices, normals, uvs, groups, materials, materialTransparency, materialPbr);
                     }
                 } else if (geomObj is Mesh directMesh) {
                     int vertexOffset = vertices.Count;
@@ -2814,7 +2894,8 @@ namespace KhepriRevit {
 
         void WriteMTL(string mtlPath,
             Dictionary<string, Autodesk.Revit.DB.Color> materials,
-            Dictionary<string, int> materialTransparency) {
+            Dictionary<string, int> materialTransparency,
+            Dictionary<string, double[]> materialPbr) {
 
             using (var sw = new StreamWriter(mtlPath)) {
                 sw.WriteLine("# Material library exported from Revit family by KhepriRevit");
@@ -2826,11 +2907,17 @@ namespace KhepriRevit {
                     double b = color.Blue / 255.0;
                     int transparency = materialTransparency.ContainsKey(name) ? materialTransparency[name] : 0;
                     double d = 1.0 - transparency / 100.0;
+                    double[] pbr = materialPbr.ContainsKey(name) ? materialPbr[name] : new double[] { 0.5, 30.0 };
 
                     sw.WriteLine("newmtl " + name);
                     sw.WriteLine("Kd {0} {1} {2}",
                         r.ToString("F4"), g.ToString("F4"), b.ToString("F4"));
                     sw.WriteLine("d {0}", d.ToString("F4"));
+                    // PBR extension keywords (consumed by the Khepri viewers and parse_mtl);
+                    // Ns kept for plain Phong consumers. Revit graphics props carry no metallic.
+                    sw.WriteLine("Pr {0}", pbr[0].ToString("F4"));
+                    sw.WriteLine("Pm 0.0000");
+                    sw.WriteLine("Ns {0}", pbr[1].ToString("F1"));
                     sw.WriteLine("illum 2");
                     sw.WriteLine();
                 }
