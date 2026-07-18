@@ -59,8 +59,21 @@ namespace KhepriRhinoceros {
                 server.Stop();
             }
             server.Start();
+            RhinoApp.WriteLine("Khepri plugin build: " + PluginBuildTime());
             RhinoApp.WriteLine("Waiting for connection");
             currentAction = AcceptClient;
+        }
+
+        // Loaded-build marker: prints the assembly's last-write time so it is
+        // unambiguous which .rhp Rhino actually loaded (a stale/other copy would show
+        // an older stamp). Purely diagnostic.
+        static string PluginBuildTime() {
+            try {
+                string loc = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                return System.IO.File.GetLastWriteTime(loc).ToString("yyyy-MM-dd HH:mm:ss");
+            } catch {
+                return "unknown";
+            }
         }
 
         protected void OnIdleDoCurrentAction(object sender, EventArgs e) {
@@ -85,7 +98,10 @@ namespace KhepriRhinoceros {
                 currentAction = AcceptClient;
             } else if (op == -2) {
                 //timeout
-            } else {                
+            } else {
+                // ExecuteReadAndRepeat drains the whole burst in this one cycle (it
+                // waits briefly for each follow-up op), so a single redraw here paints
+                // the entire batch rather than once per operation.
                 processor.ExecuteReadAndRepeat(op);
                 doc.Views.Redraw();
             }

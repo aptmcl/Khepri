@@ -65,7 +65,14 @@ namespace KhepriRhinoceros {
             return obj_to_return;
         }
         R SingletonElement<R>(R[] rs) {
-            Debug.Assert(rs.Length == 1);
+            // NEVER Debug.Assert here: in a Debug build an assert raises
+            // DebugAssertException -> Environment.FailFast -> the whole Rhino process
+            // dies mid-RPC (observed on a degenerate wall extrusion in the Moradia T3
+            // corpus). A thrown exception instead travels back to the caller as a
+            // per-operation BackendError.
+            if (rs == null || rs.Length == 0)
+                throw new InvalidOperationException(
+                    "Operation produced no geometry (degenerate profile?)");
             return rs[0];
         }
 
@@ -314,14 +321,15 @@ namespace KhepriRhinoceros {
         public Guid ClosedPolyLine(Point3d[] pts) => doc.Objects.AddPolyline(pts.Concat(new[] { pts[0] }));
         public Guid Spline(Point3d[] pts) => doc.Objects.AddCurve(Curve.CreateInterpolatedCurve(pts, 3));
         public Guid SplineTangents(Point3d[] pts, Vector3d start, Vector3d end) => doc.Objects.AddCurve(Curve.CreateInterpolatedCurve(pts, 3, CurveKnotStyle.Chord, start, end));
-        // A closed spline must be a smooth PERIODIC curve through the fit points, not an
-        // open interpolated curve whose start point is repeated at the end: duplicating
-        // pts[0] and using the default (Uniform, non-periodic) knot style leaves the curve
-        // free to have a tangent discontinuity at the seam, producing a visible kink. Using
-        // a periodic knot style (and NOT repeating the first point) yields C2 continuity all
-        // the way around — four radially-spread points then describe a near-circle, matching
-        // AutoCAD's InterpClosedSpline (new Spline(pts, periodic:true, Chord, degree:3)).
-        public Guid ClosedSpline(Point3d[] pts) => doc.Objects.AddCurve(Curve.CreateInterpolatedCurve(pts, 3, CurveKnotStyle.ChordPeriodic));
+        // A closed spline must be a smooth PERIODIC curve through the fit points. A periodic
+        // (ChordPeriodic) knot style gives C2 continuity all the way around, avoiding the
+        // tangent discontinuity ("kink") at the seam that a non-periodic knot style leaves
+        // free. BUT, unlike AutoCAD's Spline(pts, periodic:true, ...) constructor which
+        // handles periodicity internally, RhinoCommon's CreateInterpolatedCurve requires the
+        // first point to be repeated at the end as the closing fit point; without it the
+        // periodic curve does not actually close. So we duplicate pts[0] AND use ChordPeriodic
+        // — matching the original Khepri Rhino backend (AddInterpCurve(ps + [ps[0]], 3, 4)).
+        public Guid ClosedSpline(Point3d[] pts) => doc.Objects.AddCurve(Curve.CreateInterpolatedCurve(pts.Concat(new[] { pts[0] }), 3, CurveKnotStyle.ChordPeriodic));
         double[] RhinoStyleKnots(double[] knots, int targetCount) {
             if (knots.Length == targetCount) {
                 return knots;
