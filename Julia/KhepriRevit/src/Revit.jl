@@ -264,6 +264,8 @@ public bool IsProject()
 public void DeleteAllElements()
 public void DeleteElement(Element element)
 public ElementId CreateGroup(ElementId[] ids)
+public ElementId PlaceGroupInstance(XYZ p, ElementId groupTypeId)
+public XYZ GroupPlacementPoint(Element group)
 public void SetView(XYZ camera, XYZ target, int width, int height, double lens)
 public XYZ GetCamera()
 public XYZ GetTarget()
@@ -478,7 +480,9 @@ convert_and_load_ifc_file(path) =
 # Levels
 
 realize(b::RVT, s::Level) =
-  @remote(b, FindOrCreateLevelAtElevation(s.height))
+  # An unconnected-top marker is NOT a real level: realize as the void ref, so wall realization
+  # takes the CreateUnconnected* branch and the rebuilt model gains no phantom level.
+  s.is_unconnected ? RVTVoidId : @remote(b, FindOrCreateLevelAtElevation(s.height))
 
 # Families
 #=
@@ -1232,18 +1236,90 @@ KhepriBase.b_surface_grid(b::RVT, ptss, closed_u, closed_v, smooth_u, smooth_v, 
 realize(b::RVT, s::Group) =
   void_ref(b)  # container only; shapes created via GroupInstance
 
+# Group construction is DEFERRED: creating elements after a group exists triggers regenerations
+# that can silently delete it (the failure processor dismisses the warning), so member elements are
+# created inline here, but NewGroup/PlaceGroup runs only in b_finalize_groups — the generated
+# program's last statement. Repeat instances of one Khepri group skip member creation entirely and
+# are placed from the first instance's GroupType, restoring the source's shared-type identity.
+const _pending_groups = Vector{Any}()          # (:new, group, refs, loc) | (:place, group, loc)
+const _groups_realized = IdDict{Any, Bool}()
+
+_reset_pending_groups!() = (empty!(_pending_groups); empty!(_groups_realized))
+
 realize(b::RVT, s::GroupInstance) =
-  with(current_cs, translated_cs(current_cs(), cx(s.loc), cy(s.loc), cz(s.loc))) do
-    let factory = s.group.factory
-      if factory !== nothing
-        let shapes = collecting_shapes(factory),
-            refs = ref_values(b, shapes)
-          isempty(refs) ? void_ref(b) : @remote(b, CreateGroup(refs))
+  if haskey(_groups_realized, s.group)
+    push!(_pending_groups, (:place, s.group, s.loc))
+    void_ref(b)
+  else
+    with(current_cs, translated_cs(current_cs(), cx(s.loc), cy(s.loc), cz(s.loc))) do
+      let factory = s.group.factory
+        if factory !== nothing
+          let shapes = collecting_shapes(factory),
+              # Per-member containment: one member that cannot realize (e.g. a fixture whose family
+              # is absent from the target template) must not abort the whole group. Void refs
+              # (skipped stairs, no-op obj_models) are filtered — NewGroup rejects invalid ids.
+              refs = let out = RVTId[]
+                for sh in shapes
+                  # Hosted openings must NOT be passed to NewGroup: Revit adds hosted children of a
+                  # grouped wall automatically, and passing the child alongside its parent crashes
+                  # inside shouldElementBeAddedToGroupByParent. Realize them (so the opening
+                  # exists), but keep only the host's ids in the group list.
+                  try
+                    let rs = filter(!=(RVTVoidId), collect(ref_values(b, [sh])))
+                      (sh isa Door || sh isa Window) || append!(out, rs)
+                    end
+                  catch e
+                    @warn "group member failed to realize; grouping the rest" exception=e
+                  end
+                end
+                out
+              end
+            _groups_realized[s.group] = true
+            isempty(refs) || push!(_pending_groups, (:new, s.group, refs, s.loc))
+            void_ref(b)
+          end
+        else
+          void_ref(b)
         end
-      else
-        void_ref(b)
       end
     end
+  end
+
+KhepriBase.b_finalize_groups(b::RVT) =
+  let type_of = IdDict{Any, RVTId}(),
+      anchor_of = IdDict{Any, Tuple{Loc, Loc}}()   # group => (revit placement point, khepri loc)
+    for entry in _pending_groups
+      try
+        if entry[1] == :new
+          let (_, grp, refs, loc) = entry,
+              gid = @remote(b, CreateGroup(refs))
+            if gid == RVTVoidId
+              @warn "group could not be created; members remain loose" group=grp.name
+            else
+              type_of[grp] = @remote(b, GroupTypeId(gid))
+              anchor_of[grp] = (@remote(b, GroupPlacementPoint(gid)), loc)
+            end
+          end
+        else
+          let (_, grp, loc) = entry
+            if haskey(type_of, grp)
+              let (p0, loc0) = anchor_of[grp],
+                  target = xyz(cx(p0) + cx(loc) - cx(loc0),
+                               cy(p0) + cy(loc) - cy(loc0),
+                               cz(p0) + cz(loc) - cz(loc0))
+                @remote(b, PlaceGroupInstance(target, type_of[grp]))
+              end
+            else
+              @warn "repeat group instance has no realized first instance; skipped" group=grp.name
+            end
+          end
+        end
+      catch e
+        @warn "group finalization failed for one instance" exception=e
+      end
+    end
+    _reset_pending_groups!()
+    nothing
   end
 
 ############################################
@@ -1332,11 +1408,8 @@ level_from_ref(r, b::RVT) =
       s
     end
 
-unconnected_level(h::Real, b::RVT) =
-  let s = level(h)
-    ref!(b, s, RVTVoidId)
-    s
-  end
+# unconnected_level itself now lives in KhepriBase (a Level with is_unconnected=true); realize
+# below maps it to the void ref so realize_wall_path takes the CreateUnconnected* branch.
 
 # All parametrically-readable elements, by concatenating the per-category readers (there is no
 # generic per-element reader — DocElements ids without a reader are the mesh-fallback set).
@@ -1371,7 +1444,7 @@ wall_from_ref(r, b::RVT) =
       top_level_id = @remote(b, WallTopLevel(r)),
       bottom_level = level_from_ref(bottom_level_id, b),
       top_level = top_level_id == RVTVoidId ?
-                    unconnected_level(bottom_level.height + @remote(b, WallHeight(r)), b) :
+                    unconnected_level(bottom_level.height + @remote(b, WallHeight(r))) :
                     level_from_ref(top_level_id, b),
       path = if curve_type == "Line"
                convert(Path, @remote(b, LineWallVertices(r)))
@@ -1798,6 +1871,7 @@ introspect_model(; b::RVT=revit) =
   with_introspection(b) do
   _base_level_cache(nothing)   # reset the per-introspection base-level fallback cache
   empty!(_fixture_family_cache)  # per-introspection keyed fixture families
+  _reset_pending_groups!()       # deferred group construction is per-rebuild state
   let family_meta = IdDict{Family, FamilyMeta}(),
       # Groups — collect instances and introspect one representative per type.
       # DocWalls/DocFloors/etc. already exclude group members (filtered in C#),

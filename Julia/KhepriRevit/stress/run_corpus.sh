@@ -148,7 +148,10 @@ run_model() {
   rm -f "$copy_mnt"
 
   # Launch B: rebuild on the blank template, re-introspect, compare.
+  local length_rtol
+  length_rtol="$(corpus_field "$key" length_rtol)"
   launch_and_run "$TEMPLATE_WIN" "$stress_win\\_stress_rebuild.jl" "$rdir/rebuild.log" \
+    "KHEPRI_STRESS_LENGTH_RTOL=${length_rtol:-0.01}" \
     "KHEPRI_STRESS_GEN=$rdir_win\\generated.jl" \
     "KHEPRI_STRESS_SUMMARY_SRC=$rdir_win\\summary_src.txt" \
     "KHEPRI_STRESS_SUMMARY_REBUILT=$rdir_win\\summary_rebuilt.txt" \

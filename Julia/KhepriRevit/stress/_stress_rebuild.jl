@@ -27,7 +27,8 @@ try
   println("=== rebuilding (statement-by-statement) ===")
   flush(stdout)
   stats =
-    let src = read(gen_path, String),
+    let _ = cd(dirname(gen_path)),  # anchor @__DIR__ in eval'd statements at the program's home
+    src = read(gen_path, String),
         exprs = Meta.parseall(src).args,
         ok = 0, failed = 0, meshes = 0,
         errs = Dict{String,Int}()
@@ -61,9 +62,11 @@ try
   println("re-introspected: $gen2_path")
   flush(stdout)
 
+  length_rtol = parse(Float64, get(ENV, "KHEPRI_STRESS_LENGTH_RTOL", "0.01"))
   r = KhepriBase.compare_summaries(KhepriBase.read_summary(src_summary_path),
                                    KhepriBase.read_summary(rebuilt_summary_path);
-                                   allow=[:template_levels, :stair_railings])
+                                   allow=[:template_levels, :stair_railings],
+                                   length_rtol=length_rtol)
   open(report_path, "w") do io
     println(io, "rebuild: ok=$(stats.ok) mesh_noop=$(stats.meshes) failed=$(stats.failed)")
     for (m, n) in sort(collect(stats.errs), by=last, rev=true)

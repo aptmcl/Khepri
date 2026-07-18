@@ -133,3 +133,20 @@ here as provenance for the comparator's tolerances:
 
 The remaining bbox slack (~0.5 m in z-min) is the source model's terrain-adjacent content
 that legitimately does not rebuild (mesh fallback is a no-op on Revit).
+
+## Known residual diffs (as of 2026-07-18, Moradia T4)
+
+`moradia` reports one FAIL: `count.groups 11→10` / `count.group_instances 12→11`. Every
+geometry metric PASSes (walls, doors, fixtures, railings, wall length, slab area, bbox
+delta 0.0). The missing container is one specific 20-member group (`group_m_2_2`) whose
+`doc.Create.NewGroup` crashes inside Revit's native
+`ElementGroup.shouldElementBeAddedToGroupByParent` — reproduced across: inline vs deferred
+(finalize_groups) construction, hosted-opening exclusion, stair-railing inclusion,
+leave-one-out member retry, and cross-boundary UnjoinGeometry. The members themselves are
+all created correctly and remain loose. This is a Revit API defect on that member
+combination, not a codegen defect.
+
+Group construction is now DEFERRED (`finalize_groups()` as the generated program's last
+statement) so later element creation can never silently delete a group, and repeat
+instances of one group share a GroupType via PlaceGroup — the source's 11-types /
+12-instances structure round-trips for every group Revit can form.

@@ -75,3 +75,11 @@ skip = false
 path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\GSGRevit\GSG_Complete.rvt'
 description = 'Complete GSG model (final state)'
 skip = false
+
+[models.moradia]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\DDN\OneDrive_1_5-2-2025\Moradia T4_v1.rvt'
+description = 'DDN Moradia T4 house (55 MB real project; arc walls, stairs, groups)'
+skip = false
+# Rebuilt walls auto-join at junctions, extending location lines by ~half a wall thickness
+# (+1.0 m over 21 walls) — a Revit regeneration semantic, not a codegen defect.
+length_rtol = '0.02'
