@@ -2046,7 +2046,9 @@ def show_vertices(shape):
         }
 
         public Point3d[] BoundingBox(RhinoObject[] objs) {
-            var bb = new BoundingBox();
+            // new BoundingBox() is the ORIGIN box (0,0,0)-(0,0,0), not an empty one —
+            // unioning from it silently includes the world origin in every result.
+            var bb = Rhino.Geometry.BoundingBox.Empty;
             foreach (var obj in objs) {
                bb.Union(obj.Geometry.GetBoundingBox(true));
             }
