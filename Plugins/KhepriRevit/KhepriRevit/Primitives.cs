@@ -2423,6 +2423,40 @@ namespace KhepriRevit {
                 return pts.ToArray();
             }).Where(a => a.Length >= 2).ToArray();
         }
+        // Landing footprint polygons, bottom-up by elevation. The boundary CurveLoop is
+        // tessellated to its curve endpoints (landings are polygonal in practice).
+        public XYZ[][] StairLandingBoundaries(Element element) {
+            Stairs stair = element as Stairs;
+            if (stair == null) return new XYZ[0][];
+            return stair.GetStairsLandings()
+                .Select(id => doc.GetElement(id) as StairsLanding)
+                .Where(l => l != null)
+                .OrderBy(l => l.BaseElevation)
+                .Select(l => {
+                    var pts = new List<XYZ>();
+                    foreach (Curve c in l.GetFootprintBoundary()) {
+                        foreach (XYZ q in c.Tessellate()) {
+                            if (pts.Count == 0 || pts[pts.Count - 1].DistanceTo(q) > doc.Application.ShortCurveTolerance)
+                                pts.Add(q);
+                        }
+                    }
+                    // Drop a closing duplicate of the first point.
+                    if (pts.Count > 1 && pts[0].DistanceTo(pts[pts.Count - 1]) <= doc.Application.ShortCurveTolerance)
+                        pts.RemoveAt(pts.Count - 1);
+                    return pts.ToArray();
+                })
+                .Where(a => a.Length >= 3).ToArray();
+        }
+        public Length[] StairLandingElevations(Element element) {
+            Stairs stair = element as Stairs;
+            if (stair == null) return new Length[0];
+            return stair.GetStairsLandings()
+                .Select(id => doc.GetElement(id) as StairsLanding)
+                .Where(l => l != null)
+                .OrderBy(l => l.BaseElevation)
+                .Select(l => new Length(l.BaseElevation))
+                .ToArray();
+        }
         // Base and top elevation per run, flat [base1, top1, base2, top2, ...] bottom-up.
         public Length[] StairRunElevations(Element element) {
             Stairs stair = element as Stairs;
@@ -2648,7 +2682,12 @@ namespace KhepriRevit {
         // segment's start elevation; flat segments become landings, created automatically
         // between the two adjoining runs. Same StairsEditScope discipline as
         // CreateStraightStair (see WithSuspendedTransaction's comment).
-        public ElementId CreateMultiRunStair(XYZ[] pts, double width,
+        // `landings` carries the EXACT footprint polygon of each landing (level-relative z,
+        // ordered bottom-up; may be empty). Each is sketched via StairsLanding.Create; a
+        // polygon Revit rejects falls back to the automatic landing between the two
+        // adjoining runs, so an imperfect footprint degrades gracefully instead of failing
+        // the stair.
+        public ElementId CreateMultiRunStair(XYZ[] pts, XYZ[][] landings, double width,
                                              Level baseLevel, Level topLevel, ElementId familyId) {
             ElementId stairsId = ElementId.InvalidElementId;
             WithSuspendedTransaction(() => {
@@ -2657,7 +2696,7 @@ namespace KhepriRevit {
                     using (Transaction t = new Transaction(doc, "Add Runs")) {
                         t.Start();
                         WarningSwallower.KhepriWarnings(t);
-                        StairsRun prev = null;
+                        var runs = new List<StairsRun>();
                         double tol = doc.Application.ShortCurveTolerance;
                         for (int i = 0; i + 1 < pts.Length; i++) {
                             double dz = pts[i + 1].Z - pts[i].Z;
@@ -2669,12 +2708,31 @@ namespace KhepriRevit {
                                 Line.CreateBound(a, c), StairsRunJustification.Center);
                             run.ActualRunWidth = width;
                             doc.Regenerate();
-                            if (prev != null) {
+                            runs.Add(run);
+                        }
+                        for (int k = 0; k + 1 < runs.Count; k++) {
+                            bool made = false;
+                            if (landings != null && k < landings.Length && landings[k].Length >= 3) {
                                 try {
-                                    StairsLanding.CreateAutomaticLanding(doc, prev.Id, run.Id);
+                                    var loop = new CurveLoop();
+                                    var poly = landings[k];
+                                    double z = baseLevel.Elevation + poly[0].Z;
+                                    for (int j = 0; j < poly.Length; j++) {
+                                        XYZ p0 = new XYZ(poly[j].X, poly[j].Y, z);
+                                        XYZ p1 = new XYZ(poly[(j + 1) % poly.Length].X,
+                                                         poly[(j + 1) % poly.Length].Y, z);
+                                        if (p0.DistanceTo(p1) > tol)
+                                            loop.Append(Line.CreateBound(p0, p1));
+                                    }
+                                    StairsLanding.CreateSketchedLanding(doc, stairsId, loop, z);
+                                    made = true;
+                                } catch { }
+                            }
+                            if (!made) {
+                                try {
+                                    StairsLanding.CreateAutomaticLanding(doc, runs[k].Id, runs[k + 1].Id);
                                 } catch { }   // runs that touch directly have no landing gap
                             }
-                            prev = run;
                         }
                         t.Commit();
                     }
