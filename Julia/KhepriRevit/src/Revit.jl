@@ -1446,11 +1446,14 @@ wall_from_ref(r, b::RVT) =
       top_level = top_level_id == RVTVoidId ?
                     unconnected_level(bottom_level.height + @remote(b, WallHeight(r))) :
                     level_from_ref(top_level_id, b),
+      # Curve z is emitted LEVEL-RELATIVE (Revit stores it at the level's absolute elevation and
+      # ignores it on creation; mesh backends add path z on top of the level height, so an
+      # absolute z double-counted there — the same convention slabs use via _rebase_to_level).
       path = if curve_type == "Line"
-               convert(Path, @remote(b, LineWallVertices(r)))
+               open_polygonal_path(_rebase_to_level(@remote(b, LineWallVertices(r)), bottom_level))
              elseif curve_type == "Arc"
                let verts = @remote(b, ArcWallVertices(r)),
-                   center = verts[1],
+                   center = _rebase_to_level([verts[1]], bottom_level)[1],
                    radius = @remote(b, ArcWallRadius(r)),
                    angles = @remote(b, ArcWallAngles(r))
                  arc_path(center, radius, angles[1], angles[2] - angles[1])
@@ -1459,8 +1462,9 @@ wall_from_ref(r, b::RVT) =
                # Spline/ellipse walls ("Other"): the location curve tessellated to a polyline. The
                # old Line fallback null-crashed in C# on non-Line curves.
                let verts = @remote(b, WallCurveVertices(r))
-                 length(verts) >= 2 ? open_polygonal_path(verts) :
-                   convert(Path, @remote(b, LineWallVertices(r)))
+                 length(verts) >= 2 ?
+                   open_polygonal_path(_rebase_to_level(verts, bottom_level)) :
+                   open_polygonal_path(_rebase_to_level(@remote(b, LineWallVertices(r)), bottom_level))
                end
              end,
       s = if is_curtain
@@ -1735,13 +1739,15 @@ all_fixtures(b::RVT) =
 
 # Stair introspection
 stair_from_ref(r, b::RVT) =
-  let base = @remote(b, StairBasePoint(r)),
+  let base0 = @remote(b, StairBasePoint(r)),
       dir = @remote(b, StairDirection(r)),
       base_level_id = @remote(b, StairBaseLevel(r)),
       top_level_id = @remote(b, StairTopLevel(r)),
       base_level = level_from_ref(base_level_id, b),
       top_level = top_level_id == RVTVoidId ? base_level : level_from_ref(top_level_id, b),
       # StairDirection comes back as an XYZ point; stair() wants a horizontal direction vector (VXY).
+      # Base point z is emitted level-relative (realization re-adds the bottom level height).
+      base = _rebase_to_level([base0], base_level)[1],
       s = stair(base, direction=vxy(cx(dir), cy(dir)), bottom_level=base_level, top_level=top_level)
     ref!(b, s, r)
     s
@@ -1760,7 +1766,7 @@ railing_from_ref(r, b::RVT) =
     if length(pts) < 2
       nothing
     else
-      let s = railing(open_polygonal_path(pts), level=lvl)
+      let s = railing(open_polygonal_path(_rebase_to_level(pts, lvl)), level=lvl)
         ref!(b, s, r)
         s
       end
