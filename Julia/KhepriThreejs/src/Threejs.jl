@@ -164,7 +164,10 @@ const THRRefs = Vector{THRRef}
 const THR = WebSocketBackend{THRKey, THRId}
 # The Three.js camera lives in the browser, so view ops (set_view/get_view/zoom_extents)
 # must dispatch to the frontend variant rather than the default BackendView(). ([H2])
-KhepriBase.view_type(::Type{<:THR}) = KhepriBase.FrontendView()
+# NB: THR uses the default BackendView. It DECLARED FrontendView for years, but the declaration was
+# dead (the ::Type{THR} dispatch bug) and the FrontendView machinery reads a `view` field
+# WebSocketBackend does not have — fixing the dispatch turned zoom_extents into a crash. The camera
+# lives in the browser, which is exactly the BackendView contract.
 
 
 backend_name(b::THR) = b.name
@@ -710,8 +713,17 @@ measure_box(; xlength = 20, ylength = 10, zlength = 5) =
 KhepriBase.b_set_environment(b::THR, env_name, set_background) =
   @remote(b, setEnvironment("resources/environments/$env_name", set_background))
 
+# The viewer parents all shapes under a layer rotated -π/2 about x (Khepri Z-up → three.js Y-up),
+# but the camera lives OUTSIDE that layer in three.js world coordinates — so the Khepri camera/target
+# must be mapped through the same rotation: (x, y, z) → (x, z, -y). Without this, set_view aimed the
+# camera in the un-rotated frame and the model appeared tipped over / out of frame.
+_thr_world(p) =
+  let w = in_world(p)
+    xyz(cx(w), cz(w), -cy(w))
+  end
+
 KhepriBase.b_set_view(b::THR, camera, target, lens, aperture) =
-  @remote(b, setView(camera, target, lens, aperture))
+  @remote(b, setView(_thr_world(camera), _thr_world(target), lens, aperture))
 
 # Native Three.js lights (added to currentLayer, sharing its Z-up->Y-up rotation). The point
 # light carries energy + color; the spot light uses the viewer's defaults for intensity/color
