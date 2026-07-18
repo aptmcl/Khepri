@@ -278,6 +278,7 @@ public ElementId CreatePolygonalCeiling(XYZ[] pts, Level level, ElementId famId)
 public ElementId CreatePathCeiling(XYZ[] pts, double[] angles, Level level, ElementId famId)
 public ElementId CreateRamp(XYZ p0, XYZ p1, double width, double thickness, Level baseLevel, double baseOffset, double topOffset)
 public ElementId CreateStraightStair(XYZ basePoint, VXYZ direction, double width, Level baseLevel, Level topLevel, ElementId familyId)
+public ElementId CreateMultiRunStair(XYZ[] pts, double width, Level baseLevel, Level topLevel, ElementId familyId)
 public Element CreateSpiralStair(XYZ center, double radius, double startAngle, double includedAngle, bool clockwise, double width, Level baseLevel, Level topLevel, ElementId familyId)
 public string WallCurveType(Element element)
 public XYZ[] WallCurveVertices(Element element)
@@ -351,6 +352,12 @@ public ElementId FamilyInstanceHost(Element element)
 public Element[] DocStairs()
 public ElementId StairBaseLevel(Element element)
 public ElementId StairTopLevel(Element element)
+public XYZ[][] StairRunPaths(Element element)
+public Length[] StairRunElevations(Element element)
+public Length StairWidth(Element element)
+public Length StairRiserHeight(Element element)
+public Length StairTreadDepth(Element element)
+public ElementId RailingHostElement(Element element)
 public XYZ StairBasePoint(Element element)
 public XYZ StairDirection(Element element)
 public Element[] DocRailings()
@@ -837,11 +844,28 @@ _lookup_family_param(rvtf::RevitFamily, name::AbstractString, default::Function)
 # stair-attached-railing case); errors for any other path shape so users
 # aren't silently dropped onto the InsertRailing fallback that had a
 # hardcoded anchor in the previous C# code.
+# Revit railing sketches are level-planar: a climbing (stair-following) 3D path would
+# be rejected by Railing.Create, so flatten to the path's lowest z and drop the dense
+# collinear samples the climbing-path synthesis produces.
+_flat_railing_pts(pts) =
+  let z = minimum(cz, pts),
+      flat = [xyz(cx(p), cy(p), z) for p in pts],
+      keep = [flat[1]]
+    for i in 2:(length(flat) - 1)
+      let a = keep[end], p = flat[i], c = flat[i + 1],
+          crossz = (cx(p) - cx(a)) * (cy(c) - cy(a)) - (cy(p) - cy(a)) * (cx(c) - cx(a))
+        (abs(crossz) > 1e-9 && _h2(a, p) > 1e-12) && push!(keep, p)
+      end
+    end
+    _h2(keep[end], flat[end]) > 1e-12 && push!(keep, flat[end])
+    keep
+  end
+
 KhepriBase.b_railing(b::RVT, path::OpenPolygonalPath, level, host, family) =
-  @remote(b, CreateLineRailing(path.vertices, ref_value(b, level), family_ref(b, family)))
+  @remote(b, CreateLineRailing(_flat_railing_pts(path.vertices), ref_value(b, level), family_ref(b, family)))
 
 KhepriBase.b_railing(b::RVT, path::ClosedPolygonalPath, level, host, family) =
-  @remote(b, CreatePolygonRailing(path.vertices, ref_value(b, level), family_ref(b, family)))
+  @remote(b, CreatePolygonRailing(_flat_railing_pts(path.vertices), ref_value(b, level), family_ref(b, family)))
 
 KhepriBase.b_railing(b::RVT, path::CompositePath{false}, level, host, family) =
   b_railing(b, convert(OpenPolygonalPath, path), level, host, family)
@@ -880,6 +904,14 @@ KhepriBase.b_stair(b::RVT, base_point, direction, bottom_level, top_level, famil
       width = _lookup_family_param(rvtf, "width", f -> f.width)(family)
     @remote(b, CreateStraightStair(
       base_point, direction, to_revit(width),
+      ref_value(b, bottom_level), ref_value(b, top_level), family_ref(b, family)))
+  end
+
+KhepriBase.b_multi_run_stair(b::RVT, path, bottom_level, top_level, family) =
+  let rvtf = backend_family(b, family),
+      width = _lookup_family_param(rvtf, "width", f -> f.width)(family)
+    @remote(b, CreateMultiRunStair(
+      path_vertices(path), to_revit(width),
       ref_value(b, bottom_level), ref_value(b, top_level), family_ref(b, family)))
   end
 
@@ -1758,18 +1790,66 @@ all_fixtures(b::RVT) =
     end
   end
 
-# Stair introspection
+# Stair introspection.
+#
+# The walk centerline of a multi-run stair: each run's plan polyline (GetStairsPath
+# returns its curves at z=0) stamped with the run's base→top elevation, z distributed
+# by arc length within the run. Consecutive runs joined vertex-to-vertex yield flat
+# segments across landings, so the alternating run/landing structure is implicit in
+# the z profile. `base_h` is subtracted to keep the emitted path level-relative
+# (pass 0.0 for absolute z).
+_stair_walk_verts(runs, elevs, base_h) =
+  let verts = Loc[]
+    for (k, run) in enumerate(runs)
+      let z0 = elevs[2k - 1] - base_h,
+          z1 = elevs[2k] - base_h,
+          seg = [sqrt((cx(run[i + 1]) - cx(run[i]))^2 + (cy(run[i + 1]) - cy(run[i]))^2)
+                 for i in 1:(length(run) - 1)],
+          total = sum(seg; init=0.0),
+          acc = 0.0
+        for (i, p) in enumerate(run)
+          i > 1 && (acc += seg[i - 1])
+          push!(verts, xyz(cx(p), cy(p),
+                           z0 + (total < 1e-9 ? 0.0 : acc / total) * (z1 - z0)))
+        end
+      end
+    end
+    verts
+  end
+
 stair_from_ref(r, b::RVT) =
-  let base0 = @remote(b, StairBasePoint(r)),
+  let runs = @remote(b, StairRunPaths(r)),
+      elevs = @remote(b, StairRunElevations(r)),
       dir = @remote(b, StairDirection(r)),
       base_level_id = @remote(b, StairBaseLevel(r)),
       top_level_id = @remote(b, StairTopLevel(r)),
       base_level = level_from_ref(base_level_id, b),
       top_level = top_level_id == RVTVoidId ? base_level : level_from_ref(top_level_id, b),
-      # StairDirection comes back as an XYZ point; stair() wants a horizontal direction vector (VXY).
-      # Base point z is emitted level-relative (realization re-adds the bottom level height).
-      base = _rebase_to_level([base0], base_level)[1],
-      s = stair(base, direction=vxy(cx(dir), cy(dir)), bottom_level=base_level, top_level=top_level)
+      width = @remote(b, StairWidth(r)),
+      riser = @remote(b, StairRiserHeight(r)),
+      tread = @remote(b, StairTreadDepth(r)),
+      fam = stair_family(width=width > 1e-6 ? width : 1.0,
+                         riser_height=riser > 1e-6 ? riser : 0.18,
+                         tread_depth=tread > 1e-6 ? tread : 0.28),
+      s = if length(runs) >= 2 && length(elevs) == 2 * length(runs)
+            # Multi-run (L/U-shaped) stair: emit the 3D walk centerline; z level-relative.
+            let walk = _stair_walk_verts(runs, elevs, base_level.height),
+                d = length(walk) >= 2 ?
+                      vxy(cx(walk[2]) - cx(walk[1]), cy(walk[2]) - cy(walk[1])) :
+                      vxy(cx(dir), cy(dir))
+              stair(walk[1], direction=unitized(d), bottom_level=base_level,
+                    top_level=top_level, family=fam, path=open_polygonal_path(walk))
+            end
+          else
+            # StairDirection comes back as an XYZ point; stair() wants a horizontal direction
+            # vector (VXY). Base point z is emitted level-relative (realization re-adds the
+            # bottom level height).
+            let base0 = @remote(b, StairBasePoint(r)),
+                base = _rebase_to_level([base0], base_level)[1]
+              stair(base, direction=unitized(vxy(cx(dir), cy(dir))),
+                    bottom_level=base_level, top_level=top_level, family=fam)
+            end
+          end
     ref!(b, s, r)
     s
   end
@@ -1779,15 +1859,66 @@ all_stairs(b::RVT) =
     [stair_from_ref(r, b) for r in @remote(b, DocStairs())]
   end
 
-# Railing introspection
+# Railing introspection.
+#
+# Revit's Railing.GetPath() is the flat plan sketch — for a stair-hosted railing the
+# slope lives in the HOST, not the path. Reconstruct it: sample the path against the
+# host stair's walk profile (subdivided so flat landing stretches and per-run slopes
+# are tracked, not straight-lined corner to corner) and emit a 3D climbing path.
+# Mesh backends render it directly; the Revit realization flattens it back (railing
+# sketches are level-planar there).
+_h2(p, q) = (cx(p) - cx(q))^2 + (cy(p) - cy(q))^2
+
+_z_on_walk(p, walk) =
+  let best_d2 = Inf, best_z = cz(walk[1])
+    for i in 1:(length(walk) - 1)
+      let a = walk[i], c = walk[i + 1],
+          dx = cx(c) - cx(a), dy = cy(c) - cy(a),
+          len2 = dx^2 + dy^2,
+          t = len2 < 1e-12 ? 0.0 :
+              clamp(((cx(p) - cx(a)) * dx + (cy(p) - cy(a)) * dy) / len2, 0.0, 1.0),
+          d2 = _h2(p, xyz(cx(a) + t * dx, cy(a) + t * dy, 0.0))
+        d2 < best_d2 && (best_d2 = d2; best_z = cz(a) + t * (cz(c) - cz(a)))
+      end
+    end
+    best_z
+  end
+
+_railing_path_on_host(pts, host_id, lvl, b) =
+  host_id == RVTVoidId ? pts :
+  let cat = try @remote(b, ElementCategoryName(host_id)) catch; "" end
+    cat != "Stair" ? pts :
+    let runs = @remote(b, StairRunPaths(host_id)),
+        elevs = @remote(b, StairRunElevations(host_id))
+      (isempty(runs) || length(elevs) != 2 * length(runs)) ? pts :
+      let walk = _stair_walk_verts(runs, elevs, 0.0),   # absolute z
+          samples = Loc[]
+        for i in 1:(length(pts) - 1)
+          let a = pts[i], c = pts[i + 1],
+              n = max(1, Int(ceil(sqrt(_h2(a, c)) / 0.25)))
+            for k in 0:(i == length(pts) - 1 ? n : n - 1)
+              let t = k / n
+                push!(samples, xyz(cx(a) + t * (cx(c) - cx(a)),
+                                   cy(a) + t * (cy(c) - cy(a)), 0.0))
+              end
+            end
+          end
+        end
+        [xyz(cx(p), cy(p), _z_on_walk(p, walk) - lvl.height) for p in samples]
+      end
+    end
+  end
+
 railing_from_ref(r, b::RVT) =
   let pts = @remote(b, RailingPath(r)),
       level_id = @remote(b, RailingLevel(r)),
-      lvl = level_from_ref(level_id, b)
+      lvl = level_from_ref(level_id, b),
+      host_id = @remote(b, RailingHostElement(r))
     if length(pts) < 2
       nothing
     else
-      let s = railing(open_polygonal_path(_rebase_to_level(pts, lvl)), level=lvl)
+      let path = _railing_path_on_host(_rebase_to_level(pts, lvl), host_id, lvl, b),
+          s = railing(open_polygonal_path(path), level=lvl)
         ref!(b, s, r)
         s
       end
@@ -2099,14 +2230,22 @@ KhepriBase.b_native_family_expr(b::RVT, var, meta) =
       stmts = Any[guarded_backend_family_expr(var, :revit, revit_native)]
     if !isempty(meta.obj_name)
       let obj = Expr(:call, :obj_family, meta.obj_name)
-        # The extracted mesh renders the family on ANY mesh-capable backend (default b_mesh_obj_fmt),
-        # not just KhepriThreejs — without the autocad mapping, fixtures degrade to placeholder boxes.
-        push!(stmts, guarded_backend_family_expr(var, :threejs, obj))
-        push!(stmts, guarded_backend_family_expr(var, :autocad, obj))
+        # The extracted mesh renders the family on ANY mesh-capable backend (default b_mesh_obj_fmt,
+        # or a native OBJ importer like KhepriRhino's) — without a mapping, fixtures degrade to
+        # placeholder boxes. Guards are inert on backends that aren't loaded.
+        for be in _obj_mesh_backend_guards
+          push!(stmts, guarded_backend_family_expr(var, be, obj))
+        end
       end
     end
     stmts
   end
+
+# Mesh-capable backends that receive an obj_family guard for every extracted OBJ.
+# Only backends whose OBJ realization has been verified live: KhepriThreejs (browser
+# MTLLoader/OBJLoader), KhepriAutoCAD (default b_mesh_obj_fmt → b_surface_mesh),
+# KhepriRhino (native ImportOBJ handles OBJ+MTL).
+const _obj_mesh_backend_guards = (:threejs, :autocad, :rhino)
 
 # Match the C# SanitizeMaterialName used to name exported OBJ files (family name → OBJ file stem).
 _sanitize_family(name) = replace(name, ' ' => '_', '/' => '_', '\\' => '_')
