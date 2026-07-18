@@ -683,16 +683,15 @@ KhepriBase.b_surface_mesh(b::RH, vertices, faces, mat) =
     @remote(b, Mesh(vertices, map(ensure_4, faces), mat))
   end
 
-# OBJ/MTL file import — uses Rhino's native import via ImportOBJ API.
-KhepriBase.b_mesh_obj_fmt(b::RH, obj_name, transform) =
-  let path = abspath(obj_file_path(obj_name)),
-      t = transform.cs.transform,
-      origin = xyz(t[1,4], t[2,4], t[3,4]),
-      vx = vxyz(t[1,1], t[2,1], t[3,1]),
-      vy = vxyz(t[1,2], t[2,2], t[3,2]),
-      vz = vxyz(t[1,3], t[2,3], t[3,3])
-    @remote(b, ImportOBJ(path, origin, vx, vy, vz))
-  end
+# OBJ/MTL families use the KhepriBase default (read_obj_mesh + parse_mtl →
+# one b_surface_mesh per usemtl group, each with its material), NOT the plugin's
+# ImportOBJ RPC. ImportOBJ runs `RhinoApp.RunScript("_-Import …")` inside the
+# Idle-driven RPC burst loop — re-entrant command execution that intermittently
+# HARD-CRASHES Rhino on real fixture sets (observed on the Moradia T3 corpus) —
+# and it returns only the first Guid of a multi-object import, leaking the rest
+# on delete. The default path is dialog-free, crash-free, and preserves the
+# Revit-exported MTL colors (those MTLs carry no texture maps, so Rhino's native
+# importer had no fidelity advantage).
 
 ############################################################
 # Third tier: solids
