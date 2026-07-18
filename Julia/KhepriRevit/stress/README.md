@@ -142,3 +142,29 @@ The NewGroup crash documented earlier was CAUSED by z-inconsistent member elevat
 with the level-relative frame (wall curves, railing paths, stair bases, and xy-only group
 instances) it no longer occurs. Wall length carries the documented per-model
 length_rtol = 0.02 for junction auto-join drift.
+
+## Moradia T3 status (2026-07-18)
+
+`moradia3` (Moradia T3_v5, DDN) reports **VERDICT: PASS** across every metric: walls 30,
+doors 6, fixtures 31, railings 4, groups 9 types / 9 instances, bbox delta 0.075 m.
+Three fixes were needed, each of general value:
+
+- **Wall-hosted fixtures placed as phantoms** — wall-based symbols (upper cabinets)
+  ignore the point in both point overloads of NewFamilyInstance (xy collapses to the
+  symbol origin with zero geometry). CreateElementLocDirOnHost now re-places them hosted
+  on the nearest wall, searched HORIZONTALLY with a vertical-span check (a 3D distance
+  rejected hosts for high placements; ignoring z captured walls of the storey above).
+- **Unhosted fixtures misattributed to the base level** — a void LevelId now attributes
+  the fixture to the storey beneath its world z (`_level_at_or_below`), not the model's
+  lowest level (which shifted upper-storey fixtures a storey down on rebuild).
+- **Silent batch rollback ate a whole group** — error-severity Revit failures (here
+  "Can't keep elements joined" from collinear overlapping member walls) used to roll the
+  batched Execute transaction back AFTER the RPC replies were sent: every element created
+  in the batch evaporated with no deletion events and no exception, leaving stale ids in
+  the pending-group queue. OnFailuresProcessing now RESOLVES error failures with their
+  default resolution (targeted, e.g. deleting one offending stub) and proceeds.
+  Forensics that found it: DocumentChanged deletion logging + CountDeadElements RPC.
+
+Level-filtered THR rendering (`Piso 1` only, and `Piso 1 + Piso 2` without `Cobertura`)
+is exercised by classifying generated statements by their minimum referenced level;
+renders live in `results/moradia3/threejs_t3_*.png`.
