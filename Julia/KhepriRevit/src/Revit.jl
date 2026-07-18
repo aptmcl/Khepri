@@ -256,6 +256,7 @@ public Element[] DocWalls()
 public Element[] DocWallsAtLevel(Level level)
 public XYZ[] LineWallVertices(Element element)
 public ElementId ElementLevel(Element element)
+public string ElementName(Element element)
 public ElementId WallTopLevel(Element element)
 public Length WallHeight(Element element)
 public void HighlightElement(ElementId id)
@@ -321,6 +322,8 @@ public XYZ[] CeilingBoundaryVertices(Element element)
 public string CeilingTypeName(Element element)
 public ElementId CeilingLevel(Element element)
 public Element[] DocGroups()
+public int CountDeadElements(ElementId[] ids)
+public void EnableAutoJoin(bool enable)
 public string GroupTypeName(Element element)
 public ElementId GroupTypeId(Element element)
 public ElementId[] GroupMemberIds(Element element)
@@ -1254,29 +1257,38 @@ realize(b::RVT, s::GroupInstance) =
     with(current_cs, translated_cs(current_cs(), cx(s.loc), cy(s.loc), cz(s.loc))) do
       let factory = s.group.factory
         if factory !== nothing
-          let shapes = collecting_shapes(factory),
-              # Per-member containment: one member that cannot realize (e.g. a fixture whose family
-              # is absent from the target template) must not abort the whole group. Void refs
-              # (skipped stairs, no-op obj_models) are filtered — NewGroup rejects invalid ids.
-              refs = let out = RVTId[]
-                for sh in shapes
-                  # Hosted openings must NOT be passed to NewGroup: Revit adds hosted children of a
-                  # grouped wall automatically, and passing the child alongside its parent crashes
-                  # inside shouldElementBeAddedToGroupByParent. Realize them (so the opening
-                  # exists), but keep only the host's ids in the group list.
-                  try
-                    let rs = filter(!=(RVTVoidId), collect(ref_values(b, [sh])))
-                      (sh isa Door || sh isa Window) || append!(out, rs)
+          # Auto-join suppressed while members realize (collection AND ref forcing): joining
+          # them into surrounding loose geometry can fail regeneration and roll back the
+          # transaction, silently deleting every member (observed on overlapping collinear
+          # walls beside a parallel wall). CreateGroup unjoins cross-boundary joins anyway.
+          @remote(b, EnableAutoJoin(false))
+          try
+            let shapes = collecting_shapes(factory),
+                # Per-member containment: one member that cannot realize (e.g. a fixture whose family
+                # is absent from the target template) must not abort the whole group. Void refs
+                # (skipped stairs, no-op obj_models) are filtered — NewGroup rejects invalid ids.
+                refs = let out = RVTId[]
+                  for sh in shapes
+                    # Hosted openings must NOT be passed to NewGroup: Revit adds hosted children of a
+                    # grouped wall automatically, and passing the child alongside its parent crashes
+                    # inside shouldElementBeAddedToGroupByParent. Realize them (so the opening
+                    # exists), but keep only the host's ids in the group list.
+                    try
+                      let rs = filter(!=(RVTVoidId), collect(ref_values(b, [sh])))
+                        (sh isa Door || sh isa Window) || append!(out, rs)
+                      end
+                    catch e
+                      @warn "group member failed to realize; grouping the rest" exception=e
                     end
-                  catch e
-                    @warn "group member failed to realize; grouping the rest" exception=e
                   end
+                  out
                 end
-                out
-              end
-            _groups_realized[s.group] = true
-            isempty(refs) || push!(_pending_groups, (:new, s.group, refs, s.loc))
-            void_ref(b)
+              _groups_realized[s.group] = true
+              isempty(refs) || push!(_pending_groups, (:new, s.group, refs, s.loc))
+              void_ref(b)
+            end
+          finally
+            @remote(b, EnableAutoJoin(true))
           end
         else
           void_ref(b)
@@ -1710,11 +1722,20 @@ _family_instance_rotation(r, b) =
 const _fixture_family_cache = Dict{String, FamilyElementFamily}()
 _fixture_family(key) = get!(() -> family_element_family(key), _fixture_family_cache, key)
 
+# A fixture with a void level id (unhosted placement) belongs to the storey beneath it, not to
+# the model's base level: attributing a Piso-2 toilet to Piso 1 shifts its level-relative z by a
+# whole storey height on rebuild.
+_level_at_or_below(b::RVT, z) =
+  let levels = [level_from_ref(id, b) for id in @remote(b, DocLevels())],
+      below = filter(l -> l.height <= z + 1e-3, levels)
+    isempty(below) ? _base_level(b) : argmax(l -> l.height, below)
+  end
+
 fixture_from_ref(r, b::RVT) =
   let loc = @remote(b, FamilyInstanceLocation(r)),
       angle = _family_instance_rotation(r, b),
       level_id = @remote(b, FamilyInstanceLevel(r)),
-      lvl = level_from_ref(level_id, b),
+      lvl = level_id == RVTVoidId ? _level_at_or_below(b, cz(loc)) : level_from_ref(level_id, b),
       key = "$(@remote(b, ElementFamilyName(r))):$(@remote(b, ElementTypeName(r)))",
       # Level-relative z (like _rebase_to_level for slabs): Revit's NewFamilyInstance(XYZ, symbol,
       # Level, …) measures the point's Z from the level, so an absolute-z emission rebuilt every

@@ -83,3 +83,9 @@ skip = false
 # Rebuilt walls auto-join at junctions, extending location lines by ~half a wall thickness
 # (+1.0 m over 21 walls) — a Revit regeneration semantic, not a codegen defect.
 length_rtol = '0.02'
+
+[models.moradia3]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\DDN\OneDrive_1_5-2-2025\Moradia T3_v5.rvt'
+description = 'DDN Moradia T3 house v5 (real project)'
+skip = false
+length_rtol = '0.02'

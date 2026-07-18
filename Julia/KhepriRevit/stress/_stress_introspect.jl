@@ -20,6 +20,17 @@ try
     end
     flush(stdout)
     KhepriBase.write_summary(summary_path, s)
+    # Level name → elevation table (heights alone cannot distinguish named storeys, e.g. for
+    # selective execution of "Piso 1" only).
+    let lvl_path = joinpath(dirname(summary_path), "levels.txt")
+      open(lvl_path, "w") do io
+        for r in KhepriBase.@remote(revit, DocLevels())
+          println(io, KhepriBase.@remote(revit, ElementName(r)), " = ",
+                  KhepriBase.@remote(revit, GetLevelElevation(r)))
+        end
+      end
+      println("levels written: $lvl_path")
+    end
     println("summary written: $summary_path")
     generate_khepri_code(gen_path)
     println("generated: $gen_path")
