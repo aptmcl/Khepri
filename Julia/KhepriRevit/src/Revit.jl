@@ -32,8 +32,8 @@ export
 # (b_native_family_expr, b_codegen_module) are defined further down, after RVT and the family types.
 using KhepriBase: model_to_expr, expr_to_string, extract_levels, extract_families,
   add_backend_families, loop_rerolling, detect_level_repetition, add_header,
-  family_expr_map, FamilyMeta, _shape_family_category, _dedup_slabs, is_curtain_wall,
-  guarded_backend_family_expr
+  codegen_passes, family_expr_map, FamilyMeta, _shape_family_category, _dedup_slabs,
+  is_curtain_wall, guarded_backend_family_expr
 
 #=
 We need to ensure the Revit plugin is properly installed.
@@ -277,6 +277,11 @@ public ElementId CreateRamp(XYZ p0, XYZ p1, double width, double thickness, Leve
 public ElementId CreateStraightStair(XYZ basePoint, VXYZ direction, double width, Level baseLevel, Level topLevel, ElementId familyId)
 public Element CreateSpiralStair(XYZ center, double radius, double startAngle, double includedAngle, bool clockwise, double width, Level baseLevel, Level topLevel, ElementId familyId)
 public string WallCurveType(Element element)
+public XYZ[] WallCurveVertices(Element element)
+public ElementId[] StackedWallMemberIds(Element element)
+public ElementId[] CurtainWallChildIds(Element element)
+public double[] CurtainGridUVCounts(Element element)
+public Length HostObjTypeThickness(Element element)
 public XYZ[] ArcWallVertices(Element element)
 public Length ArcWallRadius(Element element)
 public double[] ArcWallAngles(Element element)
@@ -297,6 +302,7 @@ public XYZ ColumnLocation(Element element)
 public double ColumnRotation(Element element)
 public ElementId ColumnBaseLevel(Element element)
 public ElementId ColumnTopLevel(Element element)
+public XYZ ColumnProfileDims(Element element)
 public Element[] DocBeams()
 public XYZ[] BeamEndpoints(Element element)
 public double BeamRotation(Element element)
@@ -766,6 +772,19 @@ locs_and_arcs(circle::SplinePath) = error("Must be finished")
 KhepriBase.b_slab(b::RVT, contour::ClosedPath, level, family) =
   let (locs, arcs) = locs_and_arcs(contour)
     @remote(b, CreatePathFloor(locs, arcs, ref_value(b, level), family_ref(b, family)))
+  end
+
+# Region roofs (outer boundary + opening loops) mirror b_slab's Region method — without this,
+# a multi-loop roof read back by introspection fell to the KhepriBase default and rebuilt as a
+# generic slab (a FLOOR element), so round-tripped models lost their roof.
+KhepriBase.b_roof(b::RVT, profile::Region, level, family) =
+  let outer = outer_path(profile),
+      inners = inner_paths(profile),
+      roof_r = b_roof(b, outer, level, family)
+    for inner in inners
+      create_slab_opening(b, inner, roof_r)
+    end
+    roof_r
   end
 
 KhepriBase.b_roof(b::RVT, contour::ClosedPath, level, family) =
@@ -1319,8 +1338,13 @@ unconnected_level(h::Real, b::RVT) =
     s
   end
 
+# All parametrically-readable elements, by concatenating the per-category readers (there is no
+# generic per-element reader — DocElements ids without a reader are the mesh-fallback set).
 all_elements(b::RVT) =
-    [element_from_ref(r, b) for r in @remote(b, DocElements())]
+  with_introspection(b) do
+    vcat(all_walls(b), all_floors(b), all_columns(b), all_beams(b),
+         all_ceilings(b), all_roofs(b), all_fixtures(b), all_stairs(b), all_railings(b))
+  end
 
 all_walls(b::RVT) =
   with_introspection(b) do
@@ -1359,14 +1383,40 @@ wall_from_ref(r, b::RVT) =
                  arc_path(center, radius, angles[1], angles[2] - angles[1])
                end
              else
-               convert(Path, @remote(b, LineWallVertices(r)))
+               # Spline/ellipse walls ("Other"): the location curve tessellated to a polyline. The
+               # old Line fallback null-crashed in C# on non-Line curves.
+               let verts = @remote(b, WallCurveVertices(r))
+                 length(verts) >= 2 ? open_polygonal_path(verts) :
+                   convert(Path, @remote(b, LineWallVertices(r)))
+               end
              end,
-      s = is_curtain ?
-            curtain_wall(path, bottom_level=bottom_level, top_level=top_level) :
-            let mat = _material_from_revit(@remote(b, ElementMaterial(r)))
-              wall(path, bottom_level=bottom_level, top_level=top_level,
-                   family=wall_family(right_material=mat, left_material=mat, side_material=mat))
+      s = if is_curtain
+            # Real panel sizes from the curtain grid: U lines divide the height, V lines the length
+            # (n lines ⇒ n+1 panels). Without a grid, keep the family defaults.
+            let counts = @remote(b, CurtainGridUVCounts(r)),
+                fam = if length(counts) == 2 && counts[1] >= 0 && counts[2] >= 0
+                  let height = top_level.height - bottom_level.height,
+                      len = path_length(path),
+                      dy = height / (counts[1] + 1),
+                      dx = len / (counts[2] + 1)
+                    dx > 1e-3 && dy > 1e-3 ?
+                      curtain_wall_family(max_panel_dx=dx, max_panel_dy=dy) :
+                      default_curtain_wall_family()
+                  end
+                else
+                  default_curtain_wall_family()
+                end
+              curtain_wall(path, bottom_level=bottom_level, top_level=top_level, family=fam)
             end
+          else
+            let mat = _material_from_revit(@remote(b, ElementMaterial(r))),
+                th = @remote(b, HostObjTypeThickness(r)),
+                fam = th > 1e-6 ?
+                  wall_family(thickness=th, right_material=mat, left_material=mat, side_material=mat) :
+                  wall_family(right_material=mat, left_material=mat, side_material=mat)
+              wall(path, bottom_level=bottom_level, top_level=top_level, family=fam)
+            end
+          end
     ref!(b, s, r)
     s
   end
@@ -1411,6 +1461,11 @@ _rebased_loops(loops, lvl) =
   filter(loop -> length(loop) >= 3,
          [_rebase_to_level(_clean_boundary(loop), lvl) for loop in loops])
 
+# Slab-like family with the element type's real thickness (0 = unknown ⇒ family default).
+_slab_like_family(ctor, th, mat) =
+  th > 1e-6 ? ctor(thickness=th, top_material=mat, bottom_material=mat, side_material=mat) :
+              ctor(top_material=mat, bottom_material=mat, side_material=mat)
+
 floor_from_ref(r, b::RVT) =
   let level_id = @remote(b, FloorLevel(r)),
       lvl = level_from_ref(level_id, b),
@@ -1420,7 +1475,7 @@ floor_from_ref(r, b::RVT) =
       nothing
     else
       let s = slab(_region_from_loops(loops), level=lvl,
-                   family=slab_family(top_material=mat, bottom_material=mat, side_material=mat))
+                   family=_slab_like_family(slab_family, @remote(b, HostObjTypeThickness(r)), mat))
         ref!(b, s, r)
         s
       end
@@ -1443,8 +1498,12 @@ column_from_ref(r, b::RVT) =
                     base_level :
                     level_from_ref(top_level_id, b),
       mat = _material_from_revit(@remote(b, ElementMaterial(r))),
-      s = column(loc, angle=angle, bottom_level=base_level, top_level=top_level,
-                 family=column_family(material=mat))
+      # Real rectangular profile dims from the column type (b × h; XYZ.Zero = unknown ⇒ default).
+      dims = @remote(b, ColumnProfileDims(r)),
+      fam = cx(dims) > 1e-6 && cy(dims) > 1e-6 ?
+              column_family(profile=rectangular_profile(cx(dims), cy(dims)), material=mat) :
+              column_family(material=mat),
+      s = column(loc, angle=angle, bottom_level=base_level, top_level=top_level, family=fam)
     ref!(b, s, r)
     s
   end
@@ -1524,7 +1583,7 @@ ceiling_from_ref(r, b::RVT) =
       nothing
     else
       let s = ceiling(_region_from_loops(loops), level=lvl,
-                      family=ceiling_family(bottom_material=mat, top_material=mat, side_material=mat))
+                      family=_slab_like_family(ceiling_family, @remote(b, HostObjTypeThickness(r)), mat))
         ref!(b, s, r)
         s
       end
@@ -1546,7 +1605,7 @@ roof_from_ref(r, b::RVT) =
       nothing
     else
       let s = roof(_region_from_loops(loops), level=lvl,
-                   family=roof_family(bottom_material=mat, top_material=mat, side_material=mat))
+                   family=_slab_like_family(roof_family, @remote(b, HostObjTypeThickness(r)), mat))
         ref!(b, s, r)
         s
       end
@@ -1568,12 +1627,19 @@ _family_instance_rotation(r, b) =
     0.0
   end
 
+# One family_element_family per Revit family:type, memoized per introspection. Without this every
+# fixture shared the default family object, so family_meta collapsed to a single last-one-wins entry
+# and all fixtures reconstructed as the same .rfa/OBJ.
+const _fixture_family_cache = Dict{String, FamilyElementFamily}()
+_fixture_family(key) = get!(() -> family_element_family(key), _fixture_family_cache, key)
+
 fixture_from_ref(r, b::RVT) =
   let loc = @remote(b, FamilyInstanceLocation(r)),
       angle = _family_instance_rotation(r, b),
       level_id = @remote(b, FamilyInstanceLevel(r)),
       lvl = level_from_ref(level_id, b),
-      s = family_element(loc, angle=angle, level=lvl)
+      key = "$(@remote(b, ElementFamilyName(r))):$(@remote(b, ElementTypeName(r)))",
+      s = family_element(loc, angle=angle, level=lvl, family=_fixture_family(key))
     ref!(b, s, r)
     s
   end
@@ -1711,9 +1777,23 @@ _window_family_with_dims(key, w, h, type_name) =
     d === nothing ? window_family(key) : window_family(key, d[1], d[2])
   end
 
+# Per-element error containment for the stress path: one exotic element must degrade to the mesh
+# fallback (by staying unclaimed), not abort the whole introspection. Readers that return `nothing`
+# for degenerate inputs are filtered the same way.
+_guarded_refs(reader, refs, b, what) =
+  filter(!isnothing,
+         [try
+            reader(r, b)
+          catch e
+            @warn "introspection: $what reader failed; element falls back to mesh" ref=r exception=e
+            nothing
+          end
+          for r in refs])
+
 introspect_model(; b::RVT=revit) =
   with_introspection(b) do
   _base_level_cache(nothing)   # reset the per-introspection base-level fallback cache
+  empty!(_fixture_family_cache)  # per-introspection keyed fixture families
   let family_meta = IdDict{Family, FamilyMeta}(),
       # Groups — collect instances and introspect one representative per type.
       # DocWalls/DocFloors/etc. already exclude group members (filtered in C#),
@@ -1770,7 +1850,7 @@ introspect_model(; b::RVT=revit) =
       levels = all_levels(b),
       # Walls (with doors/windows attached)
       # DocWalls() already excludes group members (filtered in C#)
-      walls = let wall_shapes = [wall_from_ref(r, b) for r in @remote(b, DocWalls())],
+      walls = let wall_shapes = _guarded_refs(wall_from_ref, @remote(b, DocWalls()), b, "wall"),
                   door_infos = all_doors(b),
                   window_infos = all_windows(b),
                   wall_to_doors = Dict{RVTId, Vector{HostedElementInfo}}(),
@@ -1809,21 +1889,21 @@ introspect_model(; b::RVT=revit) =
                 wall_shapes
               end,
       # DocFloors/DocColumns/DocBeams/DocCeilings already exclude group members (filtered in C#)
-      floors = filter(!isnothing, [floor_from_ref(r, b) for r in @remote(b, DocFloors())]),
-      columns = [column_from_ref(r, b) for r in @remote(b, DocColumns())],
-      beams = [beam_from_ref(r, b) for r in @remote(b, DocBeams())],
-      ceilings = filter(!isnothing, [ceiling_from_ref(r, b) for r in @remote(b, DocCeilings())]),
-      roofs = filter(!isnothing, [roof_from_ref(r, b) for r in @remote(b, DocRoofs())]),
+      floors = _guarded_refs(floor_from_ref, @remote(b, DocFloors()), b, "floor"),
+      columns = _guarded_refs(column_from_ref, @remote(b, DocColumns()), b, "column"),
+      beams = _guarded_refs(beam_from_ref, @remote(b, DocBeams()), b, "beam"),
+      ceilings = _guarded_refs(ceiling_from_ref, @remote(b, DocCeilings()), b, "ceiling"),
+      roofs = _guarded_refs(roof_from_ref, @remote(b, DocRoofs()), b, "roof"),
       fixtures = let fixture_refs = vcat(
                        @remote(b, DocFurniture()),
                        @remote(b, DocPlumbingFixtures()),
                        @remote(b, DocCasework()),
                        @remote(b, DocGenericModels()),
                        @remote(b, DocSpecialtyEquipment()))
-                   [fixture_from_ref(r, b) for r in fixture_refs]
+                   _guarded_refs(fixture_from_ref, fixture_refs, b, "fixture")
                  end,
-      stairs = [stair_from_ref(r, b) for r in @remote(b, DocStairs())],
-      railings = filter(!isnothing, [railing_from_ref(r, b) for r in @remote(b, DocRailings())])
+      stairs = _guarded_refs(stair_from_ref, @remote(b, DocStairs()), b, "stair"),
+      railings = _guarded_refs(railing_from_ref, @remote(b, DocRailings()), b, "railing")
     # Collect family metadata for all element types
     for f in floors _store_element_family_meta!(f, b, family_meta) end
     for c in columns _store_element_family_meta!(c, b, family_meta) end
@@ -1844,7 +1924,36 @@ introspect_model(; b::RVT=revit) =
         let r = ref_value(b, s); r != RVTVoidId && push!(claimed, r) end
       end
     end
-    for info in vcat(all_doors(b), all_windows(b)); push!(claimed, info.ref) end
+    # A curtain wall read natively regenerates its panels/mullions on rebuild, so claim the grid's
+    # children — otherwise they double-emit as world-space fallback meshes on top of the native
+    # curtain wall (439 of the GSG model's 477 unclaimed elements were exactly these). Likewise a
+    # stacked wall's members are represented by their parent (DocWalls excludes them) — claim them.
+    let all_walls_read = vcat(walls, [m for g in groups for m in g.members])
+      for w in all_walls_read
+        let wr = w isa Shape ? ref_value(b, w) : RVTVoidId
+          wr != RVTVoidId || continue
+          if is_curtain_wall(w)
+            for id in @remote(b, CurtainWallChildIds(wr))
+              push!(claimed, id)
+            end
+          elseif w isa Wall
+            for id in @remote(b, StackedWallMemberIds(wr))
+              push!(claimed, id)
+            end
+          end
+        end
+      end
+    end
+    # Claim only doors/windows that were actually ATTACHED to a reconstructed wall; an opening whose
+    # host was not read (e.g. hosted on a curtain wall) stays unclaimed and degrades to a fallback
+    # mesh instead of vanishing from the generated program.
+    let host_refs = Set{RVTId}(ref_value(b, w)
+                               for w in vcat(walls, [m for g in groups for m in g.members])
+                               if w isa Wall && !is_curtain_wall(w))
+      for info in vcat(all_doors(b), all_windows(b))
+        info.host_wall_id in host_refs && push!(claimed, info.ref)
+      end
+    end
     for g in group_instances
       push!(claimed, g.ref)
       for id in g.member_ids; push!(claimed, id) end
@@ -1867,8 +1976,14 @@ KhepriBase.b_codegen_module(b::RVT) = :KhepriRevit
 # family natively in Revit AND (when an OBJ mesh was extracted) as that mesh in KhepriThreejs, without
 # either mapping erroring in the other's session. `revit`: a loadable `.rfa` if we captured its path,
 # else the built-in system family. `threejs`: the extracted OBJ family, only when one exists.
+# A .rfa materialized into the export folder travels WITH the generated file — emit its path
+# relative to the program (`joinpath(@__DIR__, "khepri_obj_models", …)`), so the pair stays
+# runnable after being moved/copied. External paths stay absolute raw strings.
 KhepriBase.b_native_family_expr(b::RVT, var, meta) =
-  let rfa_str = Expr(:macrocall, Symbol("@raw_str"), nothing, meta.path),
+  let rfa_str = basename(dirname(meta.path)) == "khepri_obj_models" ?
+        Expr(:call, :joinpath, Expr(:macrocall, Symbol("@__DIR__"), nothing),
+             "khepri_obj_models", basename(meta.path)) :
+        Expr(:macrocall, Symbol("@raw_str"), nothing, meta.path),
       revit_native = (meta.is_system || isempty(meta.path)) ?
         Expr(:call, :revit_system_family) :
         # Doors/windows carry their dimensions on the instance, so use the opening-specific loader that
@@ -1877,8 +1992,14 @@ KhepriBase.b_native_family_expr(b::RVT, var, meta) =
            Expr(:call, :revit_opening_file_family, rfa_str) :
            Expr(:call, :revit_file_family, rfa_str)),
       stmts = Any[guarded_backend_family_expr(var, :revit, revit_native)]
-    isempty(meta.obj_name) ||
-      push!(stmts, guarded_backend_family_expr(var, :threejs, Expr(:call, :obj_family, meta.obj_name)))
+    if !isempty(meta.obj_name)
+      let obj = Expr(:call, :obj_family, meta.obj_name)
+        # The extracted mesh renders the family on ANY mesh-capable backend (default b_mesh_obj_fmt),
+        # not just KhepriThreejs — without the autocad mapping, fixtures degrade to placeholder boxes.
+        push!(stmts, guarded_backend_family_expr(var, :threejs, obj))
+        push!(stmts, guarded_backend_family_expr(var, :autocad, obj))
+      end
+    end
     stmts
   end
 
@@ -1933,16 +2054,19 @@ function _attach_fallback_meshes!(model, b, obj_folder)
   end
   # Construct the obj_model shapes under with_introspection so they are NOT realized here (Revit has no
   # b_trig/b_surface_mesh; these shapes exist only to be meta_program'd into the generated code).
+  # Paths are emitted as bare file names: the generated header registers the sibling
+  # khepri_obj_models folder as a resource folder, so the program stays relocatable.
   with_introspection(b) do
     for p in paths
-      isempty(p) || push!(model.fallback_meshes, obj_model(p, u0()))
+      isempty(p) || push!(model.fallback_meshes, obj_model(basename(p), u0()))
     end
   end
   @info "Mesh-fallback: $(length(model.fallback_meshes)) element(s) emitted as obj_model (of $(length(model.fallback_ids)) unclaimed)"
   model
 end
 
-function generate_khepri_code(output_path::String; b::RVT=revit, export_obj::Bool=true)
+function generate_khepri_code(output_path::String; b::RVT=revit, export_obj::Bool=true,
+                              wrap_function::Bool=false)
   let model = introspect_model(b=b),
       _ = export_obj ? _attach_obj_families!(model, b,
               joinpath(dirname(abspath(output_path)), "khepri_obj_models")) : model,
@@ -1950,11 +2074,13 @@ function generate_khepri_code(output_path::String; b::RVT=revit, export_obj::Boo
               joinpath(dirname(abspath(output_path)), "khepri_obj_models")) : model,
       raw_expr = model_to_expr(model),
       fmap = family_expr_map(model),
-      passes = [extract_levels,
-                extract_families(fmap),
-                add_backend_families(b, fmap),
-                loop_rerolling,
-                add_header(b)],
+      # Register the sibling khepri_obj_models folder in the header when the program carries
+      # extracted OBJ content, so relative obj_family/obj_model names resolve wherever the file lives.
+      has_objs = !isempty(model.fallback_meshes) ||
+                 any(m -> !isempty(m.obj_name), values(model.family_meta)),
+      passes = codegen_passes(b, fmap;
+                              header=add_header(b; obj_resources=has_objs),
+                              wrap=wrap_function),
       refined_expr = foldl((e, pass) -> pass(e), passes, init=raw_expr),
       code = expr_to_string(refined_expr)
     open(output_path, "w") do io
