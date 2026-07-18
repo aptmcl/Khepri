@@ -2268,15 +2268,21 @@ _sanitize_family(name) = replace(name, ' ' => '_', '/' => '_', '\\' => '_')
 # pass; never affects the Revit-native reconstruction (the threejs mapping is @isdefined-guarded), so a
 # failed or partial export simply omits some cross-backend meshes.
 function _attach_obj_families!(model, b, obj_folder)
+  # Rows are per family:TYPE (the OBJ carries the type-flexed geometry; the .rfa is per
+  # family): [objBaseName, _, _, category, rfaPath, rawFamilyName, rawTypeName].
   exported = try
-    Dict(_sanitize_family(row[1]) => (obj=row[1], rfa=(length(row) >= 5 ? row[5] : ""))
-         for row in @remote(b, ExportAllFamiliesToOBJWithMetadata(obj_folder)))
+    Dict((_sanitize_family(row[6]), _sanitize_family(row[7])) =>
+           (obj=row[1], rfa=(length(row) >= 5 ? row[5] : ""))
+         for row in @remote(b, ExportAllFamiliesToOBJWithMetadata(obj_folder))
+         if length(row) >= 7)
   catch e
     @warn "OBJ/RFA family export failed; cross-backend mappings omitted" exception=e
     return model
   end
   for (fam, meta) in collect(model.family_meta)
-    let exp = get(exported, _sanitize_family(meta.family_name), nothing)
+    let exp = get(exported,
+                  (_sanitize_family(meta.family_name), _sanitize_family(meta.type_name)),
+                  nothing)
       if exp !== nothing && (isempty(meta.obj_name) || isempty(meta.path))
         model.family_meta[fam] = FamilyMeta(
           category=meta.category, family_name=meta.family_name, type_name=meta.type_name,
