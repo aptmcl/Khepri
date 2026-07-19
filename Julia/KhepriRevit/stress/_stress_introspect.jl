@@ -63,6 +63,24 @@ try
           end
         end
       end
+      # Doors/windows are not ref!'d shapes — append their rows from the hosted-
+      # element scans (ids + independent bboxes), so the conformance report can
+      # match the replayed Door/Window meshes too.
+      open(ledger_path, "a") do io
+        for (cat, infos) in (("Door", KhepriRevit.all_doors(revit)),
+                             ("Window", KhepriRevit.all_windows(revit)))
+          for inf in infos
+            let bmin = try KhepriBase.@remote(revit, BoundingBoxMin(inf.ref)) catch; nothing end
+              bmin === nothing && continue
+              let bmax = KhepriBase.@remote(revit, BoundingBoxMax(inf.ref))
+                println(io, cat, "\t", inf.ref, "\t", NaN, "\t",
+                        cx(bmin), "\t", cy(bmin), "\t", cz(bmin), "\t",
+                        cx(bmax), "\t", cy(bmax), "\t", cz(bmax))
+              end
+            end
+          end
+        end
+      end
       println("ledger written: $ledger_path")
     end
     generate_khepri_code(gen_path)

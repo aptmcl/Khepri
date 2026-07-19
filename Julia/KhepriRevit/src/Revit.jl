@@ -293,6 +293,7 @@ public string WallTypeName(Element element)
 public bool WallIsCurtainWall(Element element)
 public Length WallBaseOffset(Element element)
 public Length WallTopOffset(Element element)
+public void SetWallOffsets(ElementId id, Length baseOffset, Length topOffset)
 public ElementId[] WallInserts(Element element)
 public XYZ[] FloorBoundaryVertices(Element element)
 public XYZ[][] FloorBoundaryLoops(Element element)
@@ -348,6 +349,7 @@ public Element[] DocSpecialtyEquipment()
 public XYZ FamilyInstanceLocation(Element element)
 public double FamilyInstanceRotation(Element element)
 public double[] FamilyInstanceFrame(Element element)
+public double[] FamilyInstanceTotalTransform(Element element)
 public bool[] FamilyInstanceFlips(Element element)
 public Element[] DocAllFloors()
 public ElementId FamilyInstanceLevel(Element element)
@@ -953,20 +955,36 @@ KhepriBase.b_free_column(b::RVT, cb, h, angle, family) =
 KhepriBase.realize_wall_no_openings(b::RVT, s::Wall) =
   realize_wall_path(b, s, s.path)
 
+_apply_wall_offsets(b::RVT, ids, s::Wall) =
+  begin
+    if s.base_offset != 0 || s.top_offset != 0
+      for id in (ids isa AbstractVector ? ids : [ids])
+        try
+          # Length RPC params take raw SI meters (the C# Length wrapper converts
+          # to internal feet) — to_revit here would double-convert.
+          @remote(b, SetWallOffsets(id, s.base_offset, s.top_offset))
+        catch e
+          @warn "wall offsets not applied" exception=e
+        end
+      end
+    end
+    ids
+  end
+
 realize_wall_path(b::RVT, s::Wall, path::OpenPolygonalPath) =
   # Revit also considers unconnected walls. These have a top level with id -1
   if ref_value(b, s.top_level) == RVTVoidId
-    @remote(b, CreateUnconnectedLineWall(
+    _apply_wall_offsets(b, @remote(b, CreateUnconnectedLineWall(
         path.vertices,
         ref_value(b, s.bottom_level),
         to_revit(s.top_level.height - s.bottom_level.height),
-        family_ref(b, s.family)))
+        family_ref(b, s.family))), s)
   else
-    @remote(b, CreateLineWall(
+    _apply_wall_offsets(b, @remote(b, CreateLineWall(
         path.vertices,
         ref_value(b, s.bottom_level),
         ref_value(b, s.top_level),
-        family_ref(b, s.family)))
+        family_ref(b, s.family))), s)
   end
 
 realize_wall_path(b::RVT, s::Wall, path::ClosedPolygonalPath) =
@@ -1539,10 +1557,18 @@ wall_from_ref(r, b::RVT) =
           else
             let mat = _material_from_revit(@remote(b, ElementMaterial(r))),
                 th = @remote(b, HostObjTypeThickness(r)),
+                # Base/top offsets: a parapet band spans bottom+base_offset..top+top_offset —
+                # ignoring them emitted every offset wall at full storey height (flagged by
+                # the per-element conformance report).
+                boff = try @remote(b, WallBaseOffset(r)) catch; 0.0 end,
+                toff = top_level_id == RVTVoidId ? 0.0 :
+                       (try @remote(b, WallTopOffset(r)) catch; 0.0 end),
                 fam = th > 1e-6 ?
                   wall_family(thickness=th, right_material=mat, left_material=mat, side_material=mat) :
                   wall_family(right_material=mat, left_material=mat, side_material=mat)
-              wall(path, bottom_level=bottom_level, top_level=top_level, family=fam)
+              wall(path, bottom_level=bottom_level, top_level=top_level, family=fam,
+                   base_offset=abs(boff) > 1e-6 ? boff : 0,
+                   top_offset=abs(toff) > 1e-6 ? toff : 0)
             end
           end
     ref!(b, s, r)
@@ -1682,7 +1708,10 @@ all_doors(b::RVT) =
      HostedElementInfo(
        r,
        @remote(b, HostWallId(r)),
-       pos[1], pos[2],
+       # HostedElementPosition projects the instance CENTER onto the host curve;
+       # the portable convention (BIM.jl subpath(x, x+width) and the Revit-side
+       # location_transform p+vx(width/2)) takes loc.x as the opening's LEFT edge.
+       pos[1] - dims[1] / 2, pos[2],
        dims[1], dims[2],
        @remote(b, ElementFamilyName(r)),
        @remote(b, ElementTypeName(r)),
@@ -1698,7 +1727,8 @@ all_windows(b::RVT) =
      HostedElementInfo(
        r,
        @remote(b, HostWallId(r)),
-       pos[1], pos[2],
+       # Center → left-edge conversion; see all_doors.
+       pos[1] - dims[1] / 2, pos[2],
        dims[1], dims[2],
        @remote(b, ElementFamilyName(r)),
        @remote(b, ElementTypeName(r)),
@@ -1780,10 +1810,25 @@ _level_at_or_below(b::RVT, z) =
     isempty(below) ? _base_level(b) : argmax(l -> l.height, below)
   end
 
+#=
+Fixture placement frames (verified live on the T3 corpus, see stress/_probe_frames.jl):
+- GetTotalTransform is ALWAYS a proper rotation; the improper part of a mirrored
+  placement is BAKED INTO GetSymbolGeometry (which follows the queried instance's
+  flip state). The exporter un-mirrors the representative's mesh to canonical
+  parity, so the reader reconstructs each instance's true frame as
+  T ∘ diag(hand ? -1 : 1, facing ? -1 : 1).
+- The anchor is LocationPoint. LP drifts a family-fixed offset from the
+  total-transform origin (0.27 m on the T3 beds, 0.95 m on the file cabinets),
+  and the exporter re-references each per-type mesh to LP (δ_local = T⁻¹(LP)),
+  so LP is the one anchor every seam agrees on — including Revit's own
+  NewFamilyInstance on rebuild, which sets LP to the given point.
+=#
 fixture_from_ref(r, b::RVT) =
   let loc = @remote(b, FamilyInstanceLocation(r)),
-      angle = _family_instance_rotation(r, b),
-      fr = try @remote(b, FamilyInstanceFrame(r)) catch; nothing end,
+      tt0 = try @remote(b, FamilyInstanceTotalTransform(r)) catch; Float64[] end,
+      tt = length(tt0) == 12 ? tt0 : nothing,
+      fl = try @remote(b, FamilyInstanceFlips(r)) catch; nothing end,
+      angle = tt === nothing ? _family_instance_rotation(r, b) : atan(tt[2], tt[1]),
       level_id = @remote(b, FamilyInstanceLevel(r)),
       lvl = level_id == RVTVoidId ? _level_at_or_below(b, cz(loc)) : level_from_ref(level_id, b),
       key = "$(@remote(b, ElementFamilyName(r))):$(@remote(b, ElementTypeName(r)))",
@@ -1791,13 +1836,17 @@ fixture_from_ref(r, b::RVT) =
       # Level, …) measures the point's Z from the level, so an absolute-z emission rebuilt every
       # fixture level.height too low. Realization re-adds the level height on every backend.
       p = xyz(cx(loc), cy(loc), cz(loc) - lvl.height),
-      # A MIRRORED placement (plan-basis determinant < 0) cannot be expressed as an
-      # angle: bake the full basis into the location's cs (standalone_obj_transform
-      # honors it, flipping the mesh frame) and zero the angle.
-      mirrored = fr !== nothing && (fr[1] * fr[4] - fr[2] * fr[3]) < -1e-9,
-      rloc = mirrored ?
-               loc_from_o_vx_vy(p, vxyz(fr[1], fr[2], 0), vxyz(fr[3], fr[4], 0)) : p,
-      s = family_element(rloc, angle=mirrored ? 0.0 : angle, level=lvl,
+      facing = fl !== nothing && fl[1],
+      hand = fl !== nothing && fl[2],
+      improper = (facing ⊻ hand) && tt !== nothing,
+      # Improper placements can't be an angle: bake T's plan basis with the flip
+      # diag into the location's cs (standalone_obj_transform mirrors on det<0).
+      rloc = improper ?
+               let dh = hand ? -1.0 : 1.0, df = facing ? -1.0 : 1.0
+                 loc_from_o_vx_vy(p, vxyz(dh * tt[1], dh * tt[2], 0),
+                                  vxyz(df * tt[4], df * tt[5], 0))
+               end : p,
+      s = family_element(rloc, angle=improper ? 0.0 : angle, level=lvl,
                          family=_fixture_family(key))
     ref!(b, s, r)
     s

@@ -63,7 +63,11 @@ errors = [(r.index, first(replace(string(r.expr), r"\s+" => " "), 70),
            first(sprint(showerror, r.error), 120))
           for r in stmt_rows if r.error !== nothing]
 
-shape_rows = [(cat=String(typeof(r.shape).name.name), m=r.measurement)
+# `placeholder`: a FamilyElement whose family has no OBJ mapping realizes as a
+# 1 m box — its SIZE is meaningless; match those by position only.
+shape_rows = [(cat=String(typeof(r.shape).name.name), m=r.measurement,
+               placeholder=(r.shape isa KhepriBase.FamilyElement &&
+                            !(KhepriBase.maybe_backend_family(b, r.shape.family) isa KhepriBase.OBJFamily)))
               for r in measured_shapes(b)
               if r.measurement.n_trigs > 0 &&
                  !(typeof(r.shape).name.name in (:Group, :GroupInstance))]
@@ -108,8 +112,14 @@ open(report_path, "w") do io
               d < bd && (bd = d; best = j)
             end
           end
+          # Door/Window ledger bboxes are inflated on the wall-normal axis by swing
+          # arcs and opening symbols (observed up to 2 m) — drop the single worst
+          # axis for those and gate on the remaining two (width + height are real).
+          size_ok = sr -> let ds = sort([abs.(msizes(sr.m) .- sizes(lr))...])
+            (cat in ("Door", "Window") ? ds[2] : ds[3]) <= ts
+          end
           if best != 0 && bd <= tp &&
-             maximum(abs.(msizes(srows[best].m) .- sizes(lr))) <= ts
+             (srows[best].placeholder || size_ok(srows[best]))
             free[best] = false
             matched += 1
             push!(worst, (bd, lr.id, best))

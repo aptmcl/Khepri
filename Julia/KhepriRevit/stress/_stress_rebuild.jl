@@ -31,9 +31,15 @@ try
     src = read(gen_path, String),
         exprs = Meta.parseall(src).args,
         ok = 0, failed = 0, meshes = 0,
-        errs = Dict{String,Int}()
+        errs = Dict{String,Int}(),
+        # statement → created Revit ids ledger: when a failure-processing sacrifice
+        # or rollback names an element id, rebuild_ids.tsv maps it straight back to
+        # the generated-program line that created it.
+        ids_io = open(joinpath(dirname(gen_path), "rebuild_ids.tsv"), "w"),
+        seen_refs = Set{Any}(),
+        last_line = 0
       for e in exprs
-        e isa LineNumberNode && continue
+        e isa LineNumberNode && (last_line = e.line; continue)
         e isa Expr && e.head == :using && continue
         is_mesh = e isa Expr && e.head == :call && e.args[1] == :obj_model
         try
@@ -45,7 +51,17 @@ try
             errs[msg] = get(errs, msg, 0) + 1
           end
         end
+        let ids = Any[]
+          for (_, rf) in revit.refs.shapes
+            if !(rf in seen_refs)
+              push!(seen_refs, rf)
+              append!(ids, try KhepriBase.ref_values(revit, rf) catch; [] end)
+            end
+          end
+          isempty(ids) || println(ids_io, last_line, "\t", join(ids, ","))
+        end
       end
+      close(ids_io)
       (ok=ok, meshes=meshes, failed=failed, errs=errs)
     end
   println("REBUILD: ok=$(stats.ok) mesh_noop=$(stats.meshes) failed=$(stats.failed)")
