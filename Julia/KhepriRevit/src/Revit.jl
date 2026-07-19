@@ -25,7 +25,8 @@ export
     RevitInPlaceFamily,
     revit_system_family,
     revit_file_family,
-    revit_opening_file_family
+    revit_opening_file_family,
+    revit_opening_system_family
 
 # The backend-agnostic codegen pipeline lives in KhepriBase (CodeGen.jl). Import the internals used
 # by introspect_model / generate_khepri_code below; the Revit-specific pipeline hooks
@@ -294,6 +295,7 @@ public bool WallIsCurtainWall(Element element)
 public Length WallBaseOffset(Element element)
 public Length WallTopOffset(Element element)
 public void SetWallOffsets(ElementId id, Length baseOffset, Length topOffset)
+public ElementId FindOrCloneType(String familyName, String typeName, Length thickness)
 public ElementId[] WallInserts(Element element)
 public XYZ[] FloorBoundaryVertices(Element element)
 public XYZ[][] FloorBoundaryLoops(Element element)
@@ -341,6 +343,7 @@ public string[] ExportElementsToOBJ(ElementId[] ids, string folderPath)
 public Element[] DocRoofs()
 public XYZ[] RoofBoundaryVertices(Element element)
 public ElementId RoofLevel(Element element)
+public double[][] RoofFootprintInfo(Element element)
 public Element[] DocFurniture()
 public Element[] DocPlumbingFixtures()
 public Element[] DocCasework()
@@ -519,20 +522,48 @@ struct RevitSystemFamily <: RevitFamily
   family_map::Dict{String, Function}
   instance_map::Dict{String, Function}
   location_transform::Function
+  # "Family:Type" identity of the introspected system type ("Basic Wall:DDN GESSO
+  # 100mm"). Empty = anonymous (the pre-existing default-type behavior). With it,
+  # the rebuild resolves — or clones at the introspected thickness — the REAL type
+  # instead of silently substituting the template default (walls became Generic 8",
+  # the largest single cause of round-trip drift).
+  type_name::String
 end
 
-revit_system_family(family_map=(), instance_map=(), location_transform=(f, p)->p) =
+revit_system_family(family_map=(), instance_map=(), location_transform=(f, p)->p;
+                    type_name="") =
   RevitSystemFamily(
     Dict(family_map...),
     Dict(instance_map...),
-    location_transform)
+    location_transform,
+    type_name)
+
+# System doors/windows carry their dimensions on the instance and their loc.x is the
+# opening's LEFT edge — mirror revit_opening_file_family for the system-family case
+# (the bare revit_system_family() emission dropped Width/Height AND the width/2
+# offset, yielding 36"x84" template doors displaced by half their width).
+revit_opening_system_family(; type_name="") =
+  revit_system_family([],
+    ["Width" => f -> to_revit(f.width), "Height" => f -> to_revit(f.height)],
+    (f, p) -> p + vx(f.width/2, p.cs);
+    type_name=type_name)
 
 b_get_family_ref(b::RVT, f::Family, rvtf::RevitSystemFamily) =
-  let param_map = rvtf.family_map,
-      params = keys(param_map)
-    isempty(params) ?
-      RVTId(0) :
-      @remote(b, FamilyElement(0, collect(params), [param_map[param](f) for param in params]))
+  if !isempty(rvtf.type_name)
+    let parts = split(rvtf.type_name, ":", limit=2),
+        fam_name = String(parts[1]),
+        typ_name = length(parts) == 2 ? String(parts[2]) : String(parts[1]),
+        th = hasproperty(f, :thickness) ? Float64(f.thickness) : 0.0,
+        r = try @remote(b, FindOrCloneType(fam_name, typ_name, th)) catch; RVTVoidId end
+      r == RVTVoidId ? RVTId(0) : r
+    end
+  else
+    let param_map = rvtf.family_map,
+        params = keys(param_map)
+      isempty(params) ?
+        RVTId(0) :
+        @remote(b, FamilyElement(0, collect(params), [param_map[param](f) for param in params]))
+    end
   end
 
 struct RevitFileFamily <: RevitFamily
@@ -1590,7 +1621,7 @@ wall_from_ref(r, b::RVT) =
                 # elevation frame than their levels).
                 boff = let pb = try @remote(b, PhysicalBoundingBox(r)) catch; [] end
                   if length(pb) == 2 &&
-                     cz(pb[1]) < bottom_level.height + boff0 - 0.05 &&
+                     cz(pb[1]) < bottom_level.height + boff0 - 0.35 &&
                      abs(cz(pb[2]) - (top_level.height + toff)) < 1.0
                     cz(pb[1]) - bottom_level.height
                   else
@@ -1941,7 +1972,7 @@ fixture_from_ref(r, b::RVT) =
       # Face-based instances mounted on vertical faces carry a NON-VERTICAL BasisZ
       # (a wall-hung lavatory: BasisZ = wall normal, BasisY = up) — a plan angle
       # cannot represent that frame (the GSG lavatory rendered pitched 90°).
-      tilted = tt !== nothing && abs(tt[9]) < 1 - 1e-6,
+      tilted = tt !== nothing && abs(tt[9]) < 0.999,
       # Improper/tilted placements can't be an angle: bake T's basis with the flip
       # diag into the location's cs (kept 3D for tilted frames; the realization
       # applies the cs axes directly when the z-axis is non-vertical).
@@ -2435,8 +2466,13 @@ KhepriBase.b_native_family_expr(b::RVT, var, meta) =
         Expr(:call, :joinpath, Expr(:macrocall, Symbol("@__DIR__"), nothing),
              "khepri_obj_models", basename(meta.path)) :
         Expr(:macrocall, Symbol("@raw_str"), nothing, meta.path),
+      type_key = isempty(meta.family_name) ? "" : "$(meta.family_name):$(meta.type_name)",
       revit_native = (meta.is_system || isempty(meta.path)) ?
-        Expr(:call, :revit_system_family) :
+        (meta.category in (:door, :window) ?
+           (isempty(type_key) ? Expr(:call, :revit_opening_system_family) :
+              Expr(:call, :revit_opening_system_family, Expr(:kw, :type_name, type_key))) :
+           (isempty(type_key) ? Expr(:call, :revit_system_family) :
+              Expr(:call, :revit_system_family, Expr(:kw, :type_name, type_key)))) :
         # Doors/windows carry their dimensions on the instance, so use the opening-specific loader that
         # preserves the Width/Height mapping; other loadable families load the .rfa directly.
         (meta.category in (:door, :window) ?
