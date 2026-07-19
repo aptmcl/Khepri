@@ -636,6 +636,12 @@ See also: b_railing, railing (threejs_api).
 const threejs_railing_post_radius = 0.025
 
 KhepriBase.b_railing(b::THR, path, level, host, family) =
+  # Post-free assemblies (with_posts=false) use the portable default: the native op
+  # always plants at least two posts.
+  !family.with_posts ?
+    invoke(KhepriBase.b_railing,
+           Tuple{Backend, typeof(path), typeof(level), typeof(host), typeof(family)},
+           b, path, level, host, family) :
   let h = family.height,
       base = level_height(b, level),
       mat = material_ref(b, family.material),
