@@ -44,6 +44,20 @@ try
         catch
           NaN
         end
+      # Family instances get PHYSICAL (solid/mesh-only) bounds: get_BoundingBox pads
+      # them with invisible family geometry and symbolic curves (shower trays report
+      # 2.4x1.6 for a 1.0x0.8 tray; doors include swing symbols), which poisons the
+      # ground truth. System elements (walls/slabs/...) keep the plain bbox.
+      bbox_pair = (id, physical) -> begin
+        if physical
+          let pb = try KhepriBase.@remote(revit, PhysicalBoundingBox(id)) catch; [] end
+            length(pb) == 2 && return (pb[1], pb[2])
+          end
+        end
+        let bmin = try KhepriBase.@remote(revit, BoundingBoxMin(id)) catch; nothing end
+          bmin === nothing ? nothing : (bmin, KhepriBase.@remote(revit, BoundingBoxMax(id)))
+        end
+      end
       open(ledger_path, "w") do io
         println(io, "category	id	level	minx	miny	minz	maxx	maxy	maxz")
         for (sh, r) in revit.refs.shapes
@@ -51,9 +65,9 @@ try
             isempty(ids) && continue
             let id = ids[1]
               id isa Integer && id > 0 || continue
-              let bmin = try KhepriBase.@remote(revit, BoundingBoxMin(id)) catch; nothing end
-                bmin === nothing && continue
-                let bmax = KhepriBase.@remote(revit, BoundingBoxMax(id))
+              let bb = bbox_pair(id, sh isa KhepriBase.FamilyElement)
+                bb === nothing && continue
+                let (bmin, bmax) = bb
                   println(io, typeof(sh).name.name, "	", id, "	", lvl_of(sh), "	",
                           cx(bmin), "	", cy(bmin), "	", cz(bmin), "	",
                           cx(bmax), "	", cy(bmax), "	", cz(bmax))
@@ -70,9 +84,9 @@ try
         for (cat, infos) in (("Door", KhepriRevit.all_doors(revit)),
                              ("Window", KhepriRevit.all_windows(revit)))
           for inf in infos
-            let bmin = try KhepriBase.@remote(revit, BoundingBoxMin(inf.ref)) catch; nothing end
-              bmin === nothing && continue
-              let bmax = KhepriBase.@remote(revit, BoundingBoxMax(inf.ref))
+            let bb = bbox_pair(inf.ref, true)
+              bb === nothing && continue
+              let (bmin, bmax) = bb
                 println(io, cat, "\t", inf.ref, "\t", NaN, "\t",
                         cx(bmin), "\t", cy(bmin), "\t", cz(bmin), "\t",
                         cx(bmax), "\t", cy(bmax), "\t", cz(bmax))

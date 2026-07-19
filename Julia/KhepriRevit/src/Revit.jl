@@ -351,6 +351,8 @@ public double FamilyInstanceRotation(Element element)
 public double[] FamilyInstanceFrame(Element element)
 public double[] FamilyInstanceTotalTransform(Element element)
 public bool[] FamilyInstanceFlips(Element element)
+public XYZ[] PhysicalBoundingBox(Element element)
+public void MirrorInPlace(Element element, VXYZ planeNormal, XYZ planeOrigin)
 public Element[] DocAllFloors()
 public ElementId FamilyInstanceLevel(Element element)
 public ElementId FamilyInstanceHost(Element element)
@@ -1178,9 +1180,26 @@ KhepriBase.b_sink(b::RVT, c, host, family) =
   end
 
 KhepriBase.b_family_element(b::RVT, loc, angle, level, family) =
-  let p = loc_from_o_phi(loc, angle)
-    @remote(b, CreateElementLocDirOnHost(p, vx(1, p.cs),
-            ref_value(b, level), family_ref(b, family)))
+  let p = loc_from_o_phi(loc, angle),
+      o = in_world(p),
+      xw = in_world(p + vx(1, p.cs)) - o,
+      yw = in_world(p + vy(1, p.cs)) - o,
+      r = @remote(b, CreateElementLocDirOnHost(p, vx(1, p.cs),
+                  ref_value(b, level), family_ref(b, family)))
+    # A MIRRORED placement (improper plan basis, e.g. from Revit introspection's
+    # loc_from_o_vx_vy emission) cannot be expressed by NewFamilyInstance, which only
+    # places proper frames: the placement above realizes [x, R90(x)] = [x, -y]. Mirror
+    # the instance in place about the vertical plane through the anchor along x
+    # (normal = y): S∘[x, -y] = [x, y], restoring the emitted improper frame while
+    # keeping the anchor fixed (it lies on the mirror plane).
+    if cx(xw) * cy(yw) - cy(xw) * cx(yw) < -1e-12 && r != RVTVoidId
+      try
+        @remote(b, MirrorInPlace(r, yw, o))
+      catch e
+        @warn "mirror parity not applied" exception=e
+      end
+    end
+    r
   end
 
 #=
@@ -1703,7 +1722,12 @@ end
 
 all_doors(b::RVT) =
   [let pos = @remote(b, HostedElementPosition(r)),
-       dims = @remote(b, DoorWindowDimensions(r)),
+       dims0 = @remote(b, DoorWindowDimensions(r)),
+       # DoorWindowDimensions reports 0 for some families (cased Door-Openings) —
+       # recover from the "W x Hmm" type name BEFORE the edge conversion below, or
+       # the center-to-edge shift silently becomes zero (found by the T4 ledger).
+       dims = something(_opening_dims(dims0[1], dims0[2],
+                                      @remote(b, ElementTypeName(r))), (dims0[1], dims0[2])),
        flips = try @remote(b, FamilyInstanceFlips(r)) catch; [false, false, false] end
      HostedElementInfo(
        r,
@@ -1722,12 +1746,14 @@ all_doors(b::RVT) =
 
 all_windows(b::RVT) =
   [let pos = @remote(b, HostedElementPosition(r)),
-       dims = @remote(b, DoorWindowDimensions(r)),
+       dims0 = @remote(b, DoorWindowDimensions(r)),
+       dims = something(_opening_dims(dims0[1], dims0[2],
+                                      @remote(b, ElementTypeName(r))), (dims0[1], dims0[2])),
        flips = try @remote(b, FamilyInstanceFlips(r)) catch; [false, false, false] end
      HostedElementInfo(
        r,
        @remote(b, HostWallId(r)),
-       # Center → left-edge conversion; see all_doors.
+       # Center → left-edge conversion (dims regex-recovered); see all_doors.
        pos[1] - dims[1] / 2, pos[2],
        dims[1], dims[2],
        @remote(b, ElementFamilyName(r)),
@@ -1824,9 +1850,24 @@ Fixture placement frames (verified live on the T3 corpus, see stress/_probe_fram
   NewFamilyInstance on rebuild, which sets LP to the given point.
 =#
 fixture_from_ref(r, b::RVT) =
-  let loc = @remote(b, FamilyInstanceLocation(r)),
+  let loc0 = @remote(b, FamilyInstanceLocation(r)),
       tt0 = try @remote(b, FamilyInstanceTotalTransform(r)) catch; Float64[] end,
       tt = length(tt0) == 12 ? tt0 : nothing,
+      # Elements without a LocationPoint (site/big-id instances) report XYZ.Zero and
+      # were emitted at the origin. Fall back to the total-transform origin — exact,
+      # and consistent with the exporter (no LP means no δ re-referencing) — then to
+      # the physical bbox center as a last resort.
+      loc = if abs(cx(loc0)) > 1e-9 || abs(cy(loc0)) > 1e-9 || abs(cz(loc0)) > 1e-9
+              loc0
+            elseif tt !== nothing
+              xyz(tt[10] * 0.3048, tt[11] * 0.3048, tt[12] * 0.3048)
+            else
+              let pb = try @remote(b, PhysicalBoundingBox(r)) catch; [] end
+                length(pb) == 2 ?
+                  xyz((cx(pb[1]) + cx(pb[2])) / 2, (cy(pb[1]) + cy(pb[2])) / 2, cz(pb[1])) :
+                  loc0
+              end
+            end,
       fl = try @remote(b, FamilyInstanceFlips(r)) catch; nothing end,
       angle = tt === nothing ? _family_instance_rotation(r, b) : atan(tt[2], tt[1]),
       level_id = @remote(b, FamilyInstanceLevel(r)),
@@ -1905,10 +1946,14 @@ stair_from_ref(r, b::RVT) =
       fam = stair_family(width=width > 1e-6 ? width : 1.0,
                          riser_height=riser > 1e-6 ? riser : 0.18,
                          tread_depth=tread > 1e-6 ? tread : 0.28),
-      s = if length(runs) >= 2 && length(elevs) == 2 * length(runs)
-            # Multi-run (L/U-shaped) stair: emit the 3D walk centerline plus the EXACT
-            # landing footprints (each vertex at the landing's level-relative elevation);
-            # z level-relative throughout.
+      s = if length(runs) >= 1 && length(elevs) == 2 * length(runs)
+            # Walk-path stair: emit the 3D centerline plus the EXACT landing footprints
+            # (each vertex at the landing's level-relative elevation); z level-relative
+            # throughout. This covers multi-run L/U stairs AND single-run stairs — a
+            # single StairsRun can itself be a U-shaped winder (T4's stair: one run,
+            # zero landings, 2.35x2.68 footprint), and even for a straight run the walk
+            # encodes the TRUE top elevation, which the base-point short form cannot
+            # (it always climbs to the top level).
             let walk = _stair_walk_verts(runs, elevs, base_level.height),
                 d = length(walk) >= 2 ?
                       vxy(cx(walk[2]) - cx(walk[1]), cy(walk[2]) - cy(walk[1])) :
@@ -2261,13 +2306,18 @@ introspect_model(; b::RVT=revit) =
     # children — otherwise they double-emit as world-space fallback meshes on top of the native
     # curtain wall (439 of the GSG model's 477 unclaimed elements were exactly these). Likewise a
     # stacked wall's members are represented by their parent (DocWalls excludes them) — claim them.
-    let all_walls_read = vcat(walls, [m for g in groups for m in g.members])
+    let all_walls_read = vcat(walls, [m for g in groups for m in g.members]),
+        # Panel-REPLACING doors/windows are curtain-grid children too, but the uniform
+        # panel grid the native curtain wall regenerates does NOT reproduce them —
+        # leave them unclaimed so they degrade to fallback meshes instead of
+        # vanishing (4 curtain doors in the GSG model, found by the ledger).
+        dw_ids = Set{RVTId}(i.ref for i in vcat(all_doors(b), all_windows(b)))
       for w in all_walls_read
         let wr = w isa Shape ? ref_value(b, w) : RVTVoidId
           wr != RVTVoidId || continue
           if is_curtain_wall(w)
             for id in @remote(b, CurtainWallChildIds(wr))
-              push!(claimed, id)
+              id in dw_ids || push!(claimed, id)
             end
           elseif w isa Wall
             for id in @remote(b, StackedWallMemberIds(wr))

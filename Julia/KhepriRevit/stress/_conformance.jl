@@ -92,40 +92,56 @@ open(report_path, "w") do io
     println(io)
   end
   n_warn = 0
+  # Doors/windows/fixtures that introspection degrades to per-element obj_model
+  # fallbacks land in the ObjModel category with positionally-exact geometry — let
+  # those ledger rows borrow from a shared ObjModel pool instead of reporting the
+  # element as dropped. The pool is consumed across categories.
+  obj_rows = [r for r in shape_rows if r.cat == "ObjModel"]
+  obj_used = falses(length(obj_rows))
   for cat in cats
     lrows = [r for r in ledger if r.cat == cat]
     srows = [r for r in shape_rows if r.cat == cat]
     (isempty(lrows) && isempty(srows)) && continue
-    if isempty(lrows) || isempty(srows)
+    if isempty(lrows)
       println(io, "$cat: ledger=$(length(lrows)) measured=$(length(srows))  [coverage-only: no counterpart]")
       continue
     end
     let (tp, ts) = tol_for(cat),
         free = trues(length(srows)),
-        matched = 0, worst = Tuple{Float64, Int, Int}[],
+        can_borrow = cat in ("Door", "Window", "FamilyElement"),
+        matched = 0, borrowed = 0, worst = Tuple{Float64, Int, Int}[],
         unmatched_l = Int[]
       for (i, lr) in enumerate(lrows)
-        let lc = center(lr), best = 0, bd = Inf
-          for (j, sr) in enumerate(srows)
-            free[j] || continue
-            let d = d3(mcenter(sr.m), lc)
-              d < bd && (bd = d; best = j)
+        let lc = center(lr),
+            # Door/Window ledger bboxes are inflated on the wall-normal axis by swing
+            # arcs and opening symbols (observed up to 2 m) — drop the single worst
+            # axis for those and gate on the remaining two (width + height are real).
+            size_ok = sr -> let ds = sort([abs.(msizes(sr.m) .- sizes(lr))...])
+              (cat in ("Door", "Window") ? ds[2] : ds[3]) <= ts
+            end,
+            # All free candidates (own category + borrowable meshes) by distance; take
+            # the NEAREST one that passes the size gate — nearest-only pairing stranded
+            # elements whose closest neighbor was a different, size-incompatible shape.
+            cands = sort!(vcat(
+              [(d3(mcenter(srows[j].m), lc), :own, j) for j in 1:length(srows) if free[j]],
+              can_borrow ?
+                [(d3(mcenter(obj_rows[j].m), lc), :obj, j)
+                 for j in 1:length(obj_rows) if !obj_used[j]] : Tuple{Float64,Symbol,Int}[]);
+              by = first),
+            hit = false
+          for (d, kind, j) in cands
+            d <= tp || break
+            let sr = kind == :own ? srows[j] : obj_rows[j]
+              if (kind == :own && sr.placeholder) || size_ok(sr)
+                kind == :own ? (free[j] = false) : (obj_used[j] = true; borrowed += 1)
+                matched += 1
+                push!(worst, (d, lr.id, j))
+                hit = true
+                break
+              end
             end
           end
-          # Door/Window ledger bboxes are inflated on the wall-normal axis by swing
-          # arcs and opening symbols (observed up to 2 m) — drop the single worst
-          # axis for those and gate on the remaining two (width + height are real).
-          size_ok = sr -> let ds = sort([abs.(msizes(sr.m) .- sizes(lr))...])
-            (cat in ("Door", "Window") ? ds[2] : ds[3]) <= ts
-          end
-          if best != 0 && bd <= tp &&
-             (srows[best].placeholder || size_ok(srows[best]))
-            free[best] = false
-            matched += 1
-            push!(worst, (bd, lr.id, best))
-          else
-            push!(unmatched_l, lr.id)
-          end
+          hit || push!(unmatched_l, lr.id)
         end
       end
       sort!(worst; by = first, rev = true)
@@ -133,6 +149,7 @@ open(report_path, "w") do io
           status = frac >= 0.9 && isempty(unmatched_l) ? "OK" : "WARN"
         status == "WARN" && (n_warn += 1)
         println(io, "$cat: ledger=$(length(lrows)) measured=$(length(srows)) matched=$matched ",
+                borrowed > 0 ? "(incl. $borrowed via obj-mesh fallbacks) " : "",
                 "max_center_delta=", isempty(worst) ? "-" : string(round(worst[1][1], digits=3)),
                 "  [$status]")
         isempty(unmatched_l) ||
