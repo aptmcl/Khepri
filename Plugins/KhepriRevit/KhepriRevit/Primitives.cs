@@ -2393,6 +2393,12 @@ namespace KhepriRevit {
             Transform t = fi.GetTotalTransform();
             return new double[] { t.BasisX.X, t.BasisX.Y, t.BasisY.X, t.BasisY.Y };
         }
+        // Placement flip flags: hand (hinge side), facing (swing side), mirrored.
+        public bool[] FamilyInstanceFlips(Element element) {
+            FamilyInstance fi = element as FamilyInstance;
+            if (fi == null) return new bool[] { false, false, false };
+            return new bool[] { fi.FacingFlipped, fi.HandFlipped, fi.Mirrored };
+        }
         // Every Floor-class element regardless of category (structural foundation slabs
         // are Floors in category OST_StructuralFoundation and are invisible to DocFloors).
         public Element[] DocAllFloors() =>
