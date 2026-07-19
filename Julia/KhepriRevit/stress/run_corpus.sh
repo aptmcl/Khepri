@@ -147,6 +147,15 @@ run_model() {
   fi
   rm -f "$copy_mnt"
 
+  # Headless per-element conformance: replay the generated program on the
+  # MeasureBackend and compare against the introspection-time ledger (advisory).
+  if [ -f "$rdir/ledger.tsv" ]; then
+    (cd "$STRESS_DIR/.." && timeout 900 julia --project "$STRESS_DIR/_conformance.jl" \
+        "$rdir/generated.jl" "$rdir/ledger.tsv" "$rdir/conformance_report.txt") \
+      > "$rdir/conformance.log" 2>&1 || true
+    grep -E '^CONFORMANCE' "$rdir/conformance_report.txt" 2>/dev/null | head -1
+  fi
+
   # Launch B: rebuild on the blank template, re-introspect, compare.
   local length_rtol
   length_rtol="$(corpus_field "$key" length_rtol)"
@@ -158,6 +167,14 @@ run_model() {
     "KHEPRI_STRESS_REPORT=$rdir_win\\report.txt" \
     "KHEPRI_STRESS_GEN2=$rdir_win\\generated2.jl"
   if grep -q '^STRESS-PASS' "$rdir/rebuild.log"; then
+    # Fixpoint drift: normalized line diff between the generated program and the
+    # re-introspection of the rebuild (advisory; convergence = 0 differing lines).
+    if [ -f "$rdir/generated2.jl" ]; then
+      diff <(grep -v 'Generated on:' "$rdir/generated.jl") \
+           <(grep -v 'Generated on:' "$rdir/generated2.jl") \
+        > "$rdir/fixpoint_diff.txt" || true
+      echo "  fixpoint drift: $(grep -c '^[<>]' "$rdir/fixpoint_diff.txt") differing lines (fixpoint_diff.txt)"
+    fi
     echo "  $key: PASS"
     RESULT="PASS"
     return 0

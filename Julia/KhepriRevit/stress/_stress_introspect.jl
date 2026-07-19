@@ -32,6 +32,39 @@ try
       println("levels written: $lvl_path")
     end
     println("summary written: $summary_path")
+    # Ground-truth LEDGER: one row per introspected element (via the ref registry —
+    # everything a reader ref!'d, group representatives included), with the element's
+    # independently-queried world bbox in SI. Consumed by the headless conformance
+    # replay (stress/_conformance.jl) to verify per-element position/size after the
+    # generated program is realized on the MeasureBackend.
+    let ledger_path = joinpath(dirname(summary_path), "ledger.tsv"),
+        lvl_of = sh -> try
+          hasproperty(sh, :level) ? sh.level.height :
+          hasproperty(sh, :bottom_level) ? sh.bottom_level.height : NaN
+        catch
+          NaN
+        end
+      open(ledger_path, "w") do io
+        println(io, "category	id	level	minx	miny	minz	maxx	maxy	maxz")
+        for (sh, r) in revit.refs.shapes
+          let ids = try KhepriBase.ref_values(revit, r) catch; [] end
+            isempty(ids) && continue
+            let id = ids[1]
+              id isa Integer && id > 0 || continue
+              let bmin = try KhepriBase.@remote(revit, BoundingBoxMin(id)) catch; nothing end
+                bmin === nothing && continue
+                let bmax = KhepriBase.@remote(revit, BoundingBoxMax(id))
+                  println(io, typeof(sh).name.name, "	", id, "	", lvl_of(sh), "	",
+                          cx(bmin), "	", cy(bmin), "	", cz(bmin), "	",
+                          cx(bmax), "	", cy(bmax), "	", cz(bmax))
+                end
+              end
+            end
+          end
+        end
+      end
+      println("ledger written: $ledger_path")
+    end
     generate_khepri_code(gen_path)
     println("generated: $gen_path")
     println("STRESS-OK")

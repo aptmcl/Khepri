@@ -348,6 +348,7 @@ public Element[] DocSpecialtyEquipment()
 public XYZ FamilyInstanceLocation(Element element)
 public double FamilyInstanceRotation(Element element)
 public double[] FamilyInstanceFrame(Element element)
+public bool[] FamilyInstanceFlips(Element element)
 public Element[] DocAllFloors()
 public ElementId FamilyInstanceLevel(Element element)
 public ElementId FamilyInstanceHost(Element element)
@@ -1670,11 +1671,14 @@ struct HostedElementInfo
   family_name::String
   type_name::String
   is_system::Bool
+  facing_flipped::Bool
+  hand_flipped::Bool
 end
 
 all_doors(b::RVT) =
   [let pos = @remote(b, HostedElementPosition(r)),
-       dims = @remote(b, DoorWindowDimensions(r))
+       dims = @remote(b, DoorWindowDimensions(r)),
+       flips = try @remote(b, FamilyInstanceFlips(r)) catch; [false, false, false] end
      HostedElementInfo(
        r,
        @remote(b, HostWallId(r)),
@@ -1682,13 +1686,15 @@ all_doors(b::RVT) =
        dims[1], dims[2],
        @remote(b, ElementFamilyName(r)),
        @remote(b, ElementTypeName(r)),
-       @remote(b, IsSystemFamily(r)))
+       @remote(b, IsSystemFamily(r)),
+       flips[1], flips[2])
    end
    for r in @remote(b, DocDoors())]
 
 all_windows(b::RVT) =
   [let pos = @remote(b, HostedElementPosition(r)),
-       dims = @remote(b, DoorWindowDimensions(r))
+       dims = @remote(b, DoorWindowDimensions(r)),
+       flips = try @remote(b, FamilyInstanceFlips(r)) catch; [false, false, false] end
      HostedElementInfo(
        r,
        @remote(b, HostWallId(r)),
@@ -1696,7 +1702,8 @@ all_windows(b::RVT) =
        dims[1], dims[2],
        @remote(b, ElementFamilyName(r)),
        @remote(b, ElementTypeName(r)),
-       @remote(b, IsSystemFamily(r)))
+       @remote(b, IsSystemFamily(r)),
+       flips[1], flips[2])
    end
    for r in @remote(b, DocWindows())]
 
@@ -1951,7 +1958,11 @@ railing_from_ref(r, b::RVT) =
           tname = (try @remote(b, ElementFamilyName(r)) catch; "" end) * ":" *
                   (try @remote(b, ElementTypeName(r)) catch; "" end),
           fam = occursin(r"glass|vidro|cristal"i, tname) ?
-                  railing_family(infill_material=material_glass) :
+                  railing_family(infill_material=material_glass,
+                                 # "Over Slab" glassline assemblies clamp the glass at the
+                                 # slab edge — no balusters; default posts are invented
+                                 # geometry there.
+                                 with_posts=!occursin(r"over.?slab|glassline"i, tname)) :
                   default_railing_family(),
           s = railing(open_polygonal_path(path), level=lvl, family=fam)
         ref!(b, s, r)
@@ -2093,14 +2104,16 @@ introspect_model(; b::RVT=revit) =
                     let dfam = _door_family_with_dims("$(d.family_name):$(d.type_name)", d.width, d.height, d.type_name)
                       family_meta[dfam] = FamilyMeta(category=:door, family_name=d.family_name,
                                                      type_name=d.type_name, is_system=d.is_system)
-                      push!(m.doors, door(m, xy(d.delta_from_start, d.sill_height), family=dfam))
+                      push!(m.doors, door(m, xy(d.delta_from_start, d.sill_height),
+                                          d.hand_flipped, d.facing_flipped, family=dfam))
                     end
                   end
                   for wn in filter(w -> w.host_wall_id == mref, window_infos)
                     let wfam = _window_family_with_dims("$(wn.family_name):$(wn.type_name)", wn.width, wn.height, wn.type_name)
                       family_meta[wfam] = FamilyMeta(category=:window, family_name=wn.family_name,
                                                      type_name=wn.type_name, is_system=wn.is_system)
-                      push!(m.windows, window(m, xy(wn.delta_from_start, wn.sill_height), family=wfam))
+                      push!(m.windows, window(m, xy(wn.delta_from_start, wn.sill_height),
+                                              wn.hand_flipped, wn.facing_flipped, family=wfam))
                     end
                   end
                 end

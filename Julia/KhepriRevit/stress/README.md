@@ -168,3 +168,27 @@ Three fixes were needed, each of general value:
 Level-filtered THR rendering (`Piso 1` only, and `Piso 1 + Piso 2` without `Cobertura`)
 is exercised by classifying generated statements by their minimum referenced level;
 renders live in `results/moradia3/threejs_t3_*.png`.
+
+## Measured verification loops (2026-07-19)
+
+Beyond the aggregate summary comparison, the harness now runs three measurement
+loops (see the testing plan discussion in the session notes):
+
+1. **Pass-equivalence oracle** (headless, in the KhepriRevit test suite):
+   `pass_equivalence_report` realizes the raw `model_to_expr` output and the
+   transformed program on a `MeasureBackend` (KhepriBase's default lowering down
+   to `b_trig`) and requires the same shape multiset, folded pass-by-pass — a
+   codegen regression names the offending pass, no Revit needed.
+2. **Per-element conformance** (per corpus run, advisory): introspection writes
+   `ledger.tsv` (one row per introspected element with its independently-queried
+   Revit bbox, SI); `_conformance.jl` replays `generated.jl` on the
+   MeasureBackend (binding `threejs` to it so obj-family guards register) and
+   matches realized shapes per category by nearest bbox-center →
+   `conformance_report.txt` with per-category matched counts, worst offenders,
+   and named unmatched element ids.
+3. **Fixpoint drift** (advisory): normalized line diff of `generated.jl` vs
+   `generated2.jl` per run (`fixpoint_diff.txt`); convergence criterion is zero.
+
+Headless acceptance regressions for the historical bug classes (dropped angles,
+mirrored chirality, grouped-slab double offset, door hinge/facing flips) live in
+`KhepriBase/test/test_measure_conformance.jl`.
