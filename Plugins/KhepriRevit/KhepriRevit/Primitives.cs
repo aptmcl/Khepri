@@ -448,6 +448,69 @@ namespace KhepriRevit {
             return worldMax;
         }
 
+        // Physical-geometry bounds: solids and meshes of the element's VISIBLE geometry only.
+        // get_BoundingBox pads family instances with invisible geometry and symbolic curves
+        // (shower trays report 2.4x1.6 for a 1.0x0.8 tray; doors include swing symbols), which
+        // poisons the conformance ledger's ground truth. Curves are deliberately excluded.
+        // Returns [min, max], or an empty array when no solid/mesh geometry exists (caller
+        // falls back to the plain bounding box).
+        static void AccumulatePhysicalBounds(GeometryElement ge, ref double[] lo, ref double[] hi) {
+            if (ge == null) return;
+            foreach (GeometryObject go in ge) {
+                if (go is Solid s && s.Edges.Size > 0) {
+                    foreach (Edge e in s.Edges)
+                        foreach (XYZ p in e.Tessellate()) {
+                            lo[0] = Math.Min(lo[0], p.X); lo[1] = Math.Min(lo[1], p.Y); lo[2] = Math.Min(lo[2], p.Z);
+                            hi[0] = Math.Max(hi[0], p.X); hi[1] = Math.Max(hi[1], p.Y); hi[2] = Math.Max(hi[2], p.Z);
+                        }
+                } else if (go is Mesh m) {
+                    foreach (XYZ p in m.Vertices) {
+                        lo[0] = Math.Min(lo[0], p.X); lo[1] = Math.Min(lo[1], p.Y); lo[2] = Math.Min(lo[2], p.Z);
+                        hi[0] = Math.Max(hi[0], p.X); hi[1] = Math.Max(hi[1], p.Y); hi[2] = Math.Max(hi[2], p.Z);
+                    }
+                } else if (go is GeometryInstance gi) {
+                    AccumulatePhysicalBounds(gi.GetInstanceGeometry(), ref lo, ref hi);
+                }
+            }
+        }
+        public XYZ[] PhysicalBoundingBox(Element e) {
+            var lo = new double[] { double.MaxValue, double.MaxValue, double.MaxValue };
+            var hi = new double[] { double.MinValue, double.MinValue, double.MinValue };
+            try {
+                AccumulatePhysicalBounds(
+                    e.get_Geometry(new Options { DetailLevel = ViewDetailLevel.Fine }), ref lo, ref hi);
+            } catch { }
+            if (lo[0] > hi[0]) return new XYZ[0];
+            return new XYZ[] { new XYZ(lo[0], lo[1], lo[2]), new XYZ(hi[0], hi[1], hi[2]) };
+        }
+
+        // Mirror an element in place about the vertical plane through planeOrigin with the given
+        // (plan) normal. Used to restore the flip parity of mirrored family instances on rebuild:
+        // NewFamilyInstance can only place proper frames. The correction is always the placed
+        // frame composed with diag(1,-1) about the anchor, which three mechanisms can realize:
+        // - HOSTED instances: flipFacing (mirror across the host plane through the anchor).
+        //   ElementTransformUtils would raise "Can't mirror an instance without its host",
+        //   whose RESOLUTION deletes the element. flipHand alone is the wrong axis — it needs
+        //   an extra 180° rotation about the anchor.
+        // - Free-standing: ElementTransformUtils.MirrorElements (flip* is often unavailable).
+        public void MirrorInPlace(Element e, VXYZ planeNormal, XYZ planeOrigin) {
+            FamilyInstance fi = e as FamilyInstance;
+            if (fi != null && fi.Host != null) {
+                if (fi.CanFlipFacing) { fi.flipFacing(); return; }
+                if (fi.CanFlipHand) {
+                    fi.flipHand();
+                    ElementTransformUtils.RotateElement(doc, e.Id,
+                        Line.CreateBound(planeOrigin, planeOrigin + XYZ.BasisZ), Math.PI);
+                    return;
+                }
+                return;  // hosted and unflippable: keep the proper placement rather than lose it
+            }
+            XYZ n = new XYZ(planeNormal.X, planeNormal.Y, 0);
+            if (n.GetLength() < 1e-12) return;
+            ElementTransformUtils.MirrorElements(doc, new List<ElementId> { e.Id },
+                Plane.CreateByNormalAndOrigin(n.Normalize(), planeOrigin), false);
+        }
+
         public Element Sphere(XYZ centre, Length radius, ElementId materialId) {
             Frame frame = new Frame(centre, XYZ.BasisX, XYZ.BasisY, XYZ.BasisZ);
             XYZ p0 = centre - radius * frame.BasisZ;
@@ -1862,14 +1925,19 @@ namespace KhepriRevit {
         }
         public double[] ArcWallAngles(Element element) {
             Arc arc = (((Wall)element).Location as LocationCurve).Curve as Arc;
-            // Revit Arc: angles in the plane defined by arc.XDirection / arc.YDirection
-            // We transform to world angles
+            // World plan angle of the point at parameter t is csAngle + sign*t, where
+            // sign is the arc frame's plan handedness: a Revit Arc with Normal.Z < 0
+            // sweeps CLOCKWISE. Assuming right-handedness mirrored every CW arc wall
+            // across its frame's x-axis — a full diameter of displacement, found by
+            // the GSG conformance ledger. Angles are normalized to an increasing
+            // (CCW) sweep because CreateArcWall rebuilds via Arc.Create(world CCW);
+            // NB this loses the original wall's facing for CW sources (untracked).
             XYZ xDir = arc.XDirection;
             double csAngle = Math.Atan2(xDir.Y, xDir.X);
-            // Revit raw parameter range [0,1] maps to full arc
-            double startParam = arc.GetEndParameter(0);
-            double endParam = arc.GetEndParameter(1);
-            return new double[] { startParam + csAngle, endParam + csAngle };
+            double sign = arc.Normal.Z >= 0 ? 1.0 : -1.0;
+            double a0 = csAngle + sign * arc.GetEndParameter(0);
+            double a1 = csAngle + sign * arc.GetEndParameter(1);
+            return a0 <= a1 ? new double[] { a0, a1 } : new double[] { a1, a0 };
         }
         public string WallTypeName(Element element) =>
             ((Wall)element).WallType.Name;
@@ -1923,9 +1991,15 @@ namespace KhepriRevit {
         // All boundary loops (outer + inner openings) of an element's horizontal face, so floor/ceiling/
         // roof openings/shafts survive reconstruction as region holes. The *BoundaryVertices methods
         // return only loop 0 (the outer), dropping openings.
+        // The KhepriBase slab/ceiling convention places the boundary path at the TOP
+        // face (slab_family_elevation defaults to -thickness, extruding downward), so
+        // return the UPWARD-facing loops. Taking whichever horizontal face enumerated
+        // first anchored every reconstructed slab one thickness too low — a systematic
+        // 0.1-0.3 m z error across the whole corpus, found by the conformance ledgers.
         XYZ[][] AllHorizontalBoundaryLoops(Element element) {
             GeometryElement geo = element.get_Geometry(new Options());
             if (geo == null) return new XYZ[0][];
+            XYZ[][] fallback = null;
             foreach (GeometryObject obj in geo) {
                 Solid solid = obj as Solid;
                 if (solid == null || solid.Faces.Size == 0) continue;
@@ -1938,11 +2012,14 @@ namespace KhepriRevit {
                             foreach (Edge edge in loop) pts.Add(edge.AsCurve().GetEndPoint(0));
                             if (pts.Count >= 3) result.Add(pts.ToArray());
                         }
-                        if (result.Count > 0) return result.ToArray();
+                        if (result.Count > 0) {
+                            if (pf.FaceNormal.Z > 0.9) return result.ToArray();
+                            if (fallback == null) fallback = result.ToArray();
+                        }
                     }
                 }
             }
-            return new XYZ[0][];
+            return fallback ?? new XYZ[0][];
         }
         public XYZ[][] FloorBoundaryLoops(Element element) => AllHorizontalBoundaryLoops(element);
         public XYZ[][] CeilingBoundaryLoops(Element element) => AllHorizontalBoundaryLoops(element);
@@ -2158,12 +2235,15 @@ namespace KhepriRevit {
          *   host curve.
          *
          * Order of attempts (most reliable first):
-         *   1. Bounding-box centre (model coords). Always available for placed
-         *      elements.
-         *   2. `GetTotalTransform().Origin` as a fallback. For non-hosted family
-         *      instances, total-transform is identical to bounding-box centre; for
-         *      hosted instances it composes the host transform with the local
-         *      placement, so it is at least in world coordinates.
+         *   1. `GetTotalTransform().Origin` — the true world placement origin, which
+         *      for doors/windows is the OPENING CENTER (the Center Left/Right plane).
+         *      The bounding-box centre is NOT reliably the opening centre: cased
+         *      "Door-Opening" families carry asymmetric trim, so their bbox centre
+         *      sits at the opening EDGE — a systematic width/2 introspection error
+         *      (found by the T4 conformance ledger). Guarded: only trusted when it
+         *      projects within the host curve's range (a small set of hosted kinds
+         *      report a degenerate origin).
+         *   2. Bounding-box centre (model coords) as the fallback.
          *
          * Units: returned Lengths wrap Revit-internal feet; the channel's wLength
          * converts to metres on the wire.
@@ -2176,11 +2256,36 @@ namespace KhepriRevit {
             LocationCurve hostLoc = fi.Host.Location as LocationCurve;
             if (hostLoc == null) return new Length[] { new Length(0), new Length(0) };
             XYZ elemPt = null;
-            BoundingBoxXYZ bb = fi.get_BoundingBox(null);
-            if (bb != null) {
-                elemPt = (bb.Min + bb.Max) * 0.5;
-            } else {
-                elemPt = fi.GetTotalTransform()?.Origin;
+            // PHYSICAL (solid/mesh) bounds center: the only estimator that is the
+            // opening center for every family. The placement origin sits at the
+            // opening EDGE for cased "Door-Opening" families (width/2 off), and the
+            // plain bounding box is padded by swing symbols — both found by the
+            // conformance ledgers. Projection onto the host curve discards the
+            // wall-normal component, where leaf/swing geometry lives.
+            {
+                var lo = new double[] { double.MaxValue, double.MaxValue, double.MaxValue };
+                var hi = new double[] { double.MinValue, double.MinValue, double.MinValue };
+                try {
+                    AccumulatePhysicalBounds(
+                        fi.get_Geometry(new Options { DetailLevel = ViewDetailLevel.Fine }),
+                        ref lo, ref hi);
+                } catch { }
+                if (lo[0] <= hi[0])
+                    elemPt = new XYZ((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2);
+            }
+            if (elemPt == null) {
+                XYZ tOrigin = fi.GetTotalTransform()?.Origin;
+                if (tOrigin != null && tOrigin.GetLength() > 1e-9) {
+                    IntersectionResult pr = hostLoc.Curve.Project(tOrigin);
+                    // Project on a bound curve clamps to the curve, so the only meaningful
+                    // sanity check is the perpendicular distance to the wall line.
+                    if (pr != null && pr.XYZPoint.DistanceTo(tOrigin) < 5.0)  // ~1.5 m
+                        elemPt = tOrigin;
+                }
+            }
+            if (elemPt == null) {
+                BoundingBoxXYZ bb = fi.get_BoundingBox(null);
+                if (bb != null) elemPt = (bb.Min + bb.Max) * 0.5;
             }
             if (elemPt == null) return new Length[] { new Length(0), new Length(0) };
             Curve hostCurve = hostLoc.Curve;
@@ -2517,7 +2622,16 @@ namespace KhepriRevit {
             var run = stair?.GetStairsRuns()
                 .Select(id => doc.GetElement(id) as StairsRun)
                 .FirstOrDefault(r => r != null);
-            return new Length(run != null ? run.ActualRunWidth : 0.0);
+            double w = run != null ? run.ActualRunWidth : 0.0;
+            // Winder/sketched runs report ActualRunWidth 0 — fall back to the run's
+            // width parameter, then the type's minimum run width.
+            if (w < 1e-9 && run != null)
+                w = run.get_Parameter(BuiltInParameter.STAIRS_RUN_ACTUAL_RUN_WIDTH)?.AsDouble() ?? 0.0;
+            if (w < 1e-9 && stair != null)
+                w = (doc.GetElement(stair.GetTypeId())
+                        ?.get_Parameter(BuiltInParameter.STAIRSTYPE_MINIMUM_RUN_WIDTH))
+                    ?.AsDouble() ?? 0.0;
+            return new Length(w);
         }
         public Length StairRiserHeight(Element element) =>
             new Length(element.get_Parameter(BuiltInParameter.STAIRS_ACTUAL_RISER_HEIGHT)?.AsDouble() ?? 0.0);
