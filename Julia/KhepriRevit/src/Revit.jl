@@ -347,6 +347,8 @@ public Element[] DocGenericModels()
 public Element[] DocSpecialtyEquipment()
 public XYZ FamilyInstanceLocation(Element element)
 public double FamilyInstanceRotation(Element element)
+public double[] FamilyInstanceFrame(Element element)
+public Element[] DocAllFloors()
 public ElementId FamilyInstanceLevel(Element element)
 public ElementId FamilyInstanceHost(Element element)
 public Element[] DocStairs()
@@ -1749,7 +1751,11 @@ _family_instance_rotation(r, b) =
   try
     @remote(b, FamilyInstanceRotation(r))
   catch
-    0.0
+    # Hosted instances: LocationPoint.Rotation throws — the total-transform basis is
+    # always available and matches the placement rotation.
+    let fr = try @remote(b, FamilyInstanceFrame(r)) catch; nothing end
+      fr === nothing ? 0.0 : atan(fr[2], fr[1])
+    end
   end
 
 # One family_element_family per Revit family:type, memoized per introspection. Without this every
@@ -1770,14 +1776,22 @@ _level_at_or_below(b::RVT, z) =
 fixture_from_ref(r, b::RVT) =
   let loc = @remote(b, FamilyInstanceLocation(r)),
       angle = _family_instance_rotation(r, b),
+      fr = try @remote(b, FamilyInstanceFrame(r)) catch; nothing end,
       level_id = @remote(b, FamilyInstanceLevel(r)),
       lvl = level_id == RVTVoidId ? _level_at_or_below(b, cz(loc)) : level_from_ref(level_id, b),
       key = "$(@remote(b, ElementFamilyName(r))):$(@remote(b, ElementTypeName(r)))",
       # Level-relative z (like _rebase_to_level for slabs): Revit's NewFamilyInstance(XYZ, symbol,
       # Level, …) measures the point's Z from the level, so an absolute-z emission rebuilt every
       # fixture level.height too low. Realization re-adds the level height on every backend.
-      rloc = xyz(cx(loc), cy(loc), cz(loc) - lvl.height),
-      s = family_element(rloc, angle=angle, level=lvl, family=_fixture_family(key))
+      p = xyz(cx(loc), cy(loc), cz(loc) - lvl.height),
+      # A MIRRORED placement (plan-basis determinant < 0) cannot be expressed as an
+      # angle: bake the full basis into the location's cs (standalone_obj_transform
+      # honors it, flipping the mesh frame) and zero the angle.
+      mirrored = fr !== nothing && (fr[1] * fr[4] - fr[2] * fr[3]) < -1e-9,
+      rloc = mirrored ?
+               loc_from_o_vx_vy(p, vxyz(fr[1], fr[2], 0), vxyz(fr[3], fr[4], 0)) : p,
+      s = family_element(rloc, angle=mirrored ? 0.0 : angle, level=lvl,
+                         family=_fixture_family(key))
     ref!(b, s, r)
     s
   end
@@ -1931,7 +1945,15 @@ railing_from_ref(r, b::RVT) =
       nothing
     else
       let path = _railing_path_on_host(_rebase_to_level(pts, lvl), host_id, lvl, b),
-          s = railing(open_polygonal_path(path), level=lvl)
+          # Glass balustrades (by type/family name) get a glass infill panel so mesh
+          # backends render more than the skeletal rail+posts. Name-based, best-effort:
+          # Revit's baluster-placement API is far deeper than the render needs.
+          tname = (try @remote(b, ElementFamilyName(r)) catch; "" end) * ":" *
+                  (try @remote(b, ElementTypeName(r)) catch; "" end),
+          fam = occursin(r"glass|vidro|cristal"i, tname) ?
+                  railing_family(infill_material=material_glass) :
+                  default_railing_family(),
+          s = railing(open_polygonal_path(path), level=lvl, family=fam)
         ref!(b, s, r)
         s
       end
