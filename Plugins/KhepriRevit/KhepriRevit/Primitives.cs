@@ -903,19 +903,65 @@ namespace KhepriRevit {
             }
             return familySymbol.Id;
         }
-        // The profile's z is the floor's elevation above its level (a raised threshold slab is above
-        // its floor level). Flatten the loop to the level plane and carry the offset via
-        // FLOOR_HEIGHTABOVELEVEL — otherwise a non-zero contour z is silently dropped on rebuild.
+        // The profile's z is the floor's TOP-FACE elevation above its level (a raised
+        // threshold slab is above its floor level). Flatten the loop to the level plane
+        // and carry the offset via FLOOR_HEIGHTABOVELEVEL, anchored at the loop's MIN z
+        // (deterministic — pts[0].Z made tilted loops rebuild at whichever vertex came
+        // first). TILTED-PLANAR loops (a ramp's exact 3D top face, kept by the portable
+        // introspection) additionally rebuild their slope via the slope-arrow overload.
         XYZ[] FlattenZ(XYZ[] pts) => pts.Select(p => new XYZ(p.X, p.Y, 0)).ToArray();
-        double ProfileOffset(XYZ[] pts) => pts.Length > 0 ? pts[0].Z : 0;
+        double ProfileOffset(XYZ[] pts) => pts.Length > 0 ? pts.Min(p => p.Z) : 0;
+
+        // Least-squares plane z = a + b·x + c·y over the loop vertices.
+        static bool FitPlane(XYZ[] pts, out double b, out double c) {
+            b = 0; c = 0;
+            int n = pts.Length;
+            if (n < 3) return false;
+            double sx = 0, sy = 0, sz = 0, sxx = 0, syy = 0, sxy = 0, sxz = 0, syz = 0;
+            foreach (XYZ p in pts) {
+                sx += p.X; sy += p.Y; sz += p.Z;
+                sxx += p.X * p.X; syy += p.Y * p.Y; sxy += p.X * p.Y;
+                sxz += p.X * p.Z; syz += p.Y * p.Z;
+            }
+            // Solve the 3x3 normal equations by Cramer's rule.
+            double d = n * (sxx * syy - sxy * sxy) - sx * (sx * syy - sxy * sy) + sy * (sx * sxy - sxx * sy);
+            if (Math.Abs(d) < 1e-9) return false;
+            b = (n * (sxz * syy - sxy * syz) - sz * (sx * syy - sxy * sy) + sy * (sx * syz - sxz * sy)) / d;
+            c = (n * (sxx * syz - sxz * sxy) - sx * (sx * syz - sxz * sy) + sz * (sx * sxy - sxx * sy)) / d;
+            return true;
+        }
+
+        Floor CreateFloorWithSlope(XYZ[] pts, List<CurveLoop> flatLoops, FloorType floorType, Level level) {
+            double zmin = pts.Min(p => p.Z), zmax = pts.Max(p => p.Z);
+            if (zmax - zmin > 0.05 && FitPlane(pts, out double gb, out double gc)) {
+                double slope = Math.Sqrt(gb * gb + gc * gc);
+                if (slope > 1e-6) {
+                    XYZ dir = new XYZ(gb / slope, gc / slope, 0);
+                    XYZ low = pts.Aggregate((p, q) => p.Z <= q.Z ? p : q);
+                    XYZ tail = new XYZ(low.X, low.Y, 0);
+                    // Arrow length spans the footprint's extent along the gradient.
+                    double lo = pts.Min(p => p.X * dir.X + p.Y * dir.Y);
+                    double hi = pts.Max(p => p.X * dir.X + p.Y * dir.Y);
+                    double len = Math.Max(hi - lo, 1.0);
+                    try {
+                        Floor sloped = Floor.Create(doc, flatLoops, floorType.Id, level.Id, false,
+                                                    Line.CreateBound(tail, tail + dir * len), slope);
+                        sloped.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM)?.Set(zmin);
+                        return sloped;
+                    } catch { /* fall through to a flat floor at min z */ }
+                }
+            }
+            Floor floor = Floor.Create(doc, flatLoops, floorType.Id, level.Id);
+            floor.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM)?.Set(ProfileOffset(pts));
+            return floor;
+        }
 
         public ElementId CreatePolygonalFloor(XYZ[] pts, Level level, ElementId famId) {
             FloorType floorType = (famId != null && famId != ElementId.InvalidElementId) ?
                 doc.GetElement(famId) as FloorType :
                 new FilteredElementCollector(doc).OfClass(typeof(FloorType)).First() as FloorType;
-            Floor floor = Floor.Create(doc, new List<CurveLoop> { PolygonCurveLoop(FlattenZ(pts)) }, floorType.Id, level.Id);
-            floor.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM).Set(ProfileOffset(pts));
-            return floor.Id;
+            return CreateFloorWithSlope(pts,
+                new List<CurveLoop> { PolygonCurveLoop(FlattenZ(pts)) }, floorType, level).Id;
         }
         public ElementId CreatePathFloor(XYZ[] pts, double[] angles, Level level, ElementId famId) {
             FloorType floorType = (famId != null && famId != ElementId.InvalidElementId) ?
@@ -1042,6 +1088,47 @@ namespace KhepriRevit {
         //      passing a Level there throws "host has no face". The (XYZ, FamilySymbol, Level,
         //      StructuralType) overload is the right one for level-only placement, so we
         //      pick the overload based on the runtime type of host.
+
+        // Raise a family instance so its geometry sits at worldZ (the placement point's
+        // intended elevation). Hosted/work-plane instances ignore vertical MoveElement,
+        // and which parameter actually drives the height varies by family ("Elevation",
+        // "Offset from Host", "Sill Height" — some accept values without effect), so try
+        // each and VERIFY via the bounding box that the geometry moved.
+        void RaiseInstanceTo(FamilyInstance fi, double worldZ) {
+            double CurrentZ() {
+                try {
+                    doc.Regenerate();
+                    XYZ lp = (fi.Location as LocationPoint)?.Point;
+                    if (lp != null) return lp.Z;
+                } catch { }
+                return 0.0;
+            }
+            double before = CurrentZ();
+            double need = worldZ - before;
+            if (Math.Abs(need) < 1e-4) return;
+            double lvlElev = (doc.GetElement(fi.LevelId) as Level)?.Elevation ?? 0.0;
+            BoundingBoxXYZ bb0 = fi.get_BoundingBox(null);
+            double g0 = bb0?.Min.Z ?? 0.0;
+            foreach (BuiltInParameter bip in new[] {
+                         BuiltInParameter.INSTANCE_ELEVATION_PARAM,
+                         BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM,
+                         BuiltInParameter.INSTANCE_SILL_HEIGHT_PARAM }) {
+                Parameter pe = fi.get_Parameter(bip);
+                if (pe == null || pe.IsReadOnly) continue;
+                try { if (!pe.Set(worldZ - lvlElev)) continue; } catch { continue; }
+                try { doc.Regenerate(); } catch { }
+                BoundingBoxXYZ bb1 = fi.get_BoundingBox(null);
+                if (bb1 != null && Math.Abs((bb1.Min.Z - g0) - need) < 0.05) return;
+            }
+            try {
+                ElementTransformUtils.MoveElement(doc, fi.Id, new XYZ(0, 0, need));
+                doc.Regenerate();
+                BoundingBoxXYZ bb2 = fi.get_BoundingBox(null);
+                if (bb2 != null && Math.Abs((bb2.Min.Z - g0) - need) < 0.05) return;
+            } catch { }
+            try { (fi.Location as LocationPoint)?.Move(new XYZ(0, 0, need)); } catch { }
+        }
+
         public Element CreateElementLocDirOnHost(XYZ location, XYZ direction, Element host, ElementId famId) {
             FamilySymbol symbol = (famId == null || famId == ElementId.InvalidElementId)
                 ? GetFirstSymbol(FindCategoryFamilies(doc, BuiltInCategory.OST_GenericModel).FirstOrDefault())
@@ -1107,8 +1194,14 @@ namespace KhepriRevit {
                                     // symbol's default elevation, corrected below.
                                     if (a2 != null && new XYZ(a2.X, a2.Y, world.Z).DistanceTo(world) <= 1.5) {
                                         if (Math.Abs(a2.Z - world.Z) > 1e-4)
-                                            try { ElementTransformUtils.MoveElement(doc, cand.Id, new XYZ(0, 0, world.Z - a2.Z)); } catch { }
-                                        return cand;
+                                            RaiseInstanceTo(cand, world.Z);
+                                        // The raise can fail for host+level placements (elevation
+                                        // read-only, moves ignored) — verify the GEOMETRY reaches
+                                        // the mounting height, else reject so the next placement
+                                        // strategy (host-only / face-reference) gets its turn.
+                                        BoundingBoxXYZ bbv = cand.get_BoundingBox(null);
+                                        if (bbv == null || bbv.Max.Z >= world.Z - 0.3)
+                                            return cand;
                                     }
                                     doc.Delete(cand.Id);
                                 } catch { }
@@ -1117,6 +1210,8 @@ namespace KhepriRevit {
                             Level wlvl = doc.GetElement(hostWall.LevelId) as Level;
                             FamilyInstance re =
                                 TryVerify(() => doc.Create.NewFamilyInstance(
+                                    world, symbol, hostWall, StructuralType.NonStructural))
+                                ?? TryVerify(() => doc.Create.NewFamilyInstance(
                                     world, symbol, hostWall, wlvl, StructuralType.NonStructural))
                                 ?? TryVerify(() => {
                                     var sideRefs = HostObjectUtils.GetSideFaces(hostWall, ShellLayerType.Interior);
@@ -1135,12 +1230,31 @@ namespace KhepriRevit {
                                 });
                             if (re != null) {
                                 doc.Delete(elem.Id);
-                                return re;
+                                elem = re;
                             }
                         }
-                        try { ElementTransformUtils.MoveElement(doc, elem.Id, world - actual); } catch { }
+                        if (elem.Host == null) {
+                            XYZ act2 = (elem.Location as LocationPoint)?.Point ?? actual;
+                            if (Math.Abs(world.X - act2.X) + Math.Abs(world.Y - act2.Y) > 1e-6)
+                                try { ElementTransformUtils.MoveElement(doc, elem.Id, new XYZ(world.X - act2.X, world.Y - act2.Y, 0)); } catch { }
+                            if (Math.Abs(world.Z - act2.Z) > 1e-4)
+                                RaiseInstanceTo(elem, world.Z);
+                        }
                     }
                 } catch { }
+                // The point overloads never apply `direction` — every level-hosted fixture
+                // rebuilt unrotated (found by the GSG lavatory probe; silently wrong since
+                // the beginning). Hosted instances take their orientation from the host.
+                if (elem != null && elem.Host == null) {
+                    double ang = Math.Atan2(direction.Y, direction.X);
+                    if (Math.Abs(ang) > 1e-6) {
+                        XYZ pivot = (elem.Location as LocationPoint)?.Point ?? world;
+                        try {
+                            ElementTransformUtils.RotateElement(doc, elem.Id,
+                                Line.CreateBound(pivot, pivot + XYZ.BasisZ), ang);
+                        } catch { }
+                    }
+                }
             } else {
                 elem = doc.Create.NewFamilyInstance(location, symbol, direction, host, StructuralType.NonStructural);
             }
@@ -2466,12 +2580,16 @@ namespace KhepriRevit {
                 .WhereElementIsNotElementType()
                 .Where(e => !IsGroupMember(e) && e.Location is LocationPoint && (e as FamilyInstance)?.SuperComponent == null)
                 .ToArray();
-        // Generic model introspection
+        // Generic model introspection. ModelText is excluded: it has no portable
+        // fixture representation (a 1 m placeholder at the INSERTION point misses a
+        // 10 m text run's extents entirely) — leaving it unclaimed degrades it to the
+        // mesh fallback, which exports the exact letter solids.
         public Element[] DocGenericModels() =>
             new FilteredElementCollector(doc)
                 .OfCategory(BuiltInCategory.OST_GenericModel)
                 .WhereElementIsNotElementType()
-                .Where(e => !IsGroupMember(e) && e.Location is LocationPoint && (e as FamilyInstance)?.SuperComponent == null)
+                .Where(e => !(e is ModelText) && !IsGroupMember(e) &&
+                            e.Location is LocationPoint && (e as FamilyInstance)?.SuperComponent == null)
                 .ToArray();
         // Specialty equipment introspection
         public Element[] DocSpecialtyEquipment() =>
