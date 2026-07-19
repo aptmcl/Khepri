@@ -1014,7 +1014,17 @@ namespace KhepriRevit {
             }
             ModelCurveArray curveArray = new ModelCurveArray();
             FootPrintRoof roof = doc.Create.NewFootPrintRoof(PolygonalCurveArray(pts), level, roofType, out curveArray);
+            SetRoofOffset(roof, roofType, pts);
             return roof.Id;
+        }
+        // Path z is the roof's BOTTOM face; Revit's base offset positions the TOP
+        // (body hangs below the sketch plane) — offset = bottom + structure width.
+        void SetRoofOffset(FootPrintRoof roof, RoofType roofType, XYZ[] pts) {
+            double th = 0.0;
+            try { th = roofType.GetCompoundStructure()?.GetWidth() ?? 0.0; } catch { }
+            double z = ProfileOffset(pts) + th;
+            if (Math.Abs(z) > 1e-9)
+                roof.get_Parameter(BuiltInParameter.ROOF_LEVEL_OFFSET_PARAM)?.Set(z);
         }
         public ElementId CreatePathRoof(XYZ[] pts, double[] angles, Level level, ElementId famId) {
             RoofType roofType = null;
@@ -1031,6 +1041,7 @@ namespace KhepriRevit {
             }
             ModelCurveArray curveArray = new ModelCurveArray();
             FootPrintRoof roof = doc.Create.NewFootPrintRoof(ClosedPathCurveArray(pts, angles), level, roofType, out curveArray);
+            SetRoofOffset(roof, roofType, pts);
             return roof.Id;
         }
         public void CreatePolygonalOpening(XYZ[] pts, Element host) {
@@ -2110,7 +2121,7 @@ namespace KhepriRevit {
         // return the UPWARD-facing loops. Taking whichever horizontal face enumerated
         // first anchored every reconstructed slab one thickness too low — a systematic
         // 0.1-0.3 m z error across the whole corpus, found by the conformance ledgers.
-        XYZ[][] AllHorizontalBoundaryLoops(Element element) {
+        XYZ[][] AllHorizontalBoundaryLoops(Element element, bool preferUp) {
             GeometryElement geo = element.get_Geometry(new Options());
             if (geo == null) return new XYZ[0][];
             XYZ[][] fallback = null;
@@ -2127,7 +2138,8 @@ namespace KhepriRevit {
                             if (pts.Count >= 3) result.Add(pts.ToArray());
                         }
                         if (result.Count > 0) {
-                            if (pf.FaceNormal.Z > 0.9) return result.ToArray();
+                            bool preferred = preferUp ? pf.FaceNormal.Z > 0.9 : pf.FaceNormal.Z < -0.9;
+                            if (preferred) return result.ToArray();
                             if (fallback == null) fallback = result.ToArray();
                         }
                     }
@@ -2135,9 +2147,12 @@ namespace KhepriRevit {
             }
             return fallback ?? new XYZ[0][];
         }
-        public XYZ[][] FloorBoundaryLoops(Element element) => AllHorizontalBoundaryLoops(element);
-        public XYZ[][] CeilingBoundaryLoops(Element element) => AllHorizontalBoundaryLoops(element);
-        public XYZ[][] RoofBoundaryLoops(Element element) => AllHorizontalBoundaryLoops(element);
+        // Floors/ceilings anchor at the TOP face (slab_family_elevation = -thickness);
+        // ROOFS anchor at the BOTTOM face (RoofFamily elevation = 0, extrudes UP) —
+        // reading the top face floated every replayed roof one thickness high.
+        public XYZ[][] FloorBoundaryLoops(Element element) => AllHorizontalBoundaryLoops(element, true);
+        public XYZ[][] CeilingBoundaryLoops(Element element) => AllHorizontalBoundaryLoops(element, true);
+        public XYZ[][] RoofBoundaryLoops(Element element) => AllHorizontalBoundaryLoops(element, false);
 
         public XYZ[] FloorBoundaryVertices(Element element) {
             Floor floor = (Floor)element;
@@ -2558,6 +2573,32 @@ namespace KhepriRevit {
             return new XYZ[0];
         }
         public ElementId RoofLevel(Element element) => element.LevelId;
+        // Footprint + per-edge slope of a FootPrintRoof: one row per sketch model
+        // curve, [x0,y0,z0, x1,y1,z1, definesSlope, slopeAngleRad]. Empty for
+        // non-footprint roofs (extrusion roofs, in-place).
+        public double[][] RoofFootprintInfo(Element element) {
+            FootPrintRoof roof = element as FootPrintRoof;
+            if (roof == null) return new double[0][];
+            Sketch sk = roof.GetDependentElements(new ElementClassFilter(typeof(Sketch)))
+                .Select(id => doc.GetElement(id) as Sketch)
+                .FirstOrDefault(x => x != null);
+            if (sk == null) return new double[0][];
+            var rows = new List<double[]>();
+            foreach (ElementId id in sk.GetAllElements()) {
+                ModelCurve mc = doc.GetElement(id) as ModelCurve;
+                if (mc == null) continue;
+                Curve c = mc.GeometryCurve;
+                if (c == null || !c.IsBound) continue;
+                XYZ p0 = c.GetEndPoint(0), p1 = c.GetEndPoint(1);
+                bool defines = false; double slope = 0.0;
+                try { defines = roof.get_DefinesSlope(mc); } catch { }
+                if (defines)
+                    try { slope = Math.Atan(roof.get_SlopeAngle(mc)); } catch { }
+                rows.Add(new double[] { p0.X, p0.Y, p0.Z, p1.X, p1.Y, p1.Z,
+                                        defines ? 1.0 : 0.0, slope });
+            }
+            return rows.ToArray();
+        }
 
         // Furniture introspection
         public Element[] DocFurniture() =>
@@ -2631,6 +2672,36 @@ namespace KhepriRevit {
                 t.Origin.X, t.Origin.Y, t.Origin.Z };
         }
         // Placement flip flags: hand (hinge side), facing (swing side), mirrored.
+        // Resolve the introspected "Family:Type" identity of a SYSTEM family type, or
+        // clone the family's default type under that name at the introspected thickness.
+        // Rebuilding with the template default (Generic 8" walls, 36"x84" doors) was the
+        // largest single source of round-trip drift AND real geometry error (wall
+        // thickness drives join trimming).
+        public ElementId FindOrCloneType(string familyName, string typeName, Length thickness) {
+            var types = new FilteredElementCollector(doc).OfClass(typeof(ElementType))
+                .Cast<ElementType>().ToList();
+            ElementType hit = types.FirstOrDefault(t => t.Name == typeName && t.FamilyName == familyName);
+            if (hit != null) return hit.Id;
+            ElementType donor = types.FirstOrDefault(t => t.FamilyName == familyName);
+            if (donor == null) return ElementId.InvalidElementId;
+            ElementType clone;
+            try { clone = donor.Duplicate(typeName); } catch { return donor.Id; }
+            if (thickness.Value > 1e-9 && clone is HostObjAttributes hoa) {
+                try {
+                    CompoundStructure cs0 = hoa.GetCompoundStructure();
+                    if (cs0 != null && Math.Abs(cs0.GetWidth() - thickness.Value) > 1e-6) {
+                        ElementId mat = cs0.GetLayers().Select(l => l.MaterialId).FirstOrDefault()
+                                        ?? ElementId.InvalidElementId;
+                        hoa.SetCompoundStructure(CompoundStructure.CreateSimpleCompoundStructure(
+                            new List<CompoundStructureLayer> {
+                                new CompoundStructureLayer(thickness.Value,
+                                    MaterialFunctionAssignment.Structure, mat) }));
+                    }
+                } catch { }
+            }
+            return clone.Id;
+        }
+
         public void SetWallOffsets(ElementId id, Length baseOffset, Length topOffset) {
             Element e = doc.GetElement(id);
             if (e == null) return;
@@ -2915,6 +2986,22 @@ namespace KhepriRevit {
         // document has no open transaction" — the previous code committed the outer
         // transaction and started the StairsEditScope but never opened a Transaction
         // inside the scope.
+        // Revit auto-attaches railings to freshly-created stairs; the generated program
+        // re-creates the REAL railings as explicit statements (introspected from the
+        // source), so the automatic ones are duplicates that also DOUBLE on every
+        // introspect-rebuild iteration (found by the fixpoint-drift classifier).
+        void DeleteAutoStairRailings(ElementId stairsId) {
+            if (stairsId == null || stairsId == ElementId.InvalidElementId) return;
+            try {
+                var ids = new FilteredElementCollector(doc)
+                    .OfClass(typeof(Autodesk.Revit.DB.Architecture.Railing))
+                    .Cast<Autodesk.Revit.DB.Architecture.Railing>()
+                    .Where(r => r.HasHost && r.HostId == stairsId)
+                    .Select(r => r.Id).ToList();
+                if (ids.Count > 0) doc.Delete(ids);
+            } catch { }
+        }
+
         public ElementId CreateStraightStair(XYZ basePoint, XYZ direction, double width,
                                              Level baseLevel, Level topLevel, ElementId familyId) {
             // Let a build failure PROPAGATE (RMIfy → clean BackendError) instead of swallowing it and
@@ -3018,6 +3105,7 @@ namespace KhepriRevit {
             if (familyId != null && familyId != ElementId.InvalidElementId) {
                 doc.GetElement(stairsId).ChangeTypeId(familyId);
             }
+            DeleteAutoStairRailings(stairsId);
             return stairsId;
         }
         public Element CreateSpiralStair(XYZ center, double radius, double startAngle,
