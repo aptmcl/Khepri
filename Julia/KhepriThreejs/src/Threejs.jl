@@ -639,9 +639,13 @@ KhepriBase.b_railing(b::THR, path, level, host, family) =
   let h = family.height,
       base = level_height(b, level),
       mat = material_ref(b, family.material),
-      vs = path_vertices(path)
-    @remote(b, railing(map(in_world, vs), base, h,
-                       family.post_spacing, threejs_railing_post_radius, mat))
+      vs = path_vertices(path),
+      r = @remote(b, railing(map(in_world, vs), base, h,
+                             family.post_spacing, threejs_railing_post_radius, mat))
+    # Glass-balustrade infill panels come from the portable helper (per-segment quads),
+    # additively — the native railing op renders only rail + posts.
+    family.infill_material === nothing ? r :
+      vcat([r], KhepriBase.railing_infill_panels(b, path, base, h, family)...)
   end
 
 KhepriBase.b_stair(b::THR, base_point, direction, bottom_level, top_level, family) =
