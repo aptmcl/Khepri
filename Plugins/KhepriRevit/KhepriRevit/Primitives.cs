@@ -2393,7 +2393,27 @@ namespace KhepriRevit {
             Transform t = fi.GetTotalTransform();
             return new double[] { t.BasisX.X, t.BasisX.Y, t.BasisY.X, t.BasisY.Y };
         }
+        // Full total transform: [Xx,Xy,Xz, Yx,Yy,Yz, Zx,Zy,Zz, Ox,Oy,Oz] (basis columns
+        // then origin, world coords/feet). FamilyInstanceFrame's 2x2 plan basis is not
+        // enough to diagnose mirrored/hosted placements where LocationPoint and the
+        // total-transform origin differ.
+        public double[] FamilyInstanceTotalTransform(Element element) {
+            FamilyInstance fi = element as FamilyInstance;
+            if (fi == null) return new double[0];  // sentinel: caller falls back to LocationPoint
+            Transform t = fi.GetTotalTransform();
+            return new double[] {
+                t.BasisX.X, t.BasisX.Y, t.BasisX.Z,
+                t.BasisY.X, t.BasisY.Y, t.BasisY.Z,
+                t.BasisZ.X, t.BasisZ.Y, t.BasisZ.Z,
+                t.Origin.X, t.Origin.Y, t.Origin.Z };
+        }
         // Placement flip flags: hand (hinge side), facing (swing side), mirrored.
+        public void SetWallOffsets(ElementId id, Length baseOffset, Length topOffset) {
+            Element e = doc.GetElement(id);
+            if (e == null) return;
+            e.get_Parameter(BuiltInParameter.WALL_BASE_OFFSET)?.Set(baseOffset.Value);
+            e.get_Parameter(BuiltInParameter.WALL_TOP_OFFSET)?.Set(topOffset.Value);
+        }
         public bool[] FamilyInstanceFlips(Element element) {
             FamilyInstance fi = element as FamilyInstance;
             if (fi == null) return new bool[] { false, false, false };
@@ -3029,16 +3049,46 @@ namespace KhepriRevit {
                         }
                     }
                     if (vertices.Count == 0) continue;
-                    // Doors/windows AND wall-hosted fixtures: the symbol geometry bakes
-                    // the TYPE's default sill/mounting height, but the instance's
-                    // LocationPoint z already carries the ACTUAL elevation — without
-                    // normalization a wall cabinet renders at loc.z + baked height
-                    // (double-counted). Free-standing fixtures keep their family origin
-                    // (a counter-top sink legitimately sits above its floor-level origin).
-                    if ((fi.Category != null &&
-                         (fi.Category.Id.Value == (long)BuiltInCategory.OST_Doors ||
-                          fi.Category.Id.Value == (long)BuiltInCategory.OST_Windows)) ||
-                        fi.Host is Wall) {
+                    // Re-reference the mesh to the instance's LOCATION POINT: symbol
+                    // geometry is relative to the total-transform origin, but every
+                    // placement seam (reader emission, mesh replay, NewFamilyInstance
+                    // on rebuild) anchors at LocationPoint, which for face-based and
+                    // reference-plane families sits a family-fixed offset away from
+                    // the origin (0.27 m on beds, 0.95 m on file cabinets). δ_local is
+                    // instance-invariant, so baking it into the per-type OBJ makes all
+                    // anchors agree. Doors/windows keep their own sill normalization.
+                    bool isOpening = fi.Category != null &&
+                        (fi.Category.Id.Value == (long)BuiltInCategory.OST_Doors ||
+                         fi.Category.Id.Value == (long)BuiltInCategory.OST_Windows);
+                    if (!isOpening && fi.Location is LocationPoint flp && flp.Point != null) {
+                        XYZ dLocal = fi.GetTotalTransform().Inverse.OfPoint(flp.Point);
+                        if (dLocal.GetLength() > 1e-9)
+                            for (int i = 0; i < vertices.Count; i++)
+                                vertices[i] = vertices[i] - dLocal;
+                    }
+                    // GetSymbolGeometry() BAKES the representative instance's flip state
+                    // (verified on the T3 corpus: a mirrored bed's symbol geometry is the
+                    // mirror of its unmirrored sibling's, under the always-PROPER
+                    // GetTotalTransform). Normalize to canonical parity so one OBJ serves
+                    // every instance: un-mirror about the flipped local axis and reverse
+                    // face winding to keep outward orientation.
+                    if (fi.Mirrored) {
+                        bool flipY = fi.FacingFlipped && !fi.HandFlipped;
+                        for (int i = 0; i < vertices.Count; i++)
+                            vertices[i] = flipY ? new XYZ(vertices[i].X, -vertices[i].Y, vertices[i].Z)
+                                                : new XYZ(-vertices[i].X, vertices[i].Y, vertices[i].Z);
+                        for (int i = 0; i < normals.Count; i++)
+                            normals[i] = flipY ? new XYZ(normals[i].X, -normals[i].Y, normals[i].Z)
+                                               : new XYZ(-normals[i].X, normals[i].Y, normals[i].Z);
+                        foreach (var g in groups)
+                            foreach (var face in g.Item2)
+                                Array.Reverse(face);
+                    }
+                    // Doors/windows: the symbol geometry bakes the TYPE's default sill
+                    // height, but the opening's placement already carries the actual
+                    // sill — normalize to z=0. (Wall-hosted FIXTURES are covered by the
+                    // LocationPoint re-referencing above, which handles all three axes.)
+                    if (isOpening) {
                         double zmin = vertices.Min(v => v.Z);
                         if (Math.Abs(zmin) > 1e-9)
                             for (int i = 0; i < vertices.Count; i++)

@@ -1,6 +1,7 @@
 using Autodesk.Revit.DB.Events;
 using Autodesk.Revit.UI;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.IO;
@@ -226,12 +227,21 @@ namespace KhepriRevit {
                     deleted = true;
                 } else {
                     hasError = true;
+                    var failingIds = new List<Autodesk.Revit.DB.ElementId>();
+                    try { failingIds.AddRange(f.GetFailingElementIds()); } catch { }
                     try {
                         WriteMessage("OnFailuresProcessing: error '" + f.GetDescriptionText() +
-                            "' resolutions=" + f.HasResolutions());
+                            "' resolutions=" + f.HasResolutions() +
+                            " ids=" + string.Join(",", failingIds));
                     } catch { }
                     if (f.HasResolutions())
                         fa.ResolveFailure(f);
+                    else if (failingIds.Count > 0)
+                        // Unresolvable error: sacrifice the offending element(s) so the
+                        // batched transaction commits; letting it roll back evaporates
+                        // every element in the batch silently. The ids logged above name
+                        // the culprit for the conformance ledger to flag.
+                        try { fa.DeleteElements(failingIds); } catch { resolved = false; }
                     else
                         resolved = false;
                 }
