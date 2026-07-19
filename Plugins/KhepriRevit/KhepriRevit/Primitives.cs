@@ -2383,6 +2383,24 @@ namespace KhepriRevit {
             try { return (element.Location as LocationPoint)?.Rotation ?? 0.0; }
             catch (Autodesk.Revit.Exceptions.InvalidOperationException) { return 0.0; }
         }
+        // Definitive orientation: the instance's total transform PLAN BASIS (works for
+        // hosted instances whose LocationPoint.Rotation throws). A negative determinant
+        // of the 2x2 means the placement is MIRRORED — unrepresentable as an angle.
+        // [BasisX.X, BasisX.Y, BasisY.X, BasisY.Y]
+        public double[] FamilyInstanceFrame(Element element) {
+            FamilyInstance fi = element as FamilyInstance;
+            if (fi == null) return new double[] { 1, 0, 0, 1 };
+            Transform t = fi.GetTotalTransform();
+            return new double[] { t.BasisX.X, t.BasisX.Y, t.BasisY.X, t.BasisY.Y };
+        }
+        // Every Floor-class element regardless of category (structural foundation slabs
+        // are Floors in category OST_StructuralFoundation and are invisible to DocFloors).
+        public Element[] DocAllFloors() =>
+            new FilteredElementCollector(doc)
+                .OfClass(typeof(Floor))
+                .WhereElementIsNotElementType()
+                .Where(e => !IsGroupMember(e))
+                .ToArray();
         public ElementId FamilyInstanceLevel(Element element) => element.LevelId;
         public ElementId FamilyInstanceHost(Element element) {
             FamilyInstance fi = element as FamilyInstance;
@@ -3005,14 +3023,16 @@ namespace KhepriRevit {
                         }
                     }
                     if (vertices.Count == 0) continue;
-                    // Doors/windows: the symbol geometry bakes the TYPE's default sill
-                    // height, but placement adds the INSTANCE's sill parameter — normalize
-                    // the mesh to sill-relative (base at z=0) so `level + sill` lands it
-                    // exactly. Fixtures keep their family origin (a wall cabinet's
-                    // geometry legitimately floats above it).
-                    if (fi.Category != null &&
-                        (fi.Category.Id.Value == (long)BuiltInCategory.OST_Doors ||
-                         fi.Category.Id.Value == (long)BuiltInCategory.OST_Windows)) {
+                    // Doors/windows AND wall-hosted fixtures: the symbol geometry bakes
+                    // the TYPE's default sill/mounting height, but the instance's
+                    // LocationPoint z already carries the ACTUAL elevation — without
+                    // normalization a wall cabinet renders at loc.z + baked height
+                    // (double-counted). Free-standing fixtures keep their family origin
+                    // (a counter-top sink legitimately sits above its floor-level origin).
+                    if ((fi.Category != null &&
+                         (fi.Category.Id.Value == (long)BuiltInCategory.OST_Doors ||
+                          fi.Category.Id.Value == (long)BuiltInCategory.OST_Windows)) ||
+                        fi.Host is Wall) {
                         double zmin = vertices.Min(v => v.Z);
                         if (Math.Abs(zmin) > 1e-9)
                             for (int i = 0; i < vertices.Count; i++)
