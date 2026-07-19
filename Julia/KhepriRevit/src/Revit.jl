@@ -1579,9 +1579,24 @@ wall_from_ref(r, b::RVT) =
                 # Base/top offsets: a parapet band spans bottom+base_offset..top+top_offset —
                 # ignoring them emitted every offset wall at full storey height (flagged by
                 # the per-element conformance report).
-                boff = try @remote(b, WallBaseOffset(r)) catch; 0.0 end,
+                boff0 = try @remote(b, WallBaseOffset(r)) catch; 0.0 end,
                 toff = top_level_id == RVTVoidId ? 0.0 :
                        (try @remote(b, WallTopOffset(r)) catch; 0.0 end),
+                # A wall ATTACHED downward (e.g. based on a curtain-wall top) extends
+                # below its base level with no WALL_BASE_OFFSET — recover the effective
+                # offset from the physical z-min. Downward only (sloped-top walls make
+                # z-max unreliable), and only when the wall's z-max agrees with the
+                # level frame (guards models whose geometry sits in a different
+                # elevation frame than their levels).
+                boff = let pb = try @remote(b, PhysicalBoundingBox(r)) catch; [] end
+                  if length(pb) == 2 &&
+                     cz(pb[1]) < bottom_level.height + boff0 - 0.05 &&
+                     abs(cz(pb[2]) - (top_level.height + toff)) < 1.0
+                    cz(pb[1]) - bottom_level.height
+                  else
+                    boff0
+                  end
+                end,
                 fam = th > 1e-6 ?
                   wall_family(thickness=th, right_material=mat, left_material=mat, side_material=mat) :
                   wall_family(right_material=mat, left_material=mat, side_material=mat)
@@ -1598,17 +1613,53 @@ wall_from_ref(r, b::RVT) =
 # Drop consecutive coincident boundary vertices (and a final vertex equal to the first) so a
 # reconstructed slab/ceiling/roof has no zero-length edges — Revit rejects those ("Curve length is too
 # small for Revit's tolerance"). Fewer than 3 distinct vertices ⇒ degenerate, so the caller skips it.
-_clean_boundary(verts; tol=0.005) =
+#=
+Boundary cleanup for slab-like elements. Two z regimes:
+- FLAT (default `keep_tilt=false`, or z-spread < 20 mm): project to a single z —
+  slight non-planarity is read noise, and Revit's Floor.Create rejects a
+  non-planar profile ("Parameter name: profile").
+- TILTED-PLANAR (`keep_tilt=true` and the loop fits a plane within 50 mm): keep
+  the 3D vertices — a ramp introspected flat at its lowest edge sat a full metre
+  under the real sloped floor (GSG, found by the conformance ledger). The
+  portable lowering extrudes tilted profiles vertically (verified exact on the
+  MeasureBackend) and the Revit rebuild reconstructs the slope via a slope
+  arrow (CreatePolygonalFloor). Warped (non-planar) loops still flatten.
+Always: drop consecutive coincident vertices (and a closing dup) to avoid
+zero-length edges ("Curve length is too small"). Fewer than 3 distinct
+vertices ⇒ degenerate, caller skips it.
+=#
+_fit_plane_residual(verts) =
+  # least-squares z = a + b·x + c·y via Cramer's rule (no LinearAlgebra dep);
+  # returns (max |residual|, b, c)
+  let n = Float64(length(verts)),
+      sx = sum(cx, verts), sy = sum(cy, verts), sz = sum(cz, verts),
+      sxx = sum(v -> cx(v)^2, verts), syy = sum(v -> cy(v)^2, verts),
+      sxy = sum(v -> cx(v) * cy(v), verts),
+      sxz = sum(v -> cx(v) * cz(v), verts), syz = sum(v -> cy(v) * cz(v), verts),
+      d = n * (sxx * syy - sxy * sxy) - sx * (sx * syy - sxy * sy) +
+          sy * (sx * sxy - sxx * sy)
+    if abs(d) < 1e-9
+      (Inf, 0.0, 0.0)
+    else
+      let bb = (n * (sxz * syy - sxy * syz) - sz * (sx * syy - sxy * sy) +
+                sy * (sx * syz - sxz * sy)) / d,
+          cc = (n * (sxx * syz - sxz * sxy) - sx * (sx * syz - sxz * sy) +
+                sz * (sx * sxy - sxx * sy)) / d,
+          a = (sz - bb * sx - cc * sy) / n
+        (maximum(v -> abs(cz(v) - (a + bb * cx(v) + cc * cy(v))), verts), bb, cc)
+      end
+    end
+  end
+
+_clean_boundary(verts; tol=0.005, keep_tilt=false) =
   isempty(verts) ? verts :
-  # Floors/ceilings/roofs are planar: project the boundary to a single Z (the first vertex's) so a
-  # slightly non-planar boundary read from the source (e.g. a stepped/sloped floor edge) yields a
-  # valid planar profile — Revit's Floor.Create rejects a non-planar profile ("Parameter name:
-  # profile"). Then drop consecutive coincident vertices (and a closing dup) to avoid zero-length
-  # edges ("Curve length is too small"). Fewer than 3 distinct vertices ⇒ degenerate, caller skips it.
-  let z0 = cz(verts[1]),
+  let zs = [cz(v) for v in verts],
+      tilted = keep_tilt && (maximum(zs) - minimum(zs)) > 0.02 &&
+               _fit_plane_residual(verts)[1] < 0.05,
+      z0 = cz(verts[1]),
       out = empty(verts)
     for v0 in verts
-      let v = xyz(cx(v0), cy(v0), z0)
+      let v = tilted ? v0 : xyz(cx(v0), cy(v0), z0)
         (isempty(out) || distance(v, out[end]) > tol) && push!(out, v)
       end
     end
@@ -1630,9 +1681,9 @@ _rebase_to_level(verts, lvl) =
 _region_from_loops(loops) =
   region(closed_polygonal_path(loops[1]), [closed_polygonal_path(l) for l in loops[2:end]]...)
 
-_rebased_loops(loops, lvl) =
+_rebased_loops(loops, lvl; keep_tilt=false) =
   filter(loop -> length(loop) >= 3,
-         [_rebase_to_level(_clean_boundary(loop), lvl) for loop in loops])
+         [_rebase_to_level(_clean_boundary(loop; keep_tilt=keep_tilt), lvl) for loop in loops])
 
 # Slab-like family with the element type's real thickness (0 = unknown ⇒ family default).
 _slab_like_family(ctor, th, mat) =
@@ -1642,7 +1693,10 @@ _slab_like_family(ctor, th, mat) =
 floor_from_ref(r, b::RVT) =
   let level_id = @remote(b, FloorLevel(r)),
       lvl = level_from_ref(level_id, b),
-      loops = _rebased_loops(@remote(b, FloorBoundaryLoops(r)), lvl),
+      # keep_tilt: a ramp's tilted-planar top face is preserved as 3D vertices
+      # (roofs/ceilings keep the flat convention — multi-slope roofs would emit
+      # a half-footprint tilted panel, worse than the flat approximation).
+      loops = _rebased_loops(@remote(b, FloorBoundaryLoops(r)), lvl; keep_tilt=true),
       mat = _material_from_revit(@remote(b, ElementMaterial(r)))
     if isempty(loops)
       nothing
@@ -1862,9 +1916,13 @@ fixture_from_ref(r, b::RVT) =
             elseif tt !== nothing
               xyz(tt[10] * 0.3048, tt[11] * 0.3048, tt[12] * 0.3048)
             else
+              # Anchor so the 1 m placeholder box (which extends +0.5 around/above the
+              # loc) is centered on the element's bbox — position-only conformance
+              # matching then means something for extended site elements.
               let pb = try @remote(b, PhysicalBoundingBox(r)) catch; [] end
                 length(pb) == 2 ?
-                  xyz((cx(pb[1]) + cx(pb[2])) / 2, (cy(pb[1]) + cy(pb[2])) / 2, cz(pb[1])) :
+                  xyz((cx(pb[1]) + cx(pb[2])) / 2, (cy(pb[1]) + cy(pb[2])) / 2,
+                      (cz(pb[1]) + cz(pb[2])) / 2 - 0.5) :
                   loc0
               end
             end,
@@ -1880,14 +1938,19 @@ fixture_from_ref(r, b::RVT) =
       facing = fl !== nothing && fl[1],
       hand = fl !== nothing && fl[2],
       improper = (facing ⊻ hand) && tt !== nothing,
-      # Improper placements can't be an angle: bake T's plan basis with the flip
-      # diag into the location's cs (standalone_obj_transform mirrors on det<0).
-      rloc = improper ?
+      # Face-based instances mounted on vertical faces carry a NON-VERTICAL BasisZ
+      # (a wall-hung lavatory: BasisZ = wall normal, BasisY = up) — a plan angle
+      # cannot represent that frame (the GSG lavatory rendered pitched 90°).
+      tilted = tt !== nothing && abs(tt[9]) < 1 - 1e-6,
+      # Improper/tilted placements can't be an angle: bake T's basis with the flip
+      # diag into the location's cs (kept 3D for tilted frames; the realization
+      # applies the cs axes directly when the z-axis is non-vertical).
+      rloc = improper || tilted ?
                let dh = hand ? -1.0 : 1.0, df = facing ? -1.0 : 1.0
-                 loc_from_o_vx_vy(p, vxyz(dh * tt[1], dh * tt[2], 0),
-                                  vxyz(df * tt[4], df * tt[5], 0))
+                 loc_from_o_vx_vy(p, vxyz(dh * tt[1], dh * tt[2], dh * (tilted ? tt[3] : 0.0)),
+                                  vxyz(df * tt[4], df * tt[5], df * (tilted ? tt[6] : 0.0)))
                end : p,
-      s = family_element(rloc, angle=improper ? 0.0 : angle, level=lvl,
+      s = family_element(rloc, angle=improper || tilted ? 0.0 : angle, level=lvl,
                          family=_fixture_family(key))
     ref!(b, s, r)
     s
@@ -2345,7 +2408,12 @@ introspect_model(; b::RVT=revit) =
     (levels=levels, walls=walls, floors=floors, columns=columns,
      beams=beams, ceilings=ceilings, roofs=roofs, fixtures=fixtures,
      stairs=stairs, railings=railings, groups=groups, family_meta=family_meta,
-     fallback_ids=fallback_ids, fallback_meshes=ObjModel[])
+     fallback_ids=fallback_ids, fallback_meshes=ObjModel[],
+     # Storey name per elevation — the sectionalize_by_storey pass names its
+     # per-storey functions after the real Revit levels ("Piso 1" → piso_1()).
+     level_names=Dict{Float64, String}(
+       @remote(b, GetLevelElevation(r)) => @remote(b, ElementName(r))
+       for r in @remote(b, DocLevels())))
   end
   end
 
@@ -2477,7 +2545,9 @@ function generate_khepri_code(output_path::String; b::RVT=revit, export_obj::Boo
                  any(m -> !isempty(m.obj_name), values(model.family_meta)),
       passes = codegen_passes(b, fmap;
                               header=add_header(b; obj_resources=has_objs),
-                              wrap=wrap_function),
+                              wrap=wrap_function,
+                              level_names=get(model, :level_names,
+                                              Dict{Float64, String}())),
       refined_expr = foldl((e, pass) -> pass(e), passes, init=raw_expr),
       code = expr_to_string(refined_expr)
     open(output_path, "w") do io
