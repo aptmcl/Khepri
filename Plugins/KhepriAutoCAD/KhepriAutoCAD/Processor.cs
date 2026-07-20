@@ -95,7 +95,19 @@ namespace KhepriAutoCAD {
                         channel.EndFrame();
                         count++;
                         if (count > MaxRepeated) break;
-                        if (!channel.DataAvailable) break;
+                        // Wait briefly for the next op instead of only checking whether one is
+                        // already buffered. After EndFrame flushes this op's result, the
+                        // synchronous Julia client must read it and write its next request — a
+                        // sub-millisecond localhost round-trip during which no bytes are buffered
+                        // yet. A bare DataAvailable check loses that race on essentially every op,
+                        // collapsing the batch to a single operation and paying the host's
+                        // per-idle-tick latency for the next one. Polling with maxWaitTime keeps
+                        // the batch alive so a synchronous burst drains in one Idle tick. (Less
+                        // visible here than in Rhino because AutoCAD's Application.Idle fires far
+                        // faster, but the batching win still applies.)
+                        if (!channel.PollRead(maxWaitTime * 1000)) break;
+                        // Poll ready but zero bytes => the peer closed the socket (FIN).
+                        if (!channel.DataAvailable) return false;
                         try {
                             op = ReadOperation();
                         } catch (IOException) {
