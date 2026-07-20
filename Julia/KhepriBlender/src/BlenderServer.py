@@ -457,6 +457,34 @@ def deselect_all_shapes()->None:
 def selected_shapes(prompt:str)->List[Id]:
     return [int(obj.name) for obj in D.objects if obj.select_get()]
 
+# Shape introspection for VIM reconstruction (select_shape/captured_shape/internalize_shape),
+# mirroring KhepriUnity's ShapeType/SphereCenter/... Blender objects are meshes that don't
+# retain their generating parameters, so Khepri-created primitives are stamped at creation
+# with kh_* custom properties (see sphere/box/cone_frustum) and read back here. A shape
+# modeled directly in Blender carries no kh_type, so shape_type returns "" and the Julia side
+# reconstructs it as unknown().
+def stamp_shape(obj, kind, **props):
+    obj["kh_type"] = kind
+    for k, v in props.items():
+        obj[k] = v
+
+def shape_type(name:Id)->str:
+    return D.objects[str(name)].get("kh_type", "")
+def sphere_center(name:Id)->Point3d:
+    return Vector(D.objects[str(name)]["kh_center"])
+def sphere_radius(name:Id)->float:
+    return D.objects[str(name)]["kh_radius"]
+def box_position(name:Id)->Point3d:
+    return Vector(D.objects[str(name)]["kh_pos"])
+def box_dimensions(name:Id)->Vector3d:
+    return Vector(D.objects[str(name)]["kh_dims"])
+def cylinder_bottom(name:Id)->Point3d:
+    return Vector(D.objects[str(name)]["kh_cb"])
+def cylinder_top(name:Id)->Point3d:
+    return Vector(D.objects[str(name)]["kh_ct"])
+def cylinder_radius(name:Id)->float:
+    return D.objects[str(name)]["kh_cr"]
+
 
 def new_bmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat_idx:int)->None:
     bm = bmesh.new()
@@ -579,6 +607,33 @@ def bezier(order:int, ps:List[Point3d], closed:bool, tgs:List[Point3d], mat:MatI
     append_material(obj, mat)
     return id
 
+# Cubic Bezier chain with explicit anchors and FREE handles: ps are the
+# anchor points, ls/rs the left/right handle POSITIONS of each anchor (an
+# unused end handle should coincide with its anchor). Unlike bezier() above,
+# no AUTO smoothing is involved, so the curve is exactly the one the caller
+# computed -- Khepri relies on this to draw its canonical interpolating
+# splines identically across backends.
+def bezier_chain(ps:List[Point3d], ls:List[Point3d], rs:List[Point3d], closed:bool, mat:MatId)->Id:
+    id, name = new_id()
+    curve = D.curves.new(name, "CURVE")
+    curve.dimensions = "3D"
+    obj = D.objects.new(name, curve)
+    current_collection.objects.link(obj)
+    spline = curve.splines.new("BEZIER")
+    spline.use_cyclic_u = closed
+    n = len(ps)
+    spline.bezier_points.add(n - 1)
+    for i in range(0, n):
+        bp = spline.bezier_points[i]
+        bp.co = ps[i]
+        bp.handle_left_type = 'FREE'
+        bp.handle_right_type = 'FREE'
+        bp.handle_left = ls[i]
+        bp.handle_right = rs[i]
+    spline.resolution_u = 16
+    append_material(obj, mat)
+    return id
+
 def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
     #print(order, ps, closed)
     id, name = new_id()
@@ -596,6 +651,45 @@ def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
         spline.points[i].co = (p[0], p[1], p[2], 1.0)
     spline.order_u = max(4, order)
     spline.resolution_u = 4
+    append_material(obj, mat)
+    return id
+
+def nurbs_surface(points:List[Point3d], weights:List[float], nu:int, nv:int, order_u:int, order_v:int, mat:MatId)->Id:
+    id, name = new_id()
+    surf = D.curves.new(name, 'SURFACE')
+    surf.dimensions = '3D'
+    obj = D.objects.new(name, surf)
+    current_collection.objects.link(obj)
+    ov = min(order_v, nv)
+    for i in range(nu):
+        sp = surf.splines.new(type='NURBS')
+        sp.points.add(nv - 1)
+        for j in range(nv):
+            x, y, z = points[i * nv + j]
+            w = weights[i * nv + j] if weights else 1.0
+            sp.points[j].co = (x, y, z, w)
+        sp.order_u = ov
+        sp.use_endpoint_u = True
+    # Blender builds a NURBS *surface* only by stitching the per-u profile splines
+    # with the make_segment edit-mode operator; there is no data-level API for a 2D
+    # control grid. Save/restore the active object so this doesn't disturb the session.
+    prev_active = C.view_layer.objects.active
+    C.view_layer.objects.active = obj
+    obj.select_set(True)
+    ops.object.mode_set(mode='EDIT')
+    ops.curve.select_all(action='SELECT')
+    ops.curve.make_segment()
+    ops.object.mode_set(mode='OBJECT')
+    obj.select_set(False)
+    if prev_active is not None:
+        C.view_layer.objects.active = prev_active
+    sp = surf.splines[0]
+    sp.order_u = min(order_u, nu)
+    sp.order_v = ov
+    sp.use_endpoint_u = True
+    sp.use_endpoint_v = True
+    sp.resolution_u = 8
+    sp.resolution_v = 8
     append_material(obj, mat)
     return id
 
@@ -808,6 +902,7 @@ def sphere(center:Point3d, radius:float, mat:MatId)->Id:
     obj.scale=(radius, radius, radius)
     current_collection.objects.link(obj)
     append_material(obj, mat)
+    stamp_shape(obj, "Sphere", kh_center=tuple(center), kh_radius=radius)
     return id
 
 def cone_frustum(b:Point3d, br:float, t:Point3d, tr:float, bmat:MatId, tmat:MatId, smat:MatId)->Id:
@@ -845,6 +940,8 @@ def cone_frustum(b:Point3d, br:float, t:Point3d, tr:float, bmat:MatId, tmat:MatI
     append_material(obj, tmat)
     append_material(obj, smat)
     current_collection.objects.link(obj)
+    stamp_shape(obj, "Cylinder" if abs(br - tr) < 1e-9 else "ConeFrustum",
+                kh_cb=tuple(b), kh_ct=tuple(t), kh_cr=br)
     return id
 
 def rotation_from_axes(vx, vy):
@@ -872,6 +969,7 @@ def box(p:Point3d, vx:Vector3d, vy:Vector3d, dx:float, dy:float, dz:float, mat:M
     obj.location = p + vx*dx/2 + vy*dy/2 + vz*dz/2
     current_collection.objects.link(obj)
     append_material(obj, mat)
+    stamp_shape(obj, "Box", kh_pos=tuple(p), kh_dims=(dx, dy, dz))
     return id
 
 def text(txt:str, p:Point3d, vx:Vector3d, vy:Vector3d, size:float)->Id:
@@ -1040,15 +1138,31 @@ def find_or_create_world(name):
 
 def set_sun_sky(sun_elevation:float, sun_rotation:float, turbidity:float, with_sun:bool)->None:
     C.scene.render.engine = 'CYCLES'
+    C.scene.world.use_nodes = True
     sky = C.scene.world.node_tree.nodes.new("ShaderNodeTexSky")
     bg = C.scene.world.node_tree.nodes["Background"]
     C.scene.world.node_tree.links.new(bg.inputs[0], sky.outputs[0])
-    sky.sky_type = "NISHITA"
-    sky.turbidity = turbidity
-    sky.dust_density = turbidity
+    # Blender 5.0 replaced the "NISHITA" sky_type enum with the scattering
+    # variants ('SINGLE_SCATTERING', 'MULTIPLE_SCATTERING', 'PREETHAM',
+    # 'HOSEK_WILKIE'). Pick the physically-based Nishita successor when present,
+    # else fall back to the legacy name (4.x) or the first available option.
+    try:
+        options = [i.identifier for i in sky.bl_rna.properties['sky_type'].enum_items]
+    except Exception:
+        options = []
+    for want in ("NISHITA", "MULTIPLE_SCATTERING", "SINGLE_SCATTERING", "HOSEK_WILKIE", "PREETHAM"):
+        if not options or want in options:
+            sky.sky_type = want
+            break
+    # `turbidity`/`dust_density` do not exist on the scattering sky models; guard.
+    for attr, val in (("turbidity", turbidity), ("dust_density", turbidity)):
+        if hasattr(sky, attr):
+            try: setattr(sky, attr, val)
+            except Exception: pass
     sky.sun_elevation = sun_elevation
     sky.sun_rotation = sun_rotation
-    sky.sun_disc = with_sun
+    if hasattr(sky, "sun_disc"):
+        sky.sun_disc = with_sun
 
 
 #C.scene.view_settings.view_transform = 'False Color'
@@ -1141,12 +1255,16 @@ def _set_view_headless(camera, target, lens):
 
 def _get_view_headless():
     cam = C.scene.camera if C.scene.camera is not None else khepri_camera()
-    # Camera forward is the -Z axis of the camera's world matrix.
-    forward = cam.matrix_world.to_quaternion() @ Vector((0.0, 0.0, -1.0))
-    # We don't track an explicit target distance in headless mode — use lens
-    # length as a nominal distance so the view triple round-trips sensibly.
-    distance = max(1.0, cam.data.lens)
-    target = cam.location + forward * distance
+    # Prefer the target STORED by set_camera_view — reconstructing it from
+    # matrix_world's forward was fragile (a not-yet-evaluated transform reads back
+    # a straight-down forward, so the render path re-aimed every camera at the
+    # ground and only the top view framed the model).
+    stored = cam.get('khepri_target')
+    if stored is not None:
+        target = Point3d((stored[0], stored[1], stored[2]))
+    else:
+        forward = cam.matrix_world.to_quaternion() @ Vector((0.0, 0.0, -1.0))
+        target = cam.location + forward * max(1.0, cam.data.lens)
     return (cam.location, target, cam.data.lens)
 
 def set_view(camera:Point3d, target:Point3d, lens:float)->None:
@@ -1250,6 +1368,11 @@ def set_camera_view(camera:Point3d, target:Point3d, lens:float)->None:
     cam.data.clip_start = 0.1
     cam.data.clip_end = 100000
     C.scene.camera = cam
+    # Store the look-at target so get_view() round-trips it exactly (see
+    # _get_view_headless): reconstructing it from matrix_world's forward re-aimed
+    # every non-top-down camera at the ground in headless renders.
+    cam['khepri_target'] = (float(target[0]), float(target[1]), float(target[2]))
+    C.view_layer.update()
 
 def camera_from_view()->None:
     space = current_space()
@@ -1518,14 +1641,19 @@ def blender_cmd(expr:str)->None:
 def get_global_bbox()->Tuple[Point3d, Point3d]:
     min_coord = [float('inf')] * 3
     max_coord = [float('-inf')] * 3
-    for collection in D.collections:
-        for obj in collection.objects:
-            if obj.type == 'MESH' and obj.bound_box:
-                for local_bbox_corner in obj.bound_box:
-                    world_bbox_corner = obj.matrix_world @ Point3d(local_bbox_corner)
-                    for i in range(3):
-                        min_coord[i] = min(min_coord[i], world_bbox_corner[i])
-                        max_coord[i] = max(max_coord[i], world_bbox_corner[i])
+    # Iterate ALL scene mesh objects, not D.collections: shapes created without an
+    # explicit collection live only in the scene's master collection, which is not
+    # in D.collections — get_global_bbox() then returned inf bounds and frame_all()
+    # aimed at nothing.
+    for obj in C.scene.objects:
+        if obj.type == 'MESH' and obj.bound_box:
+            for local_bbox_corner in obj.bound_box:
+                world_bbox_corner = obj.matrix_world @ Point3d(local_bbox_corner)
+                for i in range(3):
+                    min_coord[i] = min(min_coord[i], world_bbox_corner[i])
+                    max_coord[i] = max(max_coord[i], world_bbox_corner[i])
+    if min_coord[0] == float('inf'):
+        return Point3d((-1.0, -1.0, -1.0)), Point3d((1.0, 1.0, 1.0))
     return Point3d(min_coord), Point3d(max_coord)
 
 def add_render_background(d:float, w:float, mat:MatId)->Id:
