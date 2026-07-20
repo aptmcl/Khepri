@@ -317,6 +317,7 @@ public Entity Spline(Point3d[] pts)
 public Entity BSplineCurve(Point3d[] controlPoints, int degree, double[] knots, bool closed, ObjectId matId)
 public Entity NurbsCurve(Point3d[] controlPoints, int degree, double[] knots, double[] weights, bool closed, ObjectId matId)
 public Entity InterpSpline(Point3d[] pts, Vector3d tan0, Vector3d tan1)
+public Entity InterpSplineNoTangents(Point3d[] pts)
 public Entity ClosedPolyLine(Point3d[] pts)
 public Entity ClosedSpline(Point3d[] pts)
 public Entity InterpClosedSpline(Point3d[] pts)
@@ -564,31 +565,24 @@ KhepriBase.b_line(b::ACAD, ps, mat) =
 KhepriBase.b_polygon(b::ACAD, ps, mat) =
   @remote(b, ClosedPolyLine(ps))
 
+#=
+Khepri end tangents are FORWARD (direction of travel at each end), matching
+AutoCAD's fit-tangent convention -- AutoCAD honors their sign, and a reversed
+tangent makes the curve loop back on itself at that end. When only one tangent
+is supplied, the other end must still receive a value (the constructor takes
+both), so it gets the canonical natural tangent extracted from the same
+interpolant location_at/sweeps follow (see open_spline_tangents in KhepriBase);
+open_spline_tangents also normalizes supplied tangents, so all three cases
+reduce to one call. With no tangents at all, AutoCAD's own tangent-free fit
+spline is used (natural end conditions, chord parameterization).
+=#
 KhepriBase.b_spline(b::ACAD, ps, v0, v1, mat) =
-  if (v0 == false) && (v1 == false)
-    #@remote(b, Spline(s.points))
-    #=
-    Auto end tangent convention: ps[end-1]-ps[end], i.e. it points back
-    from the last fit point toward the previous one (reverse direction),
-    mirroring the auto start tangent ps[2]-ps[1] which points forward into
-    the curve. The same convention is used by the mixed branch below and by
-    every other interpolating-spline backend (KhepriRhino Rhino.jl,
-    KhepriTikZ TikZ.jl). Using ps[end]-ps[end-1] here instead (the negation)
-    flips the curvature at the spline end, so an identical point set rendered
-    differently depending only on whether a start tangent was supplied.
-    See also: b_spline mixed branch below.
-    =#
-    @remote(b, InterpSpline(
-                     ps,
-                     ps[2]-ps[1],
-                     ps[end-1]-ps[end]))
-  elseif (v0 != false) && (v1 != false)
-    @remote(b, InterpSpline(ps, v0, v1))
+  if (v0 isa Vec) || (v1 isa Vec)
+    let (t0, t1) = open_spline_tangents(ps, v0, v1)
+      @remote(b, InterpSpline(ps, t0, t1))
+    end
   else
-    @remote(b, InterpSpline(
-                     ps,
-                     v0 == false ? ps[2]-ps[1] : v0,
-                     v1 == false ? ps[end-1]-ps[end] : v1))
+    @remote(b, InterpSplineNoTangents(ps))
   end
 
 KhepriBase.b_closed_spline(b::ACAD, ps, mat) =
