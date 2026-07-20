@@ -679,6 +679,14 @@ KhepriBase.b_trig(b::ACAD, p1, p2, p3, mat) =
 KhepriBase.b_quad(b::ACAD, p1, p2, p3, p4, mat) =
 	@remote(b, Mesh([p1, p2, p3, p4], [[0, 1, 2, 3]], 0, mat))
 
+# Native whole-mesh path: one SubDMesh per call instead of the KhepriBase default's
+# per-face fan (b_trig/b_quad), which turned each OBJ fixture into thousands of
+# socket round-trips + entities. Faces are canonically 0-based; AutoCAD's Mesh
+# takes count-prefixed 0-based index lists directly.
+KhepriBase.b_surface_mesh(b::ACAD, vertices, faces, mat) =
+  isempty(faces) ? Int[] :
+  @remote(b, Mesh([v for v in vertices], [[Int(i) for i in f] for f in faces], 0, mat))
+
 KhepriBase.b_ngon(b::ACAD, ps, pivot, smooth, mat) =
 	@remote(b, NGon(ps, pivot, smooth ? 3 : 0, mat))
 
