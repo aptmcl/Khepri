@@ -2494,9 +2494,10 @@ KhepriBase.b_native_family_expr(b::RVT, var, meta) =
 
 # Mesh-capable backends that receive an obj_family guard for every extracted OBJ.
 # Only backends whose OBJ realization has been verified live: KhepriThreejs (browser
-# MTLLoader/OBJLoader), KhepriAutoCAD (default b_mesh_obj_fmt → b_surface_mesh),
-# KhepriRhino (native ImportOBJ handles OBJ+MTL).
-const _obj_mesh_backend_guards = (:threejs, :autocad, :rhino)
+# MTLLoader/OBJLoader), KhepriAutoCAD (default b_mesh_obj_fmt → per-material
+# b_surface_mesh), KhepriRhino (native ImportOBJ), KhepriBlender (native bpy
+# obj_import — full per-face materials/UVs/textures).
+const _obj_mesh_backend_guards = (:threejs, :autocad, :rhino, :blender)
 
 # Match the C# SanitizeMaterialName used to name exported OBJ files (family name → OBJ file stem).
 _sanitize_family(name) = replace(name, ' ' => '_', '/' => '_', '\\' => '_')
