@@ -366,8 +366,17 @@ namespace KhepriAutoCAD {
             SplineFromControlData(controlPoints, degree, knots, null, closed, matId);
         public Entity NurbsCurve(Point3d[] controlPoints, int degree, double[] knots, double[] weights, bool closed, ObjectId matId) =>
             SplineFromControlData(controlPoints, degree, knots, weights, closed, matId);
+        // Khepri's canonical interpolating spline is a chord-parameterized
+        // CUBIC; this constructor's 4th argument is the ORDER (degree+1), so
+        // it must be 4, unlike the fit-point constructors below that take the
+        // DEGREE (3). Both tangents point in the direction of travel
+        // (increasing parameter) -- AutoCAD honors their sign.
         public Entity InterpSpline(Point3d[] pts, Vector3d tan0, Vector3d tan1) =>
-            new Spline(new Point3dCollection(pts), tan0, tan1, 3, 0.0);
+            new Spline(new Point3dCollection(pts), tan0, tan1, 4, 0.0);
+        // Fit spline with NO tangent constraints: AutoCAD chooses natural end
+        // conditions. Mirrors InterpClosedSpline with periodic=false.
+        public Entity InterpSplineNoTangents(Point3d[] pts) =>
+            new Spline(new Point3dCollection(pts), false, KnotParameterizationEnum.Chord, 3, 0.0);
         public Entity ClosedPolyLine(Point3d[] pts) => new Polyline3d(Poly3dType.SimplePoly, new Point3dCollection(pts), true);
         public Entity ClosedSpline(Point3d[] pts) => new Polyline3d(Poly3dType.CubicSplinePoly, new Point3dCollection(pts), true);
         public Entity InterpClosedSpline(Point3d[] pts) =>
@@ -540,6 +549,15 @@ namespace KhepriAutoCAD {
         }
         public ObjectId CreateColoredMaterialNamed(String name, Color color, double reflectivity, double translucence) {
                 DBDictionary matLib = tr.GetObject(doc.Database.MaterialDictionaryId, OpenMode.ForRead) as DBDictionary;
+                // Material names are idempotent: OBJ/MTL fixtures reuse names across
+                // instances ("default", "Material", …), and SetAt(name, …) below ERASES
+                // the previous same-named material — dangling every ObjectId Julia cached
+                // for it (the eWasErased failures on the T3 fixtures). Reuse the existing
+                // entry instead of replacing it.
+                if (matLib.Contains(name)) {
+                    ObjectId existing = matLib.GetAt(name);
+                    if (!existing.IsErased) return existing;
+                }
                 Mapper mapper = new Mapper(GI.Projection.Box,
                                             GI.Tiling.Tile, GI.Tiling.Tile,
                                             GI.AutoTransform.TransformObject, Matrix3d.Identity);
@@ -558,8 +576,11 @@ namespace KhepriAutoCAD {
                 return materialId;
         }
         Entity WithMaterial(Entity ent, ObjectId matId) {
-            if (matId != ObjectId.Null) {
-                ent.MaterialId = matId;
+            // Tolerate a stale/erased material ref (skip the assignment, keep the default
+            // material) rather than failing the whole entity — a mesh with the wrong
+            // colour beats a dropped fixture.
+            if (matId != ObjectId.Null && !matId.IsErased) {
+                try { ent.MaterialId = matId; } catch { }
             }
             return ent;
         }
