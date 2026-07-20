@@ -141,6 +141,14 @@ def select_shapes(names:List[Id])->None:
 def deselect_shapes(names:List[Id])->None:
 def deselect_all_shapes()->None:
 def selected_shapes(prompt:str)->List[Id]:
+def shape_type(name:Id)->str:
+def sphere_center(name:Id)->Point3d:
+def sphere_radius(name:Id)->float:
+def box_position(name:Id)->Point3d:
+def box_dimensions(name:Id)->Vector3d:
+def cylinder_bottom(name:Id)->Point3d:
+def cylinder_top(name:Id)->Point3d:
+def cylinder_radius(name:Id)->float:
 def get_material(name:str)->MatId:
 def get_blenderkit_material(ref:str)->MatId:
 def new_material(name:str, diffuse_color:RGBA, metallic:float, specular:float, roughness:float, clearcoat:float, clearcoat_roughness:float, ior:float, transmission:float, transmission_roughness:float, emission:RGBA, emission_strength:float)->MatId:
@@ -149,6 +157,7 @@ def new_glass_material(name:str, color:RGBA, roughness:float, ior:float)->MatId:
 def new_mirror_material(name:str, color:RGBA)->MatId:
 def line(ps:List[Point3d], closed:bool, mat:MatId)->Id:
 def bezier(order:int, ps:List[Point3d], closed:bool, tgs:List[Point3d], mat:MatId)->Id:
+def bezier_chain(ps:List[Point3d], ls:List[Point3d], rs:List[Point3d], closed:bool, mat:MatId)->Id:
 def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
 def objmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat:MatId)->Id:
 def import_obj_file(path:str, ox:float, oy:float, oz:float, vxx:float, vxy:float, vxz:float, vyx:float, vyy:float, vyz:float, vzx:float, vzy:float, vzz:float)->Id:
@@ -160,6 +169,7 @@ def ngon(ps:List[Point3d], pivot:Point3d, smooth:bool, mat:MatId)->Id:
 def polygon(ps:List[Point3d], mat:MatId)->Id:
 def polygon_with_holes(pss:List[List[Point3d]], mat:MatId)->Id:
 def quad_surface(ps:List[Point3d], nu:int, nv:int, closed_u:bool, closed_v:bool, smooth:bool, mat:MatId)->Id:
+def nurbs_surface(points:List[Point3d], weights:List[float], nu:int, nv:int, order_u:int, order_v:int, mat:MatId)->Id:
 def circle(c:Point3d, v:Vector3d, r:float, mat:MatId)->Id:
 def cuboid(verts:List[Point3d], mat:MatId)->Id:
 def pyramid_frustum(bs:List[Point3d], ts:List[Point3d], smooth:bool, bmat:MatId, tmat:MatId, smat:MatId)->Id:
@@ -291,14 +301,31 @@ KhepriBase.b_line(b::BLR, ps, mat) =
 KhepriBase.b_polygon(b::BLR, ps, mat) =
 	@remote(b, line(ps, true, mat))
 
-KhepriBase.b_spline(b::BLR, ps, v1, v2, mat) =
-  # v1/v2 are end tangents. Both `false` (no tangent specified, the proxy
-  # default) and `nothing` (passed by the b_arc default fallback in
-  # KhepriBase) mean "let Blender compute its own tangents". A `Vec` value
-  # means the user supplied a specific tangent.
-  @remote(b, bezier(5, ps, false,
-                    (v1 isa Vec && v2 isa Vec) ? [v1, v2] : [],
-                    mat))
+#=
+Open interpolating splines take the KhepriBase b_spline default, which builds
+the canonical chord-parameterized cubic as a Bézier chain and lands in
+b_bezier_curve below -- drawn natively via bezier_chain with FREE handles.
+The former b_spline override used bezier() with AUTO interior handles,
+i.e. Blender's own smoothing, which follows a different curve than every
+other backend through the same points.
+=#
+KhepriBase.b_bezier_curve(b::BLR, path::BezierPath, mat) =
+  all(seg -> length(seg.control_points) == 4, path.spans) ?
+    let spans = path.spans,
+        closed = is_closed_path(path),
+        anchors = closed ?
+          [seg.control_points[1] for seg in spans] :
+          [[seg.control_points[1] for seg in spans]..., spans[end].control_points[4]],
+        n = length(anchors),
+        lefts = [i == 1 ?
+                   (closed ? spans[end].control_points[3] : anchors[1]) :
+                   spans[i-1].control_points[3]
+                 for i in 1:n],
+        rights = [i <= length(spans) ? spans[i].control_points[2] : anchors[n]
+                  for i in 1:n]
+      @remote(b, bezier_chain(anchors, lefts, rights, closed, mat))
+    end :
+    @invoke b_bezier_curve(b::Backend, path::BezierPath, mat)
 
 KhepriBase.b_closed_spline(b::BLR, ps, mat) =
   @remote(b, bezier(5, ps, true, [], mat))
@@ -327,6 +354,35 @@ KhepriBase.b_surface_polygon_with_holes(b::BLR, ps, qss, mat) =
 KhepriBase.b_surface_circle(b::BLR, c, r, mat) =
   @remote(b, circle(c, vz(1, c.cs), r, mat))
 
+# Flatten a control-point grid (nu x nv) to u-major order (u outer, v inner), the
+# layout the Blender nurbs_surface server function expects -- same scheme the
+# AutoCAD/Rhino backends use for their NURBS RPCs.
+blender_surface_points(s) = reshape(permutedims(s.control_points), :)
+blender_surface_weights(s) =
+  isnothing(s.weights) ? fill(1.0, length(s.control_points)) : reshape(permutedims(s.weights), :)
+
+#=
+Blender represents a NURBS surface natively (a SURFACE curve datablock), so we
+build one from the control grid instead of inheriting the KhepriBase default that
+tessellates the surface into a quad mesh. Blender's surface API supports only
+clamped (endpoint) or cyclic uniform knots, not arbitrary knot vectors, so we
+cover the open/clamped case -- the common one produced by nurbs_surface() and
+bspline_surface() with default knots -- and let surfaces closed in either
+parameter fall through to the meshed default.
+See also: b_surface_grid, the nurbs_surface server function.
+=#
+KhepriBase.b_nurbs_surface(b::BLR, s::BSplineSurface{false,false,true}, mat) =
+  let (nu, nv) = size(s.control_points)
+    @remote(b, nurbs_surface(blender_surface_points(s), blender_surface_weights(s),
+                             nu, nv, s.degree_u + 1, s.degree_v + 1, mat))
+  end
+
+KhepriBase.b_bspline_surface(b::BLR, s::BSplineSurface{false,false,false}, mat) =
+  let (nu, nv) = size(s.control_points)
+    @remote(b, nurbs_surface(blender_surface_points(s), blender_surface_weights(s),
+                             nu, nv, s.degree_u + 1, s.degree_v + 1, mat))
+  end
+
 KhepriBase.b_surface_grid(b::BLR, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
   let (nu, nv) = size(ptss)
 	  smooth_u && smooth_v ?
@@ -354,7 +410,9 @@ KhepriBase.b_cone_frustum(b::BLR, cb, rb, h, rt, bmat, tmat, smat) =
   @remote(b, cone_frustum(cb, rb, add_z(cb, h), rt, bmat, tmat, smat))
 
 KhepriBase.b_cylinder(b::BLR, cb, r, h, bmat, tmat, smat) =
-  @remote(b, cone_frustum(cb, r, add_z(cb, h), r, bmat, tmat, smat))
+  isnothing(bmat) || isnothing(tmat) ?
+    b_cylinder_surfaces(b, cb, r, h, bmat, tmat, smat) :
+    @remote(b, cone_frustum(cb, r, add_z(cb, h), r, bmat, tmat, smat))
 
 KhepriBase.b_cuboid(b::BLR, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, mat) =
   @remote(b, cuboid([pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3], mat))
@@ -492,7 +550,7 @@ KhepriBase.b_layer(b::BLR, name, visible, color) =
 KhepriBase.b_set_layer_visible(b::BLR, layer, visible) =
   @remote(b, set_collection_visible(layer, visible))
 KhepriBase.b_set_layer_opacity(b::BLR, layer, opacity) =
-  @remote(b, set_collection_opacity(layer, Float64(opacity)))
+  @remote(b, set_collection_opacity(layer, opacity))
 KhepriBase.b_current_layer_ref(b::BLR) =
   @remote(b, get_current_collection())
 KhepriBase.b_current_layer_ref(b::BLR, layer) =
@@ -623,9 +681,28 @@ KhepriBase.b_select_shape(b::BLR, prompt::String) =
   end
 
 #
-KhepriBase.b_shape_from_ref(b::BLR, r) = begin
-  error("Unknown shape with reference $r")
-end
+# VIM reconstruction (select_shape, captured_shape, internalize_shape), mirroring
+# KhepriUnity: dispatch on the shape_type stamped at creation. Khepri-created primitives
+# carry kh_* custom properties (BlenderServer.py); shapes modeled directly in Blender have
+# no kh_type, so shape_type returns "" and they reconstruct as unknown(r).
+KhepriBase.b_shape_from_ref(b::BLR, r) = get_or_create_shape_from_ref_value(b, r)
+
+KhepriBase.b_create_shape_from_ref_value(b::BLR, r) =
+  let kind = @remote(b, shape_type(r))
+    if kind == "Sphere"
+      sphere(@remote(b, sphere_center(r)), @remote(b, sphere_radius(r)))
+    elseif kind == "Box"
+      let d = @remote(b, box_dimensions(r))
+        box(@remote(b, box_position(r)), d.x, d.y, d.z)
+      end
+    elseif kind == "Cylinder"
+      cylinder(@remote(b, cylinder_bottom(r)),
+               @remote(b, cylinder_radius(r)),
+               @remote(b, cylinder_top(r)))
+    else
+      unknown(r)
+    end
+  end
 ##############
 
 #=
@@ -654,7 +731,7 @@ blender_samples_for_quality(q::Real, renderer::Symbol) =
 
 # Legacy 2-arg method: existing callers keep working.
 KhepriBase.b_render_and_save_view(b::BLR, path::String) =
-  KhepriBase.b_render_and_save_view(b, path, RenderViewOptions())
+  b_render_and_save_view(b, path, RenderViewOptions())
 
 #=
 3-arg method: dispatch by opts.visual_style.
@@ -673,7 +750,7 @@ KhepriBase.b_render_and_save_view(b::BLR, path::String, opts::RenderViewOptions)
       samples = blender_samples_for_quality(opts.quality, renderer),
       # Freestyle writes SVG; swap extension if the caller gave us a .png path.
       out_path = renderer === :freestyle ? replace(path, r"\.png$" => ".svg") : path
-    KhepriBase.validate_visual_style(style)
+    validate_visual_style(style)
     @remote(b, set_camera_view(camera, target, lens))
     @remote(b, set_render_size(opts.width, opts.height))
     @remote(b, set_render_path(out_path))
@@ -698,14 +775,14 @@ KhepriBase.b_render_and_save_view(b::BLR, path::String, opts::RenderViewOptions)
 
 # Fast preview: low-sample Eevee at 640×480.
 KhepriBase.b_shot_view(b::BLR, path::String) =
-  KhepriBase.b_render_and_save_view(b, path,
+  b_render_and_save_view(b, path,
     RenderViewOptions(width=640, height=480,
                       quality=-0.5,
                       visual_style=:shaded,
                       kind=render_kind()))
 
 KhepriBase.b_shot_view(b::BLR, path::String, opts::RenderViewOptions) =
-  KhepriBase.b_render_and_save_view(b, path, opts)
+  b_render_and_save_view(b, path, opts)
 
 export render_svg
 render_svg(b::BLR, path) =
