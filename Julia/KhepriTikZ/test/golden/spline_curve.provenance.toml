@@ -1,0 +1,15 @@
+backend = "TikZ"
+compare = "text_compare"
+created = "2026-07-19T18:13:32.135Z"
+golden = "spline_curve.tex"
+height = 1080
+julia = "1.12.5"
+khepribase = "0.8.1"
+name = "spline_curve"
+schema = 1
+width = 1920
+
+[validation]
+detail = "all measures match (atol=0.001): bezier=1"
+method = "tikz-parse:v1"
+passed = true

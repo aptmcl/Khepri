@@ -9,6 +9,6 @@
 \tikzset{illustration/.style={very thin}}
 \tikzset{dimension/.style={very thin,lightgray}}
 \begin{tikzpicture}[]
-\draw plot [smooth,tension=1] coordinates {(0,0)(1,2)(3,1)(5,3)(7,0)};
+\draw (0,0)..controls(-0.022,2.01)and(0.406,2.255)..(1,2)..controls(1.594,1.745)and(2.355,0.99)..(3,1)..controls(3.815,1.012)and(4.444,2.247)..(5,3)..controls(5.708,3.96)and(6.297,4.137)..(7,0);
 \end{tikzpicture}
 \end{document}

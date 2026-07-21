@@ -208,9 +208,11 @@ end
     @testset "b_spline" begin
       clear_tikz_buffer!(tikz)
       pts = [xy(0, 0), xy(1, 1), xy(2, 0), xy(3, 1)]
-      ref = KhepriBase.b_spline(tikz, pts, false, false, nothing)
+      KhepriBase.b_spline(tikz, pts, false, false, nothing)
       output = get_tikz_output(tikz)
-      @test ref != KhepriBase.void_ref(tikz)
+      # Splines emit the canonical cubic Bézier chain (b_bezier_curve, which
+      # returns void_ref for this IO backend), not a smooth plot.
+      @test occursin("..controls", output)
       @test length(output) > 0
     end
 

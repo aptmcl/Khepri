@@ -357,38 +357,15 @@ tikz_hobby_closed_spline(out::IO, pts::Locs, filled::Bool=false) =
   end
 
 #=
-TikZ has no Hermite/Catmull-Rom curve primitive, but it draws cubic Béziers
-natively with `(p0) .. controls (c1) and (c2) .. (p1)`. We render an interpolating
-spline (a point list plus Khepri's two end tangents) as a chain of such segments
-via the Catmull-Rom construction: the velocity at an interior point Pi is
-(P_{i+1} − P_{i−1})/2, and segment Pi→P_{i+1} carries controls
-c1 = Pi + T_i/3 and c2 = P_{i+1} − T_{i+1}/3 — the unique cubic whose endpoint
-derivatives equal those velocities. Khepri's b_spline convention makes v0 the
-forward tangent at the start and v1 the *outgoing* tangent at the end (its
-auto-derived value is ps[end-1]-ps[end]), so we set T_1 = v0 and T_n = −v1, which
-reduces to the natural Catmull-Rom end tangents when no explicit tangents are
-given. The result is a smooth analytic curve, not a sampled polyline.
-See also: tikz_spline (tangent-free smooth plot), b_spline, b_bezier_curve.
+Open interpolating splines are NOT emitted here: TikZ has no interpolating
+spline primitive, so b_spline is left to the KhepriBase default, which renders
+the canonical chord-parameterized cubic (identical across all backends -- see
+open_spline_bezier_path in KhepriBase) as a chain of cubic Béziers that
+b_bezier_curve below emits natively via `..controls..`. The former
+tikz_interp_spline (a Catmull-Rom approximation that also negated the end
+tangent) was removed for that reason; TikZParser still recognizes the smooth
+plots it and tikz_spline produced in older documents.
 =#
-tikz_interp_spline(out::IO, ps::Locs, v0, v1, options=nothing) =
-  let n = length(ps),
-      ts = [i == 1 ? v0 :
-            i == n ? -v1 :
-            (ps[i + 1] - ps[i - 1]) / 2
-            for i in 1:n]
-    tikz_draw(out, false)
-    tikz_options(out, options)
-    tikz_coord(out, ps[1])
-    for i in 1:n - 1
-      print(out, "..controls")
-      tikz_coord(out, ps[i] + ts[i] / 3)
-      print(out, "and")
-      tikz_coord(out, ps[i + 1] - ts[i + 1] / 3)
-      print(out, "..")
-      tikz_coord(out, ps[i + 1])
-    end
-    println(out, ";")
-  end
 
 tikz_rectangle(out::IO, p::Loc, w::Real, h::Real, filled::Bool=false) =
   begin
@@ -569,21 +546,6 @@ KhepriBase.b_line(b::TikZ, ps, mat) =
 KhepriBase.b_polygon(b::TikZ, ps, mat) =
   isempty(ps) ? void_ref(b) : tikz_closed_line(connection(b), ps, false, mat)
 
-function KhepriBase.b_spline(b::TikZ, ps, v0, v1, mat)
-  length(ps) < 2 && return void_ref(b)  # a spline needs >= 2 control points (ps[2]/ps[end-1] below)
-  if (v0 == false) && (v1 == false)
-    #tikz_hobby_spline(connection(b), ps, false)
-    tikz_spline(connection(b), ps, false)
-  elseif (v0 != false) && (v1 != false)
-    tikz_interp_spline(connection(b), ps, v0, v1)
-  else
-    tikz_interp_spline(connection(b),
-                     ps,
-                     v0 == false ? ps[2] - ps[1] : v0,
-                     v1 == false ? ps[end-1] - ps[end] : v1)
-  end
-end
-
 KhepriBase.b_closed_spline(b::TikZ, ps, mat) =
   tikz_hobby_closed_spline(connection(b), ps)
 
@@ -593,8 +555,8 @@ span (4 control points) maps one-to-one onto TikZ's native cubic-Bézier syntax
 `(p0) .. controls (c1) and (c2) .. (p3)`, so we emit it directly rather than
 sampling the curve to a polyline. Spans of other degrees have no native TikZ form,
 so we defer the whole path to the KhepriBase sampled default. All spans share one
-`\draw`, so they join seamlessly.
-See also: tikz_interp_spline, b_spline.
+`\draw`, so they join seamlessly. Open interpolating splines arrive here too,
+as the canonical cubic Bézier chain built by the KhepriBase b_spline default.
 =#
 KhepriBase.b_bezier_curve(b::TikZ, path::BezierPath, mat) =
   all(seg -> length(seg.control_points) == 4, path.spans) ?

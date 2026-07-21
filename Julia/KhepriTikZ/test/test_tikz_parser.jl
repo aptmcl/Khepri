@@ -199,19 +199,21 @@ approx3(a, b; atol=1e-9) = all(abs(x - y) <= atol for (x, y) in zip(a, b))
     let r = scene_rect_corners(rt(() -> KhepriBase.b_rectangle(tikz, xy(1, 2), 3, 4, nothing)))[1]
       @test approx3(r.lo, (1, 2, 0), atol=1e-3) && approx3(r.hi, (4, 6, 0), atol=1e-3)
     end
+    # Splines emit the canonical cubic Bézier chain (see open_spline_bezier_path
+    # in KhepriBase); the interpolation points survive as the span endpoints.
     let pts = [xy(0, 0), xy(1, 2), xy(3, 1), xy(5, 3)],
         s = rt(() -> KhepriBase.b_spline(tikz, pts, false, false, nothing))
-      @test s.statements[1].kind === :spline
+      @test s.statements[1].kind === :bezier
       @test s.statements[1].data.pts == [(0, 0, 0), (1, 2, 0), (3, 1, 0), (5, 3, 0)]
     end
-    # explicit tangents → cubic Bézier chain; first control = p1 + v0/3
-    # (the Catmull-Rom construction documented on tikz_interp_spline)
+    # explicit tangents: first control = p1 + unit(v0)*d1/3 where d1 is the
+    # first chord length (tangents are directions; magnitude is ignored)
     let pts = [xy(0, 0), xy(1, 1), xy(2, 0)],
         s = rt(() -> KhepriBase.b_spline(tikz, pts, vxy(1, 0), vxy(1, 0), nothing)),
         b = s.statements[1]
       @test b.kind === :bezier
       @test b.data.pts == [(0, 0, 0), (1, 1, 0), (2, 0, 0)]
-      @test approx3(b.data.controls[1][1], (1/3, 0, 0), atol=1e-3)
+      @test approx3(b.data.controls[1][1], (√2/3, 0, 0), atol=1e-3)
     end
     let s = rt(() -> KhepriBase.b_closed_spline(tikz, [xy(0, 0), xy(1, 0), xy(1, 1), xy(0, 1)], nothing))
       @test s.statements[1].kind === :hobby_closed_spline
