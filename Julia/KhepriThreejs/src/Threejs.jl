@@ -379,13 +379,13 @@ KhepriBase.b_line(b::THR, ps, mat) = begin
   @remote(b, line(ps, mat))
 end
 
-KhepriBase.b_spline(b::THR, ps, v0, v1, mat) =
-  if !(v0 isa Vec) && !(v1 isa Vec)
-    @remote(b, spline(ps, false, mat))
-  else
-    @invoke b_spline(b::Backend, ps, v0, v1, mat)
-  end
-
+#=
+No b_spline override: open interpolating splines take the KhepriBase default
+so THR draws the canonical chord-parameterized cubic (as a sampled Bézier
+chain) instead of the native `spline` op, whose Catmull-Rom construction
+follows a different curve through the same points. The native op remains in
+use for closed splines.
+=#
 KhepriBase.b_closed_spline(b::THR, ps, mat) =
   @remote(b, spline(ps, true, mat))
 
