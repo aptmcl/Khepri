@@ -228,15 +228,17 @@ KhepriBase.b_line(b::Unity, ps, mat) =
 KhepriBase.b_polygon(b::Unity, ps, mat) =
   @remote(b, ClosedPolyLine(ps))
 
+If this override is ever revived, follow the AutoCAD/Rhino pattern: Khepri end
+tangents are FORWARD (direction of travel at both ends) and a missing one must
+come from open_spline_tangents, NOT from a ps[end-1]-ps[end] chord (that
+reversed tangent makes the curve loop back at the end).
 KhepriBase.b_spline(b::Unity, ps, v0, v1, mat) =
-  if (v0 == false) && (v1 == false)
-    @remote(b, Spline(ps))
-  elseif (v0 != false) && (v1 != false)
-    @remote(b, SplineTangents(ps, v0, v1))
+  if (v0 isa Vec) || (v1 isa Vec)
+    let (t0, t1) = open_spline_tangents(ps, v0, v1)
+      @remote(b, SplineTangents(ps, t0, t1))
+    end
   else
-    @remote(b, SplineTangents(ps,
-                 v0 == false ? ps[2]-ps[1] : v0,
-                 v1 == false ? ps[end-1]-ps[end] : v1))
+    @remote(b, Spline(ps))
   end
 
 KhepriBase.b_closed_spline(b::Unity, ps, mat) =
