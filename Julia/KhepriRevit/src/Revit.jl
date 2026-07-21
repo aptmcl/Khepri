@@ -590,14 +590,23 @@ revit_opening_file_family(path) =
     (f, p) -> p + vx(f.width/2, p.cs))
 
 b_get_family_ref(b::RVT, f::Family, rvtf::RevitFileFamily) =
-  let family_id = try
-        @remote(b, LoadFamily(rvtf.path))
-      catch e
-        # Never let a missing/unloadable .rfa abort the reconstruction: fall back to the system family
-        # (id 0), exactly as RevitSystemFamily does. So reconstructed programs stay robust even when an
-        # exported/native family file isn't present at rebuild time.
-        @warn "could not load family from .rfa; using system family instead" path=rvtf.path
+  let family_id = if !endswith(lowercase(rvtf.path), ".rfa")
+        # Defense in depth against pre-guard generated programs: a non-.rfa path (older
+        # introspection recorded the PROJECT .rvt for in-place families) must never reach
+        # LoadFamily — asking Revit to load a project file as a family crashed it outright on
+        # a 94 MB model. Fall back to the system family like the missing-file case below.
+        @warn "family path is not an .rfa; using system family instead" path=rvtf.path
         0
+      else
+        try
+          @remote(b, LoadFamily(rvtf.path))
+        catch e
+          # Never let a missing/unloadable .rfa abort the reconstruction: fall back to the system family
+          # (id 0), exactly as RevitSystemFamily does. So reconstructed programs stay robust even when an
+          # exported/native family file isn't present at rebuild time.
+          @warn "could not load family from .rfa; using system family instead" path=rvtf.path
+          0
+        end
       end,
       param_map = rvtf.family_map,
       params = keys(param_map)
@@ -2221,8 +2230,14 @@ _store_element_family_meta!(m, b::RVT, family_meta) =
       fam_name = @remote(b, ElementFamilyName(mref)),
       type_name = @remote(b, ElementTypeName(mref)),
       is_sys = @remote(b, IsSystemFamily(mref)),
-      fam_path = (m isa Column || m isa FreeColumn || m isa Beam || m isa Stair || m isa Railing) ?
-                   @remote(b, ElementFamilyPath(mref)) : ""
+      # ElementFamilyPath reports Family.Document.PathName — for families backed by the PROJECT
+      # document (in-place or embedded, common in real models: Snowdon had 16, rac_basic 2) that
+      # is the .rvt itself. Recording it would make the generated program call
+      # revit_file_family("….rvt") and the rebuild LoadFamily a whole project (Revit crashed on
+      # Snowdon's 94 MB copy). Only a genuine .rfa path is usable family provenance.
+      raw_path = (m isa Column || m isa FreeColumn || m isa Beam || m isa Stair || m isa Railing) ?
+                   @remote(b, ElementFamilyPath(mref)) : "",
+      fam_path = endswith(lowercase(raw_path), ".rfa") ? raw_path : ""
     family_meta[m.family] = FamilyMeta(category=_shape_family_category(m),
                                        family_name=fam_name, type_name=type_name,
                                        is_system=is_sys, path=fam_path)
