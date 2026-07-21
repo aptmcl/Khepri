@@ -213,6 +213,7 @@ public Element Union(ElementId idA, ElementId idB)
 public Element Intersection(ElementId idA, ElementId idB)
 public Element Subtraction(ElementId idA, ElementId idB)
 public Level FindOrCreateLevelAtElevation(Length elevation)
+public Level FindOrCreateLevelAtElevationNamed(Length elevation, string name)
 public Level UpperLevel(Level level, Length addedElevation)
 public Length GetLevelElevation(Level level)
 public Family LoadFamily(string fileName)
@@ -503,8 +504,17 @@ convert_and_load_ifc_file(path) =
 
 realize(b::RVT, s::Level) =
   # An unconnected-top marker is NOT a real level: realize as the void ref, so wall realization
-  # takes the CreateUnconnected* branch and the rebuilt model gains no phantom level.
-  s.is_unconnected ? RVTVoidId : @remote(b, FindOrCreateLevelAtElevation(s.height))
+  # takes the CreateUnconnected* branch and the rebuilt model gains no phantom level. Named
+  # levels replay through the name-keyed RPC (plugin ≥ 0.50) so same-elevation twins stay
+  # distinct; older plugins fall back to elevation-keyed find-or-create.
+  s.is_unconnected ? RVTVoidId :
+  isempty(s.name) ? @remote(b, FindOrCreateLevelAtElevation(s.height)) :
+    try
+      @remote(b, FindOrCreateLevelAtElevationNamed(s.height, s.name))
+    catch e
+      @warn "named-level RPC unavailable (plugin < 0.50?); elevation-keyed fallback" maxlog=1
+      @remote(b, FindOrCreateLevelAtElevation(s.height))
+    end
 
 # Families
 #=
@@ -1163,13 +1173,15 @@ _realize_wall_opening(b, opening, wall_path, wall_refs) =
                       family_ref(b, opening.family), params, values)
     catch e
       # Some opening types expose their sizing params as READ-ONLY instances (type-driven):
-      # SetParameter then throws after the insert succeeded conceptually. Retry without
-      # instance params — the type's own dimensions apply — instead of losing the opening
-      # AND everything after it in the storey body.
+      # the C# RPC inserts the opening FIRST and throws on the param write, so the element
+      # already exists — re-inserting would duplicate it (live goldennugget grew 43 doors to
+      # 51 under a retry). Treat the read-only rejection as created-with-type-defaults: warn
+      # once and return the void ref (the id is unrecoverable from a failed RPC; counts and
+      # geometry are right, only our ledger loses this one id). The queued plugin fix guards
+      # SetParameter with IsReadOnly so future plugins never throw here at all.
       if !isempty(params) && occursin("read-only", sprint(showerror, e))
-        @warn "opening instance params read-only; re-inserting with type defaults" maxlog=4
-        _insert_opening(b, opening, local_x, loc.y, host_ref,
-                        family_ref(b, opening.family), String[], [])
+        @warn "opening instance params read-only; opening kept with type defaults" maxlog=4
+        void_ref(b)
       else
         rethrow()
       end
@@ -1559,7 +1571,9 @@ _base_level(b::RVT) =
 level_from_ref(r, b::RVT) =
   r == RVTVoidId ?
     _base_level(b) :
-    let s = level(@remote(b, GetLevelElevation(r)))
+    let s = level(@remote(b, GetLevelElevation(r)), name=@remote(b, ElementName(r)))
+      # The name makes all introspected levels pairwise distinct — real models carry
+      # name-distinct levels at equal elevations that height-only identity silently merged.
       ref!(b, s, r)
       s
     end
