@@ -333,15 +333,21 @@ KhepriBase.b_line(b::RH, ps, mat) =
 KhepriBase.b_polygon(b::RH, ps, mat) =
   @remote(b, ClosedPolyLine(ps))
 
+#=
+Khepri end tangents are FORWARD (direction of travel at each end), matching
+RhinoCommon's CreateInterpolatedCurve convention. When only one tangent is
+supplied, the other end still needs a value, so it gets the canonical natural
+tangent extracted from the interpolant location_at/sweeps follow (see
+open_spline_tangents in KhepriBase). With no tangents, Rhino's own
+tangent-free interpolation applies.
+=#
 KhepriBase.b_spline(b::RH, ps, v0, v1, mat) =
-  if (v0 == false) && (v1 == false)
-    @remote(b, Spline(ps))
-  elseif (v0 != false) && (v1 != false)
-    @remote(b, SplineTangents(ps, v0, v1))
+  if (v0 isa Vec) || (v1 isa Vec)
+    let (t0, t1) = open_spline_tangents(ps, v0, v1)
+      @remote(b, SplineTangents(ps, t0, t1))
+    end
   else
-    @remote(b, SplineTangents(ps,
-                 v0 == false ? ps[2]-ps[1] : v0,
-                 v1 == false ? ps[end-1]-ps[end] : v1))
+    @remote(b, Spline(ps))
   end
 
 KhepriBase.b_closed_spline(b::RH, ps, mat) =
