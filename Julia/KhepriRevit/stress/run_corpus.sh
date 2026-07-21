@@ -73,6 +73,9 @@ list_corpus() {
 launch_and_run() {
   local doc_win="$1" jl_win="$2" log="$3"
   shift 3
+  # Truncate up front: the TIMEOUT path appends, and a leftover log from a prior
+  # run would otherwise satisfy the caller's STRESS-OK/PASS grep with stale data.
+  : > "$log"
   local envset="" kv k v
   for kv in "$@"; do
     k="${kv%%=*}"
