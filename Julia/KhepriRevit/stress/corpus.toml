@@ -89,3 +89,28 @@ path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\DDN\OneDrive_1_5-2-2025\M
 description = 'DDN Moradia T3 house v5 (real project)'
 skip = false
 length_rtol = '0.02'
+
+[models.snowdon]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\ExternalStress\snowdon_architectural.rvt'
+description = 'Snowdon Towers (Autodesk 2024 sample): multi-storey architectural tower, 94 MB'
+skip = false
+
+[models.goldennugget]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\ExternalStress\golden_nugget_architektur.rvt'
+description = 'BIM Projekt Golden Nugget (MuM 2024 sample): large mixed-use building, 148 MB'
+skip = false
+
+[models.racbasic]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\ExternalStress\rac_basic_2024.rvt'
+description = 'Autodesk rac_basic 2024 sample: the canonical demo residence (19 MB, downloaded)'
+skip = false
+
+[models.racadvanced]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\ExternalStress\rac_advanced_2024.rvt'
+description = 'Autodesk rac_advanced 2024 sample: office building, curtain walls, ramps (17 MB, downloaded)'
+skip = false
+
+[models.wspoffice]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\ExternalStress\wsp_office_smallcut.rvt'
+description = 'WSP Office SmallCut (MIT, Azure samples): real office building, Revit 2020 upgrade-on-open (27 MB, downloaded)'
+skip = false
