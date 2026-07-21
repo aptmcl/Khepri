@@ -38,6 +38,13 @@ try
         ids_io = open(joinpath(dirname(gen_path), "rebuild_ids.tsv"), "w"),
         seen_refs = Set{Any}(),
         last_line = 0
+      # Per-member containment: a storey/factory body replays as ONE statement, so a single
+      # throwing member used to drop everything after it (Snowdon lost 113/118 railings and
+      # goldennugget ~half the model to these aborts). resilient_realization records each
+      # failed shape (void ref) and lets the rest of the body realize; the tally is reported
+      # below next to the statement-level errors.
+      KhepriBase.resilient_realization(true)
+      KhepriBase.realization_errors(Any[])
       for e in exprs
         e isa LineNumberNode && (last_line = e.line; continue)
         e isa Expr && e.head == :using && continue
@@ -67,6 +74,21 @@ try
   println("REBUILD: ok=$(stats.ok) mesh_noop=$(stats.meshes) failed=$(stats.failed)")
   for (m, n) in sort(collect(stats.errs), by=last, rev=true)
     println("  [$(n)x] $m")
+  end
+  let rerrs = KhepriBase.realization_errors()
+    if !isempty(rerrs)
+      println("CONTAINED realization failures: $(length(rerrs)) (members skipped, bodies completed)")
+      let byclass = Dict{String,Int}()
+        for (s, _, e) in rerrs
+          let k = "$(typeof(s)) :: $(first(sprint(showerror, e), 100))"
+            byclass[k] = get(byclass, k, 0) + 1
+          end
+        end
+        for (m, n) in sort(collect(byclass), by=last, rev=true)
+          println("  [$(n)x] $m")
+        end
+      end
+    end
   end
   flush(stdout)
 

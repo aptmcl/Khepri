@@ -999,14 +999,26 @@ KhepriBase.realize_wall_no_openings(b::RVT, s::Wall) =
 
 _apply_wall_offsets(b::RVT, ids, s::Wall) =
   begin
-    if s.base_offset != 0 || s.top_offset != 0
-      for id in (ids isa AbstractVector ? ids : [ids])
-        try
-          # Length RPC params take raw SI meters (the C# Length wrapper converts
-          # to internal feet) — to_revit here would double-convert.
-          @remote(b, SetWallOffsets(id, s.base_offset, s.top_offset))
-        catch e
-          @warn "wall offsets not applied" exception=e
+    # UNCONNECTED walls (void top level) have a READ-ONLY top offset in Revit — the C# RPC
+    # writes base then top, so the top write throws after the base landed (93 warning storms
+    # on Snowdon). Introspection guarantees top_offset == 0 for unconnected walls, so skip
+    # the RPC when there is nothing writable to write, send top = 0 otherwise, and demote the
+    # expected read-only rejection to a once-per-run note.
+    let unconn = ref_value(b, s.top_level) == RVTVoidId,
+        top = unconn ? 0.0 : s.top_offset
+      if s.base_offset != 0 || top != 0
+        for id in (ids isa AbstractVector ? ids : [ids])
+          try
+            # Length RPC params take raw SI meters (the C# Length wrapper converts
+            # to internal feet) — to_revit here would double-convert.
+            @remote(b, SetWallOffsets(id, s.base_offset, top))
+          catch e
+            if unconn && occursin("read-only", sprint(showerror, e))
+              @warn "unconnected wall: top offset is read-only in Revit (base offset applied)" maxlog=1
+            else
+              @warn "wall offsets not applied" exception=e
+            end
+          end
         end
       end
     end
@@ -1044,17 +1056,19 @@ realize_wall_path(b::RVT, s::Wall, path::ArcPath) =
       start_angle = path.start_angle + cs_angle,
       end_angle = start_angle + path.amplitude
     if ref_value(b, s.top_level) == RVTVoidId
-      @remote(b, CreateUnconnectedArcWall(
+      _apply_wall_offsets(b, @remote(b, CreateUnconnectedArcWall(
           center, radius, start_angle, end_angle,
           ref_value(b, s.bottom_level),
           to_revit(s.top_level.height - s.bottom_level.height),
-          family_ref(b, s.family)))
+          family_ref(b, s.family))), s)
     else
-      @remote(b, CreateArcWall(
+      # Arc walls previously skipped the offsets entirely — a T4-class arc wall with a
+      # top_offset landed a full offset too tall on rebuild.
+      _apply_wall_offsets(b, @remote(b, CreateArcWall(
           center, radius, start_angle, end_angle,
           ref_value(b, s.bottom_level),
           ref_value(b, s.top_level),
-          family_ref(b, s.family)))
+          family_ref(b, s.family))), s)
     end
   end
 
@@ -1144,8 +1158,22 @@ _realize_wall_opening(b, opening, wall_path, wall_refs) =
       param_map = rvtf.instance_map,
       params = collect(keys(param_map)),
       values = [param_map[p](opening.family) for p in params]
-    _insert_opening(b, opening, local_x, loc.y, host_ref,
-                    family_ref(b, opening.family), params, values)
+    try
+      _insert_opening(b, opening, local_x, loc.y, host_ref,
+                      family_ref(b, opening.family), params, values)
+    catch e
+      # Some opening types expose their sizing params as READ-ONLY instances (type-driven):
+      # SetParameter then throws after the insert succeeded conceptually. Retry without
+      # instance params — the type's own dimensions apply — instead of losing the opening
+      # AND everything after it in the storey body.
+      if !isempty(params) && occursin("read-only", sprint(showerror, e))
+        @warn "opening instance params read-only; re-inserting with type defaults" maxlog=4
+        _insert_opening(b, opening, local_x, loc.y, host_ref,
+                        family_ref(b, opening.family), String[], [])
+      else
+        rethrow()
+      end
+    end
   end
 
 KhepriBase.realize_wall_openings(b::RVT, w::Wall, w_ref, openings) =
@@ -1770,7 +1798,13 @@ column_from_ref(r, b::RVT) =
       fam = cx(dims) > 1e-6 && cy(dims) > 1e-6 ?
               column_family(profile=rectangular_profile(cx(dims), cy(dims)), material=mat) :
               column_family(material=mat),
-      s = column(loc, angle=angle, bottom_level=base_level, top_level=top_level, family=fam)
+      # ARCHITECTURAL columns report LocationPoint with a WORLD z while every realization path
+      # treats the anchor z as LEVEL-RELATIVE — leaving it raw double-adds the level height on
+      # rebuild (Snowdon's pergola posts landed at 33.6 m: 16.05 level + 17.56 world z; the
+      # 11.8 m bbox outlier). STRUCTURAL columns report z = 0 and stay bit-identical, so rebase
+      # only when a real world z is present.
+      cb = abs(cz(loc)) < 1e-9 ? loc : xyz(cx(loc), cy(loc), cz(loc) - base_level.height),
+      s = column(cb, angle=angle, bottom_level=base_level, top_level=top_level, family=fam)
     ref!(b, s, r)
     s
   end
@@ -2035,6 +2069,45 @@ _stair_walk_verts(runs, elevs, base_h) =
     verts
   end
 
+# The nearest document level at-or-above z / strictly above z (nothing when none). Companions
+# to _level_at_or_below: honest anchors for stairs whose Revit levels are void or inverted.
+_level_at_or_above(b::RVT, z) =
+  let levels = [level_from_ref(id, b) for id in @remote(b, DocLevels())],
+      above = filter(l -> l.height >= z - 1e-3, levels)
+    isempty(above) ? nothing : argmin(l -> l.height, above)
+  end
+_level_strictly_above(b::RVT, z) =
+  let levels = [level_from_ref(id, b) for id in @remote(b, DocLevels())],
+      above = filter(l -> l.height > z + 1e-3, levels)
+    isempty(above) ? nothing : argmin(l -> l.height, above)
+  end
+
+# A valid stair TOP: the reported level when strictly above the anchor; else the level at-or-
+# above the walk top; else the next level up; last resort a synthetic storey above. Revit's
+# StairsEditScope.Start rejects top <= base outright (two whole storeys of Snowdon railings
+# died as collateral of exactly that).
+_stair_top_level(b::RVT, reported, anchor, walk_top_z) =
+  let ok = l -> l !== nothing && l.height > anchor.height + 1e-3,
+      c1 = ok(reported) ? reported : _level_at_or_above(b, walk_top_z)
+    ok(c1) ? c1 :
+      let c2 = _level_strictly_above(b, anchor.height)
+        c2 === nothing ? upper_level(anchor, 3.0) : c2
+      end
+  end
+
+# A stair whose plan length cannot fit the treads its rise requires would rebuild as a garbage
+# stub — Revit's StairRunPaths chord-collapses ARC/SPIRAL runs to their endpoints, so a spiral's
+# walk shows a full-storey rise over a near-zero plan run. Demote those to the mesh fallback
+# (return nothing before ref!; _guarded_refs leaves the element unclaimed → Phase-6 obj_model)
+# rather than emit a stair() that replays as nonsense. 0.9 slack tolerates winder compression.
+_stair_walk_infeasible(walk, riser, tread) =
+  length(walk) < 2 ? false :
+  let rise = maximum(cz(p) for p in walk) - minimum(cz(p) for p in walk),
+      plan = sum(sqrt((cx(walk[i+1]) - cx(walk[i]))^2 + (cy(walk[i+1]) - cy(walk[i]))^2)
+                 for i in 1:length(walk)-1)
+    rise > 1e-3 && plan < 0.9 * (rise / max(riser, 1e-6)) * tread
+  end
+
 stair_from_ref(r, b::RVT) =
   let runs = @remote(b, StairRunPaths(r)),
       elevs = @remote(b, StairRunElevations(r)),
@@ -2042,13 +2115,14 @@ stair_from_ref(r, b::RVT) =
       base_level_id = @remote(b, StairBaseLevel(r)),
       top_level_id = @remote(b, StairTopLevel(r)),
       base_level = level_from_ref(base_level_id, b),
-      top_level = top_level_id == RVTVoidId ? base_level : level_from_ref(top_level_id, b),
+      reported_top = top_level_id == RVTVoidId ? nothing : level_from_ref(top_level_id, b),
       width = @remote(b, StairWidth(r)),
-      riser = @remote(b, StairRiserHeight(r)),
-      tread = @remote(b, StairTreadDepth(r)),
+      riser0 = @remote(b, StairRiserHeight(r)),
+      tread0 = @remote(b, StairTreadDepth(r)),
+      riser = riser0 > 1e-6 ? riser0 : 0.18,
+      tread = tread0 > 1e-6 ? tread0 : 0.28,
       fam = stair_family(width=width > 1e-6 ? width : 1.0,
-                         riser_height=riser > 1e-6 ? riser : 0.18,
-                         tread_depth=tread > 1e-6 ? tread : 0.28),
+                         riser_height=riser, tread_depth=tread),
       s = if length(runs) >= 1 && length(elevs) == 2 * length(runs)
             # Walk-path stair: emit the 3D centerline plus the EXACT landing footprints
             # (each vertex at the landing's level-relative elevation); z level-relative
@@ -2057,30 +2131,50 @@ stair_from_ref(r, b::RVT) =
             # zero landings, 2.35x2.68 footprint), and even for a straight run the walk
             # encodes the TRUE top elevation, which the base-point short form cannot
             # (it always climbs to the top level).
-            let walk = _stair_walk_verts(runs, elevs, base_level.height),
-                d = length(walk) >= 2 ?
-                      vxy(cx(walk[2]) - cx(walk[1]), cy(walk[2]) - cy(walk[1])) :
-                      vxy(cx(dir), cy(dir)),
-                lands = @remote(b, StairLandingBoundaries(r)),
-                land_elevs = @remote(b, StairLandingElevations(r)),
-                landings = (isempty(lands) || length(lands) != length(land_elevs)) ? nothing :
-                  [closed_polygonal_path(
-                     [xyz(cx(p), cy(p), land_elevs[k] - base_level.height) for p in lands[k]])
-                   for k in 1:length(lands)]
-              stair(walk[1], direction=unitized(d), bottom_level=base_level,
-                    top_level=top_level, family=fam, path=open_polygonal_path(walk),
-                    landings=landings)
+            #
+            # The walk is anchored at the level AT-OR-BELOW its lowest elevation — the
+            # declared Base Level can sit ABOVE where the runs start (a run descending to a
+            # landing below its level), and Revit rejects run lines below the edit-scope
+            # base ("not a valid location path line for straight run": 12 corpus failures).
+            # Tiny negative residues from the level-match slack are clamped to exactly 0.
+            let min_elev = minimum(elevs),
+                anchor = _level_at_or_below(b, min_elev),
+                walk = [abs(cz(p)) < 2e-3 ? xyz(cx(p), cy(p), 0.0) : p
+                        for p in _stair_walk_verts(runs, elevs, anchor.height)],
+                top = _stair_top_level(b, reported_top, anchor, maximum(elevs))
+              if _stair_walk_infeasible(walk, riser, tread)
+                @warn "stair walk infeasible for its riser/tread (chord-collapsed arc/spiral run?); demoting to mesh fallback" id=r
+                nothing
+              else
+                let d = length(walk) >= 2 ?
+                          vxy(cx(walk[2]) - cx(walk[1]), cy(walk[2]) - cy(walk[1])) :
+                          vxy(cx(dir), cy(dir)),
+                    lands = @remote(b, StairLandingBoundaries(r)),
+                    land_elevs = @remote(b, StairLandingElevations(r)),
+                    landings = (isempty(lands) || length(lands) != length(land_elevs)) ? nothing :
+                      [closed_polygonal_path(
+                         [xyz(cx(p), cy(p), land_elevs[k] - anchor.height) for p in lands[k]])
+                       for k in 1:length(lands)]
+                  stair(walk[1], direction=unitized(d), bottom_level=anchor,
+                        top_level=top, family=fam, path=open_polygonal_path(walk),
+                        landings=landings)
+                end
+              end
             end
           else
             # StairDirection comes back as an XYZ point; stair() wants a horizontal direction
             # vector (VXY). Base point z is emitted level-relative (realization re-adds the
-            # bottom level height).
+            # bottom level height). No run elevations here, so the top fallback climbs to the
+            # next document level (synthetic storey as last resort) — an equal-level short
+            # form is guaranteed to fail StairsEditScope.Start on replay.
             let base0 = @remote(b, StairBasePoint(r)),
-                base = _rebase_to_level([base0], base_level)[1]
+                base = _rebase_to_level([base0], base_level)[1],
+                top = _stair_top_level(b, reported_top, base_level, base_level.height)
               stair(base, direction=unitized(vxy(cx(dir), cy(dir))),
-                    bottom_level=base_level, top_level=top_level, family=fam)
+                    bottom_level=base_level, top_level=top, family=fam)
             end
           end
+    s === nothing && return nothing
     ref!(b, s, r)
     s
   end
