@@ -13,7 +13,7 @@ TEMPLATE_MNT='/mnt/c/Users/aml/Vault/AML/Projects/Khepri/Julia/KhepriRevit/Plugi
 TMP_MNT='/mnt/c/Users/aml/AppData/Local/Temp'
 TMP_WIN='C:\Users\aml\AppData\Local\Temp'
 PORT_TRIES=60      # x6s = 360s max wait for the plugin on port 11001
-JULIA_TIMEOUT=1800 # seconds per julia run
+JULIA_TIMEOUT=${JULIA_TIMEOUT:-1800} # seconds per julia run (env-overridable for heavy models)
 
 kill_revit() {
   powershell.exe -NoProfile -Command "Stop-Process -Name Revit -Force -ErrorAction SilentlyContinue" >/dev/null 2>&1
