@@ -729,6 +729,26 @@ namespace KhepriRevit {
             Level level = FindLevelAtElevation(elevation);
             return level ?? CreateLevelAtElevation(elevation);
         }
+        // Named variant: real models carry NAME-distinct levels at equal (or near-equal)
+        // elevations — elevation-keyed find silently merged 9 of goldennugget's 97 levels.
+        // A named request finds by name first (idempotent re-runs), creates with the
+        // requested name otherwise (suffix on duplicate-name collisions).
+        public Level FindOrCreateLevelAtElevationNamed(Length elevation, string name) {
+            if (string.IsNullOrEmpty(name))
+                return FindOrCreateLevelAtElevation(elevation);
+            Level byName = new FilteredElementCollector(doc)
+                .WherePasses(new ElementClassFilter(typeof(Level), false))
+                .Cast<Level>()
+                .FirstOrDefault(e => e.Name == name);
+            if (byName != null) return byName;
+            Level level = CreateLevelAtElevation(elevation);
+            try {
+                level.Name = name;
+            } catch (Autodesk.Revit.Exceptions.ArgumentException) {
+                try { level.Name = name + " (2)"; } catch { }
+            }
+            return level;
+        }
         public Level UpperLevel(Level level, Length addedElevation) =>
             FindOrCreateLevelAtElevation(new Length(level.Elevation + addedElevation));
         public Length GetLevelElevation(Level level) => new Length(level.Elevation);
@@ -1061,9 +1081,11 @@ namespace KhepriRevit {
                 doc.GetElement(famId) as FamilySymbol;
             EnsureActive(symbol);
             FamilyInstance col = doc.Create.NewFamilyInstance(location, symbol, level0, StructuralType.Column);
-            col.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_PARAM).Set(level1.Id);
-            col.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_OFFSET_PARAM).Set(0.0);
-            col.get_Parameter(BuiltInParameter.FAMILY_BASE_LEVEL_OFFSET_PARAM).Set(0.0);
+            // Architectural column symbols may lack any of these built-ins (4 NREs on the
+            // Snowdon corpus): guard each — the created column stands either way.
+            SetParameter(col.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_PARAM), level1.Id);
+            SetParameter(col.get_Parameter(BuiltInParameter.FAMILY_TOP_LEVEL_OFFSET_PARAM), 0.0);
+            SetParameter(col.get_Parameter(BuiltInParameter.FAMILY_BASE_LEVEL_OFFSET_PARAM), 0.0);
             return col;
         }
         public Element CreateColumnPoints(XYZ p0, XYZ p1, Level level0, Level level1, ElementId famId) {
@@ -1463,6 +1485,11 @@ namespace KhepriRevit {
         }
 
         static void SetParameter(Parameter p, object value) {
+            // Read-only (type-driven or group-member) parameters must not abort the RPC that
+            // already created the element: the Julia side then re-tried inserts (duplicating
+            // doors) or lost whole storey bodies. Skipping is the correct semantics — the
+            // element keeps its type-level value.
+            if (p == null || p.IsReadOnly) return;
             switch (p.StorageType) {
                 case StorageType.None:
                     break;
