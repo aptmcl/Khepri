@@ -72,7 +72,14 @@
     <Compile Include="RMIFy.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
+  <!-- Sign KhepriBase.dll ONCE, here in its own build, with the local self-signed dev cert
+       (CN=KhepriSelfSign). Plugins that reference this project (KhepriRevit, KhepriAutoCAD) inherit
+       the signature through their copy-local of this assembly, so KhepriBase is never re-signed
+       downstream. ../sign.ps1 no-ops when the cert is absent, so it never breaks the build. -->
+  <Target Name="SignKhepriBaseDll" AfterTargets="Build">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)..\sign.ps1&quot; &quot;$(TargetDir.TrimEnd('\'))&quot; KhepriBase.dll" ContinueOnError="true" />
+  </Target>
+  <!-- To modify your build process, add your task inside one of the targets below and uncomment it.
        Other similar extension points exist, see Microsoft.Common.targets.
   <Target Name="BeforeBuild">
   </Target>
