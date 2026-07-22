@@ -268,6 +268,7 @@ public void DeleteAllElements()
 public void DeleteElement(Element element)
 public ElementId CreateGroup(ElementId[] ids)
 public ElementId PlaceGroupInstance(XYZ p, ElementId groupTypeId)
+public void SetElementName(Element element, string name)
 public XYZ GroupPlacementPoint(Element group)
 public void SetView(XYZ camera, XYZ target, int width, int height, double lens)
 public XYZ GetCamera()
@@ -1465,6 +1466,8 @@ KhepriBase.b_finalize_groups(b::RVT) =
               @warn "group could not be created; members remain loose" group=grp.name
             else
               type_of[grp] = @remote(b, GroupTypeId(gid))
+              # Restore the source group name — NewGroup auto-names the type "Group N".
+              @remote(b, SetElementName(type_of[grp], grp.name))
               anchor_of[grp] = (@remote(b, GroupPlacementPoint(gid)), loc)
             end
           end
