@@ -839,19 +839,29 @@ set_default_materials() =
     set_material(ACAD, material_grass, "Green")
   end  
 
+# AutoCAD symbol/dictionary names reject the characters < > / \ " : ; ? * | , = and
+# backtick. Revit-exported OBJ material names routinely contain commas (e.g.
+# "Steel,_Chrome_Plated"), which made CreateColoredMaterialNamed throw eInvalidInput and
+# dropped every fixture that used such a material. Map each illegal char to '_' — on BOTH
+# create and lookup, so a material created here resolves to the same name when fetched.
+_acad_symbol_name(s::AbstractString) =
+  map(c -> occursin(c, "<>/\\\":;?*|,=`") ? '_' : c, s)
+
 KhepriBase.b_get_material(b::ACAD, spec::AbstractString) =
-  try
-    @remote(b, GetMaterialNamed(spec))
-  catch e
-    @warn("Couldn't find material $spec. Replacing it with Global.")
-    @remote(b, GetMaterialNamed("Global"))
+  let name = _acad_symbol_name(spec)
+    try
+      @remote(b, GetMaterialNamed(name))
+    catch e
+      @warn("Couldn't find material $name. Replacing it with Global.")
+      @remote(b, GetMaterialNamed("Global"))
+    end
   end
 
 KhepriBase.b_material(b::ACAD, name, base_color, metallic, roughness, specular,
                            ior, transmission, transmission_roughness,
                            clearcoat, clearcoat_roughness,
                            emission_color, emission_strength) =
-  @remote(b, CreateColoredMaterialNamed(name, base_color, specular, transmission))
+  @remote(b, CreateColoredMaterialNamed(_acad_symbol_name(name), base_color, specular, transmission))
 
 const MaterialProjection = (InheritProjection=0, Planar=1, Box=2, Cylinder=3, Sphere=4)
 const MaterialTiling = (InheritTiling=0, Tile=1, Crop=2, Clamp=3, Mirror=4)
