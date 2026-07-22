@@ -69,6 +69,12 @@
   <Target Name="EnsureX64Platform" BeforeTargets="PrepareForBuild">
     <Error Condition="'$(Platform)' != 'x64'" Text="KhepriRevit only supports the x64 platform. Select Debug|x64 or Release|x64." />
   </Target>
+  <!-- Sign the output DLLs with the local self-signed dev cert (CN=KhepriSelfSign) so Revit loads the
+       add-in headlessly without the unsigned-file security prompt. Runs after every build; ../sign.ps1
+       is a no-op when the cert is absent, so it never breaks the build. -->
+  <Target Name="SignKhepriDlls" AfterTargets="Build">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)..\sign.ps1&quot; &quot;$(TargetDir.TrimEnd('\'))&quot;" ContinueOnError="true" />
+  </Target>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it.
        Other similar extension points exist, see Microsoft.Common.targets.
   <Target Name="BeforeBuild">
