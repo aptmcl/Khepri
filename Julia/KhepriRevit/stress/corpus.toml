@@ -117,15 +117,15 @@ skip = false
 
 [models.ulaarq]
 path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\Projeto ULA RVT\PC26001-6PC-ARQ.Z.0.00.M3_0001.rvt'
-description = 'ULA project (Tecnico PC26001-6PC): architectural model (178 MB, real project)'
+description = 'ULA project (Tecnico PC26001-6PC): architectural model (178 MB). WORKSHARED CENTRAL model — FAILs headless open (journal shows DocumentSynchronizedWithCentral); needs detach-from-central handling in the harness'
 skip = false
 
 [models.ulaest]
 path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\Projeto ULA RVT\PC26001-6PC-EST.Z.0.00.M3_0001.rvt'
-description = 'ULA project (Tecnico PC26001-6PC): structural model (91 MB, real project)'
+description = 'ULA project (Tecnico PC26001-6PC): structural model (91 MB). Same project — likely workshared central (see ulaarq)'
 skip = false
 
 [models.ulatop]
 path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\Projeto ULA RVT\PC26001-6PC-TOP.Z.0.00.M3_0001.rvt'
-description = 'ULA project (Tecnico PC26001-6PC): topography/survey model (5 MB, real project)'
+description = 'ULA project (Tecnico PC26001-6PC): topography/survey model (5 MB). Same project — likely workshared central (see ulaarq)'
 skip = false
