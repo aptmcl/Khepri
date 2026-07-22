@@ -365,6 +365,15 @@ def add_bm_uvs(mesh, bm):
 # We should be using Ints for layers!
 # HACK!!! Missing color!!!!!
 current_collection = C.collection
+
+# Cache of imported OBJ mesh data-blocks, keyed by absolute file path. The same OBJ
+# family is placed once per fixture instance (hundreds of times for a whole building);
+# re-importing the file each time through the bpy.ops operators — which force a full
+# view-layer + depsgraph update that grows with the scene — is the dominant cost. We
+# import each unique file ONCE and place further instances as linked duplicates that
+# share the cached mesh data-block (see import_obj_file). Cleared on scene reset.
+_obj_mesh_cache = {}
+
 def find_or_create_collection(name:str, visible:bool, color:RGBA)->str:
     if name not in D.collections:
         collection = D.collections.new(name)
@@ -423,6 +432,7 @@ def set_current_collection(name:str)->None:
 #def all_shapes_in_collection(name:str)->List[Id]:
 def delete_all_shapes_in_collection(name:str)->None:
     D.batch_remove(D.collections[name].objects)
+    _obj_mesh_cache.clear()  # cached meshes may now be orphaned; re-import on next use
     #D.orphans_purge(do_linked_ids=False)
 
 def delete_all_shapes()->None:
@@ -430,6 +440,7 @@ def delete_all_shapes()->None:
         D.batch_remove(collection.objects)
     global shape_counter
     shape_counter = 0
+    _obj_mesh_cache.clear()  # cached meshes are gone with the scene; re-import on next use
     #D.orphans_purge(do_linked_ids=False)
 
 def delete_shape(name:Id)->None:
@@ -700,6 +711,15 @@ def objmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int
     append_material(obj, mat)
     return id
 
+def _place_obj_instance(mesh, name, mat):
+    """Create an object sharing `mesh` (a linked duplicate), place it at `mat`, and
+    link it to the current collection. Pure data API — no bpy.ops, so no view-layer
+    or depsgraph update, which is what makes repeated placements cheap."""
+    obj = bpy.data.objects.new(name, mesh)
+    obj.matrix_world = mat
+    current_collection.objects.link(obj)
+    return obj
+
 def import_obj_file(path:str, ox:float, oy:float, oz:float,
                     vxx:float, vxy:float, vxz:float,
                     vyx:float, vyy:float, vyz:float,
@@ -708,6 +728,10 @@ def import_obj_file(path:str, ox:float, oy:float, oz:float,
 
     The transform is specified as origin (ox,oy,oz) and three basis
     vectors (vx, vy, vz) which encode scale, rotation, and axis mapping.
+
+    The first placement of a given file imports it from disk (and joins any
+    multi-material sub-objects into one); every later placement of the same file
+    reuses the cached mesh data-block as a linked duplicate with its own transform.
     """
     # Build 4x4 transform matrix from origin + basis vectors
     mat = Matrix((
@@ -716,38 +740,43 @@ def import_obj_file(path:str, ox:float, oy:float, oz:float,
         (vxz, vyz, vzz, oz),
         (0,   0,   0,   1 )
     ))
-    # Deselect all
-    bpy.ops.object.select_all(action='DESELECT')
+    id, name = new_id()
+    cached = _obj_mesh_cache.get(path)
+    if cached is not None:
+        _place_obj_instance(cached, name, mat)
+        return id
+    # First placement of this file: import from disk. Detect the imported objects by
+    # diffing bpy.data.objects (robust; independent of selection state).
+    before = set(bpy.data.objects)
     # Import OBJ file (no axis conversion — transform handles everything)
     if hasattr(bpy.ops.wm, 'obj_import'):
-        # Blender 4.x
+        # Blender 4.x / 5.x
         bpy.ops.wm.obj_import(filepath=path, forward_axis='Y', up_axis='Z')
     elif hasattr(bpy.ops.import_scene, 'obj'):
         # Blender 3.x
         bpy.ops.import_scene.obj(filepath=path, axis_forward='Y', axis_up='Z')
     else:
         raise Exception("No OBJ importer available in this Blender version")
-    imported = list(bpy.context.selected_objects)
+    imported = [o for o in bpy.data.objects if o not in before]
     if not imported:
         raise Exception("Failed to import OBJ: " + path)
-    # Join multiple objects into one
+    # Join multiple sub-objects (multi-material OBJs) into one so each instance is a
+    # single object sharing one mesh data-block.
     if len(imported) > 1:
+        bpy.ops.object.select_all(action='DESELECT')
+        for o in imported:
+            o.select_set(True)
         bpy.context.view_layer.objects.active = imported[0]
         bpy.ops.object.join()
-    obj = bpy.context.active_object
-    # Apply transform
-    obj.matrix_world = mat
-    # Register with Khepri ID system
-    id, name = new_id()
+    obj = imported[0]
+    # Detach from whatever collection the importer used; re-link to Khepri's current one.
+    for col in list(obj.users_collection):
+        col.objects.unlink(obj)
     obj.name = name
     obj.data.name = name
-    # Move to Khepri's current collection
-    old_collections = list(obj.users_collection)
-    if current_collection not in old_collections:
-        current_collection.objects.link(obj)
-    for col in old_collections:
-        if col != current_collection:
-            col.objects.unlink(obj)
+    obj.matrix_world = mat
+    current_collection.objects.link(obj)
+    _obj_mesh_cache[path] = obj.data
     return id
 
 def trig(p1:Point3d, p2:Point3d, p3:Point3d, mat:MatId)->Id:
