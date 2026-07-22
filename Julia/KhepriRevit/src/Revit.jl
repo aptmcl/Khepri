@@ -2119,7 +2119,14 @@ _stair_walk_infeasible(walk, riser, tread) =
   let rise = maximum(cz(p) for p in walk) - minimum(cz(p) for p in walk),
       plan = sum(sqrt((cx(walk[i+1]) - cx(walk[i]))^2 + (cy(walk[i+1]) - cy(walk[i]))^2)
                  for i in 1:length(walk)-1)
-    rise > 1e-3 && plan < 0.9 * (rise / max(riser, 1e-6)) * tread
+    # A run's walk (centerline) spans n_treads = n_risers − 1 treads, where n_risers = rise/riser.
+    # Using n_risers as the tread count over-demands the going by one tread — enough to false-demote
+    # compact straight stairs (rac_basic: 4 risers / 3 treads; plan 0.838 vs a spurious 4-tread need
+    # 1.006). Real chord-collapsed arc/spiral runs still fail this: their plan ≈ the chord ≪
+    # (n_risers−1)·tread. (For a multi-run walk each run loses a tread at its landing — true count
+    # n_risers − n_runs — so subtracting only 1 stays slightly conservative there; but it's strictly
+    # below the old n_risers form, so this can only *un*-demote a stair, never newly demote one.)
+    rise > 1e-3 && plan < 0.9 * max(0.0, rise / max(riser, 1e-6) - 1) * tread
   end
 
 stair_from_ref(r, b::RVT) =
