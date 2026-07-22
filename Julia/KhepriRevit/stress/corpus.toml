@@ -114,3 +114,18 @@ skip = false
 path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\ExternalStress\wsp_office_smallcut.rvt'
 description = 'WSP Office SmallCut (MIT, Azure samples): real office building, Revit 2020 upgrade-on-open (27 MB, downloaded)'
 skip = false
+
+[models.ulaarq]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\Projeto ULA RVT\PC26001-6PC-ARQ.Z.0.00.M3_0001.rvt'
+description = 'ULA project (Tecnico PC26001-6PC): architectural model (178 MB, real project)'
+skip = false
+
+[models.ulaest]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\Projeto ULA RVT\PC26001-6PC-EST.Z.0.00.M3_0001.rvt'
+description = 'ULA project (Tecnico PC26001-6PC): structural model (91 MB, real project)'
+skip = false
+
+[models.ulatop]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\Projeto ULA RVT\PC26001-6PC-TOP.Z.0.00.M3_0001.rvt'
+description = 'ULA project (Tecnico PC26001-6PC): topography/survey model (5 MB, real project)'
+skip = false
