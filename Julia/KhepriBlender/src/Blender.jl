@@ -351,6 +351,15 @@ KhepriBase.b_surface_polygon(b::BLR, ps, mat) =
 KhepriBase.b_surface_polygon_with_holes(b::BLR, ps, qss, mat) =
   isempty(ps) ? void_ref(b) : @remote(b, polygon_with_holes([ps, qss...], mat))
 
+# Emit a whole surface mesh (all faces) as ONE Blender object. Without this override the
+# generic b_surface_mesh (Backend.jl) falls back to one b_trig/b_quad PER FACE — i.e. one
+# Blender object per triangle. A single fixture's ~2700-face mesh then became ~2700 objects,
+# and because each object is linked into the collection, the per-object cost grows with the
+# scene's object count: obj_model placements went O(n²) (measured climbing 2s→15s across a
+# building of identical fixtures). One objmesh call builds one mesh from all the faces.
+KhepriBase.b_surface_mesh(b::BLR, vertices, faces, mat) =
+  isempty(faces) ? void_ref(b) : @remote(b, objmesh(vertices, [], faces, false, mat))
+
 KhepriBase.b_surface_circle(b::BLR, c, r, mat) =
   @remote(b, circle(c, vz(1, c.cs), r, mat))
 
