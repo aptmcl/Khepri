@@ -1429,6 +1429,13 @@ namespace KhepriRevit {
         // Instance name of any element (e.g. a Level's "Piso 1") — level HEIGHTS alone cannot
         // distinguish named storeys for selective execution.
         public string ElementName(Element element) => element.Name ?? "";
+        // Set an element's name (used to restore a GroupType's source name after CreateGroup, which
+        // otherwise auto-names it "Group N"). Guarded: Revit rejects duplicate or invalid names —
+        // in that case keep Revit's own name rather than aborting the group finalization.
+        public void SetElementName(Element element, string name) {
+            try { if (element != null && !string.IsNullOrWhiteSpace(name)) element.Name = name; }
+            catch { }
+        }
         public ElementId ElementLevel(Element element) => element.LevelId;
         // Walls can have unconnected height
         public ElementId WallTopLevel(Element element) => 
