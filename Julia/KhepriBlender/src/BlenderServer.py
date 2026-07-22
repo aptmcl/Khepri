@@ -1420,6 +1420,9 @@ def set_render_size(width:int, height:int)->None:
 def set_render_path(filepath:str)->None:
     C.scene.render.image_settings.file_format = 'PNG'
     C.scene.render.filepath = filepath
+    # The Julia side passes a full path WITH extension (…/foo.png); Blender's default
+    # use_file_extension would append the format extension again, producing foo.png.png.
+    C.scene.render.use_file_extension = False
 
 def _do_render()->None:
     # bpy.ops.render.render's `use_viewport` draws the existing 3D-viewport
