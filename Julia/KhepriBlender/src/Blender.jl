@@ -286,7 +286,13 @@ set_default_materials() = nothing
 
 const blender = BLR("Blender", blender_port, blender_api)
 
-KhepriBase.has_boolean_ops(::Type{<:BLR}) = HasBooleanOps{true}()
+# Wall openings must be built directly (mesh with holes), NOT by boolean subtraction. Blender's
+# walls realize as several surface meshes (a NativeRefs), and b_subtract_ref can only subtract a
+# single ref — so the boolean path (HasBooleanOps{true}) threw "cannot convert NativeRefs to Int32"
+# and dropped every wall carrying a door/window. HasBooleanOps{false} routes to the generic
+# b_wall_with_openings (surface-mesh-with-holes), which fits Blender's mesh nature. This trait gates
+# ONLY wall realization (BIM.jl); Blender's solid CSG (b_subtract_ref/unite/intersect) is untouched.
+KhepriBase.has_boolean_ops(::Type{<:BLR}) = HasBooleanOps{false}()
 
 KhepriBase.backend(::BLRRef) = blender
 KhepriBase.void_ref(b::BLR) = -1 % Int32
