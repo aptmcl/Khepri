@@ -142,6 +142,7 @@ typedAsyncFunction("setEnvironment", [Str, Bool], None, (path: string, setBackgr
 typedFunction("setView", [Point3d, Point3d, Float32, Float32], None, (position: THREE.Vector3, target: THREE.Vector3, lens: number, _aperture: number) => {
 typedFunction("stopUpdate", [], None, () => {
 typedFunction("startUpdate", [], None, () => {
+typedFunction("captureImage", [], Str, () => {
 typedAsyncFunction("showKMLCoordinatesFromFile", [], None, (cont: Function) => {
 typedFunction("wall", [[Point3d], [Point3d], Float32, Bool, MatId, MatId, MatId], Id, (rightVs: THREE.Vector3[], leftVs: THREE.Vector3[], height: number, closed: boolean, rightMat: THREE.Material, leftMat: THREE.Material, sideMat: THREE.Material) => {
 typedFunction("stair", [Point3d, Vector3d, Float32, Int32, Float32, Float32, Float32, Bool, MatId, MatId], Id, (basePoint: THREE.Vector3, direction: THREE.Vector3, bottomHeight: number, nSteps: number, riserHeight: number, treadDepth: number, width: number, hasRisers: boolean, treadMat: THREE.Material, riserMat: THREE.Material) => {
@@ -800,6 +801,16 @@ KhepriBase.b_labels(b::THR, p, data, mat) =
 KhepriBase.b_start_batch_processing(b::THR) = @remote(b, stopUpdate())
 
 KhepriBase.b_stop_batch_processing(b::THR) = @remote(b, startUpdate())
+
+export capture_image
+"""
+    capture_image(b=current_backend()) -> String
+
+Render one frame in the connected browser and return it as a base64-encoded PNG string (no data-URL
+prefix). A synchronous WebSocket round-trip, so it works headlessly without the DevTools protocol —
+decode with `Base64.base64decode` and write to a `.png`.
+"""
+capture_image(b::THR=current_backend()) = @remote(b, captureImage())
 
 export gui_create, 
        gui_add_folder, 

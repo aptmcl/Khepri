@@ -646,7 +646,7 @@ We need to store objects (e.g., materials, shapes, etc) internally.
 
 //THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true }); //{ alpha: true, antialias: true, preserveDrawingBuffer: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); // preserveDrawingBuffer lets captureImage read back the canvas
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 
@@ -2637,6 +2637,15 @@ typedFunction("startUpdate", [], None, () => {
   let now = +Date.now();
   console.log("Paused for", (now - time), "ms");
   update = true;
+});
+
+// Render one frame and return the canvas as base64 PNG (without the "data:image/png;base64," prefix).
+// A synchronous WebSocket round-trip — the server-side driver freezes the render loop, lets async OBJ
+// loads finish, then calls this to capture a complete frame headlessly without the DevTools protocol.
+typedFunction("captureImage", [], Str, () => {
+  render();
+  const url = renderer.domElement.toDataURL("image/png");
+  return url.substring(url.indexOf(",") + 1);
 });
 
 function loadFileAndSendRequest(request: request) {

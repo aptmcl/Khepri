@@ -37457,7 +37457,7 @@ typedFunction("getOperationNamed", [Str, Str], Int32, (name, canonical) => {
     throw new Error(`Requested non-existent function named '${name}' with signature ${canonical}.`);
   }
 });
-const renderer = new WebGLRenderer({ antialias: true });
+const renderer = new WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 const camera = new PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2e3);
@@ -38759,6 +38759,11 @@ typedFunction("startUpdate", [], None, () => {
   let now = +Date.now();
   console.log("Paused for", now - time, "ms");
   update = true;
+});
+typedFunction("captureImage", [], Str, () => {
+  render();
+  const url = renderer.domElement.toDataURL("image/png");
+  return url.substring(url.indexOf(",") + 1);
 });
 function loadFileAndSendRequest(request) {
   n({
