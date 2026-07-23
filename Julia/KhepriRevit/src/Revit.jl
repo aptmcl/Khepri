@@ -2613,7 +2613,10 @@ KhepriBase.b_native_family_expr(b::RVT, var, meta) =
            Expr(:call, :revit_file_family, rfa_str)),
       stmts = Any[guarded_backend_family_expr(var, :revit, revit_native)]
     if !isempty(meta.obj_name)
-      let obj = Expr(:call, :obj_family, meta.obj_name)
+      # The obj_name is a filesystem-safe file stem (C# SanitizeFileName). Emit it as a raw
+      # string so the reference is carried verbatim into the generated program — no interpolation
+      # or backslash handling — matching the file the exporter actually wrote.
+      let obj = Expr(:call, :obj_family, Expr(:macrocall, Symbol("@raw_str"), nothing, meta.obj_name))
         # The extracted mesh renders the family on ANY mesh-capable backend (default b_mesh_obj_fmt,
         # or a native OBJ importer like KhepriRhino's) — without a mapping, fixtures degrade to
         # placeholder boxes. Guards are inert on backends that aren't loaded.
@@ -2632,7 +2635,9 @@ KhepriBase.b_native_family_expr(b::RVT, var, meta) =
 # obj_import — full per-face materials/UVs/textures).
 const _obj_mesh_backend_guards = (:threejs, :autocad, :rhino, :blender)
 
-# Match the C# SanitizeMaterialName used to name exported OBJ files (family name → OBJ file stem).
+# Normalizes a raw Revit family/type name for the OBJ-attach LOOKUP KEY only (never to build a
+# filename — the file stem comes back from C# as row[1]). Both sides of the join sanitize the raw
+# names identically, so the key matches regardless of how the file stem was sanitized for disk.
 _sanitize_family(name) = replace(name, ' ' => '_', '/' => '_', '\\' => '_')
 
 # Export loadable families to OBJ (best-effort) and stamp each family's metadata with its OBJ name, so
