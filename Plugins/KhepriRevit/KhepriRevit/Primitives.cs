@@ -3288,7 +3288,7 @@ namespace KhepriRevit {
                 Family family = fi.Symbol.Family;
                 if (family == null || !exportedFamilies.Add(family.Id.Value))
                     continue;
-                string familyName = SanitizeMaterialName(family.Name);
+                string familyName = SanitizeFileName(family.Name);
                 Document famDoc = doc.EditFamily(family);
                 if (famDoc == null) continue;
                 try {
@@ -3366,9 +3366,8 @@ namespace KhepriRevit {
                 Family family = symbol?.Family;
                 if (family == null || !exportedSymbols.Add(symbol.Id.Value)) continue;
                 try {
-                    string familyName = SanitizeMaterialName(family.Name);
-                    string typeName = SanitizeMaterialName(symbol.Name);
-                    string objBase = familyName + "_" + typeName;
+                    string familyName = SanitizeFileName(family.Name);
+                    string objBase = FamilyObjStem(family.Name, symbol.Name);
                     string category = fi.Category?.Name ?? "Unknown";
                     string rfaPath;
                     if (!familyRfas.TryGetValue(family.Id.Value, out rfaPath)) {
@@ -3594,6 +3593,45 @@ namespace KhepriRevit {
 
         string SanitizeMaterialName(string name) {
             return name.Replace(' ', '_').Replace('/', '_').Replace('\\', '_');
+        }
+
+        // Produce a filesystem-safe stem for the OBJ/MTL/RFA files written per family. Revit family
+        // and type names come straight from the model and may hold characters that are illegal in a
+        // Windows path — a TV type literally named 50" (the inch mark), or names with : / \ * ? < > |
+        // — or be pathologically long. Writing such a stem throws in WriteOBJ, the family is skipped,
+        // and codegen emits no mesh mapping, so the fixture degrades to a placeholder box on mesh
+        // backends. The generated Julia references the returned stem verbatim (as a raw string), so
+        // the filesystem's own rules are the ONLY constraint here; keep it deterministic so
+        // re-introspection is stable.
+        string SanitizeFileName(string name) {
+            var sb = new StringBuilder(name.Length);
+            // c <= ' ' folds spaces and control chars — spaces are filesystem-legal but break the
+            // whitespace-delimited OBJ mtllib/usemtl tokens that reference this stem (and keep the
+            // stem matching the underscore names the old SanitizeMaterialName produced); the
+            // punctuation set is the Windows-illegal path characters.
+            foreach (char c in name)
+                sb.Append((c <= ' ' || "<>:\"/\\|?*".IndexOf(c) >= 0) ? '_' : c);
+            string s = sb.ToString().TrimEnd('.', ' ');   // Windows forbids trailing dots and spaces
+            return s.Length == 0 ? "_" : s;
+        }
+
+        // Stem for a family:type OBJ/MTL pair. The extracted geometry is per type, so the stem
+        // includes the type — except when the type name repeats the family name (single-type
+        // loadable families such as the SANINDUSA toilet), where the family name alone is
+        // unambiguous and avoids doubling an already-long name past MAX_PATH. A final length cap
+        // with a deterministic FNV-1a hash suffix keeps pathological names inside the path limit
+        // while staying unique per type.
+        string FamilyObjStem(string familyName, string typeName) {
+            string fam = SanitizeFileName(familyName);
+            string typ = SanitizeFileName(typeName);
+            string stem = fam == typ ? fam : fam + "_" + typ;
+            const int maxStem = 100;
+            if (stem.Length > maxStem) {
+                uint h = 2166136261u;
+                foreach (char c in familyName + ":" + typeName) h = (h ^ c) * 16777619u;
+                stem = stem.Substring(0, maxStem - 9) + "_" + h.ToString("x8");
+            }
+            return stem;
         }
 
         void WriteOBJ(string objPath, string mtlFileName,
