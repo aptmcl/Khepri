@@ -2613,17 +2613,14 @@ KhepriBase.b_native_family_expr(b::RVT, var, meta) =
            Expr(:call, :revit_file_family, rfa_str)),
       stmts = Any[guarded_backend_family_expr(var, :revit, revit_native)]
     if !isempty(meta.obj_name)
-      # The obj_name is a filesystem-safe file stem (C# SanitizeFileName). Emit it as a raw
-      # string so the reference is carried verbatim into the generated program — no interpolation
-      # or backslash handling — matching the file the exporter actually wrote.
-      let obj = Expr(:call, :obj_family, Expr(:macrocall, Symbol("@raw_str"), nothing, meta.obj_name))
-        # The extracted mesh renders the family on ANY mesh-capable backend (default b_mesh_obj_fmt,
-        # or a native OBJ importer like KhepriRhino's) — without a mapping, fixtures degrade to
-        # placeholder boxes. Guards are inert on backends that aren't loaded.
-        for be in _obj_mesh_backend_guards
-          push!(stmts, guarded_backend_family_expr(var, be, obj))
-        end
-      end
+      # The mesh-capable backends all reproduce this fixture from the SAME extracted OBJ, so a single
+      # set_mesh_backend_family call maps it onto whichever of them are loaded (helper emitted once in
+      # the header over _obj_mesh_backend_guards) — instead of one guarded set_backend_family line per
+      # backend. Only the native (Revit) mapping above is per-family. Without any mapping a fixture
+      # degrades to a placeholder box. The stem is a filesystem-safe file name (C# SanitizeFileName),
+      # emitted as a raw string so it is carried verbatim — matching the file the exporter wrote.
+      push!(stmts, Expr(:call, :set_mesh_backend_family, var,
+                        Expr(:macrocall, Symbol("@raw_str"), nothing, meta.obj_name)))
     end
     stmts
   end
@@ -2719,7 +2716,8 @@ function generate_khepri_code(output_path::String; b::RVT=revit, export_obj::Boo
       has_objs = !isempty(model.fallback_meshes) ||
                  any(m -> !isempty(m.obj_name), values(model.family_meta)),
       passes = codegen_passes(b, fmap;
-                              header=add_header(b; obj_resources=has_objs),
+                              header=add_header(b; obj_resources=has_objs,
+                                                mesh_backends=_obj_mesh_backend_guards),
                               wrap=wrap_function,
                               level_names=get(model, :level_names,
                                               Dict{Float64, String}())),
