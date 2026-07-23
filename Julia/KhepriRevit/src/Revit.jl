@@ -389,6 +389,13 @@ const RVTVoidId = RVTId(-1)
 
 KhepriBase.void_ref(b::RVT) = RVTVoidId
 
+# Revit places the real native families and has no mesh primitive (b_surface_mesh/b_trig are
+# unimplemented), so a generated program's obj mesh mapping must be skipped here — the per-family
+# revit_file_family/revit_system_family mapping is used instead. Instance dispatch (::RVT), not
+# ::Type — the concrete runtime type carries extra remote-function parameters that ::Type{RVT}
+# would miss, but an instance still matches the RVT UnionAll.
+KhepriBase.renders_obj_meshes(::RVT) = false
+
 KhepriBase.has_boolean_ops(::Type{<:RVT}) = HasBooleanOps{true}()
 
 # SocketBackend has no current_layer field; override to avoid field-access crash
@@ -2613,24 +2620,17 @@ KhepriBase.b_native_family_expr(b::RVT, var, meta) =
            Expr(:call, :revit_file_family, rfa_str)),
       stmts = Any[guarded_backend_family_expr(var, :revit, revit_native)]
     if !isempty(meta.obj_name)
-      # The mesh-capable backends all reproduce this fixture from the SAME extracted OBJ, so a single
-      # set_mesh_backend_family call maps it onto whichever of them are loaded (helper emitted once in
-      # the header over _obj_mesh_backend_guards) — instead of one guarded set_backend_family line per
-      # backend. Only the native (Revit) mapping above is per-family. Without any mapping a fixture
-      # degrades to a placeholder box. The stem is a filesystem-safe file name (C# SanitizeFileName),
-      # emitted as a raw string so it is carried verbatim — matching the file the exporter wrote.
+      # One call to the KhepriBase library helper set_mesh_backend_family: at run time it attaches the
+      # OBJ to every current mesh-capable backend (renders_obj_meshes) by TYPE, so the same program
+      # reproduces the fixture on whichever mesh backend it runs on. Only the native (Revit) mapping
+      # above is per-family. Without any mapping a fixture renders nothing (it has no mesh). The stem
+      # is a filesystem-safe file name (C# SanitizeFileName), emitted as a raw string so it is carried
+      # verbatim — matching the file the exporter wrote.
       push!(stmts, Expr(:call, :set_mesh_backend_family, var,
                         Expr(:macrocall, Symbol("@raw_str"), nothing, meta.obj_name)))
     end
     stmts
   end
-
-# Mesh-capable backends that receive an obj_family guard for every extracted OBJ.
-# Only backends whose OBJ realization has been verified live: KhepriThreejs (browser
-# MTLLoader/OBJLoader), KhepriAutoCAD (default b_mesh_obj_fmt → per-material
-# b_surface_mesh), KhepriRhino (native ImportOBJ), KhepriBlender (native bpy
-# obj_import — full per-face materials/UVs/textures).
-const _obj_mesh_backend_guards = (:threejs, :autocad, :rhino, :blender)
 
 # Normalizes a raw Revit family/type name for the OBJ-attach LOOKUP KEY only (never to build a
 # filename — the file stem comes back from C# as row[1]). Both sides of the join sanitize the raw
@@ -2716,8 +2716,7 @@ function generate_khepri_code(output_path::String; b::RVT=revit, export_obj::Boo
       has_objs = !isempty(model.fallback_meshes) ||
                  any(m -> !isempty(m.obj_name), values(model.family_meta)),
       passes = codegen_passes(b, fmap;
-                              header=add_header(b; obj_resources=has_objs,
-                                                mesh_backends=_obj_mesh_backend_guards),
+                              header=add_header(b; obj_resources=has_objs),
                               wrap=wrap_function,
                               level_names=get(model, :level_names,
                                               Dict{Float64, String}())),
