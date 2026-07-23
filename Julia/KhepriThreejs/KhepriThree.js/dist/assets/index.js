@@ -38750,6 +38750,36 @@ typedFunction(
     controls.update();
   }
 );
+typedFunction("zoomExtents", [], None, () => {
+  scene.updateMatrixWorld(true);
+  const box = new Box3();
+  for (const obj of objects.values()) {
+    let visible = true;
+    for (let o2 = obj; o2; o2 = o2.parent) {
+      if (!o2.visible) {
+        visible = false;
+        break;
+      }
+    }
+    if (visible) box.expandByObject(obj);
+  }
+  if (box.isEmpty()) return;
+  const size = box.getSize(new Vector3());
+  const center = box.getCenter(new Vector3());
+  const maxSize = Math.max(size.x, size.y, size.z);
+  const fitHeightDistance = maxSize / (2 * Math.tan(MathUtils.degToRad(camera.fov) / 2));
+  const fitWidthDistance = fitHeightDistance / camera.aspect;
+  const distance = Math.max(1.2 * Math.max(fitHeightDistance, fitWidthDistance), 1);
+  const direction = camera.position.clone().sub(controls.target);
+  if (direction.lengthSq() === 0) direction.set(1, 1, 1);
+  direction.normalize().multiplyScalar(distance);
+  controls.target.copy(center);
+  camera.position.copy(center).add(direction);
+  camera.near = distance / 100;
+  camera.far = distance * 100;
+  camera.updateProjectionMatrix();
+  controls.update();
+});
 let time = 0;
 typedFunction("stopUpdate", [], None, () => {
   time = +Date.now();

@@ -140,6 +140,7 @@ typedFunction("LineBasicMaterial", [Dict], MatId, (params: { [key: string]: any 
 typedAsyncFunction("glTFMaterial", [Str], MatId, (path: string, cont: Function) =>
 typedAsyncFunction("setEnvironment", [Str, Bool], None, (path: string, setBackground: boolean) =>
 typedFunction("setView", [Point3d, Point3d, Float32, Float32], None, (position: THREE.Vector3, target: THREE.Vector3, lens: number, _aperture: number) => {
+typedFunction("zoomExtents", [], None, () => {
 typedFunction("stopUpdate", [], None, () => {
 typedFunction("startUpdate", [], None, () => {
 typedFunction("captureImage", [], Str, () => {
@@ -163,12 +164,11 @@ const THRIds = Vector{THRId}
 const THRRef = NativeRef{THRKey, THRId}
 const THRRefs = Vector{THRRef}
 const THR = WebSocketBackend{THRKey, THRId}
-# The Three.js camera lives in the browser, so view ops (set_view/get_view/zoom_extents)
-# must dispatch to the frontend variant rather than the default BackendView(). ([H2])
 # NB: THR uses the default BackendView. It DECLARED FrontendView for years, but the declaration was
 # dead (the ::Type{THR} dispatch bug) and the FrontendView machinery reads a `view` field
 # WebSocketBackend does not have — fixing the dispatch turned zoom_extents into a crash. The camera
-# lives in the browser, which is exactly the BackendView contract.
+# lives in the browser, which is exactly the BackendView contract: view ops (b_set_view,
+# b_zoom_extents) are remote calls executed by the viewer.
 
 
 backend_name(b::THR) = b.name
@@ -735,6 +735,11 @@ _thr_world(p) =
 
 KhepriBase.b_set_view(b::THR, camera, target, lens, aperture) =
   @remote(b, setView(_thr_world(camera), _thr_world(target), lens, aperture))
+
+# The viewer owns the scene graph, so it computes the shapes' bounding box itself and reframes
+# the camera along its current viewing direction — no coordinate mapping needed on this side.
+KhepriBase.b_zoom_extents(b::THR) =
+  @remote(b, zoomExtents())
 
 # Native Three.js lights (added to currentLayer, sharing its Z-up->Y-up rotation). The point
 # light carries energy + color; the spot light uses the viewer's defaults for intensity/color

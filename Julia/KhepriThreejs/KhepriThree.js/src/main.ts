@@ -2553,37 +2553,39 @@ typedFunction("setView", [Point3d, Point3d, Float32, Float32], None,
     controls.update();
   });
 
-/*
-// See https://github.com/mrdoob/three.js/pull/14526
-function zoomCameraToSelection(camera: THREE.PerspectiveCamera, controls: OrbitControls, selection: THREE.Object3D[]) {
-const box = new THREE.Box3();
-for (const object of selection) box.expandByObject(object);
-const size = box.getSize(new THREE.Vector3());
-const center = box.getCenter(new THREE.Vector3());
-const maxSize = Math.max(size.x, size.y, size.z);
-const fitHeightDistance = maxSize / (2 * Math.atan(Math.PI * camera.fov / 360));
-const fitWidthDistance = fitHeightDistance / camera.aspect;
-const distance = Math.max(fitHeightDistance, fitWidthDistance);
-const direction = controls.target.clone()
-  .sub(camera.position)
-  .normalize()
-  .multiplyScalar(distance);
-//controls.maxDistance = distance * 10;
-controls.target.copy(center);
-camera.near = distance / 100;
-camera.far = distance * 100;
-camera.position.copy(controls.target).sub(direction);
-camera.updateProjectionMatrix();
-controls.update();
-}
-*/
-//typedFunction("zoomExtents", [], None, () => {
-//  zoomCameraToSelection(camera, controls, meshes);
-//  /*    const boundingBox = new THREE.Box3();
-//      meshes.forEach(object => boundingBox.expandBy(object));
-//      const center = boundingBox
-//      return boundingBox;*/
-//});
+// Frame every visible Khepri-created shape (the `objects` registry — the grid helper and the
+// default scene lighting are not registered there, and registered lights carry no geometry, so
+// expandByObject ignores them). Keeps the current viewing direction, CAD-style.
+typedFunction("zoomExtents", [], None, () => {
+  // The layers' Z-up rotation only reaches matrixWorld on a render frame, which may not have
+  // happened yet (e.g. batch mode or a headless capture right after drawing).
+  scene.updateMatrixWorld(true);
+  const box = new THREE.Box3();
+  for (const obj of objects.values()) {
+    let visible = true;
+    for (let o: THREE.Object3D | null = obj; o; o = o.parent) {
+      if (!o.visible) { visible = false; break; }
+    }
+    if (visible) box.expandByObject(obj);
+  }
+  if (box.isEmpty()) return;
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxSize = Math.max(size.x, size.y, size.z);
+  const fitHeightDistance = maxSize / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+  const fitWidthDistance = fitHeightDistance / camera.aspect;
+  // 1.2 leaves a margin around the model; the lower bound handles point-like scenes (maxSize 0).
+  const distance = Math.max(1.2 * Math.max(fitHeightDistance, fitWidthDistance), 1);
+  const direction = camera.position.clone().sub(controls.target);
+  if (direction.lengthSq() === 0) direction.set(1, 1, 1); // camera on target: any direction works
+  direction.normalize().multiplyScalar(distance);
+  controls.target.copy(center);
+  camera.position.copy(center).add(direction);
+  camera.near = distance / 100;
+  camera.far = distance * 100;
+  camera.updateProjectionMatrix();
+  controls.update();
+});
 
 //typedFunction("setSky", [Point3d, Point3d, Float32, Float32], None,
 //  (position: THREE.Vector3, target: THREE.Vector3, lens: number, aperture: number) => {
