@@ -1452,26 +1452,44 @@ function setWireframeActive(v: boolean) {
   objects.forEach(wireframeCheck);
 }
 */
-let selected: THREE.Mesh[] = [];
-function select(obj: THREE.Mesh) {
+let selected: THREE.Object3D[] = [];
+// The meshes that carry the geometry to highlight. A primitive Khepri shape IS a Mesh with its own
+// geometry; an OBJ/MTL family is a THREE.Object3D wrapper whose geometry lives only in descendant
+// meshes (see meshObjFmt). Overlaying just `obj.geometry` therefore produced an empty, invisible
+// highlight for families — they looked unselectable. Traverse for every real mesh instead, skipping
+// the overlay meshes we add here so re-selection doesn't highlight the highlights.
+function highlightableMeshes(obj: THREE.Object3D): THREE.Mesh[] {
+  const meshes: THREE.Mesh[] = [];
+  obj.traverse(child => {
+    if (child instanceof THREE.Mesh && child.userData.KhepriSelectionOverlay !== true) {
+      meshes.push(child);
+    }
+  });
+  return meshes;
+}
+function select(obj: THREE.Object3D) {
   if (obj.userData.KhepriSelected) {
-    obj.userData.KhepriSelected.visible = true;
+    (obj.userData.KhepriSelected as THREE.Mesh[]).forEach(o => o.visible = true);
   } else {
-    const isSelected = new THREE.Mesh(obj.geometry, selectedMaterial);
-    obj.userData.KhepriSelected = isSelected;
-    obj.add(isSelected);
+    // One translucent overlay per geometry-bearing mesh, added as its child so it inherits the full
+    // transform chain and coincides exactly. The overlay shares the mesh's geometry (disposed once,
+    // harmlessly, when the object is deleted) and the shared selectedMaterial (never disposed).
+    obj.userData.KhepriSelected = highlightableMeshes(obj).map(mesh => {
+      const overlay = new THREE.Mesh(mesh.geometry, selectedMaterial);
+      overlay.userData.KhepriSelectionOverlay = true;
+      mesh.add(overlay);
+      return overlay;
+    });
   }
   selected.push(obj);
 }
 /*
-function deselect(obj: THREE.Mesh) {
-  if (obj.userData.KhepriSelected) {
-    obj.userData.KhepriSelected.visible = false;
-  }
+function deselect(obj: THREE.Object3D) {
+  (obj.userData.KhepriSelected as THREE.Mesh[] | undefined)?.forEach(o => o.visible = false);
   selected = selected.filter((e) => e !== obj);
 }*/
 function deselectAll() {
-  selected.forEach(e => e.userData.KhepriSelected.visible = false);
+  selected.forEach(e => (e.userData.KhepriSelected as THREE.Mesh[] | undefined)?.forEach(o => o.visible = false));
   selected = [];
 }
 // Selection mode for Julia-driven interactive picking

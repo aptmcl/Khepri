@@ -37725,18 +37725,33 @@ function delAllSprites() {
   sprites.length = 0;
 }
 let selected = [];
+function highlightableMeshes(obj) {
+  const meshes = [];
+  obj.traverse((child) => {
+    if (child instanceof Mesh && child.userData.KhepriSelectionOverlay !== true) {
+      meshes.push(child);
+    }
+  });
+  return meshes;
+}
 function select(obj) {
   if (obj.userData.KhepriSelected) {
-    obj.userData.KhepriSelected.visible = true;
+    obj.userData.KhepriSelected.forEach((o2) => o2.visible = true);
   } else {
-    const isSelected = new Mesh(obj.geometry, selectedMaterial);
-    obj.userData.KhepriSelected = isSelected;
-    obj.add(isSelected);
+    obj.userData.KhepriSelected = highlightableMeshes(obj).map((mesh) => {
+      const overlay = new Mesh(mesh.geometry, selectedMaterial);
+      overlay.userData.KhepriSelectionOverlay = true;
+      mesh.add(overlay);
+      return overlay;
+    });
   }
   selected.push(obj);
 }
 function deselectAll() {
-  selected.forEach((e2) => e2.userData.KhepriSelected.visible = false);
+  selected.forEach((e2) => {
+    var _a;
+    return (_a = e2.userData.KhepriSelected) == null ? void 0 : _a.forEach((o2) => o2.visible = false);
+  });
   selected = [];
 }
 let selectionCallback = null;
