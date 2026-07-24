@@ -603,6 +603,16 @@ solid_polygon_mesh_part(top, thk, mat) =
     (cs, vcat(top_idxs, bot_idxs, side_idxs), mat)
   end
 
+# Openings are subtracted from the wall face as holes of a THREE.Shape (region-with-holes).
+# THREE's hole triangulation only behaves when a hole is strictly INTERIOR: a hole that
+# touches the outer boundary on several edges (e.g. a full-width, floor-to-2.68 void) or that
+# shares an edge with a neighbouring hole (a bottom void + a top strip meeting at one z) breaks
+# into triangular slivers. So we inset every opening by this margin on all four sides — except
+# a floor-anchored bottom, which stays at z=0 (a single-edge touch triangulates cleanly once the
+# sides carry material). A few mm is imperceptible at building scale and separates stacked
+# openings so their holes never share an edge.
+const wall_opening_render_inset = 0.003
+
 KhepriBase.b_wall_no_openings(b::THR, w_path, w_height, l_thickness, r_thickness, lmat, rmat, smat) =
   path_length(w_path) < coincidence_tolerance() ? void_ref(b) :
   let r_vs = path_vertices(offset(w_path, -r_thickness)),
@@ -641,39 +651,39 @@ KhepriBase.b_wall_with_openings(b::THR, w_path, w_height, l_thickness, r_thickne
         openings = filter(openings) do op
           if prevlength <= op.path_position < currlength ||
              prevlength <= op.path_position + op.width <= currlength
-            # Cap the opening to the wall FACE: w_height was scaled by wall_z_fighting_factor (0.998),
-            # so an opening reaching the true top would poke above the face — the hole then escapes
-            # the outer polygon and triangulates into slivers (openings rendered as triangles). Keep
-            # a sub-cm gap so the hole stays strictly interior at the top.
-            let op_height = min(op.height, max(0.0, w_height - op.base_height - 0.002)),
-                op_at_start = op.path_position <= prevlength,
-                op_at_end = op.path_position + op.width >= currlength,
-                op_path = subpath(w_path,
-                                  max(prevlength, op.path_position),
-                                  min(currlength, op.path_position + op.width)),
-                r_op_path = offset(op_path, -r_thickness),
-                l_op_path = offset(op_path,  l_thickness),
-                fixed_r_op_path =
-                  open_polygonal_path([path_start(op_at_start ? r_w_path : r_op_path),
-                                       path_end(op_at_end ? r_w_path : r_op_path)]),
-                fixed_l_op_path =
-                  open_polygonal_path([path_start(op_at_start ? l_w_path : l_op_path),
-                                       path_end(op_at_end ? l_w_path : l_op_path)]),
-                r_op_translated = translate(fixed_r_op_path, vz(op.base_height)),
-                l_op_translated = translate(fixed_l_op_path, vz(op.base_height)),
-                c_r_op_path = closed_path_for_height(r_op_translated, op_height),
-                c_l_op_path = closed_path_for_height(l_op_translated, op_height),
-                r_jacket = op.base_height < coincidence_tolerance() ?
-                  let ps = path_vertices(r_op_translated)
-                    open_polygonal_path([ps[1], ps[1]+vz(op_height), ps[end]+vz(op_height), ps[end]])
-                  end : c_r_op_path,
-                l_jacket = op.base_height < coincidence_tolerance() ?
-                  let ps = path_vertices(l_op_translated)
-                    open_polygonal_path([ps[1], ps[1]+vz(op_height), ps[end]+vz(op_height), ps[end]])
-                  end : c_l_op_path
-              push!(parts, strip_mesh_part(reverse(r_jacket), reverse(l_jacket), smat_ref))
-              c_r_w_path, c_l_w_path = subtract_wall_paths(b, c_r_w_path, c_l_w_path, c_r_op_path, c_l_op_path)
-              !(op.path_position >= prevlength && op.path_position + op.width <= currlength)
+            # Inset the opening on all four sides so its hole stays strictly interior to the wall
+            # face — a floor-anchored bottom (base ≈ 0) keeps z=0. This stops THREE's hole
+            # triangulation from slivering when a hole touches several boundary edges or abuts a
+            # neighbouring hole. See wall_opening_render_inset.
+            let eps = wall_opening_render_inset,
+                on_floor = op.base_height < coincidence_tolerance(),
+                s_lo = max(prevlength, op.path_position) + eps,
+                s_hi = min(currlength, op.path_position + op.width) - eps,
+                z0 = on_floor ? 0.0 : op.base_height + eps,
+                z1 = min(op.base_height + op.height, w_height) - eps,
+                keep_next = !(op.path_position >= prevlength &&
+                              op.path_position + op.width <= currlength)
+              if s_hi - s_lo > eps && z1 - z0 > eps
+                let op_path = subpath(w_path, s_lo, s_hi),
+                    oph = z1 - z0,
+                    r_op_translated = translate(offset(op_path, -r_thickness), vz(z0)),
+                    l_op_translated = translate(offset(op_path,  l_thickness), vz(z0)),
+                    c_r_op_path = closed_path_for_height(r_op_translated, oph),
+                    c_l_op_path = closed_path_for_height(l_op_translated, oph),
+                    r_jacket = on_floor ?
+                      let ps = path_vertices(r_op_translated)
+                        open_polygonal_path([ps[1], ps[1]+vz(oph), ps[end]+vz(oph), ps[end]])
+                      end : c_r_op_path,
+                    l_jacket = on_floor ?
+                      let ps = path_vertices(l_op_translated)
+                        open_polygonal_path([ps[1], ps[1]+vz(oph), ps[end]+vz(oph), ps[end]])
+                      end : c_l_op_path
+                  push!(parts, strip_mesh_part(reverse(r_jacket), reverse(l_jacket), smat_ref))
+                  c_r_w_path, c_l_w_path =
+                    subtract_wall_paths(b, c_r_w_path, c_l_w_path, c_r_op_path, c_l_op_path)
+                end
+              end
+              keep_next
             end
           else
             true
