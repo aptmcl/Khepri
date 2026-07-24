@@ -254,6 +254,9 @@ public Element[] DocElements()
 public Element[] DocFamilies()
 public Element[] DocFloors()
 public Element[] DocCeilings()
+public Element[] DocOpenings()
+public ElementId OpeningHostId(Element element)
+public double[] WallProfile(Element element)
 public Element[] DocWalls()
 public Element[] DocWallsAtLevel(Level level)
 public XYZ[] LineWallVertices(Element element)
@@ -1617,6 +1620,64 @@ _material_from_revit(m) =
                specular=clamp(m[5]/128, 0.0, 1.0),
                transmission=clamp(m[4]/100, 0.0, 1.0))
 
+# Reproduce a Revit wall's EDITED PROFILE as rectangular openings. WallProfile returns the wall's
+# main-face outline in wall-local coords (u along the location line, v above the base); where it is
+# not the plain [0,L]x[0,H] rectangle, material has been notched away. A per-v-band sweep turns the
+# complement (the void) into WallOpening rectangles. Only rectilinear profiles are handled (sloped
+# tops / arcs stay solid, as before); voids below ~0.25 m in either dimension are dropped as
+# join/rounding artifacts.
+const _wall_opening_eps = 0.25
+
+_wall_openings_from_profile(b::RVT, r, L, H) =
+  let flat = try @remote(b, WallProfile(r)) catch; Float64[] end
+    length(flat) < 8 && return KhepriBase.WallOpening[]
+    let pts = [(flat[2i-1], flat[2i]) for i in 1:div(length(flat), 2)],
+        n = length(pts),
+        rectilinear = all(abs(pts[i][1] - pts[mod1(i+1, n)][1]) < 1e-3 ||
+                          abs(pts[i][2] - pts[mod1(i+1, n)][2]) < 1e-3 for i in 1:n)
+      rectilinear ? _decompose_wall_voids(pts, L, H) : KhepriBase.WallOpening[]
+    end
+  end
+
+_decompose_wall_voids(pts, L, H) =
+  let n = length(pts),
+      vedges = [(pts[i][1], min(pts[i][2], pts[mod1(i+1, n)][2]), max(pts[i][2], pts[mod1(i+1, n)][2]))
+                for i in 1:n if abs(pts[i][1] - pts[mod1(i+1, n)][1]) < 1e-3],
+      vlevels = sort(unique(vcat([0.0, H], [clamp(v, 0.0, H) for e in vedges for v in (e[2], e[3])]))),
+      ops = KhepriBase.WallOpening[]
+    for k in 1:length(vlevels)-1
+      vlo, vhi = vlevels[k], vlevels[k+1]
+      (vhi - vlo) < _wall_opening_eps && continue
+      vmid = (vlo + vhi) / 2
+      # u-crossings of vertical edges spanning vmid → solid spans are consecutive pairs.
+      xs = sort([e[1] for e in vedges if e[2] - 1e-6 < vmid < e[3] + 1e-6])
+      pos = 0.0
+      for i in 1:div(length(xs), 2)
+        a, c = xs[2i-1], xs[2i]
+        a - pos > _wall_opening_eps && push!(ops, KhepriBase.WallOpening(pos, vlo, a - pos, vhi - vlo))
+        pos = max(pos, c)
+      end
+      L - pos > _wall_opening_eps && push!(ops, KhepriBase.WallOpening(pos, vlo, L - pos, vhi - vlo))
+    end
+    _merge_stacked_wall_openings(ops)
+  end
+
+# Merge openings stacked directly on top of each other (same u-span, contiguous v) into one rectangle.
+_merge_stacked_wall_openings(ops) =
+  let merged = KhepriBase.WallOpening[]
+    for o in sort(ops, by = o -> (round(o.path_position, digits=3), round(o.width, digits=3), o.base_height))
+      if !isempty(merged) && abs(merged[end].path_position - o.path_position) < 1e-3 &&
+         abs(merged[end].width - o.width) < 1e-3 &&
+         abs((merged[end].base_height + merged[end].height) - o.base_height) < 1e-3
+        p = merged[end]
+        merged[end] = KhepriBase.WallOpening(p.path_position, p.base_height, p.width, p.height + o.height)
+      else
+        push!(merged, o)
+      end
+    end
+    merged
+  end
+
 wall_from_ref(r, b::RVT) =
   let curve_type = @remote(b, WallCurveType(r)),
       is_curtain = @remote(b, WallIsCurtainWall(r)),
@@ -1692,9 +1753,14 @@ wall_from_ref(r, b::RVT) =
                 fam = th > 1e-6 ?
                   wall_family(thickness=th, right_material=mat, left_material=mat, side_material=mat) :
                   wall_family(right_material=mat, left_material=mat, side_material=mat)
-              wall(path, bottom_level=bottom_level, top_level=top_level, family=fam,
-                   base_offset=abs(boff) > 1e-6 ? boff : 0,
-                   top_offset=abs(toff) > 1e-6 ? toff : 0)
+              let boff_e = abs(boff) > 1e-6 ? boff : 0,
+                  toff_e = abs(toff) > 1e-6 ? toff : 0,
+                  wall_len = path_length(path),
+                  wall_h = (top_level.height + toff_e) - (bottom_level.height + boff_e)
+                wall(path, bottom_level=bottom_level, top_level=top_level, family=fam,
+                     base_offset=boff_e, top_offset=toff_e,
+                     openings=_wall_openings_from_profile(b, r, wall_len, wall_h))
+              end
             end
           end
     ref!(b, s, r)
