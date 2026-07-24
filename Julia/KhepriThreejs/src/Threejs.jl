@@ -580,7 +580,11 @@ KhepriBase.b_wall_with_openings(b::THR, w_path, w_height, l_thickness, r_thickne
         openings = filter(openings) do op
           if prevlength <= op.path_position < currlength ||
              prevlength <= op.path_position + op.width <= currlength
-            let op_height = op.height,
+            # Cap the opening to the wall FACE: w_height was scaled by wall_z_fighting_factor (0.998),
+            # so an opening reaching the true top would poke above the face — the hole then escapes
+            # the outer polygon and triangulates into slivers (openings rendered as triangles). Keep
+            # a sub-cm gap so the hole stays strictly interior at the top.
+            let op_height = min(op.height, max(0.0, w_height - op.base_height - 0.002)),
                 op_at_start = op.path_position <= prevlength,
                 op_at_end = op.path_position + op.width >= currlength,
                 op_path = subpath(w_path,
