@@ -542,14 +542,53 @@ strip_mesh_part(path1, path2, mat) =
       quad_strip_mesh_part(v1s, v2s, mat)
   end
 
-# Solid parallelepiped as a mesh part: corner `o` with edge vectors `u`, `v`, `w`.
-# 8 corners, 12 triangles covering all six faces. (Backend materials are double-sided,
-# so face winding does not affect visibility here.)
-box_mesh_part(o, u, v, w, mat) =
-  let cs = [o, o+u, o+u+v, o+v, o+w, o+u+w, o+u+v+w, o+v+w],
-      faces = ((1,4,3,2), (5,6,7,8), (1,2,6,5), (2,3,7,6), (3,4,8,7), (4,1,5,8)),
-      idxs = Int32[i-1 for (a,b,c,d) in faces for i in (a,b,c, a,c,d)]
-    (cs, idxs, mat)
+# Mesh parts for ONE stair run, built as a single closed solid: the stepped top surface
+# (a riser then a tread per step), a sloped underside, front/back end faces, and the two
+# staircase side caps (a waist parallelogram plus one triangle per step). Crucially this
+# shares NO coincident exposed faces — unlike a pile of overlapping tread/riser/waist boxes,
+# whose side faces all landed in the same two ±half planes and z-fought on the visible sides.
+# All faces are separate parts (flat-shaded), giving crisp steps.
+#   near0 : run start at the NEAR edge (z = run base);  dir : unit vector along the run
+#   wvec  : perp * width (near edge → far edge)
+#   n     : tread count;  td : tread depth;  rh : riser height
+#   extra_top_riser : true for multi-run (a final riser lands on the next level), false for
+#                     a straight run (the last tread tops out the run)
+#   wd    : structural depth below the pitch line (family.thickness)
+stair_run_parts(near0, dir, wvec, n, td, rh, extra_top_riser, wd, tmat, rmat, smat) =
+  let parts = [],
+      nP = (s, zr) -> near0 + dir * s + vz(zr),                 # near-edge point
+      fP = (s, zr) -> near0 + dir * s + vz(zr) + wvec,          # far-edge point
+      top_zr = extra_top_riser ? (n + 1) * rh : n * rh
+    # Stepped top surface.
+    for k in 0:(n - 1)
+      push!(parts, polygon_mesh_part(
+        [nP(k*td, k*rh), fP(k*td, k*rh), fP(k*td, (k+1)*rh), nP(k*td, (k+1)*rh)], rmat))
+      push!(parts, polygon_mesh_part(
+        [nP(k*td, (k+1)*rh), fP(k*td, (k+1)*rh),
+         fP((k+1)*td, (k+1)*rh), nP((k+1)*td, (k+1)*rh)], tmat))
+    end
+    extra_top_riser &&
+      push!(parts, polygon_mesh_part(
+        [nP(n*td, n*rh), fP(n*td, n*rh), fP(n*td, (n+1)*rh), nP(n*td, (n+1)*rh)], rmat))
+    # Sloped underside, front end, and back end (where the run meets the landing / top).
+    push!(parts, polygon_mesh_part(
+      [nP(0.0, -wd), nP(n*td, n*rh - wd), fP(n*td, n*rh - wd), fP(0.0, -wd)], smat))
+    push!(parts, polygon_mesh_part(
+      [nP(0.0, -wd), nP(0.0, 0.0), fP(0.0, 0.0), fP(0.0, -wd)], smat))
+    push!(parts, polygon_mesh_part(
+      [nP(n*td, n*rh - wd), nP(n*td, top_zr), fP(n*td, top_zr), fP(n*td, n*rh - wd)], smat))
+    # Two staircase side caps: waist parallelogram + one triangle per step (tiles the profile).
+    for e in (0.0, 1.0)
+      let P = (s, zr) -> near0 + dir * s + vz(zr) + wvec * e
+        push!(parts, polygon_mesh_part(
+          [P(0.0, -wd), P(0.0, 0.0), P(n*td, n*rh), P(n*td, n*rh - wd)], smat))
+        for k in 0:(n - 1)
+          push!(parts, polygon_mesh_part(
+            [P(k*td, k*rh), P(k*td, (k+1)*rh), P((k+1)*td, (k+1)*rh)], smat))
+        end
+      end
+    end
+    parts
   end
 
 # Extrude the (top) polygon `top` straight down by `thk` into a solid slab mesh part:
@@ -686,64 +725,54 @@ Solid stairs for Three.js.
 
 The portable defaults (`b_stair` / `b_multi_run_stair` in KhepriBase) draw each tread,
 riser and landing as a single zero-thickness `surface_polygon`, so introspected stairs
-read as a stack of floating sheets. Here we build genuine SOLIDS from the same inputs —
-extruded treads and risers, a sloped structural "waist" slab under each run, and thick
-landing plates — and ship them as ONE `groupedMesh` (a single selectable object). This is
-purely render-side: the generated programs are unchanged, and no new frontend op is added
-(groupedMesh already exists).
+read as a stack of floating sheets. Here each run is built as ONE closed solid (see
+`stair_run_parts`) and the landings as extruded plates, shipped as ONE `groupedMesh` per
+stair (a single selectable object). This is purely render-side: the generated programs are
+unchanged, and no new frontend op is added (groupedMesh already exists).
 
-Treads/risers are thin finish slabs sitting on the waist; the waist and landings use
-`family.thickness` (the structural slab depth). The width footprint stays identical to the
-portable version — `base_point` is the near edge, `perp = cross(dir, vz(1)) = (dy, -dx)`
-points to the far edge — so the auto-railings in `realize(::Stair)` still align.
+The run solid shares no coincident exposed faces, so it does not z-fight — an earlier
+box-per-tread/riser/waist version did, because every box's side face landed in the same two
+±half planes on the visible sides of the stair. The waist/landing depth is `family.thickness`.
+The width footprint stays identical to the portable version — `base_point` is the near edge,
+`perp = cross(dir, vz(1)) = (dy, -dx)` points to the far edge — so the auto-railings in
+`realize(::Stair)` still align.
 =#
-"Tread finish-slab thickness (m) for solid Three.js stairs."
-const threejs_stair_tread_thickness = 0.05
-"Riser finish-slab thickness (m) for solid Three.js stairs."
-const threejs_stair_riser_thickness = 0.04
-
 KhepriBase.b_stair(b::THR, base_point, direction, bottom_level, top_level, family) =
+  # Open stairs (no risers) have no monolithic body — defer to the portable surface default.
+  !family.has_risers ?
+    invoke(KhepriBase.b_stair,
+           Tuple{Backend, typeof(base_point), typeof(direction),
+                 typeof(bottom_level), typeof(top_level), typeof(family)},
+           b, base_point, direction, bottom_level, top_level, family) :
   let bottom_h = level_height(b, bottom_level),
       top_h = level_height(b, top_level),
       total_h = top_h - bottom_h,
       n_steps = stair_step_count(total_h, family.riser_height),
       riser_h = total_h / n_steps,
-      tread_d = family.tread_depth,
       dir = unitized(direction),
       perp = vxy(cy(dir), -cx(dir)),          # cross(dir, vz(1)); base_point is the NEAR edge
-      pw = perp * family.width,
-      tt = threejs_stair_tread_thickness,
-      rt = threejs_stair_riser_thickness,
-      wt = family.thickness,
-      o = in_world(base_point),
-      tmat = material_ref(b, family.tread_material),
-      rmat = material_ref(b, family.riser_material),
-      smat = material_ref(b, family.stringer_material),
-      parts = []
-    for i in 0:(n_steps - 1)
-      let base = o + dir * (i * tread_d) + vz(bottom_h + i * riser_h)   # step front, near edge
-        family.has_risers &&
-          push!(parts, box_mesh_part(base, dir * rt, pw, vz(riser_h), rmat))
-        push!(parts, box_mesh_part(base + vz(riser_h - tt), dir * tread_d, pw, vz(tt), tmat))
-      end
-    end
-    # Sloped waist slab carrying the steps (its top passes through every step front).
-    family.has_risers && wt > 1e-6 &&
-      push!(parts, box_mesh_part(o + vz(bottom_h - wt),
-                                 dir * (n_steps * tread_d) + vz(n_steps * riser_h),
-                                 pw, vz(wt), smat))
+      near0 = in_world(base_point) + vz(bottom_h),
+      # A straight run: the last tread tops out the run (no trailing riser onto a landing).
+      parts = stair_run_parts(near0, dir, perp * family.width, n_steps, family.tread_depth,
+                              riser_h, false, family.thickness,
+                              material_ref(b, family.tread_material),
+                              material_ref(b, family.riser_material),
+                              material_ref(b, family.stringer_material))
     isempty(parts) ? void_ref(b) : @remote(b, groupedMesh(parts))
   end
 
 # Solid multi-run stair from the 3D plan CENTERLINE (+ optional explicit landing
-# footprints). Mirrors the run/landing segmentation of the portable default, but emits
-# solid boxes/slabs instead of surfaces. See the block comment on `b_stair` above.
+# footprints). Mirrors the run/landing segmentation of the portable default, but emits one
+# closed solid per run (plus extruded landing plates). See the block comment on `b_stair`.
 KhepriBase.b_multi_run_stair(b::THR, path, landings, bottom_level, top_level, family) =
+  !family.has_risers ?
+    invoke(KhepriBase.b_multi_run_stair,
+           Tuple{Backend, typeof(path), typeof(landings),
+                 typeof(bottom_level), typeof(top_level), typeof(family)},
+           b, path, landings, bottom_level, top_level, family) :
   let bottom_h = level_height(b, bottom_level),
       vs = [in_world(p) + vz(bottom_h) for p in path_vertices(path)],
       half = family.width / 2,
-      tt = threejs_stair_tread_thickness,
-      rt = threejs_stair_riser_thickness,
       wt = family.thickness,                  # structural slab depth (waist + landings)
       tmat = material_ref(b, family.tread_material),
       rmat = material_ref(b, family.riser_material),
@@ -763,19 +792,8 @@ KhepriBase.b_multi_run_stair(b::THR, path, landings, bottom_level, top_level, fa
               n_treads = max(1, Int(round(hlen / family.tread_depth))),
               tread_d = hlen / n_treads,
               riser_h = dz / (n_treads + 1)
-            for k in 0:n_treads
-              let base = a + dir * (k * tread_d) + vz(k * riser_h)
-                family.has_risers &&
-                  push!(parts, box_mesh_part(base - pv, dir * rt, pv * 2, vz(riser_h), rmat))
-                k < n_treads &&
-                  push!(parts, box_mesh_part(base + vz(riser_h - tt) - pv,
-                                             dir * tread_d, pv * 2, vz(tt), tmat))
-              end
-            end
-            family.has_risers && wt > 1e-6 &&
-              push!(parts, box_mesh_part(a - pv - vz(wt),
-                                         dir * (n_treads * tread_d) + vz(n_treads * riser_h),
-                                         pv * 2, vz(wt), smat))
+            append!(parts, stair_run_parts(a - pv, dir, pv * 2, n_treads, tread_d,
+                                           riser_h, true, wt, tmat, rmat, smat))
           end
         elseif hlen > 1e-9 && landings === nothing
           # Synthesized solid landing plate (only when explicit footprints are absent):
