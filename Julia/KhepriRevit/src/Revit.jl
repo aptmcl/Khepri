@@ -1232,6 +1232,37 @@ realize(b::RVT, s::Door) =
     end
   end
 
+# A bare WallOpening (a rectangular void from an edited wall profile — see
+# _wall_openings_from_profile) carries no door/window family to insert, so it is NOT handled by
+# realize_wall_openings above. The portable realize_wall_opening(::WallOpening) builds a mesh
+# cutter and calls b_subtract_ref — which Revit cannot do: it has no b_trig, and its native Wall
+# elements are not solid-subtractable. Cut the void with Revit's OWN wall-opening API instead
+# (doc.Create.NewOpening, via CreatePolygonalOpening): a rectangular profile in the wall's plane
+# spanning the opening's width × height, hosted by the segment the opening falls in. Best-effort —
+# Revit may reject a degenerate/oversized rectangle, in which case that patch stays solid rather
+# than aborting the whole build.
+KhepriBase.realize_wall_opening(b::RVT, w_ref, w_path, l_thickness, r_thickness,
+                                op::KhepriBase.WallOpening, family) =
+  let s0 = max(0.0, op.path_position),
+      s1 = min(path_length(w_path), op.path_position + op.width)
+    if s1 - s0 > 1e-6 && op.height > 1e-6
+      let op_seg = subpath(w_path, s0, s1),
+          p0 = path_start(op_seg),
+          p1 = path_end(op_seg),
+          corners = [p0 + vz(op.base_height), p1 + vz(op.base_height),
+                     p1 + vz(op.base_height + op.height), p0 + vz(op.base_height + op.height)],
+          wall_refs = ref_values(b, w_ref),
+          (host, _) = _wall_host_and_offset(wall_refs, w_path, (s0 + s1) / 2)
+        try
+          @remote(b, CreatePolygonalOpening(corners, host))
+        catch e
+          @warn "Revit rejected a wall opening; that patch stays solid" opening=op maxlog=8
+        end
+      end
+    end
+    w_ref
+  end
+
 #
 
 # Functional wall construction with door/window specs.
