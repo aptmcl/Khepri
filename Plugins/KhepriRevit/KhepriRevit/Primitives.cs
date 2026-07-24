@@ -2029,6 +2029,65 @@ namespace KhepriRevit {
         public Element[] DocCeilings() => (new FilteredElementCollector(doc).OfClass(typeof(Ceiling)))
             .Where(e => !IsGroupMember(e)).ToArray();
 
+        // Standalone openings (the Opening class): rectangular wall openings (OST_SWallRectOpening),
+        // shafts, and vertical openings in floors/roofs/ceilings. Doors/windows are FamilyInstances,
+        // not Openings, so this is exactly the set of voids introspection otherwise never sees.
+        public Element[] DocOpenings() =>
+            new FilteredElementCollector(doc).OfClass(typeof(Opening)).ToArray();
+
+        // The element an Opening is cut into (a Wall for a wall opening; a Floor/Roof/Ceiling for a
+        // vertical one). InvalidElementId when unhosted.
+        public ElementId OpeningHostId(Element e) =>
+            (e is Opening op && op.Host != null) ? op.Host.Id : ElementId.InvalidElementId;
+
+        // Elevation profile of a wall in wall-local 2D (u = distance along the location line from its
+        // start; v = height above the wall base), as a flat [u0,v0,u1,v1,...] loop of the wall's main
+        // vertical face. A plain wall gives a rectangle; an EDITED profile gives its true notched
+        // shape — the signal that parametric reproduction (centerline x height x thickness) is losing
+        // a sketched void (e.g. a concrete frame around a large opening). Empty if no suitable face.
+        public double[] WallProfile(Element e) {
+            if (!(e is Wall wall) || !(wall.Location is LocationCurve lc)) return new double[0];
+            Curve curve = lc.Curve;
+            XYZ p0 = curve.GetEndPoint(0);
+            XYZ along = curve.GetEndPoint(1) - p0;
+            if (along.GetLength() < 1e-9) return new double[0];
+            along = along.Normalize();
+            double baseZ = p0.Z;
+            var opt = new Options { ComputeReferences = false, DetailLevel = ViewDetailLevel.Fine };
+            GeometryElement geo = wall.get_Geometry(opt);
+            if (geo == null) return new double[0];
+            // Main face: the largest planar face whose normal is horizontal and perpendicular to the
+            // wall run (one of the two big vertical faces).
+            PlanarFace best = null; double bestArea = 0;
+            foreach (GeometryObject go in geo)
+                if (go is Solid solid && solid.Volume > 1e-9)
+                    foreach (Face f in solid.Faces)
+                        if (f is PlanarFace pf && Math.Abs(pf.FaceNormal.Z) < 0.05
+                            && Math.Abs(pf.FaceNormal.DotProduct(along)) < 0.05 && pf.Area > bestArea)
+                            { bestArea = pf.Area; best = pf; }
+            if (best == null) return new double[0];
+            // Outer loop = the CurveLoop spanning the largest u*v bounding area.
+            CurveLoop outer = null; double outerSpan = -1;
+            foreach (CurveLoop cl in best.GetEdgesAsCurveLoops()) {
+                double umin = 1e30, umax = -1e30, vmin = 1e30, vmax = -1e30;
+                foreach (Curve c in cl) {
+                    XYZ q = c.GetEndPoint(0);
+                    double u = (q - p0).DotProduct(along), v = q.Z - baseZ;
+                    umin = Math.Min(umin, u); umax = Math.Max(umax, u);
+                    vmin = Math.Min(vmin, v); vmax = Math.Max(vmax, v);
+                }
+                double span = (umax - umin) * (vmax - vmin);
+                if (span > outerSpan) { outerSpan = span; outer = cl; }
+            }
+            var pts = new List<double>();
+            foreach (Curve c in outer) {
+                XYZ q = c.GetEndPoint(0);
+                pts.Add((q - p0).DotProduct(along) * from_feet);
+                pts.Add((q.Z - baseZ) * from_feet);
+            }
+            return pts.ToArray();
+        }
+
         // The member walls of a stacked wall, so introspection can claim them (the parent represents
         // them; unclaimed they would double-emit as fallback meshes).
         public ElementId[] StackedWallMemberIds(Element element) {
