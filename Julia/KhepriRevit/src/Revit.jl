@@ -1636,7 +1636,10 @@ KhepriBase.b_all_walls(b::RVT) =
   end
 KhepriBase.b_all_walls_at_level(b::RVT, level::Level) =
   with_introspection(b) do
-    [wall_from_ref(r, b) for r in @remote(b, DocWallsAtLevel(ref(level).value))]
+    # `ref(level)` (no backend) is not a method — this raised MethodError on the first
+    # live call. The method was unreachable until the hook was wired up, so the bug sat
+    # latent. `ref_value(b, level)` is the idiomatic form used everywhere else here.
+    [wall_from_ref(r, b) for r in @remote(b, DocWallsAtLevel(ref_value(b, level)))]
   end
 
 # Map a Revit element material [r,g,b,transparency(0-100),shininess(0-128),smoothness(0-100)] to a
