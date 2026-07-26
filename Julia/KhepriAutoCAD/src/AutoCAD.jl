@@ -1479,7 +1479,7 @@ KhepriBase.b_delete_all_shape_refs(b::ACAD) =
     nothing
   end
 
-backend_set_length_unit(b::ACAD, unit::String) = @remote(b, SetLengthUnit(unit))
+b_set_length_unit(b::ACAD, unit::String) = @remote(b, SetLengthUnit(unit))
 
 # Dimensions
 
@@ -1619,7 +1619,10 @@ KhepriBase.b_set_layer_visible(b::ACAD, layer, visible) =
 KhepriBase.b_set_layer_opacity(b::ACAD, layer, opacity) =
   @remote(b, SetLayerTransparency(ref_value(b, layer), round(UInt8, opacity * 255)))
 
-switch_to_layer(to, b::ACAD) =
+# `switch_to_layer` is a `@defcbs`, so the hook is `b_switch_to_layer(b, layer)` —
+# backend first. Defining the bare exported name here only shadowed KhepriBase's
+# generic inside this module (see the `backend_*` note above): the method was dead.
+b_switch_to_layer(b::ACAD, to) =
     let from = current_layer()
       if to != from
         set_layer_visible(to, true)
@@ -1828,24 +1831,33 @@ b_generate_captured_shapes(b::ACAD, ss::Shapes) =
 
 # Register for notification
 
-backend_register_shape_for_changes(b::ACAD, s::Shape) =
+#=
+`register_shape_for_changes` / `unregister_shape_for_changes` /
+`waiting_for_changes` come from `@defshapeop`, so they are EXPORTED (not
+public-but-unexported) and therefore are NOT part of the `@import_backend_api`
+import list — extending them requires the explicit `KhepriBase.` qualification.
+Their `@defshapeop` signature is `(s::Shape, b::Backend)`, i.e. the shape comes
+FIRST; that is the order `on_change`/`register_for_changes` dispatch on.
+`changed_shape` is a `@defcb`, so its hook is the public `b_changed_shape`.
+=#
+KhepriBase.register_shape_for_changes(s::Shape, b::ACAD) =
     let conn = connection(b)
         @remote(b, RegisterForChanges(ref_value(b, s)))
         @remote(b, DetectCancel())
         s
     end
 
-backend_unregister_shape_for_changes(b::ACAD, s::Shape) =
+KhepriBase.unregister_shape_for_changes(s::Shape, b::ACAD) =
     let conn = connection(b)
         @remote(b, UnregisterForChanges(ref_value(b, s)))
         @remote(b, UndetectCancel())
         s
     end
 
-backend_waiting_for_changes(b::ACAD, s::Shape) =
+KhepriBase.waiting_for_changes(s::Shape, b::ACAD) =
     ! @remote(b, WasCanceled())
 
-backend_changed_shape(b::ACAD, ss::Shapes) =
+b_changed_shape(b::ACAD, ss::Shapes) =
     let conn = connection(b)
         changed = []
         while length(changed) == 0 && ! @remote(b, WasCanceled())
@@ -1875,20 +1887,20 @@ KhepriBase.b_unhighlight_all_refs(b::ACAD) =
   @remote(b, DeselectAllShapes())
 
 
-backend_pre_selected_shapes_from_set(ss::Shapes) =
-  length(ss) == 0 ? [] : pre_selected_shapes_from_set(ss, backend(ss[1]))
+#=
+The `pre_selected_shapes_from_set` trio was dropped when KhepriBase migrated the
+`backend_*` hooks to `b_*`: KhepriBase defines no such operation any more, so
+nothing dispatched to these methods, and the 1-arg entry point delegated to a
+`pre_selected_shapes_from_set` that no longer exists anywhere (an UndefVarError
+had it ever been reached). Removed rather than renamed — there is no current
+hook to attach them to. `GetPreSelectedShapes` remains available on the plugin
+if the operation is reintroduced in KhepriBase.
+=#
 
-# HACK: This must be implemented for all backends
-backend_pre_selected_shapes_from_set(ss::Shapes, b::Backend) = []
-
-backend_pre_selected_shapes_from_set(b::ACAD, ss::Shapes) =
-  let refs = map(id -> @remote(b, GetHandleFromShape(id)), @remote(b, GetPreSelectedShapes()))
-    filter(s -> @remote(b, GetHandleFromShape(ref_value(b, s))) in refs, ss)
-  end
-backend_disable_update(b::ACAD) =
+b_disable_update(b::ACAD) =
   @remote(b, DisableUpdate())
 
-backend_enable_update(b::ACAD) =
+b_enable_update(b::ACAD) =
   @remote(b, EnableUpdate())
 
 # Render
@@ -2003,7 +2015,7 @@ mentalray_render_view(name::String) =
         @remote(b, Command("._-render P _R $(render_width()) $(render_height()) _yes $(prepare_for_saving_file(render_pathname(name)))\n"))
     end
 
-backend_save_as(b::ACAD, pathname::String, format::String) =
+b_save_as(b::ACAD, pathname::String, format::String) =
     @remote(b, SaveAs(pathname, format))
 
 
