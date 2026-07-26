@@ -171,7 +171,12 @@ const THR = WebSocketBackend{THRKey, THRId}
 # b_zoom_extents) are remote calls executed by the viewer.
 
 
-backend_name(b::THR) = b.name
+# NB: no `backend_name` method here. `backend_name` is EXPORTED by KhepriBase, so it is
+# excluded from the `@import_backend_api` set; a bare `backend_name(b::THR) = b.name`
+# defined a *shadowing* function in this module instead of extending KhepriBase's generic
+# (dead for dispatch, and it hid KhepriBase's method from callers inside/using this module).
+# It was also redundant: KhepriBase already has `backend_name(b::RemoteBackend) = b.name`,
+# which THR inherits via WebSocketBackend <: RemoteBackend.
 
 resource_request_path(request) =
   try
