@@ -3,20 +3,14 @@ using Dates
 # Coordinate convention: Revit uses right-handed Z-up, same as Khepri.
 # No axis transforms needed.
 
+# The `all_<category>` family now lives in KhepriBase (BIM.jl) as `@defcb`s and
+# reaches users through `@reexport using KhepriBase`; Revit supplies the native
+# `b_all_*` hooks below rather than its own copies of the frontend names. Only
+# the two with no portable counterpart are exported here.
 export
     revit,
-    all_walls,
-    all_floors,
-    all_columns,
-    all_beams,
-    all_doors,
-    all_windows,
-    all_ceilings,
-    all_groups,
-    all_roofs,
-    all_fixtures,
-    all_stairs,
-    all_railings,
+    all_groups,    # returns GroupInstanceInfo, a Revit-specific record
+    all_floors,    # Revit-idiomatic alias for the portable all_slabs
     generate_khepri_code,
     introspect_model,
     wall_with_openings,
@@ -1590,7 +1584,7 @@ KhepriBase.b_delete_ref(b::RVT, r::RVTId) =
 # prompt_position removed: the Revit plugin has no GetPoint RPC (only
 # GetSelectedElements). Interactive position picking is not supported on Revit.
 
-all_levels(b::RVT) =
+KhepriBase.b_all_levels(b::RVT) =
   with_introspection(b) do
     [level_from_ref(r, b) for r in @remote(b, DocLevels())]
   end
@@ -1630,17 +1624,17 @@ level_from_ref(r, b::RVT) =
 
 # All parametrically-readable elements, by concatenating the per-category readers (there is no
 # generic per-element reader — DocElements ids without a reader are the mesh-fallback set).
-all_elements(b::RVT) =
+KhepriBase.b_all_elements(b::RVT) =
   with_introspection(b) do
-    vcat(all_walls(b), all_floors(b), all_columns(b), all_beams(b),
-         all_ceilings(b), all_roofs(b), all_fixtures(b), all_stairs(b), all_railings(b))
+    vcat(b_all_walls(b), b_all_slabs(b), b_all_columns(b), b_all_beams(b),
+         b_all_ceilings(b), b_all_roofs(b), b_all_fixtures(b), b_all_stairs(b), b_all_railings(b))
   end
 
-all_walls(b::RVT) =
+KhepriBase.b_all_walls(b::RVT) =
   with_introspection(b) do
     [wall_from_ref(r, b) for r in @remote(b, DocWalls())]
   end
-all_walls_at_level(level::Level, b::RVT) =
+KhepriBase.b_all_walls_at_level(b::RVT, level::Level) =
   with_introspection(b) do
     [wall_from_ref(r, b) for r in @remote(b, DocWallsAtLevel(ref(level).value))]
   end
@@ -1901,10 +1895,15 @@ floor_from_ref(r, b::RVT) =
     end
   end
 
-all_floors(b::RVT) =
+KhepriBase.b_all_slabs(b::RVT) =
   with_introspection(b) do
     filter(!isnothing, [floor_from_ref(r, b) for r in @remote(b, DocFloors())])
   end
+
+# Khepri's portable name for the category is `slab`; Revit's users (and its API)
+# call them floors. Keep the Revit spelling as an alias over the portable hook so
+# existing Revit scripts keep working — `all_slabs(revit)` is the portable form.
+all_floors(b::RVT=revit) = all_slabs(b)
 
 # Column introspection
 column_from_ref(r, b::RVT) =
@@ -1933,7 +1932,7 @@ column_from_ref(r, b::RVT) =
     s
   end
 
-all_columns(b::RVT) =
+KhepriBase.b_all_columns(b::RVT) =
   with_introspection(b) do
     [column_from_ref(r, b) for r in @remote(b, DocColumns())]
   end
@@ -1952,7 +1951,7 @@ beam_from_ref(r, b::RVT) =
     s
   end
 
-all_beams(b::RVT) =
+KhepriBase.b_all_beams(b::RVT) =
   with_introspection(b) do
     [beam_from_ref(r, b) for r in @remote(b, DocBeams())]
   end
@@ -1972,7 +1971,17 @@ struct HostedElementInfo
   hand_flipped::Bool
 end
 
-all_doors(b::RVT) =
+#=
+Deliberately NOT `b_all_doors`/`b_all_windows`. These return `HostedElementInfo`
+records — host-wall id, offset along the host curve, sill height, flips — which is
+what `introspect_model` needs to reattach an opening to its wall, but it is not what
+the portable `all_doors` promises (a vector of Khepri `Door` shapes). Binding them to
+the portable hook would make the same call return different types per backend, which
+is precisely what the hook exists to prevent. Revit therefore leaves `all_doors` /
+`all_windows` on KhepriBase's default (the Door/Window shapes Khepri itself created);
+the reconstructed openings reach the model through the walls that host them.
+=#
+_revit_door_infos(b::RVT) =
   [let pos = @remote(b, HostedElementPosition(r)),
        dims0 = @remote(b, DoorWindowDimensions(r)),
        # DoorWindowDimensions reports 0 for some families (cased Door-Openings) —
@@ -1996,7 +2005,7 @@ all_doors(b::RVT) =
    end
    for r in @remote(b, DocDoors())]
 
-all_windows(b::RVT) =
+_revit_window_infos(b::RVT) =
   [let pos = @remote(b, HostedElementPosition(r)),
        dims0 = @remote(b, DoorWindowDimensions(r)),
        dims = something(_opening_dims(dims0[1], dims0[2],
@@ -2005,7 +2014,7 @@ all_windows(b::RVT) =
      HostedElementInfo(
        r,
        @remote(b, HostWallId(r)),
-       # Center → left-edge conversion (dims regex-recovered); see all_doors.
+       # Center → left-edge conversion (dims regex-recovered); see _revit_door_infos.
        pos[1] - dims[1] / 2, pos[2],
        dims[1], dims[2],
        @remote(b, ElementFamilyName(r)),
@@ -2032,7 +2041,7 @@ ceiling_from_ref(r, b::RVT) =
     end
   end
 
-all_ceilings(b::RVT) =
+KhepriBase.b_all_ceilings(b::RVT) =
   with_introspection(b) do
     filter(!isnothing, [ceiling_from_ref(r, b) for r in @remote(b, DocCeilings())])
   end
@@ -2054,7 +2063,7 @@ roof_from_ref(r, b::RVT) =
     end
   end
 
-all_roofs(b::RVT) =
+KhepriBase.b_all_roofs(b::RVT) =
   with_introspection(b) do
     filter(!isnothing, [roof_from_ref(r, b) for r in @remote(b, DocRoofs())])
   end
@@ -2154,7 +2163,7 @@ fixture_from_ref(r, b::RVT) =
     s
   end
 
-all_fixtures(b::RVT) =
+KhepriBase.b_all_fixtures(b::RVT) =
   with_introspection(b) do
     let refs = vcat(
           @remote(b, DocFurniture()),
@@ -2310,7 +2319,7 @@ stair_from_ref(r, b::RVT) =
     s
   end
 
-all_stairs(b::RVT) =
+KhepriBase.b_all_stairs(b::RVT) =
   with_introspection(b) do
     [stair_from_ref(r, b) for r in @remote(b, DocStairs())]
   end
@@ -2393,7 +2402,7 @@ railing_from_ref(r, b::RVT) =
     end
   end
 
-all_railings(b::RVT) =
+KhepriBase.b_all_railings(b::RVT) =
   with_introspection(b) do
     filter(!isnothing, [railing_from_ref(r, b) for r in @remote(b, DocRailings())])
   end
@@ -2523,8 +2532,8 @@ introspect_model(; b::RVT=revit) =
             # Deduplicate slabs with same vertices in different order
             members = _dedup_slabs(members)
             # Attach doors/windows to walls in this group
-            door_infos = all_doors(b)
-            window_infos = all_windows(b)
+            door_infos = _revit_door_infos(b)
+            window_infos = _revit_window_infos(b)
             for m in members
               if m isa Wall && !is_curtain_wall(m)
                 let mref = ref_value(b, m)
@@ -2559,12 +2568,12 @@ introspect_model(; b::RVT=revit) =
         group_types
       end,
       # Levels
-      levels = all_levels(b),
+      levels = b_all_levels(b),
       # Walls (with doors/windows attached)
       # DocWalls() already excludes group members (filtered in C#)
       walls = let wall_shapes = _guarded_refs(wall_from_ref, @remote(b, DocWalls()), b, "wall"),
-                  door_infos = all_doors(b),
-                  window_infos = all_windows(b),
+                  door_infos = _revit_door_infos(b),
+                  window_infos = _revit_window_infos(b),
                   wall_to_doors = Dict{RVTId, Vector{HostedElementInfo}}(),
                   wall_to_windows = Dict{RVTId, Vector{HostedElementInfo}}()
                 for d in door_infos
@@ -2645,7 +2654,7 @@ introspect_model(; b::RVT=revit) =
         # panel grid the native curtain wall regenerates does NOT reproduce them —
         # leave them unclaimed so they degrade to fallback meshes instead of
         # vanishing (4 curtain doors in the GSG model, found by the ledger).
-        dw_ids = Set{RVTId}(i.ref for i in vcat(all_doors(b), all_windows(b)))
+        dw_ids = Set{RVTId}(i.ref for i in vcat(_revit_door_infos(b), _revit_window_infos(b)))
       for w in all_walls_read
         let wr = w isa Shape ? ref_value(b, w) : RVTVoidId
           wr != RVTVoidId || continue
@@ -2667,7 +2676,7 @@ introspect_model(; b::RVT=revit) =
     let host_refs = Set{RVTId}(ref_value(b, w)
                                for w in vcat(walls, [m for g in groups for m in g.members])
                                if w isa Wall && !is_curtain_wall(w))
-      for info in vcat(all_doors(b), all_windows(b))
+      for info in vcat(_revit_door_infos(b), _revit_window_infos(b))
         info.host_wall_id in host_refs && push!(claimed, info.ref)
       end
     end
