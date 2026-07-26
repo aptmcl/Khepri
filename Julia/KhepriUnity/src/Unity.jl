@@ -580,7 +580,7 @@ KhepriBase.b_delete_refs(b::Unity, refs::Vector{UnityId}) =
 KhepriBase.b_delete_all_shape_refs(b::Unity) =
   @remote(b, DeleteAll())
 
-set_length_unit(unit::String, b::Unity) = nothing # Unused, for now
+KhepriBase.b_set_length_unit(b::Unity, unit::String) = nothing # Unused, for now
 
 #=
 # Dimensions
@@ -625,7 +625,7 @@ KhepriBase.b_create_layer_from_ref_value(b::Unity, r) =
 KhepriBase.b_delete_all_shapes_in_layer(b::Unity, layer) =
   @remote(b, DeleteAllInParent(ref_value(b, layer)))
 
-switch_to_layer(b::Unity, layer) =
+KhepriBase.b_switch_to_layer(b::Unity, layer) =
   @remote(b, SwitchToParent(layer))
 
 # To preserve interactiveness during background
@@ -737,8 +737,18 @@ convert_render_exposure(b::Unity, v::Real) = -4.05*v + 8.8
 #render quality: [-1, +1] -> [+1, +50]
 convert_render_quality(b::Unity, v::Real) = round(Int, 25.5 + 24.5*v)
 
-render_view(path::String, b::Unity) =
-    let c = connection(b)
+#=
+The render hook is `b_render_view(b, name, opts)`, which receives a view NAME and
+resolves it through `b_render_pathname`. The previous `render_view(path, b)` bore
+the bare exported frontend name, so it never joined KhepriBase's generic — Unity
+supplied no render hook at all and `render_view` fell through to the default
+`b_render_view`, whose `b_render_and_save_view` Unity does not implement either
+(i.e. rendering raised UndefinedBackendException). Resolve the path here, as the
+default hook does, so the screenshot lands where the frontend expects it.
+=#
+KhepriBase.b_render_view(b::Unity, name, opts::RenderViewOptions=RenderViewOptions()) =
+    let c = connection(b),
+        path = prepare_for_saving_file(b_render_pathname(b, name))
       @remote(b, SetResolution(render_width(), render_height()))
       interrupt_processing(c)
       @remote(b, ScreenShot(path))
