@@ -742,7 +742,10 @@ function revit_category_to_khepri(category)
   end
 end
 
-switch_to_backend(from::Backend, to::RVT) =
+# `switch_to_backend` is an exported KhepriBase generic, so it is NOT part of the
+# `@import_backend_api` (public-but-unexported) set — the bare name would define a
+# shadowing function here and the method would never be reached.
+KhepriBase.switch_to_backend(from::Backend, to::RVT) =
     let height = level_height(default_level())
         current_backend(to)
         default_level(level(height))
