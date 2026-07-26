@@ -30,7 +30,7 @@ save_shape!(b::FR4DD, s::TrussNode) = maybe_merged_node(b, s)
 save_shape!(b::FR4DD, s::TrussBar) = maybe_merged_bar(b, s)
 
 # Frame4DD does not need layers — skip the layer-switching mechanism
-with_material_as_layer(f::Function, b::FR4DD, m::Material) = f()
+KhepriBase.with_material_as_layer(f::Function, b::FR4DD, m::Material) = f()
 KhepriBase.b_current_layer_ref(b::FR4DD) = nothing
 KhepriBase.b_current_layer_ref(b::FR4DD, layer) = nothing
 
@@ -85,7 +85,7 @@ frame4dd_circular_tube_truss_bar_geometry(rₒ, e) =
       Izz=Ixxyy)
   end
 
-backend_get_family_ref(b::FR4DD, f::TrussBarFamily, tbf::Frame4DDTrussBarFamily) =
+b_get_family_ref(b::FR4DD, f::TrussBarFamily, tbf::Frame4DDTrussBarFamily) =
   begin
     tbf.geometry[] = frame4dd_circular_tube_truss_bar_geometry(f.radius, f.radius-f.inner_radius)
     tbf
