@@ -1956,7 +1956,7 @@ acad_autocad_environment_file(filename::String) =
   end
 
 acad_bundled_render_environment() =
-  joinpath(@__DIR__, "studio_small_05_4k.exr")
+  joinpath(artifact"studio_small_05_4k_exr", "studio_small_05_4k.exr")
 
 acad_realistic_render_environment() =
   let path = acad_autocad_environment_file("mi360_Plaza.hdr")

@@ -1,5 +1,6 @@
 module KhepriAutoCAD
 using KhepriBase
+using LazyArtifacts
 using Sockets
 using EzXML
 
