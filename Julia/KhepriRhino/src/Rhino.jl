@@ -1395,6 +1395,15 @@ KhepriBase.b_shot_view(b::RH, path::String) =
 # at all, leaving this render path working only on a machine that happened to have
 # a local copy. We now ship the 22 KB archive and patch its <filename> to point at
 # the shared lazy artifact, materializing the result in a temp file on first use.
+#
+# The materialized file MUST keep the basename KhepriStudio.renv. The <environment>
+# element carries no instance-name, so RenderContent.LoadFromFile names the
+# RenderEnvironment after the file, and RenderUseHDRiEnvironment then looks it up by
+# that name -- rename the temp copy and the lookup throws.
+#
+# Verified live against Rhino 8: a :white clay render through this patched archive is
+# pixel-equivalent to the same render through the original embedded-HDRI archive
+# (max channel diff 2/255, mean 0.003/255 -- path-tracer sampling noise).
 const khepri_studio_renv_cache = Ref("")
 
 materialize_khepri_studio_renv() =
