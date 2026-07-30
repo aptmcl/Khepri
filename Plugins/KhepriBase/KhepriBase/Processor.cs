@@ -122,10 +122,21 @@ namespace KhepriBase {
             return ReadOperation();
         }
 
-        // Batching optimization: after executing one operation, checks if more data
-        // is immediately available and keeps executing without returning control to
-        // the host application's message loop. This reduces per-call overhead for
-        // burst sequences of RPC calls.
+        // Batching: after executing one operation, keep executing subsequent ones
+        // without returning control to the host application's message loop, so a burst
+        // of RPC calls does not pay the host's per-idle-tick latency once per operation.
+        //
+        // The subtlety is how we decide there is a "next" operation. Execute has just
+        // flushed this op's result; a synchronous client (Julia) must now read that
+        // result and write its next request — a sub-millisecond localhost round-trip
+        // during which NO bytes are buffered yet. A bare `DataAvailable` check loses
+        // that race on essentially every operation, so the batch collapses to a single
+        // op and control returns to the host loop, which then costs the host's idle
+        // cadence (~66 ms/tick in Rhino, whose RhinoApp.Idle is slow) for the NEXT op.
+        // Instead we WAIT up to maxWaitTime ms for the next op (PollRead); on localhost
+        // the client turns the request around well within that window, so the loop keeps
+        // spinning and the entire burst drains inside one idle tick. Only when the client
+        // genuinely goes quiet (poll times out) do we leave the batch.
         public virtual bool ExecuteReadAndRepeat(int op) {
             int count = 0;
             while (true) {
@@ -140,8 +151,16 @@ namespace KhepriBase {
                 if (count >= MaxRepeated) {
                     break;
                 }
-                if (!channel.DataAvailable) {
+                // Wait briefly for the next op rather than only checking for one already
+                // buffered. Poll=false => the window elapsed with nothing: the burst is
+                // over, yield to the host loop.
+                if (!channel.PollRead(maxWaitTime * 1000)) {
                     break;
+                }
+                // Poll=true but zero bytes => the peer closed the socket (FIN), same
+                // disambiguation as TryReadOperation. Signal disconnect, don't read.
+                if (!channel.DataAvailable) {
+                    return false;
                 }
                 op = ReadOperation();
             }
