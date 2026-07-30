@@ -1389,6 +1389,29 @@ KhepriBase.b_all_shapes_in_layer(b::RH, layer) =
 KhepriBase.b_shot_view(b::RH, path::String) =
   @remote(b, SaveView(render_width(), render_height(), path))
 
+# The shipped KhepriStudio.renv is Rhino's environment archive with its
+# <embedded-files> copy of the HDRI removed. That copy was 29.8 MB of the file's
+# 29.9 MB, which is why the .renv was gitignored -- and so it never reached users
+# at all, leaving this render path working only on a machine that happened to have
+# a local copy. We now ship the 22 KB archive and patch its <filename> to point at
+# the shared lazy artifact, materializing the result in a temp file on first use.
+const khepri_studio_renv_cache = Ref("")
+
+materialize_khepri_studio_renv() =
+  let hdri = joinpath(artifact"studio_small_05_4k_exr", "studio_small_05_4k.exr"),
+      xml = replace(read(joinpath(@__DIR__, "KhepriStudio.renv"), String),
+                    "<filename type=\"string\">studio_small_05_4k.exr</filename>" =>
+                      "<filename type=\"string\">$(hdri)</filename>"),
+      path = joinpath(mktempdir(cleanup=true), "KhepriStudio.renv")
+    write(path, xml)
+    path
+  end
+
+khepri_studio_renv() =
+  let cached = khepri_studio_renv_cache[]
+    isfile(cached) ? cached : (khepri_studio_renv_cache[] = materialize_khepri_studio_renv())
+  end
+
 KhepriBase.b_render_and_save_view(b::RH, path::String) =
   let kind = render_kind()
     if kind == :realistic
@@ -1396,7 +1419,7 @@ KhepriBase.b_render_and_save_view(b::RH, path::String) =
         @remote(b, Render(render_width(), render_height(), quality, path))
       end
     else
-      @remote(b, RenderLoadHDRiEnvironment("KhepriStudio", joinpath(@__DIR__, "KhepriStudio.renv")))
+      @remote(b, RenderLoadHDRiEnvironment("KhepriStudio", khepri_studio_renv()))
       let (camera, target) = (@remote(b, ViewCamera()), @remote(b, ViewTarget())),
           rot = 11π/6 + π/2 - (camera - target).ϕ
         if render_kind() == :white
