@@ -6,7 +6,7 @@
 		</parameters>
 		<simulation>
 			<background-color type="color">0.627451002597809,0.627451002597809,0.627451002597809,0</background-color>
-			<background-image type="string">C:\Users\aml\AppData\Local\Temp\McNeel\Rhino\V6\TextureCache\rdk$0400-0200-317CD69E.png</background-image>
+			<background-image type="string"></background-image>
 			<background-projection type="string">spherical</background-projection>
 		</simulation>
 		<texture type-name="rdk-hdr-texture" render-engine-id="99999999-9999-9999-9999-999999999999" type-id="F28C2D86-0466-40D4-89EE-A54B6C5E9288" instance-name="studio_small_05_4k" notes="" tags="" hidden="false" reference="false" auto-delete="false" child-slot-name="texture">
@@ -43,7 +43,7 @@
 				<filter type="bool">true</filter>
 			</parameters>
 			<simulation>
-				<filename type="string">C:\Users\aml\AppData\Local\Temp\McNeel\Rhino\V6\TextureCache\rdk$0200-0200-FA174679.png</filename>
+				<filename type="string"></filename>
 				<repeat type="vector2d">1,1</repeat>
 				<offset type="vector2d">-0,-0</offset>
 				<rotation type="double">0</rotation>

@@ -1401,6 +1401,10 @@ KhepriBase.b_shot_view(b::RH, path::String) =
 # RenderEnvironment after the file, and RenderUseHDRiEnvironment then looks it up by
 # that name -- rename the temp copy and the lookup throws.
 #
+# The archive's two <simulation> blocks are deliberately blank. They held Rhino's
+# own TextureCache paths under a user's home directory, which would otherwise be
+# published in the package; Rhino regenerates that cache on load.
+#
 # Verified live against Rhino 8: a :white clay render through this patched archive is
 # pixel-equivalent to the same render through the original embedded-HDRI archive
 # (max channel diff 2/255, mean 0.003/255 -- path-tracer sampling noise).
