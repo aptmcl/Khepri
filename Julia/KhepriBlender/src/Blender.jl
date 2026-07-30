@@ -771,7 +771,7 @@ KhepriBase.b_render_and_save_view(b::BLR, path::String, opts::RenderViewOptions)
     @remote(b, set_render_path(out_path))
     if opts.kind == :black
       @remote(b, set_hdri_background_with_rotation(
-        joinpath(@__DIR__, "studio_small_05_4k.exr"),
+        joinpath(artifact"studio_small_05_4k_exr", "studio_small_05_4k.exr"),
         11π/6 - (camera - target).ϕ))
       @remote(b, cycles_renderer(samples, true, false, true, opts.exposure))
     elseif renderer === :cycles
@@ -810,7 +810,7 @@ render_size(1920,1080)
 #@remote(blender, add_render_background(0.1, 10000, b_plastic_material(b, "Black", rgb(0.0, 0.0, 0.0),	1.0)
 start_film("SombrasTrans")
 for α in division(0, 2pi, 128, false)
-  @remote(blender, set_hdri_background_with_rotation(joinpath(@__DIR__, "studio_small_05_4k.exr"), α))
+  @remote(blender, set_hdri_background_with_rotation(joinpath(artifact"studio_small_05_4k_exr", "studio_small_05_4k.exr"), α))
   save_film_frame()
 end
 KhepriBase.create_mp4_from_frames()

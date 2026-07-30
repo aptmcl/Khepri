@@ -1,5 +1,6 @@
 module KhepriBlender
 using KhepriBase
+using LazyArtifacts
 using Sockets
 
 # functions that need specialization
