@@ -683,6 +683,12 @@ povray_cmd() =
 const povray_lib = Parameter(realpath(normpath(@__DIR__, "..", "lib", "include")))
 const LightsysIV_lib = Parameter(realpath(normpath(@__DIR__, "..", "lib", "LightsysIV")))
 
+# The studio environment map ships as a lazy artifact, not in lib/include, so it
+# is fetched only by users who actually render. Deliberately a function and not a
+# Parameter: a Parameter would evaluate @artifact_str at module load and force the
+# download on every `using KhepriPOVRay`, which is exactly what laziness avoids.
+studio_hdri_lib() = artifact"studio_small_05_4k_hdr"
+
 ##########################################
 export rendered_image_area
 rendered_image_area = Parameter{Union{Missing,Tuple{Int,Int,Int,Int}}}(missing)
@@ -698,6 +704,7 @@ KhepriBase.b_render_and_save_view(b::POVRay, path::String) =
       #println(out, "Debug_Console=off")
       println(out, "Library_Path='$(povray_lib())'")
       println(out, "Library_Path='$(LightsysIV_lib())'")
+      println(out, "Library_Path='$(studio_hdri_lib())'")
       println(out, "Width=$(render_width())")
       println(out, "Height=$(render_height())")
       println(out, "Antialias=on")

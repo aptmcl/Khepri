@@ -1,5 +1,6 @@
 module KhepriPOVRay
 using KhepriBase
+using LazyArtifacts
 
 # functions that need specialization
 include(khepribase_interface_file())
