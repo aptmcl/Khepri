@@ -1,6 +1,6 @@
 name = "KhepriRhino"
 uuid = "27da4253-bb12-40dc-baea-7a8a96820661"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["António Menezes Leitão <antonio.menezes.leitao@gmail.com>"]
 
 [deps]
