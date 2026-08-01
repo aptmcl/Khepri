@@ -2,3 +2,9 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.sln text eol=crlf
+
+# Golden files are byte-compared fixtures (VisualTests.text_compare), and the
+# backend emits LF. Without -text, a checkout with core.autocrlf=true -- the
+# default on GitHub's Windows runners -- rewrites them to CRLF and every text
+# golden mismatches.
+test/golden/** -text
