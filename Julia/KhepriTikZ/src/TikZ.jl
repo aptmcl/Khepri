@@ -985,8 +985,33 @@ gen_tikz_commands(b::TikZ) =
     end
   end
 
+"""
+Depth differences below this are treated as ties by the painter's sort.
+
+TikZ has no depth buffer, so triangles are emitted back to front and the order is
+the visible output. Two triangles at genuinely the same distance -- which a
+symmetric scene such as a ripple surface produces in quantity -- must not swap
+places merely because the two distances, arrived at through sin/cos, came back an
+ulp apart on another machine. Sorting on the raw Float64 let exactly that happen:
+on aarch64, surface_grid_ripple reordered wholesale and 12130 of its 106676
+emitted numbers moved, against identical geometry.
+
+Quantising the depth to this tolerance collapses such near-ties into one bucket,
+and a stable sort then leaves them in insertion order, which is deterministic
+everywhere. The value is far below the 3 decimals coordinates are printed at, so
+it cannot merge depths that are actually distinguishable in the output.
+"""
+const painter_depth_tolerance = Parameter(1e-6)
+
+# Depths are computed once rather than inside the comparison, which previously
+# re-derived each triangle's centre and distance on every one of the O(n log n)
+# comparisons.
 painter_sorter!(trigs, camera) =
-  sort!(trigs, lt=(t2, t1)->distance(trig_center(t1[1:end-1]...), camera)<distance(trig_center(t2[1:end-1]...), camera))
+  let depths = [distance(trig_center(t[1:end-1]...), camera) for t in trigs],
+      buckets = round.(depths ./ painter_depth_tolerance()),
+      order = sortperm(buckets, rev=true, alg=MergeSort)
+    permute!(trigs, order)
+  end
 
 # HACK THESE NEED TO BE FINISHED. They were used to help generate drawings for the book.
 #=
