@@ -13,19 +13,33 @@ public class Khepri : MonoBehaviour {
     public Light directionalLight;
     public bool hasStarted = false;
 
+    // Logos. [NonSerialized] is load-bearing, not tidiness.
+    //
+    // Start() rebuilds each of these with new Texture2D(..) + LoadImage(..) from
+    // the PNGs in Assets/Khepri/Editor. A texture created that way has no asset
+    // backing it, so if the field is serialized Unity has nowhere to store it but
+    // the scene itself -- and writes the whole uncompressed, mipmapped bitmap
+    // inline as hex. That is how BlankScene.unity and KhepriScene.unity reached
+    // 86 MiB each: 3225x2480 khepri_logo.png, 89 KiB on disk, became 81 MiB of
+    // text in every scene that had ever been saved with this component on it.
+    //
+    // Marking them NonSerialized keeps the runtime behaviour identical -- Start()
+    // still loads them, the editor GUI still draws them -- while leaving nothing
+    // for Unity to write into the scene.
+
     // Header Logo
     public string khepriLogoFilename = "khepri_logo.png";
-    public Texture2D khepriLogo;
-    
+    [NonSerialized] public Texture2D khepriLogo;
+
     // Buttons Logo
     public string startKhepriLogoFilename = "khepri_start.png";
-    public Texture2D startKhepriLogo;
+    [NonSerialized] public Texture2D startKhepriLogo;
     public string startKhepriNoNavigationLogoFilename = "khepri_start_no_navi.png";
-    public Texture2D startKhepriNoNavigationLogo;
+    [NonSerialized] public Texture2D startKhepriNoNavigationLogo;
     public string startNavigationLogoFilename = "navi.png";
-    public Texture2D startNavigationLogo;
+    [NonSerialized] public Texture2D startNavigationLogo;
     public string pauseSocketLogoFilename = "pause.png";
-    public Texture2D pauseSocketLogo;
+    [NonSerialized] public Texture2D pauseSocketLogo;
     
     [SerializeField]
     public bool startKhepriToggle = false;
