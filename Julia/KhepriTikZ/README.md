@@ -1,9 +1,9 @@
 # KhepriTikZ
 
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://aptmcl.github.io/KhepriTikZ.jl/stable)
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://aptmcl.github.io/KhepriTikZ.jl/dev)
-[![Build Status](https://github.com/aptmcl/KhepriTikZ.jl/workflows/CI/badge.svg)](https://github.com/aptmcl/KhepriTikZ.jl/actions)
-[![Coverage](https://codecov.io/gh/aptmcl/KhepriTikZ.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/aptmcl/KhepriTikZ.jl)
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://aptmcl.github.io/Khepri/KhepriTikZ/stable)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://aptmcl.github.io/Khepri/KhepriTikZ/dev)
+[![Build Status](https://github.com/aptmcl/Khepri/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/aptmcl/Khepri/actions/workflows/ci.yml?query=branch%3Amain)
+[![Coverage](https://codecov.io/gh/aptmcl/Khepri/branch/main/graph/badge.svg?flag=KhepriTikZ)](https://codecov.io/gh/aptmcl/Khepri)
 
 KhepriTikZ is a Khepri backend that generates TikZ code for standalone visualization or inclusion in LaTeX documents.
 

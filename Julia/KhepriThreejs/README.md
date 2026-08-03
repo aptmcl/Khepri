@@ -1,10 +1,10 @@
 # KhepriThreejs
 
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://aptmcl.github.io/KhepriThreejs.jl/stable/)
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://aptmcl.github.io/KhepriThreejs.jl/dev/)
-[![Build Status](https://github.com/aptmcl/KhepriThreejs.jl/actions/workflows/CI.yml/badge.svg?branch=master)](https://github.com/aptmcl/KhepriThreejs.jl/actions/
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://aptmcl.github.io/Khepri/KhepriThreejs/stable)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://aptmcl.github.io/Khepri/KhepriThreejs/dev)
+[![Build Status](https://github.com/aptmcl/Khepri/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/aptmcl/Khepri/actions/workflows/ci.yml?query=branch%3Amain)
 workflows/CI.yml?query=branch%3Amaster)
-[![Coverage](https://codecov.io/gh/aptmcl/KhepriThreejs.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/aptmcl/KhepriThreejs.jl)
+[![Coverage](https://codecov.io/gh/aptmcl/Khepri/branch/main/graph/badge.svg?flag=KhepriThreejs)](https://codecov.io/gh/aptmcl/Khepri)
 
 A Julia package for 3D visualization using Three.js through WebSocket communication.
 

@@ -1,6 +1,6 @@
 # KhepriLibrary
 
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://aptmcl.github.io/KhepriLibrary.jl/stable)
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://aptmcl.github.io/KhepriLibrary.jl/dev)
-[![Build Status](https://github.com/aptmcl/KhepriLibrary.jl/workflows/CI/badge.svg)](https://github.com/aptmcl/KhepriLibrary.jl/actions)
-[![Coverage](https://codecov.io/gh/aptmcl/KhepriLibrary.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/aptmcl/KhepriLibrary.jl)
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://aptmcl.github.io/Khepri/KhepriLibrary/stable)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://aptmcl.github.io/Khepri/KhepriLibrary/dev)
+[![Build Status](https://github.com/aptmcl/Khepri/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/aptmcl/Khepri/actions/workflows/ci.yml?query=branch%3Amain)
+[![Coverage](https://codecov.io/gh/aptmcl/Khepri/branch/main/graph/badge.svg?flag=KhepriLibrary)](https://codecov.io/gh/aptmcl/Khepri)

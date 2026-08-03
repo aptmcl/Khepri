@@ -1,6 +1,6 @@
 # KhepriFrame4DD
 
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://aptmcl.github.io/KhepriFrame4DD.jl/stable)
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://aptmcl.github.io/KhepriFrame4DD.jl/dev)
-[![Build Status](https://github.com/aptmcl/KhepriFrame4DD.jl/workflows/CI/badge.svg)](https://github.com/aptmcl/KhepriFrame4DD.jl/actions)
-[![Coverage](https://codecov.io/gh/aptmcl/KhepriFrame4DD.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/aptmcl/KhepriFrame4DD.jl)
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://aptmcl.github.io/Khepri/KhepriFrame4DD/stable)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://aptmcl.github.io/Khepri/KhepriFrame4DD/dev)
+[![Build Status](https://github.com/aptmcl/Khepri/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/aptmcl/Khepri/actions/workflows/ci.yml?query=branch%3Amain)
+[![Coverage](https://codecov.io/gh/aptmcl/Khepri/branch/main/graph/badge.svg?flag=KhepriFrame4DD)](https://codecov.io/gh/aptmcl/Khepri)
