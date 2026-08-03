@@ -1,0 +1,1988 @@
+#####################################################################
+# BIM
+#=
+Building Information Modeling is more than just shapes.
+Each BIM element is connected to other BIM elements. A wall is connected to its
+windows and doors. A floor is connected to its walls, and stairs. Stairs connect
+different floors, etc.
+
+This graph of objects needs to be build programmatically and that is one problem.
+The other problem is portability, as we want this to work in backends that are
+not BIM tools.
+
+A third problem is related to level of detail. Even in the same backend, we might
+need to represent BIM elements at different levels of detail.
+
+To solve these problems, we will use a protocol to realize BIM objects. To avoid
+confusion, we need to ensure a series of invariants, namely, that entities are
+portable above a certain level and non-portable below that level. As an example,
+a Slab and a SlabFamily are portable entities.
+
+We will start with the simplest of BIM elements, namely, levels, slabs, walls,
+windows and doors.
+=#
+
+# Level
+# `name` participates in level IDENTITY: real models carry name-distinct levels at equal (or
+# near-equal) elevations — height-only equality silently merged 9 of a 97-level corpus model's
+# levels at introspection. Unnamed levels ("") keep the historical height-keyed dedupe.
+@defproxy(level, UniqueProxy, height::Real=0, elements::BIMElements=BIMElement[],
+  is_unconnected::Bool=false, name::String="")
+
+convert(::Type{Level}, h::Real) = level(h)
+
+# The top "level" of an unconnected-top wall: a height marker, NOT a real building level. BIM
+# backends must not materialize it (Revit realizes it as the void ref, so wall reconstruction takes
+# the unconnected-wall path); geometry backends just use its height like any level. Without the
+# distinction, round-tripped unconnected walls minted phantom levels in the rebuilt model.
+export unconnected_level
+unconnected_level(h::Real) = level(h, is_unconnected=true)
+
+# Flush any deferred group construction. On most backends grouping happens inline and this is a
+# no-op; Revit defers NewGroup/PlaceGroup to here because creating elements AFTER a group exists
+# triggers regenerations that can silently delete it — a generated program calls finalize_groups()
+# as its last statement so every group is built when nothing further will disturb it.
+export finalize_groups
+finalize_groups(b::Backend=top_backend()) = b_finalize_groups(b)
+public b_finalize_groups
+b_finalize_groups(b::Backend) = nothing
+
+default_level = OptionParameter{Level}(level())
+default_level_to_level_height = Parameter{Real}(3)
+
+#=
+Default vertical placement for a window's bottom edge, in metres
+above the floor of its hosting storey. 0.9 m is the conventional
+residential sill — high enough that furniture can sit under it and
+occupants standing next to the wall see out, low enough that a
+seated person does too. Override per-window via `sill=…` on
+`add_window`, or globally by `default_window_sill_height(0.8)` etc.
+
+See also: `add_window`, `add_door` (which uses `sill = 0`).
+=#
+"Default sill height (metres) for windows created without an explicit `sill=`."
+default_window_sill_height = Parameter{Real}(0.9)
+upper_level(lvl=default_level(), height=default_level_to_level_height()) = level(lvl.height + height)
+Base.:(==)(l1::Level, l2::Level) = l1.height == l2.height && l1.name == l2.name
+
+#default implementation (name participates in identity only; geometry backends key on height)
+b_level(b::Backend, h, elements, is_unconnected=false, name="") = h
+
+export all_levels, default_level, default_level_to_level_height, upper_level,
+       default_window_sill_height
+
+#=
+@defproxy(polygonal_mass, BIMShape, points::Locs, height::Real)
+@defproxy(rectangular_mass, BIMShape, center::Loc, width::Real, len::Real, height::Real)
+
+@defproxy(column, BIMShape, center::Loc, bottom_level::Any, top_level::Any, family::Any)
+=#
+
+
+#=
+The main structure is the model, more specifically, the building information model.
+Given that multiple buldings might be under constructions simultaneously, it becomes 
+necessary to include all defaults (i.e., the parameters) that govern the creation of
+the building elements.
+=#
+
+struct BIM
+  levels::Vector{Level}
+  current_level::Level
+  elements::BIMElements
+end
+
+#=
+
+We need to provide defaults for a lot of things. For example, we want to specify
+a wall that goes through a path without having to specify the kind of wall or its
+thickness and height.
+
+This means that, apart from the wall's path, all other wall features will come
+from defaults. The base height will be determined by the current level and the
+wall height by the current level-to-level height. Finally, the wall thickness,
+constituent parts, thermal characteristics, and so on will come from the wall
+defaults.  In the case of a wall, we will assume that current_wall_defaults() is
+a parameter that contains a set of wall parameters.  As an example of use, we
+might have:
+
+current_wall_defaults(wall_defaults(thickness=10))
+
+Another option is the definition of different defaults:
+
+thick_wall_defaults = wall_defaults(thickness=10)
+thin_wall_defaults = wall_defaults(thickness=5)
+
+which then can be made current:
+
+current_wall_defaults(thin_wall_defaults)
+
+In most cases, the defaults are not just one value, but a bunch of them. For a
+beam, we might have:
+
+standard_beam = beam_defaults(width=10, height=20)
+current_beam_defaults(standard_beam)
+
+Another useful feature is the ability to adapt defaults. For example:
+
+current_beam_defaults(beam_with(standard_beam, height=20))
+
+Finally, defaults can be created for anything. For example, in a building, we
+might want to define a bunch of parameters that are relevant. The syntax is as
+follows:
+
+@defaults(building,
+    width::Real=20,
+    length::Real=30,
+    height::Real=50)
+
+In order to access these defaults, we can use the following:
+
+current_building_defaults().width
+
+In some cases, defaults are supported by the backend itself. For example, in
+Revit, a wall can be specified using a family. In order to realize the wall
+defaults in the current backend, we need to map from the wall parameters to the
+corresponding BIM family parameters. This mapping must be described in a
+different structure.
+
+For example, a beam element might have a section with a given width and height
+but, in Revit, a beam element such as "...\\Structural Framing\\Wood\\M_Timber.rfa"
+has, as parameters, the dimensions b and d.  This means that we need a map, such
+as Dict(:width => "b", :height => "d")))). So, for a Revit family, we might use:
+
+RevitFamily(
+    "C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\Structural Framing\\Wood\\M_Timber.rfa",
+    Dict(:width => "b", :height => "d"))
+
+To make things more interesting, some families might require instantiation on
+different levels. For example, a circular window family in Revit needs to be
+loaded using RVTLoadFamily, which requires the name of the family, then it needs
+to be instantiated with RVTFamilyElement, which requires the radius of the window,
+and finally needs to be inserted on the wall, using RVTInsertWindow, which requires
+the opening angle. This might be different for different families, so we need a
+flexible way of using the parameters. One hipotesis is to specify those different
+moments as different dictionaries.
+
+RevitFamily(
+  "C:\\ProgramData\\Autodesk\\RVT 2019\\Libraries\\US Metric\\Windows\\CIRCULAR WINDOW.rfa",
+  ("radius_window" => :radius),
+  ("angle_window" => :opening_angle))
+
+If no parameters are needed on a particular phase, we might use an empty dictionary
+to describe that phase. Given the typical Revit families, defaults parameters seem
+to be the best approach here. This means that the previous beam family might be
+equivalent to
+
+RevitFamily(
+  "C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\Structural Framing\\Wood\\M_Timber.rfa",
+  ("b" => :width, "d" => :height),
+  ())
+
+However, the same beam might have a different mapping in a different backend.
+This means that we need another mapping to support different backends. One
+possibility is to use something similar to:
+
+backend_family(
+    revit => RevitFamily(
+        "C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\Structural Framing\\Wood\\M_Timber.rfa",
+        ("b" => :width, "d" => :height)),
+    archicad => ArchiCADFamily(
+        "BeamElement",
+        ("size_x" => :width, "size_y" => :height)),
+    autocad => AutoCADFamily())
+
+Then, we need an operation that instantiates a family. This can be done on two different
+levels: (1) from a backend-specific family (e.g., RevitFamily), for example:
+
+beam_family = RevitFamily(
+    "C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\Structural Framing\\Wood\\M_Timber.rfa",
+    ("b" => :width, "d" => :height))
+
+current_beam_defaults(beam_family_instance(beam_family, width=10, height=20)
+
+or from a generic backend family, for example:
+
+beam_family = backend_family(
+    revit => RevitFamily(
+        "C:\\ProgramData\\Autodesk\\RVT 2017\\Libraries\\US Metric\\Structural Framing\\Wood\\M_Timber.rfa",
+        ("b" => :width, "d" => :height)),
+    archicad => ArchiCADFamily(
+        "BeamElement"
+        ("size_x" => :width, "size_y" => :height)),
+    autocad => AutoCADFamily())
+
+current_beam_defaults(beam_family_instance(beam_family, width=10, height=20)
+
+In this last case, the generic family will use the top_backend value to identify
+which family to use.
+
+Another important feature is the use of a delegation-based implementation for
+family instances. This means that we might do
+
+current_beam_defaults(beam_family_instance(current_beam_defaults(), width=20)
+
+to instantiate a family that uses, by default, the same parameter values used by
+another family instance.
+
+Finally, because we might need to know which families are available (e.g., for
+metaprogramming purposes), we need a database of families for each BIM element.
+
+A relatively simple approach is to have a registry for families:
+
+family_registry(WallFamily) -> Vector{WallFamily}
+register_family(family)
+=#
+
+family(f::Family) = f
+family(f::FamilyInstance) = f.family
+
+#=
+Caching of families is more complex than caching of shapes because families
+are created independently of the current backend and then they are lazily
+instantiated, possibly multiples times as the current backend is being changed.
+=#
+
+family_ref(s::BIMShape) =
+   family_ref(backend(s), s.family)
+family_ref(b::Backend, f::Family) =
+  get!(f.ref, b) do
+    realize(b, f)
+  end
+
+# When the proxy system realizes a Family, delegate to family_ref to avoid double realize.
+# family_ref caches in f.ref; we also store in b.refs.families for proxy system consistency.
+force_realize(b::Backend, f::Family) =
+  ref!(b, f, family_ref(b, f))
+
+#=
+Some families might specify materials (particularly, those that are not backed up by a BIM tool)
+We can retrieve those materials by querying the BIM shape.
+=#
+
+used_materials(s::BIMShape) = used_materials(s.family)
+
+# CAD tools that support Layers might benefit from this typical implementation:
+struct LayerFamily <: Family
+  name::String
+  visible::Bool
+  color::RGB
+  ref::IdDict{Backend, Any}
+end
+
+export layer_family
+public LayerFamily
+layer_family(name, color::RGB=rgb(1,1,1); visible::Bool=true) =
+  LayerFamily(name, visible, color, IdDict{Backend, Any}())
+
+public b_get_family_ref
+b_get_family_ref(b::Backend, f::Family, af::LayerFamily) =
+  b_layer(b, af.name, af.visible, af.color)
+
+# OBJ family types (OBJFamily, OBJFileFamily, obj_family) are defined in
+# Backend.jl because the OBJ transform functions and BIM fallbacks there
+# reference them at compile time.
+
+macro deffamily(name, parent, fields...)
+  name_str = string(name)
+  abstract_name = esc(Symbol(string))
+  struct_name = esc(Symbol(string(map(uppercasefirst,split(name_str,'_'))...)))
+  typename_str = string(map(uppercasefirst,split(name_str,'_'))...)
+  # We always add a name field
+  fields = [:(name::String=$(name_str)), fields...]
+  field_names = map(field -> field.args[1].args[1], fields)
+  field_types = map(field -> field.args[1].args[2], fields)
+  field_inits = map(field -> field.args[2], fields)
+  # Positional-arg names must not collide with any type used in the keyword annotations: Julia
+  # evaluates keyword annotations in the cascading argument scope, so a positional named `Material`
+  # shadows the type `Material` in `material::Material=Material` (isa against a value → TypeError).
+  # gensym keeps them unique; they are positional-only, so callers never see these names.
+  field_renames = map(esc ∘ gensym ∘ uppercasefirst ∘ string, field_names)
+  field_replacements = Dict(zip(field_names, field_renames))
+  struct_fields = map((name,typ) -> :($(name) :: $(typ)), field_names, field_types)
+#  opt_params = map((name,typ,init) -> :($(name) :: $(typ) = $(init)), field_renames, field_types, field_inits)
+#  key_params = map((name,typ,rename) -> :($(name) :: $(typ) = $(rename)), field_names, field_types, field_renames)
+#  mk_param(name,typ) = Expr(:kw, Expr(:(::), name, typ))
+  mk_param(name,typ,init) = Expr(:kw, Expr(:(::), name, typ), init)
+  opt_params = map(mk_param, field_renames, field_types, map(init -> replace_in(init, field_replacements), field_inits))
+  key_params = map(mk_param, field_names, field_types, field_renames)
+  instance_params = map(mk_param, field_names, field_types, map(name -> :(family.$(name)), field_names))
+  constructor_name = esc(name)
+  instance_name = esc(Symbol(name_str, "_element")) #"_instance")) beam_family_element or beam_family_instance?
+  default_name = esc(Symbol("default_", name_str))
+  predicate_name = esc(Symbol("is_", name_str))
+  selector_names = map(field_name -> esc(Symbol(name_str, "_", string(field_name))), field_names)
+  with_name = esc(Symbol("with_", name_str))
+  # Generate docstring
+  field_type_strs = map(string, field_types)
+  field_init_strs = map(string, field_inits)
+  sig_parts = join(["$(fn)::$(ft)=$(fi)" for (fn, ft, fi) in zip(field_names, field_type_strs, field_init_strs)], ", ")
+  field_lines = ["- `$(fn)::$(ft)` — default: `$(fi)`"
+                 for (fn, ft, fi) in zip(field_names, field_type_strs, field_init_strs)]
+  docstr = string("    ", name_str, "(", sig_parts, ")\n\n",
+                  "Create a `", typename_str, "` family (`", parent, "`).\n\n",
+                  "# Fields\n",
+                  join(field_lines, "\n"), "\n\n",
+                  "Default parameter: `default_", name_str, "`\n")
+  quote
+    export $(constructor_name), $(default_name), $(predicate_name), $(with_name), $(struct_name), $(instance_name)
+    struct $struct_name <: $parent
+      $(struct_fields...)
+      based_on::Union{Family, Nothing}
+      implemented_as::IdDict{Type{<:Backend}, <:Family}
+      ref::IdDict{Backend, Any}
+    end
+    $(constructor_name)($(opt_params...);
+                        $(key_params...),
+                        based_on=nothing,
+                        implemented_as=IdDict{Type{<:Backend}, Family}()) =
+      $(struct_name)($(field_names...), based_on, implemented_as, IdDict{Backend, Any}())
+    $(instance_name)(family:: Family, implemented_as=copy(family.implemented_as); $(instance_params...)) =
+      $(struct_name)($(field_names...), family, implemented_as, IdDict{Backend, Any}())
+    $(default_name) = Parameter{$struct_name}($(constructor_name)())
+    KhepriBase._register_family_default!($(default_name))
+    $(predicate_name)(v::$(struct_name)) = true
+    $(predicate_name)(v::Any) = false
+    $(with_name)(f::Function; family :: $(struct_name) = $(default_name)(), $(instance_params...)) =
+      with(f, $(default_name), $(instance_name)(family; $([:($(esc(p))=$(esc(p))) for p in field_names]...)))
+#    $(map((selector_name, field_name) -> :($(selector_name)(v::$(struct_name)) = v.$(field_name)),
+#          selector_names, field_names)...)
+    KhepriBase.meta_program(v::$(struct_name)) =
+        let args = Any[$(map(field_name -> :(meta_program(v.$(field_name))),
+                             [fn for (fn, ft) in zip(field_names, field_types)
+                              if !(ft in (:Material, :(Union{Material, Nothing})))])...)]
+            # Non-material fields are positional (as before); non-default material fields are appended as
+            # keyword args when material emission is enabled — so backends whose appearance comes from the
+            # family material (not a native type) reproduce it, and default materials stay silent.
+            codegen_emit_materials() && begin
+                $(map(((fn, fi),) -> :(v.$(fn) == $(fi) ||
+                          push!(args, Expr(:kw, $(QuoteNode(fn)), meta_program(v.$(fn))))),
+                      [(fn, fi) for (fn, ft, fi) in zip(field_names, field_types, field_inits)
+                       if ft in (:Material, :(Union{Material, Nothing}))])...)
+            end
+            Expr(:call, $(Expr(:quote, name)), args...)
+        end
+    KhepriBase.meta_program(v::Parameter{$struct_name}) =
+        Expr(:call, $(Expr(:quote, default_name)))
+    Base.@doc $(docstr) $(constructor_name)
+  end
+end
+
+export set_family
+const set_family = set_on!
+
+#=
+
+We also need to register families so that we know, at runtime, which ones are available.
+
+We need BIMElement
+avaliable_families(element::BIMElement) => Array of families
+default_family_parameter(element::BIMElement) => Parameter
+
+ALSO
+
+Give families names so that the interface can present them
+
+
+
+We need to detect using traceability the Khepri primitive that is called. So we cannot exclude the
+Khepri module.
+
+=#
+
+# When dispatching a BIM operation to a backend, we also need to dispatch the family
+
+backend_family(b::Backend, family::Family) =
+  get(family.implemented_as, typeof(b)) do
+    if !isnothing(family.based_on)
+      backend_family(b, family.based_on)
+    else
+      let default = _default_family_for(typeof(family))
+        if default !== nothing && default !== family
+          backend_family(b, default)
+        else
+          error("Family $(family) is missing the implementation for backend $(b)")
+        end
+      end
+    end
+  end
+
+# Like backend_family, but returns `nothing` instead of erroring when no
+# implementation is found — for call sites (Door/Window/Table/Chair realize) that
+# fall back to a generic geometry branch. Crucially it walks based_on/default
+# delegation, so an OBJ family installed on a base family is honoured (the bare
+# `get(implemented_as, typeof(b), nothing)` it replaces did not).
+maybe_backend_family(b::Backend, family::Family) =
+  get(family.implemented_as, typeof(b)) do
+    if !isnothing(family.based_on)
+      maybe_backend_family(b, family.based_on)
+    else
+      let default = _default_family_for(typeof(family))
+        default !== nothing && default !== family ? maybe_backend_family(b, default) : nothing
+      end
+    end
+  end
+
+# Backends will install their own families on top of the default families, e.g.,
+# set_backend_family(default_beam_family(), revit, revit_beam_family)
+set_backend_family(family::Family, backend::Backend, backend_family::Family) =
+  begin
+    family.implemented_as[typeof(backend)]=backend_family
+    delete!(family.ref, backend) #force recreation
+  end
+
+set_backend_family(family::Family, ::Type{B}, backend_family::Family) where {B<:Backend} =
+  family.implemented_as[B] = backend_family
+
+realize(b::Backend, f::Family) =
+  b_get_family_ref(b, f, backend_family(b, f))
+
+b_get_family_ref(b::Backend, f::Family, bf) = bf
+export backend_family, set_backend_family
+
+# Registry of default family parameters for invalidation on backend reconnection.
+# Each @deffamily generates a default_xxx_family Parameter; we register them here
+# so that invalidate_family_refs can clear stale cached refs.
+const _family_defaults = Any[]
+_register_family_default!(p) = push!(_family_defaults, p)
+
+_default_family_for(::Type{T}) where T <: Family =
+  let result = nothing
+    for p in _family_defaults
+      if p isa Parameter{T}
+        result = p()
+        break
+      end
+    end
+    result
+  end
+
+public invalidate_family_refs
+invalidate_family_refs(b::Backend) =
+  for p in _family_defaults
+    delete!(p().ref, b)
+  end
+
+#=
+We can now define specific families for slabs, beams, etc., the corresponding
+specific building elements and even, when possible, default implementations.
+=#
+
+@deffamily(slab_family, Family,
+  thickness::Real=0.2,
+  coating_thickness::Real=0.0,
+  bottom_material::Material=material_concrete,
+  top_material::Material=material_concrete,
+  side_material::Material=material_concrete)
+
+export slab_family_elevation, slab_family_thickness
+slab_family_elevation(b::Backend, family::SlabFamily) =
+  family.coating_thickness - family.thickness
+slab_family_thickness(b::Backend, family::SlabFamily) =
+  family.coating_thickness + family.thickness
+
+used_materials(f::SlabFamily) = (f.bottom_material, f.top_material, f.side_material)
+
+
+@defproxy(slab, BIMShape, region::Region=rectangular_path(),
+          level::Level=default_level(), family::SlabFamily=default_slab_family())
+
+# Default implementation: dispatch on the slab elements
+realize(b::Backend, s::Slab) =
+  b_slab(b, s.region, s.level, s.family)
+
+#=
+export add_slab_opening
+add_slab_opening(s::Slab=required(), contour::ClosedPath=circular_path()) =
+    let b = backend(s)
+        push!(s.openings, contour)
+        if realized(s)
+            set_ref!(s, realize_slab_openings(b, s, ref(b, s), [contour]))
+        end
+        s
+    end
+
+realize_slab_openings(b::Backend, s::Slab, s_ref, openings) =
+    let s_base_height = s.level.height,
+        s_thickness = slab_family_thickness(b, s.family)
+        for opening in openings
+            op_path = translate(opening, vz(s_base_height-1.1*s_thickness))
+            op_ref = ensure_ref(b, backend_slab(b, op_path, s_thickness*1.2))
+            s_ref = ensure_ref(b, subtract_ref(b, s_ref, op_ref))
+        end
+        s_ref
+    end
+=#
+
+# Roof
+
+@deffamily(roof_family, Family,
+    thickness::Real=0.2,
+    coating_thickness::Real=0.0,
+    bottom_material::Material=material_concrete,
+    top_material::Material=material_concrete,
+    side_material::Material=material_concrete)
+
+slab_family_elevation(b::Backend, family::RoofFamily) = 0
+slab_family_thickness(b::Backend, family::RoofFamily) =
+  family.coating_thickness + family.thickness
+
+used_materials(f::RoofFamily) = (f.bottom_material, f.top_material, f.side_material)
+
+@defproxy(roof, BIMShape, region::Region=rectangular_path(),
+          level::Level=default_level(), family::RoofFamily=default_roof_family())
+realize(b::Backend, s::Roof) =
+  b_roof(b, s.region, s.level, s.family)
+
+# Ceiling
+
+@deffamily(ceiling_family, Family,
+  thickness::Real=0.02,
+  coating_thickness::Real=0.0,
+  bottom_material::Material=material_plaster,
+  top_material::Material=material_concrete,
+  side_material::Material=material_plaster)
+
+ceiling_family_elevation(b::Backend, family::CeilingFamily) = 0
+ceiling_family_thickness(b::Backend, family::CeilingFamily) =
+  family.coating_thickness + family.thickness
+
+used_materials(f::CeilingFamily) = (f.bottom_material, f.top_material, f.side_material)
+
+@defproxy(ceiling, BIMShape, region::Region=rectangular_path(),
+          level::Level=default_level(), family::CeilingFamily=default_ceiling_family())
+realize(b::Backend, s::Ceiling) =
+  b_ceiling(b, s.region, s.level, s.family)
+
+# Panel
+
+@deffamily(panel_family, Family,
+  thickness::Real=0.02,
+  right_material::Material=material_glass,
+  left_material::Material=material_glass,
+  side_material::Material=material_glass)
+
+used_materials(f::PanelFamily) = (f.right_material, f.left_material, f.side_material)
+
+
+@defproxy(panel, BIMShape, region::Region=rectangular_path(), family::PanelFamily=default_panel_family())
+
+realize(b::Backend, s::Panel) =
+  b_panel(b, s.region, s.family)
+
+#=
+
+A wall contains doors and windows
+
+=#
+
+# Wall
+
+@deffamily(wall_family, Family,
+  thickness::Real=0.2,
+  left_coating_thickness::Real=0.0,
+  right_coating_thickness::Real=0.0,
+  right_material::Material=material_plaster,
+  left_material::Material=material_plaster,
+  side_material::Material=material_plaster)
+
+used_materials(f::WallFamily) = (f.right_material, f.left_material, f.side_material)
+
+#=
+A wall's `path` is always its centerline — openings are placed
+along it by arc-length, and that stays stable regardless of how
+the wall's endpoints meet their neighbours.
+
+`left_face_path` / `right_face_path` are *optional* pre-computed
+face polylines that override the derived `offset(path, ±t)` used
+by the default renderer. They exist for callers that know more
+about a wall's junctions than an isolated wall can — chiefly the
+WallGraph chain resolver, which pairwise intersects adjacent
+walls' offset faces and stores the resulting corner vertices on
+the chain's face polylines before emitting each `wall(…)`. When
+the faces are absent (the common path), the backend falls back
+to `offset(path, ±t)` exactly as before.
+
+See also: `KhepriBase.junction_face_corners`,
+`KhepriBase.wall_face_polylines`, and `b_wall` (the backend
+dispatcher that chooses faces-vs-offsets at render time).
+=#
+@defproxy(wall, BIMShape, path::Path=rectangular_path(),
+          bottom_level::Level=default_level(),
+          top_level::Level=upper_level(convert(Level, bottom_level)),
+          family::WallFamily=default_wall_family(),
+          offset::Real=is_closed_path(path) ? 1/2 : 0, # offset is relative to the thickness
+          doors::Shapes=Shape[], windows::Shapes=Shape[],
+          left_face_path::Union{Nothing, Path}=nothing,
+          right_face_path::Union{Nothing, Path}=nothing,
+          # Vertical offsets from the levels (Revit base/top offsets): a parapet band
+          # spans bottom+base_offset .. top+top_offset, not the full storey.
+          base_offset::Real=0,
+          top_offset::Real=0,
+          # Rectangular voids in the wall that are NOT doors/windows — e.g. reproduced from a Revit
+          # edited wall profile (a concrete frame around a large opening). Cut like door/window
+          # openings; see add_wall_opening.
+          openings::Vector{WallOpening}=WallOpening[])
+
+# To deal with incremental creation, it is necessary to use transactions.
+export with_wall
+with_wall(f, args...) =
+  with_transaction() do
+    let w = wall(args...)
+      f(w)
+      w
+    end
+  end
+
+# The protocol starts by identifying the approach to use. It can be either
+# based on Boolean operations or on the construction of polygonal elements.
+# Then, for each approach, the appropriate implementation is selected.
+public HasBooleanOps, has_boolean_ops
+
+struct HasBooleanOps{T} end
+# By default, we DON'T rely on boolean operations
+has_boolean_ops(::Type{<:Backend}) = HasBooleanOps{false}()
+
+realize(b::B, w::Wall) where B<:Backend =
+  realize(has_boolean_ops(B), b, w)
+
+realize(::HasBooleanOps{true}, b::Backend, w::Wall) =
+  let w_ref = ensure_ref(b, realize_wall_no_openings(b, w)),
+      w_path = translate(w.path, vz(w.bottom_level.height + w.base_offset))
+    ref!(b, w, w_ref)  # Cache wall ref before processing openings so that opening realization can access it
+    w_ref = realize_wall_openings(b, w, w_ref, [w.doors..., w.windows...])
+    # Direct rectangular voids (from an edited profile): subtract each like a door/window opening,
+    # but there is no door/window shape to also render, so loop them here rather than via
+    # realize_wall_openings (which caches each opening shape's ref).
+    for op in w.openings
+      w_ref = realize_wall_opening(b, w_ref, w_path, l_thickness(w), r_thickness(w), op, w.family)
+    end
+    w_ref
+  end
+
+realize_wall_no_openings(b::Backend, w::Wall) =
+  let w_base_height = w.bottom_level.height + w.base_offset,
+      w_height = w.top_level.height + w.top_offset - w_base_height,
+      w_path = translate(w.path, vz(w_base_height))
+    ensure_ref(b, b_wall(b, w_path, w_height, w.family, w.offset, WallOpening[]))
+  end
+
+realize_wall_openings(b::Backend, w::Wall, w_ref, openings) =
+  let w_base_height = w.bottom_level.height + w.base_offset,
+      w_height = w.top_level.height + w.top_offset - w_base_height,
+      w_path = translate(w.path, vz(w_base_height)),
+      r_thickness = r_thickness(w),
+      l_thickness = l_thickness(w)
+    for opening in openings
+      w_ref = realize_wall_opening(b, w_ref, w_path, l_thickness, r_thickness, opening, w.family)
+      ref(b, opening)
+    end
+    w_ref
+  end
+
+realize_wall_opening(b::Backend, w_ref, w_path, l_thickness, r_thickness, op, family) =
+  let op_base_height = op.loc.y,
+      op_height = op.family.height,
+      op_path = translate(subpath(w_path, op.loc.x, op.loc.x + op.family.width), vz(op_base_height)),
+      op_ref = ensure_ref(b, b_wall_no_openings(b, op_path, op_height, l_thickness+0.1, r_thickness+0.1, family))
+    ensure_ref(b, b_subtract_ref(b, w_ref, op_ref))
+  end
+
+# A WallOpening carries its rectangle inline (path_position/base_height/width/height) instead of via
+# a door/window family — otherwise the subtraction is identical.
+realize_wall_opening(b::Backend, w_ref, w_path, l_thickness, r_thickness, op::WallOpening, family) =
+  let op_path = translate(subpath(w_path, op.path_position, op.path_position + op.width), vz(op.base_height)),
+      op_ref = ensure_ref(b, b_wall_no_openings(b, op_path, op.height, l_thickness+0.1, r_thickness+0.1, family))
+    ensure_ref(b, b_subtract_ref(b, w_ref, op_ref))
+  end
+
+# For backends that do not support boolean operations, we use a different approach
+
+realize(::HasBooleanOps{false}, b::Backend, w::Wall) =
+  let w_base_height = w.bottom_level.height + w.base_offset,
+      w_height = w.top_level.height + w.top_offset - w_base_height,
+      lift = vz(w_base_height),
+      w_path = translate(w.path, lift),
+      l_face = isnothing(w.left_face_path)  ? nothing : translate(w.left_face_path,  lift),
+      r_face = isnothing(w.right_face_path) ? nothing : translate(w.right_face_path, lift),
+      openings = vcat([WallOpening(op.loc.x, op.loc.y, op.family.width, op.family.height)
+                       for op in [w.doors..., w.windows...]],
+                      w.openings)
+    b_wall(b, w_path, w_height, w.family, w.offset, openings;
+           l_face_path=l_face, r_face_path=r_face)
+  end
+
+
+#=
+Walls can be joined. That is very important because the wall needs to have
+uniform thickness along the entire path.
+=#
+export join_walls
+join_walls(wall1, wall2) =
+  if wall1.bottom_level != wall2.bottom_level
+    error("Walls with different bottom levels")
+  elseif wall1.top_level != wall2.top_level
+    error("Walls with different top levels")
+  elseif wall1.family != wall2.family
+    error("Walls with different families")
+  elseif wall1.offset != wall2.offset
+    error("Walls with different offsets")
+  else
+    let w = wall(join_paths(wall1.path, wall2.path),
+                 wall1.bottom_level, wall1.top_level,
+                 wall1.family, wall1.offset),
+        len = path_length(wall1.path)
+      for (es,l) in ((wall1.doors, 0), (wall2.doors, len))
+        for e in es
+          add_door(w, e.loc+vx(l), e.family)
+        end
+      end
+      for (es,l) in ((wall1.windows, 0), (wall2.windows, len))
+        for e in es
+          add_window(w, e.loc+vx(l), e.family)
+        end
+      end
+      for w in (wall1, wall2)
+        delete_shapes(w.doors)
+        delete_shapes(w.windows)
+        delete_shape(w)
+      end
+      w
+    end
+  end
+
+join_walls(walls...) =
+  reduce(join_walls, walls)
+
+# Right and Left considering observer looking along with curve direction
+# a non-closed wall should have a wall offset of zero and a r_thickness and a l_thickness of 1/2*thickness
+# a closed wall should have a wall offset of 1/2 and a r_thickness of zero and a l_thickness of 1*thickness
+# Thus, we have:
+r_thickness(offset, thickness) = (1/2 - offset)*thickness
+l_thickness(offset, thickness) = (1/2 + offset)*thickness
+
+r_thickness(w::Wall) = r_thickness(w.offset, w.family.thickness + w.family.right_coating_thickness)
+l_thickness(w::Wall) = l_thickness(w.offset, w.family.thickness + w.family.left_coating_thickness)
+
+# Windows and doors have frames.
+
+@deffamily(frame_family, Family,
+  profile::Path=rectangular_profile(0.16, 0.16),
+  material::Material=material_metal)
+
+# Door
+
+@deffamily(door_family, Family,
+  width::Real=1.0,
+  height::Real=2.0,
+  thickness::Real=0.05,
+  frame::FrameFamily=default_frame_family(),
+  right_material::Material=material_wood,
+  left_material::Material=material_wood,
+  side_material::Material=material_wood)
+
+used_materials(f::DoorFamily) = (f.right_material, f.left_material, f.side_material)
+
+
+@defproxy(door, BIMShape, wall::Wall=required(), loc::Loc=u0(), flip_x::Bool=false, flip_y::Bool=false, angle::Real=0, family::DoorFamily=default_door_family())
+
+# Window
+
+@deffamily(window_family, Family,
+  width::Real=1.0,
+  height::Real=1.0,
+  thickness::Real=0.05,
+  frame::FrameFamily=default_frame_family(),
+  right_material::Material=material_glass,
+  left_material::Material=material_glass,
+  side_material::Material=material_glass)
+
+used_materials(f::WindowFamily) = (f.right_material, f.left_material, f.side_material)
+
+
+@defproxy(window, BIMShape, wall::Wall=required(), loc::Loc=u0(), flip_x::Bool=false, flip_y::Bool=false, angle::Real=0, family::WindowFamily=default_window_family())
+
+realize(b::Backend, s::Union{Door, Window}) =
+  let bf = maybe_backend_family(b, s.family)
+    if bf isa OBJFamily
+      let base_height = s.wall.bottom_level.height + s.loc.y,
+          sp = subpath(s.wall.path, s.loc.x, s.loc.x + s.family.width),
+          # flip_x mirrors the leaf/hinge side: reverse the tangent (a rotation by pi
+          # about the opening center, keeping the mesh in the wall plane). flip_y
+          # mirrors the swing/facing side ACROSS the wall plane — a true mirror
+          # (chirality flips), carried by the transform's negated normal axis.
+          (pa, pc) = s.flip_x ? (sp[end], sp[begin]) : (sp[begin], sp[end]),
+          # Revit door/window families put their origin at the opening CENTER (the
+          # revit-side instance map compensates with +width/2); anchor the mesh there,
+          # keeping the tangent from the opening's own direction.
+          loc = wall_obj_transform(intermediate_loc(pa, pc), pc, base_height, bf,
+                                   normal_sign=s.flip_y ? -1.0 : 1.0)
+        # Raw backend ref, like the generic branch below — wrapping in ensure_ref here made this
+        # branch's ref a NativeRef vector while consumers expect the wire value.
+        [b_mesh_obj_fmt(b, bf.obj_name, loc)]
+      end
+    else
+      let base_height = s.wall.bottom_level.height + s.loc.y + 0.0001, #To avoid z-fighting :-(
+          height = s.family.height - 0.0001, #To avoid z-fighting :-(,
+          subpath = translate(subpath(s.wall.path, s.loc.x, s.loc.x + s.family.width), vz(base_height)),
+          subpath = s.flip_x ? reverse(subpath) : subpath,
+          subpath = rotate(subpath, s.angle),
+          r_thickness = r_thickness(s.wall),
+          l_thickness = l_thickness(s.wall),
+          thickness = s.family.thickness
+        vcat(b_wall_no_openings(b, subpath, height, (l_thickness - r_thickness + thickness)/2, (r_thickness - l_thickness + thickness)/2, s.family),
+             frame_refs(b, s, subpath, height))
+      end
+    end
+  end
+
+#=
+Frame geometry has two code paths depending on the subpath's shape.
+
+For polygonal subpaths (straight walls and polygonal wall paths), the
+historical approach works well: merge the U-shape (door) or rectangle
+(window) into a single OpenPolygonalPath via `foldr(join_paths, …)` and
+sweep it in one call. `path_frames(OpenPolygonalPath)` gives per-vertex
+averaged-tangent frames at the corners, which `rotation_minimizing_frames`
+then smooths into the continuous profile orientation you'd expect.
+
+For an `ArcPath` subpath (curved walls), that approach breaks down:
+the composite path becomes a `CompositePath` mixing poly jambs with
+an arc head, `path_frames` falls back to `path_interpolated_frames`,
+and — crucially — the RMF seed is the first frame of the right jamb,
+whose orientation is picked by `cs_from_o_vz((0, 0, -1))`. That seed
+is independent of the wall's tangent at the jamb's arc position, so
+each jamb ends up with the same profile rotation (correct only for
+one specific arc angle). The head also gets threaded through a single
+RMF chain that has no sensible way to re-orient across two discontinuous
+corners.
+
+The split path sweeps each piece independently, with a profile
+pre-rotated so the 0.1 × 0.4 dims land on the right physical directions
+at that piece — matching the convention the polygonal branch produces
+on a straight wall.
+
+See also: src/Paths.jl `Base.reverse(::ArcPath)`, which the head relies
+on for its reversed traversal.
+=#
+frame_refs(b::Backend, s::Union{Door, Window}, subpath::Path, height) =
+  let arc = single_arc_path(subpath)
+    isnothing(arc) ?
+      b_sweep(b, frame_path(s, subpath, height),
+              s.family.frame.profile, 0, 1,
+              material_ref(b, s.family.frame.material)) :
+      frame_refs_arc(b, s, arc, height)
+  end
+
+frame_refs(b::Backend, s::Union{Door, Window}, subpath::ArcPath, height) =
+  frame_refs_arc(b, s, subpath, height)
+
+frame_refs_arc(b::Backend, s::Union{Door, Window}, subpath::ArcPath, height) =
+  let profile = s.family.frame.profile,
+      mat = material_ref(b, s.family.frame.material)
+    vcat(arc_jamb_refs(b, subpath, :end,   height, profile, mat),
+         arc_head_refs(b, subpath, height, profile, mat),
+         arc_jamb_refs(b, subpath, :begin, height, profile, mat),
+         s isa Window ?
+           arc_sill_refs(b, subpath, profile, mat) :
+           [])
+  end
+
+#=
+Per-jamb profile rotation.
+
+The wall tangent at a jamb's arc position has world polar angle
+`θ + π/2` (for an arc centered at the world origin at angle θ). To make
+the post-sweep profile.X align with that tangent, we rotate the profile
+in its 2D plane by `α = atan2(t.x, t.y)` — which simplifies to `-θ` for
+the standard arc tangent `(-sin θ, cos θ, 0)`. The same formula works
+for any tangent direction, including the straight-wall cases (`+X` →
+`π/2`, `+Y` → `0`), which we can verify against the polygonal branch.
+
+See also: src/Paths.jl `location_at(::ArcPath, ϕ)` — the base Loc's
+CS Z-axis gives the wall tangent.
+=#
+arc_jamb_refs(b::Backend, subpath::ArcPath, side::Symbol, height, profile, mat) =
+  let base = side == :end ? path_end(subpath) : path_start(subpath),
+      t_w = in_world(vz(1, base.cs)),
+      α = atan(t_w.x, t_w.y),
+      oriented = rotate(profile, α),
+      jamb_path = open_polygonal_path([base, base + vz(height)])
+    b_sweep(b, jamb_path, oriented, 0, 1, mat)
+  end
+
+#=
+Head/sill profile rotation.
+
+The head follows the arc reversed and lifted by `vz(height)`; the sill
+follows the arc forward. In both, the default frames (from
+`path_interpolated_frames → location_at`) put the profile's X along
+the inward radial and Y along vertical — i.e. the 0.4 dim would land
+on vertical. A π/2 rotation swaps those: 0.1 ends on vertical and 0.4
+on wall normal, matching the polygonal branch's convention.
+=#
+arc_head_refs(b::Backend, subpath::ArcPath, height, profile, mat) =
+  b_sweep(b, translate(reverse(subpath), vz(height)),
+          rotate(profile, π/2), 0, 1, mat)
+
+arc_sill_refs(b::Backend, subpath::ArcPath, profile, mat) =
+  b_sweep(b, subpath, rotate(profile, π/2), 0, 1, mat)
+
+frame_path(s::Door, subpath, height) =
+  foldr(join_paths, [open_polygonal_path([subpath[end], subpath[end] + vz(height)]), translate(reverse(subpath), vz(height)), open_polygonal_path([subpath[begin] + vz(height), subpath[begin]])])
+
+frame_path(s::Window, subpath, height) =
+  foldr(join_paths, [subpath, open_polygonal_path([subpath[end], subpath[end] + vz(height)]), translate(reverse(subpath), vz(height)), open_polygonal_path([subpath[begin] + vz(height), subpath[begin]])])
+##
+
+export add_door
+# `flip_x` mirrors the leaf/hinge side about the opening center (Revit HandFlipped);
+# `flip_y` mirrors the swing/facing side across the wall plane (Revit FacingFlipped).
+add_door(w::Wall=required(), loc::Loc=u0(), family::DoorFamily=default_door_family();
+         flip_x::Bool=false, flip_y::Bool=false) =
+  let d = door(w, loc, flip_x, flip_y, family=family)
+    push!(w.doors, d)
+    delete_shape(w)
+    maybe_realize(w)
+    w
+  end
+
+add!(d::Door) =
+  let w = d.wall
+    push!(w.doors, d)
+    delete_shape(w)
+    maybe_realize(w)
+    w
+  end
+
+export add_wall_opening, WallOpening
+# Add a rectangular void to a wall — like add_door/add_window but a plain WallOpening rectangle
+# (path_position along the wall, base_height above the wall base, width, height), used to reproduce
+# an edited wall profile. Re-realizes the wall so the opening is cut.
+add_wall_opening(w::Wall=required(), opening::WallOpening=WallOpening(0, 0, 1, 1)) =
+  let _ = push!(w.openings, opening)
+    delete_shape(w)
+    maybe_realize(w)
+    w
+  end
+
+export add_window
+add_window(w::Wall=required(), loc::Loc=u0(), family::WindowFamily=default_window_family();
+           flip_x::Bool=false, flip_y::Bool=false) =
+  let d = window(w, loc, flip_x, flip_y, family=family)
+    push!(w.windows, d)
+    delete_shape(w)
+    maybe_realize(w)
+    w
+  end
+
+#=
+A curtain wall is a special kind of wall that is made of a frame with windows.
+=#
+
+@deffamily(curtain_wall_frame_family, Family,
+  width::Real=0.1,
+  depth::Real=0.1,
+  depth_offset::Real=0.25,
+  right_material::Material=material_metal,
+  left_material::Material=material_metal,
+  side_material::Material=material_metal)
+
+used_materials(f::CurtainWallFrameFamily) = (f.right_material, f.left_material, f.side_material)
+
+@deffamily(curtain_wall_family, Family,
+  max_panel_dx::Real=1,
+  max_panel_dy::Real=2,
+  panel::PanelFamily=panel_family(thickness=0.05),
+  boundary_frame::CurtainWallFrameFamily=
+    curtain_wall_frame_family(width=0.1,depth=0.1,depth_offset=0.25),
+  mullion_frame::CurtainWallFrameFamily=
+    curtain_wall_frame_family(width=0.08,depth=0.09,depth_offset=0.2),
+  transom_frame::CurtainWallFrameFamily=
+    curtain_wall_frame_family(width=0.06,depth=0.1,depth_offset=0.11))
+
+used_materials(f::CurtainWallFamily) =
+  (used_materials(f.boundary_frame)...,
+   used_materials(f.mullion_frame)...,
+   used_materials(f.transom_frame)...)
+
+@defproxy(curtain_wall, BIMShape,
+          path::Path=rectangular_path(),
+          bottom_level::Level=default_level(),
+          top_level::Level=upper_level(bottom_level),
+          family::CurtainWallFamily=default_curtain_wall_family(),
+          offset::Real=0.0)
+curtain_wall(p0::Loc, p1::Loc;
+     bottom_level::Level=default_level(),
+     top_level::Level=upper_level(bottom_level),
+     family::CurtainWallFamily=default_curtain_wall_family(),
+     offset::Real=0.0) =
+  curtain_wall([p0, p1], bottom_level=bottom_level, top_level=top_level,
+         family=family, offset=offset)
+       
+realize(b::Backend, s::CurtainWall) =
+  b_curtain_wall(b, s.path, s.bottom_level, s.top_level, s.family, s.offset)
+
+# True when a profile-derived opening `op` is (mostly) covered by a door or window on the same wall
+# — the door/window already cuts that rectangle, so re-emitting it as a wall opening is redundant.
+# By area, so a large frame void that merely contains a small door is NOT considered covered.
+_wall_opening_covered_by_door_window(op::WallOpening, w::Wall) =
+  any(vcat(w.doors, w.windows)) do d
+    let ou = max(0.0, min(op.path_position + op.width, d.loc.x + d.family.width) -
+                      max(op.path_position, d.loc.x)),
+        ov = max(0.0, min(op.base_height + op.height, d.loc.y + d.family.height) -
+                      max(op.base_height, d.loc.y))
+      ou * ov > 0.5 * op.width * op.height
+    end
+  end
+
+# Override auto-generated meta_program for Wall to handle doors/windows
+# and emit keyword arguments instead of positional
+meta_program(w::Wall) =
+  let path = meta_program(w.path),
+      kwargs = Expr[
+        Expr(:kw, :bottom_level, meta_program(w.bottom_level)),
+        Expr(:kw, :top_level, meta_program(w.top_level)),
+        Expr(:kw, :family, meta_program(w.family))],
+      _ = (w.base_offset == 0 ||
+             push!(kwargs, Expr(:kw, :base_offset, meta_program(w.base_offset)));
+           w.top_offset == 0 ||
+             push!(kwargs, Expr(:kw, :top_offset, meta_program(w.top_offset)))),
+      openings = filter(op -> !_wall_opening_covered_by_door_window(op, w), w.openings),
+      has_doors = !isempty(w.doors),
+      has_windows = !isempty(w.windows),
+      has_openings = !isempty(openings)
+    if has_doors || has_windows || has_openings
+      # Portable reconstruction: build the wall, then add each opening. Emitting
+      # `wall_with_openings` (defined only in some backends, with differing
+      # signatures, and absent from KhepriBase) is non-portable and crashes with
+      # UndefVarError when the generated program is eval'd in plain Khepri.
+      Expr(:let,
+           Expr(:(=), :__wall, Expr(:call, :wall, path, kwargs...)),
+           Expr(:block,
+                (let args = Any[:add_door, :__wall, meta_program(d.loc), meta_program(d.family)]
+                   d.flip_x && push!(args, Expr(:kw, :flip_x, true))
+                   d.flip_y && push!(args, Expr(:kw, :flip_y, true))
+                   Expr(:call, args...)
+                 end
+                 for d in w.doors)...,
+                (let args = Any[:add_window, :__wall, meta_program(wn.loc), meta_program(wn.family)]
+                   wn.flip_x && push!(args, Expr(:kw, :flip_x, true))
+                   wn.flip_y && push!(args, Expr(:kw, :flip_y, true))
+                   Expr(:call, args...)
+                 end
+                 for wn in w.windows)...,
+                (Expr(:call, :add_wall_opening, :__wall,
+                      Expr(:call, :WallOpening, meta_program(op.path_position),
+                           meta_program(op.base_height), meta_program(op.width), meta_program(op.height)))
+                 for op in openings)...,
+                :__wall))
+    else
+      Expr(:call, :wall, path, kwargs...)
+    end
+  end
+
+# Override auto-generated meta_program for Level to omit elements; the name rides as a
+# trailing kwarg when present (identity for same-elevation twins; replay finds-or-creates
+# by name via the named plugin RPC).
+meta_program(l::Level) =
+  let call = Expr(:call, l.is_unconnected ? :unconnected_level : :level, meta_program(l.height))
+    isempty(l.name) || push!(call.args, Expr(:kw, :name, l.name))
+    call
+  end
+
+# Railing
+
+# `infill_material` (e.g. material_glass): render a continuous panel between the posts
+# under the top rail — glass-balustrade railings (common on balconies) would otherwise
+# reproduce as skeletal rail+posts on mesh backends.
+# `with_posts=false`: post-free assemblies (glass clamped at the slab edge, e.g.
+# "Over Slab" glassline balustrades) — the default posts are invented geometry there.
+@deffamily(railing_family, Family,
+  height::Real=0.9,
+  post_spacing::Real=1.0,
+  with_posts::Bool=true,
+  material::Material=material_metal,
+  infill_material::Union{Material, Nothing}=nothing)
+
+used_materials(f::RailingFamily) =
+  f.infill_material === nothing ? (f.material,) : (f.material, f.infill_material)
+
+@defproxy(railing, BIMShape,
+  path::Path=open_polygonal_path([u0(), ux()]),
+  level::Level=default_level(),
+  host::Union{BIMShape, Nothing}=nothing,
+  family::RailingFamily=default_railing_family())
+
+realize(b::Backend, s::Railing) =
+  b_railing(b, s.path, s.level, s.host, s.family)
+
+# Ramp
+
+@deffamily(ramp_family, Family,
+  width::Real=1.2,
+  thickness::Real=0.2,
+  bottom_material::Material=material_concrete,
+  top_material::Material=material_concrete,
+  side_material::Material=material_concrete)
+
+used_materials(f::RampFamily) = (f.bottom_material, f.top_material, f.side_material)
+
+@defproxy(ramp, BIMShape,
+  path::Path=open_polygonal_path([u0(), ux()]),
+  bottom_level::Level=default_level(),
+  top_level::Level=upper_level(convert(Level, bottom_level)),
+  family::RampFamily=default_ramp_family())
+
+ramp(p0::Loc, p1::Loc;
+     bottom_level::Level=default_level(),
+     top_level::Level=upper_level(bottom_level),
+     family::RampFamily=default_ramp_family()) =
+  ramp(open_polygonal_path([p0, p1]), bottom_level, top_level, family)
+
+realize(b::Backend, s::Ramp) =
+  b_ramp(b, s.path, s.bottom_level, s.top_level, s.family)
+
+# Stair
+
+#=
+`base_point` convention.
+
+`base_point` is the bottom-left corner of the stair as seen by a person
+standing at the bottom and looking up — equivalently, the corner whose two
+outgoing edges run along `+direction` (the run) and `+perp` (the width),
+where `perp = cross(direction, vz(1))`. The full stair occupies
+`[base_point, base_point + perp * width]` across the run.
+
+This matches a right-handed top-down sketch: place a pin at `base_point`
+on paper, point an arrow along `direction`, and the stair body is on the
+right side of that arrow. Railings (when `with_railings` is set) are placed
+at the two long edges — one at `base_point`, the other at
+`base_point + perp * width` — and inherit their slope from the stair run.
+
+See also: [[b_stair]], [[stair_family]], [[Railing]].
+
+`with_railings` toggles automatic railing generation; one railing is emitted
+on each long edge of the stair, sloped to match the run. Manual `railing(...)`
+calls remain available for cases where the auto-railings are insufficient
+(e.g. a railing on only one side, or extended past the stair landing).
+=#
+@deffamily(stair_family, Family,
+  width::Real=1.0,
+  riser_height::Real=0.18,
+  tread_depth::Real=0.28,
+  thickness::Real=0.15,
+  has_risers::Bool=true,
+  with_railings::Bool=false,
+  railing_family::RailingFamily=default_railing_family(),
+  tread_material::Material=material_concrete,
+  riser_material::Material=material_concrete,
+  stringer_material::Material=material_concrete)
+
+used_materials(f::StairFamily) = (f.tread_material, f.riser_material, f.stringer_material)
+
+#=
+Multi-run stairs (L/U-shaped, dog-leg) carry an optional `path`: the stair's plan
+CENTERLINE as a 3D polyline in coordinates relative to `bottom_level`. Segments whose
+endpoints differ in z are runs (steps climb along them); segments at constant z are
+landings (flat plates). A straight stair keeps `path == nothing` and uses
+base_point/direction as before. When `path` is present, base_point and direction
+mirror the path's first vertex and first-segment direction for backward compatibility.
+=#
+@defproxy(stair, BIMShape,
+  base_point::Loc=u0(),
+  direction::Vec=vy(1),
+  bottom_level::Level=default_level(),
+  top_level::Level=upper_level(convert(Level, bottom_level)),
+  family::StairFamily=default_stair_family(),
+  path::Union{Path, Nothing}=nothing,
+  landings::Union{Vector{ClosedPolygonalPath}, Nothing}=nothing)
+
+# `landings` (only meaningful with `path`): the exact footprint polygon of each
+# landing, bottom-up, each vertex at the landing's level-relative elevation. When
+# absent, realization synthesizes a rectangular plate per flat path segment.
+
+# The auto-generated meta_program would always emit the trailing fields; keep the
+# classic 5-arg form for straight stairs so existing generated programs stay stable.
+meta_program(v::Stair) =
+  let args = Any[:stair, meta_program(v.base_point), meta_program(unitized(v.direction)),
+                 meta_program(v.bottom_level), meta_program(v.top_level), meta_program(v.family)]
+    if v.path !== nothing
+      push!(args, meta_program(v.path))
+      v.landings === nothing ||
+        push!(args, Expr(:vect, [meta_program(l) for l in v.landings]...))
+    end
+    Expr(:call, args...)
+  end
+
+#=
+Auto-railing geometry must match the stair body exactly. Both consume the
+same `perp = cross(direction, vz(1))` so the two long edges of the stair
+become the two railing centerlines; the railing slope rises with the run.
+The path is supplied in coordinates relative to `bottom_level` — `b_railing`
+adds the level base internally, so we never duplicate `level_height` here.
+
+`n_steps * tread_depth` is the actual horizontal stair run (the stair
+occupies one tread-depth less than the user-visible footprint of any
+landing they put on top); the railing tracks the stair, not the landing.
+=#
+realize(b::Backend, s::Stair) =
+  s.path !== nothing ?
+    let stair_refs = b_multi_run_stair(b, s.path, s.landings, s.bottom_level, s.top_level, s.family)
+      s.family.with_railings ?
+        vcat(stair_refs,
+             [b_railing(b, offset_stair_edge_path(s.path, side * s.family.width / 2),
+                        s.bottom_level, nothing, s.family.railing_family)
+              for side in (-1, 1)]...) :
+        stair_refs
+    end :
+  let stair_refs = b_stair(b, s.base_point, s.direction, s.bottom_level, s.top_level, s.family)
+    s.family.with_railings ?
+      let bottom_h = level_height(b, s.bottom_level),
+          top_h = level_height(b, s.top_level),
+          total_h = top_h - bottom_h,
+          n_steps = stair_step_count(total_h, s.family.riser_height),
+          run = n_steps * s.family.tread_depth,
+          dir = unitized(s.direction),
+          perp = cross(dir, vz(1)),
+          bp = in_world(s.base_point),
+          bp_top = bp + dir * run + vz(total_h),
+          left = open_polygonal_path([bp, bp_top]),
+          right = open_polygonal_path([bp + perp * s.family.width,
+                                       bp_top + perp * s.family.width])
+        vcat(stair_refs,
+             b_railing(b, left,  s.bottom_level, nothing, s.family.railing_family),
+             b_railing(b, right, s.bottom_level, nothing, s.family.railing_family))
+      end :
+      stair_refs
+  end
+
+# Edge path for a multi-run stair's auto-railing: each centerline vertex offset
+# horizontally by `d` along the perpendicular of its adjoining segment (naive miter —
+# adequate for the 90-degree turns of real stairs). Keeps the climbing z.
+offset_stair_edge_path(path::Path, d) =
+  let vs = path_vertices(path),
+      seg_perp = i -> let a = vs[max(i, 1)], b = vs[min(i + 1, length(vs))],
+                          h = vxy(cx(b) - cx(a), cy(b) - cy(a))
+                        norm(h) < 1e-9 ? vxy(0, 0) : unitized(cross(h, vz(1)))
+                      end
+    open_polygonal_path([let p = i == 1 ? seg_perp(1) :
+                                 i == length(vs) ? seg_perp(i - 1) :
+                                 let u = seg_perp(i - 1) + seg_perp(i)
+                                   norm(u) < 1e-9 ? seg_perp(i - 1) : unitized(u)
+                                 end
+                           vs[i] + p * d
+                         end
+                         for i in 1:length(vs)])
+  end
+
+# Spiral Stair
+
+@defproxy(spiral_stair, BIMShape,
+  center::Loc=u0(),
+  radius::Real=2.0,
+  start_angle::Real=0,
+  included_angle::Real=2*pi,
+  clockwise::Bool=true,
+  bottom_level::Level=default_level(),
+  top_level::Level=upper_level(convert(Level, bottom_level)),
+  family::StairFamily=default_stair_family())
+
+realize(b::Backend, s::SpiralStair) =
+  b_spiral_stair(b, s.center, s.radius, s.start_angle, s.included_angle,
+                 s.clockwise, s.bottom_level, s.top_level, s.family)
+
+# Stair Landing
+
+@deffamily(stair_landing_family, Family,
+  thickness::Real=0.2,
+  top_material::Material=material_concrete,
+  bottom_material::Material=material_concrete,
+  side_material::Material=material_concrete)
+
+slab_family_elevation(b::Backend, family::StairLandingFamily) = 0
+slab_family_thickness(b::Backend, family::StairLandingFamily) = family.thickness
+
+used_materials(f::StairLandingFamily) = (f.top_material, f.bottom_material, f.side_material)
+
+@defproxy(stair_landing, BIMShape,
+  region::Region=rectangular_path(),
+  level::Level=default_level(),
+  family::StairLandingFamily=default_stair_landing_family())
+
+realize(b::Backend, s::StairLanding) =
+  b_stair_landing(b, s.region, s.level, s.family)
+
+# Beam
+# Beams are mainly horizontal elements. By default, a beam is aligned along its top axis
+@deffamily(beam_family, Family,
+  profile::ClosedPath=top_aligned_rectangular_profile(1, 2),
+  material::Material=material_metal)
+
+used_materials(f::BeamFamily) = (f.material, )
+
+
+@defproxy(beam, BIMShape, cb::Loc=u0(), h::Real=1, angle::Real=0, family::BeamFamily=default_beam_family())
+beam(cb::Loc, ct::Loc, Angle::Real=0, Family::BeamFamily=default_beam_family(); angle::Real=Angle, family::BeamFamily=Family) =
+    let (c, h) = position_and_height(cb, ct)
+      beam(c, h, angle, family)
+    end
+
+realize(b::Backend, s::Beam) =
+  b_beam(b, s.cb, s.h, s.angle, s.family)
+
+# Emit the two world endpoints (via the 2-point beam constructor) so a beam's orientation round-trips.
+# The auto-generated meta_program would emit `beam(cb, h, …)`, but meta_program(::Loc) drops cb's
+# coordinate system, so a horizontal beam would collapse back to a vertical one of height h≈0.
+meta_program(s::Beam) =
+  Expr(:call, :beam,
+       meta_program(in_world(s.cb)),
+       meta_program(in_world(add_z(s.cb, s.h))),
+       Expr(:kw, :angle, meta_program(s.angle)),
+       Expr(:kw, :family, meta_program(s.family)))
+
+# Column
+# Columns are mainly vertical elements. A column has its center axis aligned with a line defined by two points
+
+@deffamily(column_family, Family,
+  profile::ClosedPath=rectangular_profile(0.2, 0.2),
+  material::Material=material_concrete)
+
+used_materials(f::ColumnFamily) = (f.material, )
+
+@defproxy(free_column, BIMShape, cb::Loc=u0(), h::Real=1, angle::Real=0, family::ColumnFamily=default_column_family())
+free_column(cb::Loc, ct::Loc, Angle::Real=0, Family::ColumnFamily=default_column_family(); angle::Real=Angle, family::ColumnFamily=Family) =
+  let (c, h) = position_and_height(cb, ct)
+    free_column(c, h, angle, family)
+  end
+
+realize(b::Backend, s::FreeColumn) =
+  b_free_column(b, s.cb, s.h, s.angle, s.family)
+
+# See meta_program(::Beam): emit the two world endpoints via the 2-point free_column constructor so
+# the member's orientation survives the round-trip.
+meta_program(s::FreeColumn) =
+  Expr(:call, :free_column,
+       meta_program(in_world(s.cb)),
+       meta_program(in_world(add_z(s.cb, s.h))),
+       Expr(:kw, :angle, meta_program(s.angle)),
+       Expr(:kw, :family, meta_program(s.family)))
+
+@defproxy(column, BIMShape, cb::Loc=u0(), angle::Real=0,
+  bottom_level::Level=default_level(), top_level::Level=upper_level(bottom_level),
+  family::ColumnFamily=default_column_family())
+
+realize(b::Backend, s::Column) =
+  b_column(b, s.cb, s.angle, s.bottom_level, s.top_level, s.family)
+
+# Tables and chairs
+
+@deffamily(table_family, Family,
+  length::Real=1.6,
+  width::Real=0.9,
+  height::Real=0.75,
+  top_thickness::Real=0.05,
+  leg_thickness::Real=0.05,
+  material::Material=material_wood)
+
+used_materials(f::TableFamily) = (f.material, )
+
+
+@deffamily(chair_family, Family,
+  length::Real=0.4,
+  width::Real=0.4,
+  height::Real=1.0,
+  seat_height::Real=0.5,
+  thickness::Real=0.05,
+  material::Material=material_wood)
+
+used_materials(f::ChairFamily) = (f.material, )
+
+@deffamily(table_chair_family, Family,
+  table_family::TableFamily=default_table_family(),
+  chair_family::ChairFamily=default_chair_family(),
+  chairs_top::Int=1,
+  chairs_bottom::Int=1,
+  chairs_right::Int=2,
+  chairs_left::Int=2,
+  spacing::Real=0.7)
+
+used_materials(f::TableChairFamily) =
+  (used_materials(f.table_family)..., used_materials(f.chair_family)...)
+
+
+@defproxy(table, BIMShape, loc::Loc=u0(), level::Level=default_level(), family::TableFamily=default_table_family())
+table(loc::Loc, angle::Real, level=default_level(), family::TableFamily=default_table_family()) =
+  table(loc_from_o_phi(loc, angle), level, family)
+realize(b::Backend, s::Table) =
+  let bf = maybe_backend_family(b, s.family)
+    if bf isa OBJFamily
+      b_mesh_obj_fmt(b, bf.obj_name, standalone_obj_transform(add_z(s.loc, s.level.height), bf))
+    else
+      let tf = s.family
+        b_table(b, add_z(s.loc, s.level.height),
+                tf.length, tf.width, tf.height,
+                tf.top_thickness, tf.leg_thickness,
+                material_ref(b, tf.material))
+      end
+    end
+  end
+
+@defproxy(chair, BIMShape, loc::Loc=u0(), level::Level=default_level(), family::ChairFamily=default_chair_family())
+chair(loc::Loc, angle::Real, level::Level=default_level(), family::ChairFamily=default_chair_family()) =
+  chair(loc_from_o_phi(loc, angle), level, family)
+realize(b::Backend, s::Chair) =
+  let bf = maybe_backend_family(b, s.family)
+    if bf isa OBJFamily
+      b_mesh_obj_fmt(b, bf.obj_name, standalone_obj_transform(add_z(s.loc, s.level.height), bf))
+    else
+      let cf = s.family
+        b_chair(b, add_z(s.loc, s.level.height),
+                cf.length, cf.width, cf.height,
+                cf.seat_height, cf.thickness,
+                material_ref(b, cf.material))
+      end
+    end
+  end
+
+@defproxy(table_and_chairs, BIMShape, loc::Loc=u0(), level::Level=default_level(), family::TableChairFamily=default_table_chair_family())
+table_and_chairs(loc::Loc, angle::Real, level::Level=default_level(), family::TableChairFamily=default_table_chair_family()) =
+  table_and_chairs(loc_from_o_phi(loc, angle), level, family)
+realize(b::Backend, s::TableAndChairs) =
+  let f = s.family,
+      tf = f.table_family,
+      cf = f.chair_family,
+      tmat = material_ref(b, tf.material),
+      cmat = material_ref(b, cf.material)
+    b_table_and_chairs(b,
+      add_z(s.loc, s.level.height),
+      p->b_table(b, p, tf.length, tf.width, tf.height, tf.top_thickness, tf.leg_thickness, tmat),
+      p->b_chair(b, p, cf.length, cf.width, cf.height, cf.seat_height, cf.thickness, cmat),
+      tf.length,
+      tf.width,
+      f.chairs_top,
+      f.chairs_bottom,
+      f.chairs_right,
+      f.chairs_left,
+      f.spacing)
+  end
+
+# Lights
+# A pointlight has a fixed, inverse-square attenuation. Intensity is in Candela
+@defproxy(pointlight, BIMShape, loc::Loc=z(3), color::RGB=rgb(1,1,1), intensity::Real=1500.0, level::Level=default_level())
+
+realize(b::Backend, s::Pointlight) =
+  b_pointlight(b, add_z(s.loc, s.level.height), s.intensity, s.color)
+
+@defproxy(spotlight, BIMShape, loc::Loc=z(3), dir::Vec=vz(-1), hotspot::Real=pi/4, falloff::Real=pi/3)
+
+realize(b::Backend, s::Spotlight) =
+  b_spotlight(b, s.loc, s.dir, s.hotspot, s.falloff)
+
+@defproxy(arealight, BIMShape, loc::Loc=z(3), dir::Vec=vz(-1), size::Real=1.0, color::RGB=rgb(1,1,1), intensity::Real=1000.0, level::Level=default_level())
+
+realize(b::Backend, s::Arealight) =
+  b_arealight(b, add_z(s.loc, s.level.height), s.dir, s.size, s.intensity, s.color)
+
+@defproxy(ieslight, BIMShape, file::String=required(), loc::Loc=z(3), dir::Vec=vz(-1), alpha::Real=0, beta::Real=0, gamma::Real=0)
+
+realize(b::Backend, s::Ieslight) =
+  b_ieslight(b, s.file, s.loc, s.dir, s.alpha, s.beta, s.gamma)
+
+# Water closed
+@deffamily(toilet_family, Family,
+  )
+missing_slab() = error("Missing slab host!")
+
+@defproxy(toilet, BIMShape, cb::Loc=u0(), host::BIMShape=missing_slab(), family::ToiletFamily=default_toilet_family())
+toilet(cb::Loc, Angle::Real=0, Host::BIMShape=missing_slab(), Family::ToiletFamily=default_toilet_family(); 
+             angle::Real=Angle, host::BIMShape=Host, family::ToiletFamily=Family) =
+  toilet(loc_from_o_phi(cb, angle), host, family)
+
+realize(b::Backend, s::Toilet) =
+  b_toilet(b, s.cb, s.host, s.family)
+
+# Sink
+@deffamily(sink_family, Family,
+  )
+
+@defproxy(sink, BIMShape, cb::Loc=u0(), host::BIMShape=missing_slab(), family::SinkFamily=default_sink_family())
+sink(cb::Loc, Angle::Real=0, Host::BIMShape=missing_slab(), Family::SinkFamily=default_sink_family(); 
+             angle::Real=Angle, host::BIMShape=Host, family::SinkFamily=Family) =
+  sink(loc_from_o_phi(cb, angle), host, family)
+
+realize(b::Backend, s::Sink) =
+  b_sink(b, s.cb, s.host, s.family)
+
+# Closet
+@deffamily(closet_family, Family,
+  )
+
+@defproxy(closet, BIMShape, cb::Loc=u0(), host::BIMShape=missing_slab(), family::ClosetFamily=default_closet_family())
+closet(cb::Loc, Angle::Real=0, Host::BIMShape=missing_slab(), Family::ClosetFamily=default_closet_family(); 
+       angle::Real=Angle, host::BIMShape=Host, family::ClosetFamily=Family) =
+  closet(loc_from_o_phi(cb, angle), host, family)
+
+realize(b::Backend, s::Closet) =
+  b_closet(b, s.cb, s.host, s.family)
+# Family Element (generic catch-all for family instances not matching specific proxies)
+@deffamily(family_element_family, Family,
+  )
+
+@defproxy(family_element, BIMShape,
+  loc::Loc=u0(),
+  angle::Real=0,
+  level::Level=default_level(),
+  family::FamilyElementFamily=default_family_element_family())
+realize(b::Backend, s::FamilyElement) =
+  b_family_element(b, s.loc, s.angle, s.level, s.family)
+
+#################################
+# Node support
+Base.@kwdef struct TrussNodeSupport
+    ux::Bool=false
+    uy::Bool=false
+    uz::Bool=false
+    rx::Bool=false
+    ry::Bool=false
+    rz::Bool=false
+end
+
+const truss_node_support = TrussNodeSupport
+
+@deffamily(truss_node_family, Family,
+    radius::Real=0.03,
+    support::Any=false,
+    material::Material=material_metal)
+
+@deffamily(truss_bar_family, Family,
+    radius::Real=0.02,
+    inner_radius::Real=0,
+    material::Material=material_metal)
+
+used_materials(f::TrussNodeFamily) = [f.material]
+used_materials(f::TrussBarFamily) = [f.material]
+
+public truss_bar_family_cross_section_area
+truss_bar_family_cross_section_area(f::TrussBarFamily) =
+  error("This should be computed by the backend family") #truss_bar_family_cross_section_area(back)
+
+# We need a few families by default
+export free_truss_node_family, fixed_truss_node_family, truss_node_support
+
+free_truss_node_family =
+  truss_node_family_element(default_truss_node_family(),
+                            support=truss_node_support())
+fixed_truss_node_family =
+  truss_node_family_element(default_truss_node_family(),
+                            support=truss_node_support(ux=true, uy=true, uz=true))
+
+
+@defproxy(truss_node, BIMShape, p::Loc=u0(), family::TrussNodeFamily=default_truss_node_family())
+@defproxy(truss_bar, BIMShape, p0::Loc=u0(), p1::Loc=u0(), angle::Real=0, family::TrussBarFamily=default_truss_bar_family())
+
+realize(b::Backend, s::TrussNode) =
+  truss_node_is_supported(s) ?
+    vcat(b_truss_node(b, s.p, s.family), b_truss_node_support(b, s.p, s.family)) :
+    b_truss_node(b, s.p, s.family)
+
+realize(b::Backend, s::TrussBar) =
+  b_truss_bar(b, s.p0, s.p1, s.family)
+
+
+export truss_nodes, truss_bars
+truss_nodes(ps, family=default_truss_node_family()) =
+  [truss_node(p, family) for p in ps]
+truss_bars(ps, qs, family=default_truss_bar_family()) =
+  [truss_bar(p, q, 0, family) for (p, q) in zip(ps, qs)]
+
+export truss_node_is_supported
+truss_node_is_supported(n) =
+  let s = n.family.support
+    s != false && (s.ux || s.uy || s.uz || s.rx || s.ry || s.rz)
+  end
+
+truss_bar_cross_section_area(s::TrussBar) =
+  truss_bar_family_cross_section_area(family_ref(top_backend(), s.family))
+truss_bar_volume(s::TrussBar) =
+  truss_bar_cross_section_area(s)*distance(s.p0, s.p1)
+
+
+# Should we merge coincident nodes?
+export merge_coincident_truss_nodes,
+       merge_coincident_truss_bars
+public maybe_merged_node,
+       maybe_merged_bar
+
+const merge_coincident_truss_nodes = Parameter(true)
+
+#=
+Truss-node coincidence tolerance.
+
+Truss-analysis input often arrives from a modelling pipeline that
+introduces millimetre-scale drift: two nodes that the designer treats
+as the same joint may have positions that differ by 1e-4 m or more
+after coordinate transports and family substitutions. Using
+`coincidence_tolerance()` here (1e-10 m) would fail to merge them,
+leaving the solver with an over-constrained or singular stiffness
+matrix. We therefore maintain a separate, looser coincidence
+threshold specifically for structural nodes.
+
+Compared against `distance(n_a.p, n_b.p)` between the positions of
+two truss nodes, in metres. The default 1e-6 m (one micrometre)
+is still tight from an engineering standpoint — no real structure
+has micrometre-scale node spacing — while being six orders of
+magnitude more permissive than `coincidence_tolerance`, enough to
+absorb authoring drift without silently merging distinct joints.
+
+See also: coincidence_tolerance (the general-purpose path-point
+coincidence threshold at 1e-10 m).
+=#
+
+"Distance below which two truss nodes are merged into one. `distance(a, b) < truss_node_coincidence_tolerance()`. [metres]"
+const truss_node_coincidence_tolerance = Parameter(1e-6)
+export truss_node_coincidence_tolerance
+
+maybe_merged_node(b::Backend, s::TrussNode) =
+  # We are allowed to replace a node that we just created with one that already exists
+  let tol = truss_node_coincidence_tolerance(),
+      p = s.p
+    for n in b.truss_nodes
+      if distance(n.p, p) < tol
+        merge_coincident_truss_nodes() || error("Coincident nodes $(s) and $(n) at $(p)")
+        return n
+      end
+    end
+    b.realized(false)
+    push!(b.truss_nodes, s)
+    s
+  end
+
+# Should we merge coincident bars?
+const merge_coincident_truss_bars = Parameter(true)
+
+maybe_merged_bar(b::Backend, s::TrussBar) =
+  # We are allowed to replace a bar that we just created with one that already exists
+  let tol = truss_node_coincidence_tolerance(),
+      p0 = s.p0,
+      p1 = s.p1
+    for existing_bar in b.truss_bars
+      if (distance(existing_bar.p0, p0) < tol && distance(existing_bar.p1, p1) < tol) ||
+         (distance(existing_bar.p0, p1) < tol && distance(existing_bar.p1, p0) < tol)
+        merge_coincident_truss_bars() ||
+          error("Coincident bars $(s) and $(existing_bar) at $(p0) and $(p1)")
+        return existing_bar
+      end
+    end
+    b.realized(false)
+    push!(b.truss_bars, s)
+    s
+  end
+
+# Many analysis tools prefer a simplified node-and-bar representation.
+# To merge nodes and bars we need a different structure. Maybe we should merge
+# this with the BIM information
+export truss_node_data, truss_bar_data
+public TrussNodeData, TrussBarData
+
+struct TrussNodeData
+    id::Int
+    loc::Loc
+    family::Any
+    load::Any
+end
+
+truss_node_data(id::Int, loc::Loc, family::Any, load::Vec) =
+  TrussNodeData(id, loc, family, load)
+
+#
+struct TrussBarData
+    id::Int
+    node1::TrussNodeData
+    node2::TrussNodeData
+    rotation::Real
+    family::Any
+end
+
+truss_bar_data(id::Int, node0::TrussNodeData, node1::TrussNodeData, rotation::Real, family::Any) =
+  TrussBarData(id, node0, node1, rotation, family)
+
+public process_nodes, process_bars
+process_nodes(nodes, load=vz(0), loads_points=Dict()) =
+  let point_loads = Dict()
+    for k in keys(loads_points)
+      for p in loads_points[k]
+        point_loads[p] = k
+      end
+    end
+    [truss_node_data(i, in_world(node.p), node.family, load + get(point_loads, node.p, vz(0)))
+     for (i, node) in enumerate(nodes)]
+  end
+process_bars(bars, processed_nodes) =
+  let tol = truss_node_coincidence_tolerance(),
+      node_data_near(loc) =
+        begin
+          for nd in processed_nodes
+            distance(loc, nd.loc) < tol && return nd
+          end
+          error("Bar without corresponding node at location $(loc)!")
+        end
+    [truss_bar_data(
+      i,
+      node_data_near(in_world(bar.p0)),
+      node_data_near(in_world(bar.p1)),
+      bar.angle,
+      bar.family)
+     for (i, bar) in enumerate(bars)]
+  end
+
+# Analysis
+@defcb truss_analysis(load::Vec=vz(-1e5), self_weight::Bool=false, point_loads::Dict=Dict())
+@defcb truss_bars_volume()
+@defcb node_displacement_function(res::Any)
+@defcb reaction_forces(res::Any)
+@defcb element_axial_forces(res::Any)
+
+export view_truss_deformation
+view_truss_deformation(
+  results::Any=nothing,
+  visualizer::Backend=top_backend();
+  factor::Real=100) =
+  let disp = node_displacement_function(results),
+      b = top_backend()
+    with(current_backend, visualizer) do
+      for node in b.truss_node_data
+        d = disp(node)*factor
+        p = node.loc
+        truss_node(p+d, family=node.family)
+      end
+      for bar in b.truss_bar_data
+        let (node1, node2) = (bar.node1, bar.node2),
+            (p1, p2) = (node1.loc, node2.loc),
+            (d1, d2) = (disp(node1)*factor, disp(node2)*factor)
+          truss_bar(p1+d1, p2+d2, family=bar.family)
+        end
+      end
+    end
+  end
+
+public show_truss_deformation
+show_truss_deformation(
+    results::Any=nothing,
+    visualizer::Backend=top_backend();
+    node_radius::Real=0.08, bar_radius::Real=0.02, factor::Real=100,
+    deformation_name::String="Deformation",
+    deformation_color::RGB=rgb(1, 0, 0),
+    no_deformation_name::String="No deformation",
+    no_deformation_color::RGB=rgb(0, 1, 0)) =
+  let disp = node_displacement_function(results),
+      b = top_backend()
+    with(current_backend, visualizer) do
+      delete_all_shapes()
+      with(current_layer, create_layer(no_deformation_name, true, no_deformation_color)) do
+        for node in b.truss_node_data
+          p = node.loc
+          sphere(p, node_radius)
+        end
+        for bar in b.truss_bar_data
+          let (node1, node2) = (bar.node1, bar.node2),
+              (p1, p2) = (node1.loc, node2.loc)
+            cylinder(p1, bar_radius, p2)
+          end
+        end
+      end
+      with(current_layer, create_layer(deformation_name, true, deformation_color)) do
+        for node in b.truss_node_data
+          d = disp(node)*factor
+          p = node.loc
+          sphere(p+d, node_radius)
+        end
+        for bar in b.truss_bar_data
+          let (node1, node2) = (bar.node1, bar.node2),
+              (p1, p2) = (node1.loc, node2.loc),
+              (d1, d2) = (disp(node1)*factor, disp(node2)*factor)
+            cylinder(p1+d1, bar_radius, p2+d2)
+          end
+        end
+      end
+    end
+  end
+
+export max_displacement
+max_displacement(results, b::Backend=top_backend()) =
+  let disp = node_displacement_function(results)
+    maximum(map(norm∘disp, b.truss_node_data))
+  end
+
+#=
+bar_length_variation(bar, disp) =
+  let (node1, node2) = (bar.node1, bar.node2),
+      (p1, p2) = (node1.loc, node2.loc),
+      pre_length = distance(p1, p2),
+      (d1, d2) = disp.((node1, node2)),
+      pos_length = distance(p1 + d1, p2 + d2)
+    pos_length - pre_length
+  end
+
+show_stresses(results, b::Backend=autocad) =
+  let disp = node_displacement_function(results),
+      to255(x) = round(UInt8, x*255),
+      (min, max) = extrema([bar_length_variation(bar, disp) for bar in frame3dd.truss_bar_data])
+    for bar in frame3dd.truss_bar_data
+      let diff = bar_length_variation(bar, disp),
+          color = diff > 0 ?
+            rgb(diff/max, 0, 0) :
+            rgb(0, 0, diff/min),
+          bar_radius = 0.05,
+          (node1, node2) = (bar.node1, bar.node2),
+          (p1, p2) = (node1.loc, node2.loc),
+          (d1, d2) = disp.((node1, node2)),
+          s = cylinder(p1+d1, bar_radius, p2+d2)
+        @remote(b, SetShapeColor(ref(b, s).value, to255(red(color)), to255(green(color)), to255(blue(color))))
+      end
+    end
+  end
+=#
+
+# obj_model — a portable, direct placement of a Wavefront OBJ mesh at an explicit frame. Distinct
+# from an OBJ *family* (obj_family, resolved via set_backend_family): obj_model is a standalone shape
+# used by the geometric fallback to reproduce elements that have no parametric family (MEP, in-place,
+# complex geometry). It realizes on any backend by parsing the OBJ and emitting a surface mesh in the
+# placement coordinate system; backends with native/instanced OBJ loading (e.g. KhepriThreejs) override
+# b_obj_model. `path` is a file path (absolute or ending in .obj); a bare name resolves under
+# resources/models/obj/.
+@defproxy(obj_model, Shape3D, path::String="", location::Loc=u0(), scale::Real=1.0,
+          material::Union{Material,Nothing}=nothing)
+
+realize(b::Backend, s::ObjModel) = b_obj_model(b, s.path, s.location, s.scale, s.material)
+
+public b_obj_model
+b_obj_model(b::Backend, path, location, scale, material) =
+  let objpath = obj_file_path(path),
+      (verts, faces, face_mats) = read_obj_mesh(objpath),
+      # Place each (scaled) OBJ vertex in the location's frame: works whether `location` is a plain
+      # world point or a full frame u0(cs=cs(o, vx, vy, vz)) as emitted by the geometric fallback.
+      # The offset vector must live in the location's cs (a bare vxyz() is built in the
+      # current cs and would bypass the frame's rotation).
+      placed = [in_world(location + vxyz(v[1] * scale, v[2] * scale, v[3] * scale, location.cs)) for v in verts]
+    if isnothing(material)
+      # No explicit material: colour each usemtl group from the .mtl sibling (the Revit exporter writes
+      # one next to each fallback .obj) so fallback meshes render coloured, not void/grey.
+      let (mtl, order) = parse_mtl(splitext(objpath)[1] * ".mtl"),
+          fb = isempty(order) ? void_ref(b) : material_ref(b, mtl[first(order)])
+        _b_surface_mesh_obj(b, placed, faces, face_mats, mtl, fb)
+      end
+    else
+      # An explicit material overrides every group; faces are OBJ-native 1-based → canonical 0-based.
+      b_surface_mesh(b, placed, [f .- 1 for f in faces], material_ref(b, material))
+    end
+  end
+
+@defcb lighting_analysis()
+
+###################################
+# BIM model introspection
+#=
+`all_<category>()` enumerates the BIM elements a backend knows about. Each is a
+`@defcb`, so it gets an exported frontend `all_x(backend=top_backend())` plus a
+public `b_all_x(backend)` hook backends may specialize. `all_x(b)` therefore
+works positionally, which is how these were called when they lived in a backend.
+
+Three implementation tiers, in order of preference:
+
+  1. Nothing to write. The default `b_all_x(b::Backend)` below filters
+     `b_all_shapes(b)` by the category's shape type, so any backend that can
+     enumerate its shapes gets the whole family for free. This covers both
+     storage strategies, since `b_all_shapes` already dispatches on
+     `shape_storage_type` (local dict vs. remote query).
+  2. Override the hook when the host application models the category natively.
+     That also finds elements Khepri did not create — the point of BIM
+     introspection (cf. KhepriRevit's `b_all_walls`, which reads `DocWalls()`).
+  3. Nothing to write, again: a backend that cannot enumerate shapes inherits
+     `b_all_shapes`'s `UndefinedBackendException`. File-output backends (TikZ,
+     POVRay) have no model to introspect, and that is the honest answer.
+
+Filtering uses the `Abstract*` supertypes `@defproxy` generates rather than the
+concrete structs, so a backend that specializes a shape type still matches.
+
+`all_levels` deliberately has NO derived default: levels are not shapes, so
+there is nothing to filter, and inventing them from the shapes that reference
+one would report a different model than the backend actually holds. Backends
+that know their levels implement the hook; the rest raise (tier 3).
+=#
+@defcb all_levels()
+@defcb all_walls()
+@defcb all_walls_at_level(level)
+@defcb all_slabs()
+@defcb all_roofs()
+@defcb all_ceilings()
+@defcb all_panels()
+@defcb all_columns()
+@defcb all_beams()
+@defcb all_doors()
+@defcb all_windows()
+@defcb all_stairs()
+@defcb all_railings()
+@defcb all_fixtures()
+@defcb all_elements()
+
+# Tier-1 defaults. More specific than the `b_all_x(::Any)` throw @defcb emits, so
+# these win for every Backend while a non-backend argument still raises.
+_all_shapes_of_type(b::Backend, T::Type) =
+  filter(s -> s isa T, b_all_shapes(b))
+
+# A curtain wall is a wall to anyone asking "what walls are in this model?", but Khepri
+# gives it its own shape type, which is NOT a subtype of AbstractWall. Include it, so the
+# default agrees with backends whose host app files curtain walls under walls (Revit's
+# DocWalls returns them, verified live). `all_panels` still reports the panels themselves.
+b_all_walls(b::Backend)    = _all_shapes_of_type(b, Union{AbstractWall,AbstractCurtainWall})
+b_all_slabs(b::Backend)    = _all_shapes_of_type(b, AbstractSlab)
+b_all_roofs(b::Backend)    = _all_shapes_of_type(b, AbstractRoof)
+b_all_ceilings(b::Backend) = _all_shapes_of_type(b, AbstractCeiling)
+b_all_panels(b::Backend)   = _all_shapes_of_type(b, AbstractPanel)
+b_all_beams(b::Backend)    = _all_shapes_of_type(b, AbstractBeam)
+b_all_doors(b::Backend)    = _all_shapes_of_type(b, AbstractDoor)
+b_all_windows(b::Backend)  = _all_shapes_of_type(b, AbstractWindow)
+b_all_railings(b::Backend) = _all_shapes_of_type(b, AbstractRailing)
+b_all_fixtures(b::Backend) = _all_shapes_of_type(b, AbstractFamilyElement)
+# A free column is a column that spans an explicit height instead of a level pair;
+# both are columns to anyone asking "what columns are in this model?".
+b_all_columns(b::Backend)  = _all_shapes_of_type(b, Union{AbstractColumn,AbstractFreeColumn})
+# Landings are parts of a stair, not stairs, so they are not counted here.
+b_all_stairs(b::Backend)   = _all_shapes_of_type(b, Union{AbstractStair,AbstractSpiralStair})
+# Every BIM element, whatever the category — including ones with no all_x of their own.
+b_all_elements(b::Backend) = _all_shapes_of_type(b, BIMShape)
+
+# Derived from b_all_walls, so a backend that overrides only that one still gets a
+# correct (if unindexed) answer here; backends with a level-indexed query override.
+b_all_walls_at_level(b::Backend, level) =
+  filter(w -> w.bottom_level == level, b_all_walls(b))
+@defcbs realize_beam_profile(s::BIMShape, profile::Path, cb::Loc, length::Real)
+#@defcbs slab(profile, holes, thickness, family)
+#@defcbs wall(path, height, l_thickness, r_thickness, family)
+#@defcbs panel(bot::Locs, top::Locs, family)
+
+####################################
+
+#=
+The typical family change is:
+
+with(default_XPTO_family, XPTO_family_element(default_XPTO_family(), param=value)) do
+  ...
+end
+
+We will simplify this pattern by allowing the following syntax:
+
+with(XPTO_family, param=value) do
+  ...
+end
+=#
+
+
+public family_profile
+# The accessor every default realization funnels through normalizes the profile
+# to section semantics (see section_in_world): a family created under a
+# non-world current_cs (a group factory body, a `with(current_cs, ...)` block)
+# must not drag the ambient transform into its members' sections.
+family_profile(b::Backend, family) =
+  section_in_world(family.profile)
