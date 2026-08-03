@@ -776,7 +776,7 @@ KhepriBase.b_arc_dimension(b::SVG, c, r, α, Δα, rstr, Δstr, size, offset, ma
    pixel rectangle for any string, so we use it directly. =#
 KhepriBase.shape_locs(s::KhepriBase.Text) =
   let p = s.corner, h = s.height
-    (minx, maxx, miny, maxy) = KhepriBase.b_text_size(svg, s.str, h, nothing)
+    (minx, maxx, miny, maxy) = b_text_size(svg, s.str, h, nothing)
     [add_xy(p, minx, miny), add_xy(p, maxx, maxy)]
   end
 
@@ -1034,7 +1034,7 @@ svg_shapes_bbox(b::SVG) =
   let bmin = [Inf, Inf, Inf],
       bmax = [-Inf, -Inf, -Inf]
     fold_locs!(s) =
-      for loc in KhepriBase.shape_locs(s)
+      for loc in shape_locs(s)
         let wp = in_world(loc)
           bmin[1] = min(bmin[1], wp.x)
           bmin[2] = min(bmin[2], wp.y)
