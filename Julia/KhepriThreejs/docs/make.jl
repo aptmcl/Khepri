@@ -8,7 +8,7 @@ makedocs(;
     authors="António Menezes Leitão <antonio.menezes.leitao@gmail.com>",
     sitename="KhepriThreejs.jl",
     format=Documenter.HTML(;
-        canonical="https://aptmcl.github.io/KhepriThreejs.jl",
+        canonical="https://aptmcl.github.io/Khepri/KhepriThreejs/stable",
         edit_link="master",
         assets=String[],
     ),
@@ -18,6 +18,8 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/aptmcl/KhepriThreejs.jl",
-    devbranch="master",
+    repo="github.com/aptmcl/Khepri.git",
+    devbranch="main",
+    dirname="KhepriThreejs",
+    tag_prefix="KhepriThreejs-",
 )

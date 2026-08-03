@@ -10,11 +10,11 @@ makedocs(;
     # us to strip their docstrings.
     checkdocs=:exports,
     authors="António Menezes Leitão <antonio.menezes.leitao@gmail.com>",
-    repo="https://github.com/aptmcl/KhepriBase.jl/blob/{commit}{path}#L{line}",
+    repo=Documenter.Remotes.GitHub("aptmcl", "Khepri"),
     sitename="KhepriBase.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://aptmcl.github.io/KhepriBase.jl",
+        canonical="https://aptmcl.github.io/Khepri/KhepriBase/stable",
         assets=String[],
         size_threshold=300 * 1024,  # 300 KiB — api.md is large
     ),
@@ -82,6 +82,8 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/aptmcl/KhepriBase.jl",
-    devbranch="master",
+    repo="github.com/aptmcl/Khepri.git",
+    devbranch="main",
+    dirname="KhepriBase",
+    tag_prefix="KhepriBase-",
 )

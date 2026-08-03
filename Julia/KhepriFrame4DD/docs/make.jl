@@ -8,7 +8,7 @@ makedocs(;
     authors="António Menezes Leitão <antonio.menezes.leitao@gmail.com>",
     sitename="KhepriFrame4DD.jl",
     format=Documenter.HTML(;
-        canonical="https://aptmcl.github.io/KhepriFrame4DD.jl",
+        canonical="https://aptmcl.github.io/Khepri/KhepriFrame4DD/stable",
         edit_link="master",
         assets=String[],
     ),
@@ -24,6 +24,8 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/aptmcl/KhepriFrame4DD.jl",
-    devbranch="master",
+    repo="github.com/aptmcl/Khepri.git",
+    devbranch="main",
+    dirname="KhepriFrame4DD",
+    tag_prefix="KhepriFrame4DD-",
 )

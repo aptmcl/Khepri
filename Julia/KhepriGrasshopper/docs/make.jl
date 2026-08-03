@@ -4,11 +4,11 @@ using Documenter
 makedocs(;
     modules=[KhepriGrasshopper],
     authors="António Menezes Leitão <antonio.menezes.leitao@gmail.com>",
-    repo="https://github.com/aptmcl/KhepriGrasshopper.jl/blob/{commit}{path}#L{line}",
+    repo=Documenter.Remotes.GitHub("aptmcl", "Khepri"),
     sitename="KhepriGrasshopper.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://aptmcl.github.io/KhepriGrasshopper.jl",
+        canonical="https://aptmcl.github.io/Khepri/KhepriGrasshopper/stable",
         assets=String[],
     ),
     pages=[
@@ -17,6 +17,8 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/aptmcl/KhepriGrasshopper.jl",
-    devbranch="master",
+    repo="github.com/aptmcl/Khepri.git",
+    devbranch="main",
+    dirname="KhepriGrasshopper",
+    tag_prefix="KhepriGrasshopper-",
 )
