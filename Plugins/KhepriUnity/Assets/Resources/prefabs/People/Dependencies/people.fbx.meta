@@ -1,0 +1,222 @@
+fileFormatVersion: 2
+guid: d13eef3cfa676de4eb177ceb5dd06aab
+ModelImporter:
+  serializedVersion: 23
+  fileIDToRecycleName:
+    100000: 01_person
+    100002: 01_person.001
+    100004: 01_person.002
+    100006: 01_person.003
+    100008: 02_person
+    100010: 02_person.001
+    100012: 02_person.002
+    100014: 02_person.003
+    100016: 03_person
+    100018: 03_person.001
+    100020: 03_person.002
+    100022: 03_person.003
+    100024: 04_person
+    100026: 04_person.001
+    100028: 04_person.002
+    100030: 04_person.003
+    100032: 05_person
+    100034: 05_person.001
+    100036: 05_person.002
+    100038: 05_person.003
+    100040: 06_person
+    100042: 06_person.001
+    100044: 06_person.002
+    100046: 06_person.003
+    100048: //RootNode
+    400000: 01_person
+    400002: 01_person.001
+    400004: 01_person.002
+    400006: 01_person.003
+    400008: 02_person
+    400010: 02_person.001
+    400012: 02_person.002
+    400014: 02_person.003
+    400016: 03_person
+    400018: 03_person.001
+    400020: 03_person.002
+    400022: 03_person.003
+    400024: 04_person
+    400026: 04_person.001
+    400028: 04_person.002
+    400030: 04_person.003
+    400032: 05_person
+    400034: 05_person.001
+    400036: 05_person.002
+    400038: 05_person.003
+    400040: 06_person
+    400042: 06_person.001
+    400044: 06_person.002
+    400046: 06_person.003
+    400048: //RootNode
+    2100000: 04_person
+    2100002: 06_person
+    2100004: 05_person
+    2100006: 01_person
+    2100008: 02_person
+    2100010: 03_person
+    2100012: No Name
+    2100014: 03_person.001
+    2100016: 02_person.001
+    2100018: 01_person.001
+    2100020: 05_person.001
+    2100022: 06_person.001
+    2100024: 04_person.001
+    2300000: 01_person
+    2300002: 01_person.001
+    2300004: 01_person.002
+    2300006: 01_person.003
+    2300008: 02_person
+    2300010: 02_person.001
+    2300012: 02_person.002
+    2300014: 02_person.003
+    2300016: 03_person
+    2300018: 03_person.001
+    2300020: 03_person.002
+    2300022: 03_person.003
+    2300024: 04_person
+    2300026: 04_person.001
+    2300028: 04_person.002
+    2300030: 04_person.003
+    2300032: 05_person
+    2300034: 05_person.001
+    2300036: 05_person.002
+    2300038: 05_person.003
+    2300040: 06_person
+    2300042: 06_person.001
+    2300044: 06_person.002
+    2300046: 06_person.003
+    3300000: 01_person
+    3300002: 01_person.001
+    3300004: 01_person.002
+    3300006: 01_person.003
+    3300008: 02_person
+    3300010: 02_person.001
+    3300012: 02_person.002
+    3300014: 02_person.003
+    3300016: 03_person
+    3300018: 03_person.001
+    3300020: 03_person.002
+    3300022: 03_person.003
+    3300024: 04_person
+    3300026: 04_person.001
+    3300028: 04_person.002
+    3300030: 04_person.003
+    3300032: 05_person
+    3300034: 05_person.001
+    3300036: 05_person.002
+    3300038: 05_person.003
+    3300040: 06_person
+    3300042: 06_person.001
+    3300044: 06_person.002
+    3300046: 06_person.003
+    4300000: 04_person.003
+    4300002: 06_person.003
+    4300004: 05_person.003
+    4300006: 01_person.003
+    4300008: 02_person.003
+    4300010: 03_person.003
+    4300012: 03_person.002
+    4300014: 02_person.002
+    4300016: 01_person.002
+    4300018: 05_person.002
+    4300020: 06_person.002
+    4300022: 04_person.002
+    4300024: 04_person.001
+    4300026: 06_person.001
+    4300028: 05_person.001
+    4300030: 01_person.001
+    4300032: 02_person.001
+    4300034: 03_person.001
+    4300036: 03_person
+    4300038: 02_person
+    4300040: 01_person
+    4300042: 05_person
+    4300044: 06_person
+    4300046: 04_person
+  externalObjects: {}
+  materials:
+    importMaterials: 1
+    materialName: 0
+    materialSearch: 1
+    materialLocation: 1
+  animations:
+    legacyGenerateAnimations: 4
+    bakeSimulation: 0
+    resampleCurves: 1
+    optimizeGameObjects: 0
+    motionNodeName: 
+    rigImportErrors: 
+    rigImportWarnings: 
+    animationImportErrors: 
+    animationImportWarnings: 
+    animationRetargetingWarnings: 
+    animationDoRetargetingWarnings: 0
+    importAnimatedCustomProperties: 0
+    importConstraints: 0
+    animationCompression: 1
+    animationRotationError: 0.5
+    animationPositionError: 0.5
+    animationScaleError: 0.5
+    animationWrapMode: 0
+    extraExposedTransformPaths: []
+    extraUserProperties: []
+    clipAnimations: []
+    isReadable: 1
+  meshes:
+    lODScreenPercentages: []
+    globalScale: 1
+    meshCompression: 0
+    addColliders: 0
+    importVisibility: 1
+    importBlendShapes: 1
+    importCameras: 1
+    importLights: 1
+    swapUVChannels: 0
+    generateSecondaryUV: 0
+    useFileUnits: 1
+    optimizeMeshForGPU: 1
+    keepQuads: 0
+    weldVertices: 1
+    preserveHierarchy: 0
+    indexFormat: 0
+    secondaryUVAngleDistortion: 8
+    secondaryUVAreaDistortion: 15.000001
+    secondaryUVHardAngle: 88
+    secondaryUVPackMargin: 4
+    useFileScale: 1
+    previousCalculatedGlobalScale: 1
+    hasPreviousCalculatedGlobalScale: 0
+  tangentSpace:
+    normalSmoothAngle: 60
+    normalImportMode: 0
+    tangentImportMode: 3
+    normalCalculationMode: 4
+  importAnimation: 1
+  copyAvatar: 0
+  humanDescription:
+    serializedVersion: 2
+    human: []
+    skeleton: []
+    armTwist: 0.5
+    foreArmTwist: 0.5
+    upperLegTwist: 0.5
+    legTwist: 0.5
+    armStretch: 0.05
+    legStretch: 0.05
+    feetSpacing: 0
+    rootMotionBoneName: 
+    hasTranslationDoF: 0
+    hasExtraRoot: 0
+    skeletonHasParents: 1
+  lastHumanDescriptionAvatarSource: {instanceID: 0}
+  animationType: 0
+  humanoidOversampling: 1
+  additionalBone: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
