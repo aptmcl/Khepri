@@ -1,0 +1,1818 @@
+bl_info = {
+    "name": "Khepri",
+    "author": "António Leitão",
+    "version": (1, 1),
+    "blender": (5, 0, 0),
+    "location": "Scripting > Khepri",
+    "description": "Khepri connection to Blender",
+    "warning": "",
+    "wiki_url": "",
+    "category": "Tools",
+}
+
+# To easily test this, on a command prompt do:
+# "C:\Program Files\Blender Foundation\Blender 5.0\blender.exe" --python BlenderServer.py
+# To test this while still allowing redefinitions do:
+# "C:\Program Files\Blender Foundation\Blender 5.0\blender.exe"
+# and then, in Blender's Python console:
+# import os
+# __file__=os.path.join(os.getcwd(), "src")
+# exec(open("BlenderServer.py").read())
+
+# This loads the shared part of the Khepri server
+# PS: Don't even try to load that as a module. You will get separate namespaces.
+import os
+exec(open(os.path.join(os.path.dirname(__file__), "KhepriServer.py")).read())
+
+# Now comes the Blender-specific server
+from bpy import ops, data as D, context as C
+import bpy
+import bmesh
+from math import pi
+from mathutils import Vector, Matrix, Quaternion
+import addon_utils
+# BlenderKit integration - now optional with graceful fallback
+# The BlenderKit API has changed significantly in 3.17+/3.18+
+# We provide programmatic PBR materials as fallback
+
+def try_enable_blenderkit():
+    """Try to enable BlenderKit addon, return True if successful."""
+    try:
+        addon_utils.enable("blenderkit")
+        return True
+    except Exception as e:
+        print(f"BlenderKit addon not available: {e}")
+        return False
+
+# Predefined PBR materials as fallback when BlenderKit is unavailable
+# These create high-quality materials using Principled BSDF
+FALLBACK_MATERIALS = {
+    # Metal materials
+    "metal": {"base_color": (0.8, 0.8, 0.8, 1.0), "metallic": 1.0, "roughness": 0.3},
+    "steel": {"base_color": (0.7, 0.7, 0.75, 1.0), "metallic": 1.0, "roughness": 0.2},
+    "copper": {"base_color": (0.95, 0.64, 0.54, 1.0), "metallic": 1.0, "roughness": 0.25},
+    "gold": {"base_color": (1.0, 0.84, 0.0, 1.0), "metallic": 1.0, "roughness": 0.2},
+    # Glass materials
+    "glass": {"base_color": (0.95, 0.95, 1.0, 1.0), "transmission": 0.95, "roughness": 0.0, "ior": 1.45},
+    # Building materials
+    "concrete": {"base_color": (0.5, 0.5, 0.5, 1.0), "roughness": 0.8, "metallic": 0.0},
+    "plaster": {"base_color": (0.9, 0.88, 0.85, 1.0), "roughness": 0.6, "metallic": 0.0},
+    "wood": {"base_color": (0.55, 0.35, 0.2, 1.0), "roughness": 0.5, "metallic": 0.0},
+    "grass": {"base_color": (0.2, 0.5, 0.15, 1.0), "roughness": 0.7, "metallic": 0.0},
+    "clay": {"base_color": (0.9, 0.9, 0.9, 1.0), "roughness": 1.0, "metallic": 0.0},
+}
+
+def create_fallback_material(name:str):
+    """Create a PBR material from predefined settings. Returns material object."""
+    props = FALLBACK_MATERIALS.get(name.lower(), FALLBACK_MATERIALS["clay"])
+    base_color = props.get("base_color", (0.8, 0.8, 0.8, 1.0))
+    metallic = props.get("metallic", 0.0)
+    roughness = props.get("roughness", 0.5)
+    transmission = props.get("transmission", 0.0)
+    ior = props.get("ior", 1.45)
+
+    mat = D.materials.new(name=name)
+    mat.use_nodes = True
+    mat.use_fake_user = True
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    nodes.clear()
+
+    node = nodes.new(type='ShaderNodeBsdfPrincipled')
+    node.inputs['Base Color'].default_value = base_color
+    node.inputs['Metallic'].default_value = metallic
+    node.inputs['Roughness'].default_value = roughness
+    node.inputs['IOR'].default_value = ior
+    node.inputs['Transmission Weight'].default_value = transmission
+
+    node_out = nodes.new(type='ShaderNodeOutputMaterial')
+    links.new(node.outputs[0], node_out.inputs[0])
+
+    return mat  # Return material object, not MatId
+
+def download_blenderkit_material(asset_ref):
+    """
+    Try to download material from BlenderKit.
+    Falls back to predefined materials if BlenderKit is unavailable.
+    """
+    try:
+        # Try new BlenderKit API (3.17+)
+        from blenderkit import daemon_lib, paths, utils
+        import requests
+
+        # Parse asset reference
+        asset_base_id_str, asset_type_str = asset_ref.split()
+        asset_type = asset_type_str.split(':')[1]
+        asset_base_id = asset_base_id_str.split(':')[1]
+
+        # Try to use BlenderKit's download system
+        # Note: BlenderKit 3.17+ uses a daemon-based download system
+        print(f"Attempting BlenderKit download for {asset_base_id}")
+
+        # Check if we have cached materials
+        cache_dir = paths.get_download_dirs(asset_type)[0]
+        for cached_file in os.listdir(cache_dir) if os.path.exists(cache_dir) else []:
+            if asset_base_id in cached_file and cached_file.endswith('.blend'):
+                return append_blend_material(os.path.join(cache_dir, cached_file))
+
+        # If not cached and daemon available, try download
+        # This is a simplified attempt - full BlenderKit integration requires daemon
+        raise NotImplementedError("BlenderKit daemon download not implemented")
+
+    except Exception as e:
+        print(f"BlenderKit download failed: {e}")
+        print("Using fallback material...")
+
+        # Extract material type from asset_ref for fallback
+        # Common BlenderKit material types map to our fallbacks
+        ref_lower = asset_ref.lower()
+        if "metal" in ref_lower or "steel" in ref_lower:
+            return create_fallback_material("metal")
+        elif "glass" in ref_lower:
+            return create_fallback_material("glass")
+        elif "concrete" in ref_lower:
+            return create_fallback_material("concrete")
+        elif "wood" in ref_lower:
+            return create_fallback_material("wood")
+        elif "grass" in ref_lower:
+            return create_fallback_material("grass")
+        elif "plaster" in ref_lower:
+            return create_fallback_material("plaster")
+        else:
+            return create_fallback_material("clay")
+
+def append_blend_material(file_name):
+    materials = D.materials[:]
+    with D.libraries.load(file_name, link=False, relative=True) as (data_from, data_to):
+        matname = data_from.materials[0]
+        data_to.materials = [matname]
+    mat = D.materials.get(matname)
+    mat.use_fake_user = True
+    return mat
+
+# download_blenderkit_material("asset_base_id:1bdb5334-851e-414d-b766-f9fe05477860 asset_type:material")
+# download_blenderkit_material("asset_base_id:31dccf38-74f4-4516-9d17-b80a45711ca7 asset_type:material")
+
+Point3d = Vector
+Vector3d = Vector
+
+def quaternion_from_vx_vy(vx, vy):
+    return Vector((1,0,0)).rotation_difference(vx) @ Vector((0,1,0)).rotation_difference(vy)
+
+shape_counter = 0
+def new_id()->Id:
+    global shape_counter
+    shape_counter += 1
+    return shape_counter, str(shape_counter)
+
+materials = []
+def add_material(mat):
+    materials.append(mat)
+    return len(materials) - 1
+
+def get_material(name:str)->MatId:
+    return add_material(D.materials[name])
+
+def get_blenderkit_material(ref:str)->MatId:
+    return add_material(download_blenderkit_material(ref))
+
+def get_blend_material(file_path:str)->MatId:
+    return add_material(append_blend_material(file_path))
+
+def new_node_material(name, type):
+    mat = D.materials.new(name=name)
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    nodes.clear()
+    links.clear()
+    return mat, nodes.new(type=type)
+
+def new_clay_material(name:str, color:RGBA)->MatId:
+    mat, diffuse_shader = new_node_material(name, "ShaderNodeBsdfDiffuse")
+    diffuse_shader.inputs[0].default_value = color
+    return add_node_output_material(mat, diffuse_shader)
+
+def add_node_output_material(mat, node):
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    node_out = nodes.new(type='ShaderNodeOutputMaterial')
+    links.new(node.outputs[0], node_out.inputs[0])
+    return add_material(mat)
+
+def new_glass_material(name:str, color:RGBA, roughness:float, ior:float)->MatId:
+    mat, node = new_node_material(name, 'ShaderNodeBsdfGlass')
+    node.distribution = 'GGX'
+    node.inputs['Color'].default_value = color
+    node.inputs['Roughness'].default_value = roughness
+    node.inputs['IOR'].default_value = ior
+    return add_node_output_material(mat, node)
+
+def new_mirror_material(name:str, color:RGBA)->MatId:
+    mat, node = new_node_material(name, 'ShaderNodeBsdfGlossy')
+    node.distribution = 'Sharp'
+    node.inputs['Color'].default_value = color
+    return add_node_output_material(mat, node)
+
+def new_metal_material(name:str, color:RGBA, roughness:float, ior:float)->MatId:
+    mat, node = new_node_material(name, 'ShaderNodeBsdfGlossy')
+    node.distribution = 'GGX'
+    node.inputs['Color'].default_value = color
+    node.inputs['Roughness'].default_value = roughness
+    return add_node_output_material(mat, node)
+
+# For Principled BSDF in Blender 4.0+/5.0, the inputs are:
+# 'Base Color', 'Metallic', 'Roughness', 'IOR', 'Alpha', 'Normal', 'Weight'
+# 'Subsurface Weight', 'Subsurface Radius', 'Subsurface Scale', 'Subsurface Anisotropy'
+# 'IOR Level' (formerly 'Specular'), 'Specular Tint'
+# 'Anisotropic', 'Anisotropic Rotation', 'Tangent'
+# 'Transmission Weight' (formerly 'Transmission'), no more 'Transmission Roughness'
+# 'Coat Weight' (formerly 'Clearcoat'), 'Coat Roughness' (formerly 'Clearcoat Roughness')
+# 'Coat IOR', 'Coat Tint', 'Coat Normal'
+# 'Sheen Weight' (formerly 'Sheen'), 'Sheen Roughness', 'Sheen Tint'
+# 'Emission Color' (formerly 'Emission'), 'Emission Strength'
+
+def _set_bsdf_input(node, candidates, value):
+    # Blender renamed a handful of Principled BSDF inputs between 4.0 and
+    # 4.1+: 'Specular' -> 'IOR Level', 'Transmission' -> 'Transmission
+    # Weight', 'Clearcoat' -> 'Coat Weight', etc. Accept a list of candidate
+    # names and silently skip when none match, so a single `new_material`
+    # body works on 4.0, 4.1+, and 5.x.
+    for name in candidates:
+        if name in node.inputs:
+            node.inputs[name].default_value = value
+            return True
+    return False
+
+def new_material(name:str, base_color:RGBA, metallic:float, specular:float, roughness:float,
+                 clearcoat:float, clearcoat_roughness:float, ior:float,
+                 transmission:float, transmission_roughness:float,
+                 emission:RGBA, emission_strength:float)->MatId:
+    mat, node = new_node_material(name, 'ShaderNodeBsdfPrincipled')
+    _set_bsdf_input(node, ['Base Color'], base_color)
+    _set_bsdf_input(node, ['Metallic'], metallic)
+    _set_bsdf_input(node, ['IOR Level', 'Specular'], specular)
+    _set_bsdf_input(node, ['Roughness'], roughness)
+    _set_bsdf_input(node, ['Coat Weight', 'Clearcoat'], clearcoat)
+    _set_bsdf_input(node, ['Coat Roughness', 'Clearcoat Roughness'], clearcoat_roughness)
+    _set_bsdf_input(node, ['IOR'], ior)
+    _set_bsdf_input(node, ['Transmission Weight', 'Transmission'], transmission)
+    # 'Transmission Roughness' was removed entirely in 4.0 — just ignore it.
+    _set_bsdf_input(node, ['Emission Color', 'Emission'], emission)
+    _set_bsdf_input(node, ['Emission Strength'], emission_strength)
+    return add_node_output_material(mat, node)
+
+
+def set_hdri_background(hdri_path:str)->None:
+    world = C.scene.world
+    world.use_nodes = True
+    nodes = world.node_tree.nodes
+    nodes.clear()
+    env_texture = nodes.new(type='ShaderNodeTexEnvironment')
+    env_texture.image = D.images.load(hdri_path)
+    env_texture.location = (-300,0)
+    background = nodes.new(type='ShaderNodeBackground')
+    world_output = nodes.new(type='ShaderNodeOutputWorld')
+    world.node_tree.links.new(env_texture.outputs[0], background.inputs[0])
+    world.node_tree.links.new(background.outputs[0], world_output.inputs[0])
+    C.scene.render.film_transparent = True
+
+def set_hdri_background_with_rotation(hdri_path:str, rotation:float)->None:
+    world = C.scene.world
+    world.use_nodes = True
+    nodes = world.node_tree.nodes
+    nodes.clear()
+    tex_coord = nodes.new(type='ShaderNodeTexCoord')
+    mapping = nodes.new(type='ShaderNodeMapping')
+    mapping.inputs['Rotation'].default_value[2] = rotation
+    env_texture = nodes.new(type='ShaderNodeTexEnvironment')
+    env_texture.image = D.images.load(hdri_path)
+    background = nodes.new(type='ShaderNodeBackground')
+    world_output = nodes.new(type='ShaderNodeOutputWorld')
+    world.node_tree.links.new(tex_coord.outputs['Generated'], mapping.inputs[0])
+    world.node_tree.links.new(mapping.outputs[0], env_texture.inputs[0])
+    world.node_tree.links.new(env_texture.outputs[0], background.inputs[0])
+    world.node_tree.links.new(background.outputs[0], world_output.inputs[0])
+    C.scene.render.film_transparent = True
+
+def append_material(obj, mat_idx):
+    if mat_idx >= 0:
+        obj.data.materials.append(materials[mat_idx])
+
+# def add_uvs(mesh):
+#     mesh.use_auto_texspace = True
+#     uvl = mesh.uv_layers.new(name='KhepriUVs')
+#     mesh.uv_layers.active = uvl
+#     for polygon in mesh.polygons:
+#         for vert, loop in zip(polygon.vertices, polygon.loop_indices):
+#             uvl.data[loop].uv = Vector(, 0))
+#     uvl.active = True
+#     uvl.active_render = True
+#     return mesh
+
+def add_bm_uvs(mesh, bm):
+    uv_layer = bm.loops.layers.uv.verify()
+    for face in bm.faces:
+        normal = face.normal
+        dx=abs(normal[0])
+        dy=abs(normal[1])
+        dz=abs(normal[2])
+        if (dz > dx):
+            u = Vector([1,0,0])
+            if (dz>dy):
+                v = Vector([0,1,0])
+            else:
+                v = Vector([0,0,1])
+        else:
+            v = Vector([0,0,1])
+            if dx>dy:
+                u = Vector([0,1,0])
+            else:
+                u = Vector([1,0,0])
+        for loop in face.loops:
+            loop_uv = loop[uv_layer]
+            loop_uv.uv = [ u.dot(loop.vert.co),
+                           v.dot(loop.vert.co)]
+
+# def set_uvs_for_face(bm, fi, uv_layer):
+#     face = bm.faces[fi]
+#     normal = face.normal
+#     dx=abs(normal[0])
+#     dy=abs(normal[1])
+#     dz=abs(normal[2])
+#     if (dz > dx):
+#         u = Vector([1,0,0])
+#         if (dz>dy):
+#             v = Vector([0,1,0])
+#         else:
+#             v = Vector([0,0,1])
+#     else:
+#         v = Vector([0,0,1])
+#         if dx>dy:
+#             u = Vector([0,1,0])
+#         else:
+#             u = Vector([1,0,0])
+#     for i in range(len(face.loops)):
+#         l = face.loops[i]
+#         l[uv_layer].uv = [ u.dot(l.vert.co),
+#                            v.dot(l.vert.co)]
+
+# def set_uvs(bm, name=None):
+#     uv_layer = bm.loops.layers.uv['KhepriUVs']
+#     for fi in range(len(bm.faces)):
+#         set_uvs_for_face(bm, fi, uv_layer)
+#     bm.to_mesh(mesh)
+# We should be using Ints for layers!
+# HACK!!! Missing color!!!!!
+current_collection = C.collection
+
+# Cache of imported OBJ mesh data-blocks, keyed by absolute file path. The same OBJ
+# family is placed once per fixture instance (hundreds of times for a whole building);
+# re-importing the file each time through the bpy.ops operators — which force a full
+# view-layer + depsgraph update that grows with the scene — is the dominant cost. We
+# import each unique file ONCE and place further instances as linked duplicates that
+# share the cached mesh data-block (see import_obj_file). Cleared on scene reset.
+_obj_mesh_cache = {}
+
+def find_or_create_collection(name:str, visible:bool, color:RGBA)->str:
+    if name not in D.collections:
+        collection = D.collections.new(name)
+        collection.hide_viewport = not visible
+        C.scene.collection.children.link(collection)
+    return name
+
+def set_collection_visible(name:str, visible:bool)->None:
+    D.collections[name].hide_viewport = not visible
+
+def set_collection_opacity(name:str, opacity:float)->None:
+    collection = D.collections[name]
+    for obj in collection.objects:
+        if not hasattr(obj, 'material_slots'):
+            continue
+        if opacity <= 0 or opacity >= 1:
+            # Restore originals
+            if '_khepri_orig_mats' in obj:
+                orig_names = obj['_khepri_orig_mats']
+                for i, slot in enumerate(obj.material_slots):
+                    if i < len(orig_names) and orig_names[i] in D.materials:
+                        slot.material = D.materials[orig_names[i]]
+                del obj['_khepri_orig_mats']
+        else:
+            # Save originals and apply ghost
+            if '_khepri_orig_mats' not in obj:
+                obj['_khepri_orig_mats'] = [slot.material.name if slot.material else '' for slot in obj.material_slots]
+            orig_names = obj['_khepri_orig_mats']
+            for i, slot in enumerate(obj.material_slots):
+                orig_name = orig_names[i] if i < len(orig_names) else ''
+                orig_mat = D.materials.get(orig_name)
+                if orig_mat is None:
+                    continue
+                ghost_name = orig_name + '__khepri_ghost__'
+                ghost = D.materials.get(ghost_name)
+                if ghost is None:
+                    ghost = orig_mat.copy()
+                    ghost.name = ghost_name
+                ghost.use_backface_culling = False
+                if ghost.use_nodes and ghost.node_tree:
+                    for node in ghost.node_tree.nodes:
+                        if node.type == 'BSDF_PRINCIPLED':
+                            node.inputs['Alpha'].default_value = opacity
+                            break
+                ghost.blend_method = 'BLEND'
+                ghost.shadow_method = 'CLIP'
+                slot.material = ghost
+
+def get_current_collection()->str:
+    return current_collection.name
+
+def set_current_collection(name:str)->None:
+    global current_collection
+    current_collection = D.collections[name]
+
+#def all_shapes_in_collection(name:str)->List[Id]:
+def delete_all_shapes_in_collection(name:str)->None:
+    D.batch_remove(D.collections[name].objects)
+    _obj_mesh_cache.clear()  # cached meshes may now be orphaned; re-import on next use
+    #D.orphans_purge(do_linked_ids=False)
+
+def delete_all_shapes()->None:
+    for collection in D.collections:
+        D.batch_remove(collection.objects)
+    global shape_counter
+    shape_counter = 0
+    _obj_mesh_cache.clear()  # cached meshes are gone with the scene; re-import on next use
+    #D.orphans_purge(do_linked_ids=False)
+
+def delete_shape(name:Id)->None:
+    D.objects.remove(D.objects[str(name)], do_unlink=True)
+
+def select_shape(name:Id)->None:
+    D.objects[str(name)].select_set(True)
+
+def deselect_shape(name:Id)->None:
+    D.objects[str(name)].select_set(False)
+
+def select_shapes(names:List[Id])->None:
+    for name in names:
+        D.objects[str(name)].select_set(True)
+
+def deselect_shapes(names:List[Id])->None:
+    for name in names:
+        D.objects[str(name)].select_set(False)
+
+def deselect_all_shapes()->None:
+    for collection in D.collections:
+        for obj in collection.objects:
+            obj.select_set(False)
+
+def selected_shapes(prompt:str)->List[Id]:
+    return [int(obj.name) for obj in D.objects if obj.select_get()]
+
+# Shape introspection for VIM reconstruction (select_shape/captured_shape/internalize_shape),
+# mirroring KhepriUnity's ShapeType/SphereCenter/... Blender objects are meshes that don't
+# retain their generating parameters, so Khepri-created primitives are stamped at creation
+# with kh_* custom properties (see sphere/box/cone_frustum) and read back here. A shape
+# modeled directly in Blender carries no kh_type, so shape_type returns "" and the Julia side
+# reconstructs it as unknown().
+def stamp_shape(obj, kind, **props):
+    obj["kh_type"] = kind
+    for k, v in props.items():
+        obj[k] = v
+
+def shape_type(name:Id)->str:
+    return D.objects[str(name)].get("kh_type", "")
+def sphere_center(name:Id)->Point3d:
+    return Vector(D.objects[str(name)]["kh_center"])
+def sphere_radius(name:Id)->float:
+    return D.objects[str(name)]["kh_radius"]
+def box_position(name:Id)->Point3d:
+    return Vector(D.objects[str(name)]["kh_pos"])
+def box_dimensions(name:Id)->Vector3d:
+    return Vector(D.objects[str(name)]["kh_dims"])
+def cylinder_bottom(name:Id)->Point3d:
+    return Vector(D.objects[str(name)]["kh_cb"])
+def cylinder_top(name:Id)->Point3d:
+    return Vector(D.objects[str(name)]["kh_ct"])
+def cylinder_radius(name:Id)->float:
+    return D.objects[str(name)]["kh_cr"]
+
+
+def new_bmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat_idx:int)->None:
+    bm = bmesh.new()
+    mverts = bm.verts
+    for vert in verts:
+        mverts.new(vert)
+    mverts.ensure_lookup_table()
+    medges = bm.edges
+    for edge in edges:
+        medges.new((mverts[edge[0]], mverts[edge[1]]))
+    if faces == []:
+        bmesh.ops.triangle_fill(bm, edges=bm.edges, use_beauty=True)
+    mfaces = bm.faces
+    for face in faces:
+        mfaces.new([mverts[i] for i in face])
+    if smooth:
+        for f in mfaces:
+            f.smooth = True
+    if mat_idx >= 0:
+        for f in mfaces:
+            f.material_index = mat_idx
+            #f.select = True
+    bm.normal_update()
+    return bm
+
+def add_to_bmesh(bm, verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat_idx:int)->None:
+    #print(verts, edges, faces)
+    mverts = bm.verts
+    medges = bm.edges
+    mfaces = bm.faces
+    new_verts = [mverts.new(vert) for vert in verts]
+    mverts.ensure_lookup_table()
+    if faces == []:
+        new_edges = [medges.new((new_verts[edge[0]], new_verts[edge[1]])) for edge in edges]
+        bmesh.ops.triangle_fill(bm, edges=new_edges, use_beauty=True)
+    else:
+        new_faces = [mfaces.new([new_verts[i] for i in face]) for face in faces]
+        if smooth:
+            for f in new_faces:
+                f.smooth = True
+        if mat_idx >= 0:
+            for f in new_faces:
+                f.material_index = mat_idx
+    bm.normal_update()
+    return bm
+
+def mesh_from_bmesh(name, bm):
+    mesh_data = D.meshes.new(name)
+    add_bm_uvs(mesh_data, bm)
+    bm.to_mesh(mesh_data)
+    bm.free()
+    #add_uvs(mesh_data)
+    return D.objects.new(name, mesh_data)
+
+def automap(tob, target_slot=0, tex_size=1):
+    actob = C.active_object
+    C.view_layer.objects.active = tob
+    if tob.data.use_auto_texspace:
+        tob.data.use_auto_texspace = False
+    tob.data.texspace_size = (1, 1, 1)
+    uvl = tob.data.uv_layers.new(name='automap')
+    scale = tob.scale.copy()
+    if target_slot is not None:
+        tob.active_material_index = target_slot
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='DESELECT')
+    bpy.ops.object.material_slot_select()
+    scale = (scale.x + scale.y + scale.z) / 3.0
+    bpy.ops.uv.cube_project(
+        cube_size=scale * 2.0 / (tex_size),
+        correct_aspect=False)  # it's * 2.0 because blender can't tell size of a unit cube :)
+    bpy.ops.object.editmode_toggle()
+    tob.data.uv_layers.active = uvl #tob.data.uv_layers['automap']
+    uvl.active_render = True
+    C.view_layer.objects.active = actob
+
+def line(ps:List[Point3d], closed:bool, mat:MatId)->Id:
+    id, name = new_id()
+    curve = D.curves.new(name, "CURVE")
+    curve.dimensions = "3D"
+    obj = D.objects.new(name, curve)
+    current_collection.objects.link(obj)
+    line = curve.splines.new("POLY")
+    line.use_cyclic_u = closed
+    line.points.add(len(ps) - 1)
+    for (i, p) in enumerate(ps):
+        line.points[i].co = (p[0], p[1], p[2], 1.0)
+    append_material(obj, mat)
+    return id
+
+def bezier(order:int, ps:List[Point3d], closed:bool, tgs:List[Point3d], mat:MatId)->Id:
+    id, name = new_id()
+    curve = D.curves.new(name, "CURVE")
+    curve.dimensions = "3D"
+    obj = D.objects.new(name, curve)
+    current_collection.objects.link(obj)
+    spline = curve.splines.new("BEZIER")
+    spline.use_cyclic_u = closed
+    spline.use_endpoint_u = not closed
+    n = len(ps) - (1 if closed else 0)
+    spline.bezier_points.add(n - 1)
+    for i in range(0, n):
+        p = ps[i]
+        #pt = (p[0], p[1], p[2], 1.0)
+        spline.bezier_points[i].co = p
+        #spline.bezier_points[i].handle_left = p
+        #spline.bezier_points[i].handle_right = p
+        spline.bezier_points[i].handle_right_type = 'AUTO'
+        spline.bezier_points[i].handle_left_type = 'AUTO'
+    for (tg, i) in zip(tgs, [0, n-1]):
+        bp = spline.bezier_points[i]
+        x, y, z = ps[i]
+        tx, ty, tz = tg
+        bp.handle_left_type = 'FREE'
+        bp.handle_right_type = 'FREE'
+        bp.handle_left = (x - tx, y - ty, z - tz)
+        bp.handle_right = (x + tx, y + ty, z + tz)
+    spline.order_u = max(3, order)
+    spline.resolution_u = 4*len(ps)
+    append_material(obj, mat)
+    return id
+
+# Cubic Bezier chain with explicit anchors and FREE handles: ps are the
+# anchor points, ls/rs the left/right handle POSITIONS of each anchor (an
+# unused end handle should coincide with its anchor). Unlike bezier() above,
+# no AUTO smoothing is involved, so the curve is exactly the one the caller
+# computed -- Khepri relies on this to draw its canonical interpolating
+# splines identically across backends.
+def bezier_chain(ps:List[Point3d], ls:List[Point3d], rs:List[Point3d], closed:bool, mat:MatId)->Id:
+    id, name = new_id()
+    curve = D.curves.new(name, "CURVE")
+    curve.dimensions = "3D"
+    obj = D.objects.new(name, curve)
+    current_collection.objects.link(obj)
+    spline = curve.splines.new("BEZIER")
+    spline.use_cyclic_u = closed
+    n = len(ps)
+    spline.bezier_points.add(n - 1)
+    for i in range(0, n):
+        bp = spline.bezier_points[i]
+        bp.co = ps[i]
+        bp.handle_left_type = 'FREE'
+        bp.handle_right_type = 'FREE'
+        bp.handle_left = ls[i]
+        bp.handle_right = rs[i]
+    spline.resolution_u = 16
+    append_material(obj, mat)
+    return id
+
+def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
+    #print(order, ps, closed)
+    id, name = new_id()
+    curve = D.curves.new(name, "CURVE")
+    curve.dimensions = "3D"
+    obj = D.objects.new(name, curve)
+    current_collection.objects.link(obj)
+    spline = curve.splines.new("NURBS")
+    spline.use_cyclic_u = closed
+    spline.use_endpoint_u = not closed
+    n = len(ps) - (1 if closed else 0)
+    spline.points.add(n - 1)
+    for i in range(0, n):
+        p = ps[i]
+        spline.points[i].co = (p[0], p[1], p[2], 1.0)
+    spline.order_u = max(4, order)
+    spline.resolution_u = 4
+    append_material(obj, mat)
+    return id
+
+def nurbs_surface(points:List[Point3d], weights:List[float], nu:int, nv:int, order_u:int, order_v:int, mat:MatId)->Id:
+    id, name = new_id()
+    surf = D.curves.new(name, 'SURFACE')
+    surf.dimensions = '3D'
+    obj = D.objects.new(name, surf)
+    current_collection.objects.link(obj)
+    ov = min(order_v, nv)
+    for i in range(nu):
+        sp = surf.splines.new(type='NURBS')
+        sp.points.add(nv - 1)
+        for j in range(nv):
+            x, y, z = points[i * nv + j]
+            w = weights[i * nv + j] if weights else 1.0
+            sp.points[j].co = (x, y, z, w)
+        sp.order_u = ov
+        sp.use_endpoint_u = True
+    # Blender builds a NURBS *surface* only by stitching the per-u profile splines
+    # with the make_segment edit-mode operator; there is no data-level API for a 2D
+    # control grid. Save/restore the active object so this doesn't disturb the session.
+    prev_active = C.view_layer.objects.active
+    C.view_layer.objects.active = obj
+    obj.select_set(True)
+    ops.object.mode_set(mode='EDIT')
+    ops.curve.select_all(action='SELECT')
+    ops.curve.make_segment()
+    ops.object.mode_set(mode='OBJECT')
+    obj.select_set(False)
+    if prev_active is not None:
+        C.view_layer.objects.active = prev_active
+    sp = surf.splines[0]
+    sp.order_u = min(order_u, nu)
+    sp.order_v = ov
+    sp.use_endpoint_u = True
+    sp.use_endpoint_v = True
+    sp.resolution_u = 8
+    sp.resolution_v = 8
+    append_material(obj, mat)
+    return id
+
+def objmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat:MatId)->Id:
+    id, name = new_id()
+    obj = mesh_from_bmesh(name, new_bmesh(verts, edges, faces, smooth, -1 if mat < 0 else 0))
+    current_collection.objects.link(obj)
+    append_material(obj, mat)
+    return id
+
+def _place_obj_instance(mesh, name, mat):
+    """Create an object sharing `mesh` (a linked duplicate), place it at `mat`, and
+    link it to the current collection. Pure data API — no bpy.ops, so no view-layer
+    or depsgraph update, which is what makes repeated placements cheap."""
+    obj = bpy.data.objects.new(name, mesh)
+    obj.matrix_world = mat
+    current_collection.objects.link(obj)
+    return obj
+
+def import_obj_file(path:str, ox:float, oy:float, oz:float,
+                    vxx:float, vxy:float, vxz:float,
+                    vyx:float, vyy:float, vyz:float,
+                    vzx:float, vzy:float, vzz:float)->Id:
+    """Import an OBJ/MTL file and apply a 4x4 transform.
+
+    The transform is specified as origin (ox,oy,oz) and three basis
+    vectors (vx, vy, vz) which encode scale, rotation, and axis mapping.
+
+    The first placement of a given file imports it from disk (and joins any
+    multi-material sub-objects into one); every later placement of the same file
+    reuses the cached mesh data-block as a linked duplicate with its own transform.
+    """
+    # Build 4x4 transform matrix from origin + basis vectors
+    mat = Matrix((
+        (vxx, vyx, vzx, ox),
+        (vxy, vyy, vzy, oy),
+        (vxz, vyz, vzz, oz),
+        (0,   0,   0,   1 )
+    ))
+    id, name = new_id()
+    cached = _obj_mesh_cache.get(path)
+    if cached is not None:
+        _place_obj_instance(cached, name, mat)
+        return id
+    # First placement of this file: import from disk. Detect the imported objects by
+    # diffing bpy.data.objects (robust; independent of selection state).
+    before = set(bpy.data.objects)
+    # Import OBJ file (no axis conversion — transform handles everything)
+    if hasattr(bpy.ops.wm, 'obj_import'):
+        # Blender 4.x / 5.x
+        bpy.ops.wm.obj_import(filepath=path, forward_axis='Y', up_axis='Z')
+    elif hasattr(bpy.ops.import_scene, 'obj'):
+        # Blender 3.x
+        bpy.ops.import_scene.obj(filepath=path, axis_forward='Y', axis_up='Z')
+    else:
+        raise Exception("No OBJ importer available in this Blender version")
+    imported = [o for o in bpy.data.objects if o not in before]
+    if not imported:
+        raise Exception("Failed to import OBJ: " + path)
+    # Join multiple sub-objects (multi-material OBJs) into one so each instance is a
+    # single object sharing one mesh data-block.
+    if len(imported) > 1:
+        bpy.ops.object.select_all(action='DESELECT')
+        for o in imported:
+            o.select_set(True)
+        bpy.context.view_layer.objects.active = imported[0]
+        bpy.ops.object.join()
+    obj = imported[0]
+    # Detach from whatever collection the importer used; re-link to Khepri's current one.
+    for col in list(obj.users_collection):
+        col.objects.unlink(obj)
+    obj.name = name
+    obj.data.name = name
+    obj.matrix_world = mat
+    current_collection.objects.link(obj)
+    _obj_mesh_cache[path] = obj.data
+    return id
+
+def trig(p1:Point3d, p2:Point3d, p3:Point3d, mat:MatId)->Id:
+    return objmesh([p1, p2, p3], [], [[0, 1, 2]], False, mat)
+
+def quad(p1:Point3d, p2:Point3d, p3:Point3d, p4:Point3d, mat:MatId)->Id:
+    return objmesh([p1, p2, p3, p4], [], [[0, 1, 2, 3]], False, mat)
+
+def quad_strip_faces(s, n):
+    return [[p0, p1, p2, p3]
+            for (p0, p1, p2, p3)
+            in zip(range(s,s+n),
+                   range(s+1,s+n+1),
+                   range(s+n+1, s+2*n),
+                   range(s+n, s+2*n-1))]
+
+def quad_strip_closed_faces(s, n):
+    faces = quad_strip_faces(s, n)
+    faces.append([s+n-1, s, s+n, s+2*n-1])
+    return faces
+
+def quad_strip(ps:List[Point3d], qs:List[Point3d], smooth:bool, mat:MatId)->Id:
+    ps.extend(qs)
+    return objmesh(ps, [], quad_strip_faces(0, len(qs)), smooth, mat)
+
+def quad_strip_closed(ps:List[Point3d], qs:List[Point3d], smooth:bool, mat:MatId)->Id:
+    ps.extend(qs)
+    return objmesh(ps, [], quad_strip_closed_faces(0, len(qs)), smooth, mat)
+
+def quad_surface(ps:List[Point3d], nu:int, nv:int, closed_u:bool, closed_v:bool, smooth:bool, mat:MatId)->Id:
+    faces = []
+    if closed_u:
+        for i in range(0, nv-1):
+            faces.extend(quad_strip_closed_faces(i*nu, nu))
+        if closed_v:
+            faces.extend([[p, p+1, q+1, q] for (p, q) in zip(range((nv-1)*nu,nv*nu-1), range(0, nu-1))])
+            faces.append([nv*nu-1, (nv-1)*nu, 0, nu-1])
+    else:
+        for i in range(0, nv-1):
+            faces.extend(quad_strip_faces(i*nu, nu))
+        if closed_v:
+            faces.extend([[p, p+1, q+1, q] for (p, q) in zip(range((nv-1)*nu,nv*nu), range(0, nu-1))])
+    return objmesh(ps, [], faces, smooth, mat)
+
+def ngon(ps:List[Point3d], pivot:Point3d, smooth:bool, mat:MatId)->Id:
+    ps.append(ps[0])
+    ps.append(pivot)
+    n = len(ps) - 1
+    return objmesh(
+        ps,
+        [],
+        [[i0, i1, n]
+         for (i0,i1) in zip(range(0, n-1), range(1, n))],
+        smooth,
+        mat)
+
+def polygon(ps:List[Point3d], mat:MatId)->Id:
+    return objmesh(ps, [], [list(range(0, len(ps)))], False, mat)
+
+def polygon_with_holes(pss:List[List[Point3d]], mat:MatId)->Id:
+    verts = [p for ps in pss for p in ps]
+    edges = []
+    for ps in pss:
+        i = len(edges)
+        edges.extend([(i+j,i+j+1) for j in range(0, len(ps)-1)])
+        edges.append((i+len(ps)-1, i))
+    id, name = new_id()
+    obj = mesh_from_bmesh(name, new_bmesh(verts, edges, [], False, -1 if mat < 0 else 0))
+    append_material(obj, mat)
+    current_collection.objects.link(obj)
+    return id
+
+def circle(c:Point3d, v:Vector3d, r:float, mat:MatId)->Id:
+    rot = Vector((0, 0, 1)).rotation_difference(v)  # Rotation from Z axis.
+    bm = bmesh.new()
+    bmesh.ops.create_circle(bm, cap_ends=True, radius=r, segments=64,
+                                calc_uvs=True)
+    id, name = new_id()
+    obj = mesh_from_bmesh(name, bm)
+    obj.rotation_euler = rot.to_euler()
+    obj.location = c
+    append_material(obj, mat)
+    current_collection.objects.link(obj)
+    return id
+
+def cuboid(verts:List[Point3d], mat:MatId)->Id:
+    return objmesh(verts, [], [(0,1,2,3), (4,5,6,7), (0,1,5,4), (1,2,6,5), (2,3,7,6), (3,0,4,7)], False, mat)
+
+def pyramid_frustum(bs:List[Point3d], ts:List[Point3d], smooth:bool, bmat:MatId, tmat:MatId, smat:MatId)->Id:
+    n = len(bs)
+    mat_idx = 0
+    bm = new_bmesh(bs, [], [list(range(n-1,-1,-1))], False, -1 if bmat < 0 else mat_idx)
+    mat_idx += 0 if tmat < 0 else 1
+    add_to_bmesh(bm, ts, [], [list(range(0, n))], False, -1 if tmat < 0 else mat_idx)
+    mat_idx += 0 if smat < 0 else 1
+    add_to_bmesh(bm, bs + ts, [], quad_strip_closed_faces(0, n), smooth, -1 if smat < 0 else mat_idx)
+    id, name = new_id()
+    obj = mesh_from_bmesh(name, bm)
+    append_material(obj, bmat)
+    append_material(obj, tmat)
+    append_material(obj, smat)
+    current_collection.objects.link(obj)
+    return id
+
+# def sphere(center:Point3d, radius:float)->Id:
+#     bpy.ops.mesh.primitive_uv_sphere_add(location=center, radius=radius)
+#     bpy.ops.object.shade_smooth()
+#     return C.object.name
+def oldsphere(center:Point3d, radius:float, mat:MatId)->Id:
+    bm = bmesh.new()
+    bmesh.ops.create_uvsphere(bm, u_segments=128, v_segments=64, radius=radius, )
+    for f in bm.faces:
+       f.smooth = True
+    if mat >= 0:
+        for f in bm.faces:
+            f.material_index = 0
+            #f.select = True
+    id, name = new_id()
+    obj = mesh_from_bmesh(name, bm)
+    obj.location=center
+    obj.scale=(radius, radius, radius)
+    current_collection.objects.link(obj)
+    append_material(obj, mat)
+    return id
+
+sphere_bmesh = False
+def sphere(center:Point3d, radius:float, mat:MatId)->Id:
+    global sphere_bmesh
+    if sphere_bmesh:
+        bm = sphere_bmesh
+    else:
+        bm = bmesh.new()
+        bmesh.ops.create_uvsphere(bm, u_segments=64, v_segments=32, radius=1, )
+        for f in bm.faces:
+           f.smooth = True
+        sphere_bmesh = bm
+
+    #for f in bm.faces:
+    #   f.smooth = True
+    #if mat >= 0:
+    #    for f in bm.faces:
+    #        f.material_index = 0
+            #f.select = True
+    id, name = new_id()
+    mesh_data = D.meshes.new(name)
+    #add_bm_uvs(mesh_data, bm)
+    bm.to_mesh(mesh_data)
+    #bm.free() We are caching it!
+    #add_uvs(mesh_data)
+    obj = D.objects.new(name, mesh_data)
+    obj.location=center
+    obj.scale=(radius, radius, radius)
+    current_collection.objects.link(obj)
+    append_material(obj, mat)
+    stamp_shape(obj, "Sphere", kh_center=tuple(center), kh_radius=radius)
+    return id
+
+def cone_frustum(b:Point3d, br:float, t:Point3d, tr:float, bmat:MatId, tmat:MatId, smat:MatId)->Id:
+    vec = t - b
+    depth = vec.length
+    rot = Vector((0, 0, 1)).rotation_difference(vec)  # Rotation from Z axis.
+    trans = rot @ Vector((0, 0, depth / 2))  # Such that origin is at center of the base of the cylinder.
+    bm = bmesh.new()
+    mat_idx = 0
+    bmesh.ops.create_cone(bm, cap_ends=False, segments=64,
+                          radius1=br, radius2=tr, depth=depth,
+                          calc_uvs=True)
+    for f in bm.faces:
+        f.smooth = True
+    if smat >= 0:
+        for f in  bm.faces:
+            f.material_index = mat_idx
+        bm.normal_update()
+        mat_idx += 1
+    if br > 0:
+        bmesh.ops.create_circle(bm, cap_ends=True, radius=br, segments=64,
+                                matrix=Matrix.Translation(Vector((0, 0, -depth/2))),
+                                calc_uvs=True)
+        mat_idx += 0 if bmat < 0 else 1
+    if tr > 0:
+        bmesh.ops.create_circle(bm, cap_ends=True, radius=tr, segments=64,
+                                matrix=Matrix.Translation(Vector((0, 0, depth/2))),
+                                calc_uvs=True)
+        mat_idx += 0 if tmat < 0 else 1
+    id, name = new_id()
+    obj = mesh_from_bmesh(name, bm)
+    obj.rotation_euler = rot.to_euler()
+    obj.location = b + trans
+    append_material(obj, bmat)
+    append_material(obj, tmat)
+    append_material(obj, smat)
+    current_collection.objects.link(obj)
+    stamp_shape(obj, "Cylinder" if abs(br - tr) < 1e-9 else "ConeFrustum",
+                kh_cb=tuple(b), kh_ct=tuple(t), kh_cr=br)
+    return id
+
+def rotation_from_axes(vx, vy):
+    vz = vx.cross(vy)
+    rot_matrix = Matrix((vx, vy, vz)).transposed()
+    return rot_matrix
+
+box_bmesh = False
+def box(p:Point3d, vx:Vector3d, vy:Vector3d, dx:float, dy:float, dz:float, mat:MatId)->Id:
+    global box_bmesh
+    if box_bmesh:
+        bm = box_bmesh
+    else:
+        bm = bmesh.new()
+        bmesh.ops.create_cube(bm, size=1)
+        box_bmesh = bm
+    vz = vx.cross(vy)
+    rot_matrix = Matrix((vx, vy, vz)).transposed()
+    id, name = new_id()
+    mesh_data = D.meshes.new(name)
+    bm.to_mesh(mesh_data)
+    obj = D.objects.new(name, mesh_data)
+    obj.scale = (dx, dy, dz)
+    obj.rotation_euler = rot_matrix.to_euler()
+    obj.location = p + vx*dx/2 + vy*dy/2 + vz*dz/2
+    current_collection.objects.link(obj)
+    append_material(obj, mat)
+    stamp_shape(obj, "Box", kh_pos=tuple(p), kh_dims=(dx, dy, dz))
+    return id
+
+def text(txt:str, p:Point3d, vx:Vector3d, vy:Vector3d, size:float)->Id:
+    id, name = new_id()
+    rot = quaternion_from_vx_vy(vx, vy)
+    text_data = D.curves.new(name=name, type='FONT')
+    text_data.body = txt
+    #text_data.align_x = align_x
+    #text_data.align_y = align_y
+    text_data.size = size
+    text_data.font = D.fonts["Bfont"]
+    #text_data.space_line = space_line
+    #text_data.extrude = extrude
+    obj = D.objects.new(name, text_data)
+    obj.location = p
+    obj.rotation_euler = rot.to_euler()
+    current_collection.objects.link(obj)
+    return id
+
+# Boolean operations
+
+def boolean_op(op:str, id1:Id, id2:Id)->Id:
+    obj1 = D.objects[str(id1)]
+    obj2 = D.objects[str(id2)]
+    bool_modifier = obj1.modifiers.new(name="Boolean", type='BOOLEAN')
+    bool_modifier.operation = op
+    bool_modifier.object = obj2
+    C.view_layer.objects.active = obj1
+    bpy.ops.object.modifier_apply(modifier=bool_modifier.name)
+    # Note: use_auto_smooth was removed in Blender 4.0+
+    # Smooth shading is now handled via mesh attributes or geometry nodes
+    D.objects.remove(obj2,do_unlink = True)
+    return id1
+
+def union(id1:Id, id2:Id)->Id:
+    return boolean_op('UNION', id1, id2)
+
+def intersect(id1:Id, id2:Id)->Id:
+    return boolean_op('INTERSECT', id1, id2)
+
+def difference(id1:Id, id2:Id)->Id:
+    return boolean_op('DIFFERENCE', id1, id2)
+
+def slice(id:Id, p:Point3d, v:Vector3d)->Id:
+    obj = D.objects[str(id)]
+    dimensions = obj.dimensions
+    plane_size = max(dimensions) * 2
+    bpy.ops.mesh.primitive_plane_add(size=plane_size, enter_editmode=False, align='WORLD', location=(0, 0, 0))
+    plane = C.active_object
+    rot_quat = Vector((0, 0, 1)).rotation_difference(Vector(-v))
+    plane.rotation_euler = rot_quat.to_euler()
+    plane.location = p
+    bool_mod = obj.modifiers.new(name="Slice", type='BOOLEAN')
+    bool_mod.operation = 'DIFFERENCE'
+    bool_mod.object = plane
+    C.view_layer.objects.active = obj
+    bpy.ops.object.modifier_apply(modifier=bool_mod.name)
+    # Note: use_auto_smooth was removed in Blender 4.0+
+    D.objects.remove(plane, do_unlink=True)
+    return id
+
+# Lights
+
+def sun_light(p:Point3d, v:Vector3d)->Id:
+    id, name = new_id()
+    rot = Vector((0, 0, 1)).rotation_difference(v)  # Rotation from Z axis
+    bpy.ops.object.light_add(name=name, type='SUN', location=p, rotation=rot)
+    return id
+
+def baselight(p:Point3d, type:str, energy:float, color:RGB):
+    id, name = new_id()
+    light_data = D.lights.new(name, type)
+    light_data.energy = energy
+    light_data.color = color
+    light = D.objects.new(name, light_data)
+    light.location = p
+    current_collection.objects.link(light)
+    return id, light
+
+def pointlight(p:Point3d, energy:float, color:RGB)->Id:
+    id, light = baselight(p, 'POINT', energy, color)
+    return id
+
+def rotation_euler_from_z_direction(v):
+    return Vector(v).to_track_quat('-Z', 'Y').to_euler()
+
+def arealight(p:Point3d, v:Vector3d, size:float, energy:float, color:RGB)->Id:
+    id, light = baselight(p, 'AREA', energy, color)
+    light.data.size = size
+    light.rotation_euler = rotation_euler_from_z_direction(v)
+    return id
+
+def spotlight(p:Point3d, v:Vector3d, size:float, blend:float, energy:float, color:RGB)->Id:
+    id, light = baselight(p, 'SPOT', energy, color)
+    light_data = light.data
+    light_data.energy = energy
+    light_data.color = color
+    light_data.spot_size = size
+    light_data.spot_blend = blend
+    light.rotation_euler = rotation_euler_from_z_direction(v)
+    return id
+
+def ieslight(p:Point3d, v:Vector3d, ies_file_path:str, energy:float)->Id:
+    id, light = baselight(p, 'POINT', energy, (1.0, 1.0, 1.0))
+    light.data.use_nodes = True
+    nodes = light.data.node_tree.nodes
+    nodes.clear()
+    emission = nodes.new(type='ShaderNodeEmission')
+    ies_texture = nodes.new(type='ShaderNodeTexIES')
+    ies_texture.ies = D.texts.load(ies_file_path)
+    light_output = nodes.new(type='ShaderNodeOutputLight')
+    light.data.node_tree.links.new(ies_texture.outputs[0], emission.inputs[0])
+    light.data.node_tree.links.new(emission.outputs[0], light_output.inputs[0])
+    return id
+
+# HACK! This should not be used as we now resort to Nishita!!!!
+def khepri_sun():
+    raise RuntimeError("Don't use this!!! Use Nishita!!!")
+    name = 'KhepriSun'
+    name = 'Sun'
+    if D.objects.find(name) == -1:
+        C.view_layer.active_layer_collection = C.view_layer.layer_collection
+        light_data = D.lights.new(name="Sun", type='SUN')
+        light_data.energy = 30
+        light_object = D.objects.new(name="Sun", object_data=light_data)
+        light_object.location = (5, 5, 5)
+        C.collection.objects.link(light_object)
+        C.view_layer.objects.active = light_object
+        #bpy.ops.object.light_add(type='SUN')
+    return D.objects[name]
+
+def set_sun(latitude:float, longitude:float, elevation:float,
+            year:int, month:int, day:int, time:float,
+            UTC_zone:float, use_daylight_savings:bool)->None:
+    raise RuntimeError("Don't use this!!! Use Nishita!!!")
+    sun_props = C.scene.sun_pos_properties #sunposition.sun_calc.sun
+    sun_props.usage_mode = 'NORMAL'
+    sun_props.use_daylight_savings = False
+    sun_props.use_refraction = True
+    sun_props.latitude = latitude
+    sun_props.longitude = longitude
+    sun_props.month = month
+    sun_props.day = day
+    sun_props.year = year
+    sun_props.use_day_of_year = False
+    sun_props.UTC_zone = UTC_zone
+    sun_props.time = time
+    sun_props.sun_distance = 100
+    sun_props.use_daylight_savings = use_daylight_savings
+    # Using Sky Texture => It creates its own sun.
+    # sun_props.sun_object = khepri_sun()
+    sunposition.sun_calc.update_time(C)
+    sunposition.sun_calc.move_sun(C)
+
+def find_or_create_node(node_tree, search_type, create_type):
+    for node in node_tree.nodes:
+        if node.type == search_type:
+            return node
+    return node_tree.nodes.new(type=create_type)
+
+def find_or_create_world(name):
+    for world in D.worlds:
+        if world.name == name:
+            return world
+    return D.worlds.new(name)
+
+def set_sun_sky(sun_elevation:float, sun_rotation:float, turbidity:float, with_sun:bool)->None:
+    C.scene.render.engine = 'CYCLES'
+    C.scene.world.use_nodes = True
+    sky = C.scene.world.node_tree.nodes.new("ShaderNodeTexSky")
+    bg = C.scene.world.node_tree.nodes["Background"]
+    C.scene.world.node_tree.links.new(bg.inputs[0], sky.outputs[0])
+    # Blender 5.0 replaced the "NISHITA" sky_type enum with the scattering
+    # variants ('SINGLE_SCATTERING', 'MULTIPLE_SCATTERING', 'PREETHAM',
+    # 'HOSEK_WILKIE'). Pick the physically-based Nishita successor when present,
+    # else fall back to the legacy name (4.x) or the first available option.
+    try:
+        options = [i.identifier for i in sky.bl_rna.properties['sky_type'].enum_items]
+    except Exception:
+        options = []
+    for want in ("NISHITA", "MULTIPLE_SCATTERING", "SINGLE_SCATTERING", "HOSEK_WILKIE", "PREETHAM"):
+        if not options or want in options:
+            sky.sky_type = want
+            break
+    # `turbidity`/`dust_density` do not exist on the scattering sky models; guard.
+    for attr, val in (("turbidity", turbidity), ("dust_density", turbidity)):
+        if hasattr(sky, attr):
+            try: setattr(sky, attr, val)
+            except Exception: pass
+    sky.sun_elevation = sun_elevation
+    sky.sun_rotation = sun_rotation
+    if hasattr(sky, "sun_disc"):
+        sky.sun_disc = with_sun
+
+
+#C.scene.view_settings.view_transform = 'False Color'
+#C.scene.world.light_settings.use_ambient_occlusion = True
+
+
+def set_sky(turbidity:float)->None:
+    raise RuntimeError("Don't use this!!! Use Nishita!!!")
+    C.scene.render.engine = 'CYCLES'
+    world = find_or_create_world("World")
+    world.use_nodes = True
+    bg = find_or_create_node(world.node_tree, "BACKGROUND", "")
+    sky = find_or_create_node(world.node_tree, "TEX_SKY", "ShaderNodeTexSky")
+    #sky.sky_type = "HOSEK_WILKIE"
+    sky.sky_type = "NISHITA"
+    sky.turbidity = turbidity
+    sky.dust_density = turbidity
+    #Sun Direction
+    #Sun direction vector.
+    #
+    #Ground Albedo
+    #Amount of light reflected from the planet surface back into the atmosphere.
+    #
+    #Sun Disc
+    #Enable/Disable sun disc lighting.
+    #
+    #Sun Size
+    #Angular diameter of the sun disc (in degrees).
+    #
+    #Sun Intensity
+    #Multiplier for sun disc lighting.
+    #
+    #Sun Elevation
+    #Rotation of the sun from the horizon (in degrees).
+    #
+    #Sun Rotation
+    #Rotation of the sun around the zenith (in degrees).
+    #
+    #Altitude
+    #The distance from sea level to the location of the camera. For example, if the camera is placed on a beach then a value of 0 should be used. However, if the camera is in the cockpit of a flying airplane then a value of 10 km will be more suitable. Note, this is limited to 60 km because the mathematical model only accounts for the first two layers of the earth’s atmosphere (which ends around 60 km).
+    #
+    #Air
+    #Density of air molecules.
+    #0 no air
+    #1 clear day atmosphere
+    #2 highly polluted day
+    #
+    #Dust
+    #Density of dust and water droplets.
+    #0 no dust
+    #1 clear day atmosphere
+    #5 city like atmosphere
+    #10 hazy day
+    #
+    #Ozone
+    #Density of ozone molecules; useful to make the sky appear bluer.
+    #0 no ozone
+    #1 clear day atmosphere
+    #2 city like atmosphere
+    world.node_tree.links.new(bg.inputs[0], sky.outputs[0])
+
+# Viewport helpers.
+#
+# Blender has two independent camera concepts:
+#   - the 3D-viewport view   (space.region_3d), usable only with a UI open;
+#   - the scene's render camera (C.scene.camera), always usable.
+#
+# When `bpy.app.background` is true (blender was launched with --background,
+# i.e. headless), C.screen has no VIEW_3D areas and every call below that
+# touches region_3d raises. The *_headless variants below manipulate the scene
+# camera object instead, which is what bpy.ops.render.render uses anyway, so
+# headless renders produce the same framing as GUI renders.
+
+def current_area():
+    return next(area for area in C.screen.areas if area.type == 'VIEW_3D')
+
+def current_space(area = None):
+    if area is None: area = current_area()
+    return next(space for space in area.spaces if space.type == 'VIEW_3D')
+
+def current_region(area = None):
+    if area is None: area = current_area()
+    return next(region for region in area.regions if region.type == 'WINDOW')
+
+def _set_view_headless(camera, target, lens):
+    # Manipulate the scene render camera directly. khepri_camera() creates or
+    # retrieves a scene-level Camera object; set_camera_view assigns it as the
+    # active render camera and configures its position/rotation/lens.
+    set_camera_view(camera, target, lens)
+
+def _get_view_headless():
+    cam = C.scene.camera if C.scene.camera is not None else khepri_camera()
+    # Prefer the target STORED by set_camera_view — reconstructing it from
+    # matrix_world's forward was fragile (a not-yet-evaluated transform reads back
+    # a straight-down forward, so the render path re-aimed every camera at the
+    # ground and only the top view framed the model).
+    stored = cam.get('khepri_target')
+    if stored is not None:
+        target = Point3d((stored[0], stored[1], stored[2]))
+    else:
+        forward = cam.matrix_world.to_quaternion() @ Vector((0.0, 0.0, -1.0))
+        target = cam.location + forward * max(1.0, cam.data.lens)
+    return (cam.location, target, cam.data.lens)
+
+def set_view(camera:Point3d, target:Point3d, lens:float)->None:
+    if bpy.app.background:
+        _set_view_headless(camera, target, lens)
+        return
+    direction = target - camera
+    rot_quat = direction.to_track_quat('-Z', 'Y')
+    space = current_space()
+    view = space.region_3d
+    view.view_location = target
+    view.view_rotation = rot_quat
+    view.view_distance = direction.length
+    space.lens = lens
+
+def set_view_top()->None:
+    if bpy.app.background:
+        # Headless: place the scene camera above the origin, looking straight down.
+        set_camera_view(Point3d((0.0, 0.0, 1000.0)),
+                        Point3d((0.0, 0.0, 0.0)),
+                        50.0)
+        return
+    area = current_area()
+    with C.temp_override(area=area, region=current_region(area)):
+       bpy.ops.view3d.view_axis(type='TOP')
+
+def frame_all()->None:
+    if bpy.app.background:
+        # Headless approximation: frame a cube that encloses all mesh bounds.
+        mn, mx = get_global_bbox()
+        centre = Point3d(((mn[0]+mx[0])/2, (mn[1]+mx[1])/2, (mn[2]+mx[2])/2))
+        diag = max(10.0, ((mx[0]-mn[0])**2 + (mx[1]-mn[1])**2 + (mx[2]-mn[2])**2) ** 0.5)
+        eye = centre + Point3d((diag*0.6, -diag*0.8, diag*0.6))
+        set_camera_view(eye, centre, 50.0)
+        return
+    area = current_area()
+    with C.temp_override(area=area, region=current_region(area)):
+        bpy.ops.view3d.view_all()
+
+# import bpy
+# from mathutils import Vector
+#
+# cam = D.objects['Camera']
+# location = cam.location
+# up = cam.matrix_world.to_quaternion() @ Vector((0.0, 1.0, 0.0))
+# direction = cam.matrix_world.to_quaternion() @ Vector((0.0, 0.0, -1.0))
+#
+# print(
+#     '-vp ' + str(location.x) + ' ' + str(location.y) + ' ' +  str(location.z) + ' ' +
+#     '-vd ' + str(direction.x) + ' ' + str(direction.y) + ' ' + str(direction.z) + ' ' +
+#     '-vu ' + str(up.x) + ' ' + str(up.y) + ' ' + str(up.z)
+# )
+
+def get_view()->Tuple[Point3d, Point3d, float]:
+    if bpy.app.background:
+        return _get_view_headless()
+    space = current_space()
+    view = space.region_3d
+    return (
+        view.view_rotation @ Vector((0.0, 0.0, view.view_distance)) + view.view_location,
+        view.view_location,
+        space.lens)
+
+def khepri_camera():
+    name = 'KhepriCamera'
+    name = 'Camera'
+    if D.objects.find(name) == -1:
+        cam = D.cameras.new(name)
+        # Simulate Sony's FE 85mm F1.4 GM
+        # cam.sensor_fit = 'HORIZONTAL'
+        # cam.sensor_width = 36.0
+        # cam.sensor_height = 24.0
+        # cam.lens = lens
+        # cam.dof.use_dof = True
+        # cam.dof.focus_object = focus_target_object
+        # cam.dof.aperture_fstop = fstop
+        # cam.dof.aperture_blades = 11
+        obj = D.objects.new(name, cam)
+        C.collection.objects.link(obj)
+        return obj
+    else:
+        return D.objects[name]
+
+def set_camera_view(camera:Point3d, target:Point3d, lens:float)->None:
+    # Compute look-at rotation. The historical "direction *= 2" was a no-op
+    # for to_track_quat (which is magnitude-invariant) and is removed.
+    direction = target - camera
+    rot_quat = direction.to_track_quat('-Z', 'Y')
+    cam = khepri_camera()
+    cam.location = camera
+    cam.rotation_euler = rot_quat.to_euler()
+    cam.data.lens = lens
+    # Match Mitsuba's perspective sensor: 36 mm horizontal sensor + lens in
+    # millimetres. Without an explicit sensor_fit Blender follows the render
+    # aspect, which in 4:3 produces a noticeably wider FOV than Mitsuba's
+    # `fov_axis=x` + `fov=h_angle` (computed from a 36 mm sensor in
+    # KhepriBase.view_angles). HORIZONTAL fixes that.
+    cam.data.sensor_fit = 'HORIZONTAL'
+    cam.data.sensor_width = 36.0
+    # Architectural work suggests these distances:
+    cam.data.clip_start = 0.1
+    cam.data.clip_end = 100000
+    C.scene.camera = cam
+    # Store the look-at target so get_view() round-trips it exactly (see
+    # _get_view_headless): reconstructing it from matrix_world's forward re-aimed
+    # every non-top-down camera at the ground in headless renders.
+    cam['khepri_target'] = (float(target[0]), float(target[1]), float(target[2]))
+    C.view_layer.update()
+
+def camera_from_view()->None:
+    space = current_space()
+    cam = khepri_camera()
+    cam.location = space.region_3d.view_location
+    cam.rotation_euler = space.region_3d.view_rotation.to_euler()
+    cam.data.lens = space.lens
+
+# If needed, a zoom-extents operation can be defined as follows
+# for area in C.screen.areas:
+#     if area.type == 'VIEW_3D':
+#         for region in area.regions:
+#             if region.type == 'WINDOW':
+#                 override = {'area': area, 'region': region, 'edit_object': C.edit_object}
+#                 bpy.ops.view3d.view_all(override)
+
+def set_view_size(width:int, height:int)->None:
+    if os.name == 'nt':
+        import ctypes
+        hwnd = ctypes.c_void_p()
+        pid = os.getpid()
+        user32 = ctypes.windll.user32
+        EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        result = []
+        def callback(hwnd, lParam):
+            proc_id = ctypes.c_ulong()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_id))
+            if proc_id.value == pid and user32.IsWindowVisible(hwnd):
+                result.append(hwnd)
+            return True
+        user32.EnumWindows(EnumWindowsProc(callback), 0)
+        if result:
+            SWP_NOMOVE = 0x0002
+            SWP_NOZORDER = 0x0004
+            user32.SetWindowPos(result[0], None, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER)
+
+def set_render_size(width:int, height:int)->None:
+    C.scene.render.resolution_x = width
+    C.scene.render.resolution_y = height
+    C.scene.render.resolution_percentage = 100
+    #C.scene.render.resolution_percentage = 50
+    #C.scene.render.pixel_aspect_x = 1.0
+    #C.scene.render.pixel_aspect_y = 1.0
+
+def set_render_path(filepath:str)->None:
+    C.scene.render.image_settings.file_format = 'PNG'
+    C.scene.render.filepath = filepath
+    # The Julia side passes a full path WITH extension (…/foo.png); Blender's default
+    # use_file_extension would append the format extension again, producing foo.png.png.
+    C.scene.render.use_file_extension = False
+
+def _do_render()->None:
+    # bpy.ops.render.render's `use_viewport` draws the existing 3D-viewport
+    # framebuffer before rendering. That path relies on UI state and raises in
+    # --background mode. Force it off when Blender is headless and leave the
+    # GUI-friendly value otherwise.
+    use_vp = not bpy.app.background
+    bpy.ops.render.render(use_viewport=use_vp, write_still=True)
+
+def _configure_cycles_gpu()->None:
+    # Request CUDA if available; fall back to CPU silently if it isn't. In WSL
+    # this lets the same code path work on both native Linux/Windows GPUs and
+    # on headless CI runners without NVIDIA drivers.
+    try:
+        C.scene.cycles.device = "GPU"
+        prefs = C.preferences.addons["cycles"].preferences
+        prefs.compute_device_type = "CUDA"
+        prefs.get_devices()
+        any_cuda = False
+        for d in prefs.devices:
+            d["use"] = 1
+            if d.type == "CUDA":
+                any_cuda = True
+        if not any_cuda:
+            C.scene.cycles.device = "CPU"
+    except Exception:
+        C.scene.cycles.device = "CPU"
+
+def default_renderer()->None:
+    _do_render()
+
+def _safe_set_denoising(use_denoising):
+    # Distro Blender builds (notably Ubuntu's apt package) sometimes ship
+    # without OpenImageDenoiser, in which case enabling use_denoising raises
+    # at render time. Probe by setting it inside try/except and clear the
+    # flag if it fails. Returns the actual flag set.
+    try:
+        C.scene.view_layers[0].cycles.use_denoising = use_denoising
+        return use_denoising
+    except Exception:
+        try:
+            C.scene.view_layers[0].cycles.use_denoising = False
+        except Exception:
+            pass
+        return False
+
+def ensure_default_world():
+    # A scene without world lighting renders almost black under indirect
+    # illumination because there's nowhere for diffuse rays to bounce
+    # *from*. Mitsuba's `realistic_sky` plays the same role; here we install
+    # a procedural sky-coloured background unless the user already set one
+    # (e.g. via set_hdri_background).
+    world = C.scene.world
+    if world is None:
+        world = bpy.data.worlds.new('KhepriWorld')
+        C.scene.world = world
+    # If we already wired up an HDRI / Sky Texture, leave it alone.
+    if world.use_nodes and any(n.type in ('TEX_ENVIRONMENT', 'TEX_SKY')
+                               for n in world.node_tree.nodes):
+        return
+    world.use_nodes = True
+    nodes = world.node_tree.nodes
+    nodes.clear()
+    sky = nodes.new(type='ShaderNodeTexSky')
+    sky.sky_type = 'NISHITA'
+    sky.sun_elevation = 0.9        # ~52 deg above horizon
+    sky.sun_rotation = 2.4
+    # Nishita's unclamped output is several thousand W/m^2 at the sun disc;
+    # for a scene-average illumination that matches what Mitsuba's Perez sky
+    # delivers (after its own luminous-efficacy conversion), multiply by a
+    # small constant. Too high here produces a washed-out overexposed frame
+    # regardless of view_settings.exposure.
+    bg = nodes.new(type='ShaderNodeBackground')
+    bg.inputs['Strength'].default_value = 0.25
+    out = nodes.new(type='ShaderNodeOutputWorld')
+    world.node_tree.links.new(sky.outputs[0], bg.inputs[0])
+    world.node_tree.links.new(bg.outputs[0], out.inputs[0])
+
+def cycles_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool, exposure:float)->None:
+    C.scene.render.engine = 'CYCLES'
+    C.scene.render.use_motion_blur = motion_blur
+    C.scene.render.film_transparent = transparent
+    actual_denoising = _safe_set_denoising(denoising)
+    C.scene.cycles.samples = samples
+    # Filmic view transform produces much more pleasant tonemapping than the
+    # default 'Standard'; matches Mitsuba's perceptual sRGB output more
+    # closely. AGX is even better but only on Blender 4.0+.
+    try:
+        C.scene.view_settings.view_transform = 'AgX'
+    except (TypeError, AttributeError):
+        try:
+            C.scene.view_settings.view_transform = 'Filmic'
+        except Exception:
+            pass
+    C.scene.view_settings.exposure = exposure
+    # Cycles' world-bounce term needs *something* to bounce off. Install a
+    # procedural sky if the user hasn't already configured an environment.
+    ensure_default_world()
+    _configure_cycles_gpu()
+    try:
+        _do_render()
+    except RuntimeError as e:
+        # Some builds raise even after we cleared use_denoising — fall back
+        # to a final attempt with denoiser explicitly OFF and re-render.
+        if 'Denoiser' in str(e) or 'denois' in str(e).lower():
+            _safe_set_denoising(False)
+            _do_render()
+        else:
+            raise
+
+def eevee_renderer(samples:int, exposure:float)->None:
+    # Eevee is Blender's real-time rasteriser. It renders orders of magnitude
+    # faster than Cycles at the cost of bias (screen-space reflections, no true
+    # GI), which makes it the right engine for fast previews and for
+    # :shaded-style documentation figures where materials matter more than
+    # physical correctness. Eevee's API name changed between Blender 4.0 and
+    # 4.2+ (BLENDER_EEVEE → BLENDER_EEVEE_NEXT); we try the new name first and
+    # fall back.
+    for engine in ('BLENDER_EEVEE_NEXT', 'BLENDER_EEVEE'):
+        try:
+            C.scene.render.engine = engine
+            break
+        except TypeError:
+            continue
+    C.scene.view_settings.exposure = exposure
+    # Eevee samples attribute is called taa_render_samples.
+    if hasattr(C.scene, 'eevee'):
+        try:
+            C.scene.eevee.taa_render_samples = max(1, samples)
+        except AttributeError:
+            pass
+    _do_render()
+
+def _set_attr_safe(obj, name, value):
+    # Blender's Freestyle API has shifted attributes between versions
+    # (use_advanced_options was removed in 4.x; sphere_radius and
+    # kr_derivative_epsilon moved). Set tolerantly so a single missing field
+    # doesn't fail an entire render.
+    try:
+        setattr(obj, name, value)
+        return True
+    except (AttributeError, TypeError):
+        return False
+
+def freestylesvg_renderer(thickness:float, crease_angle:float, sphere_radius:float, kr_derivative_epsilon:float)->None:
+    # In --background mode the addon-enable path still works because
+    # render_freestyle_svg only modifies scene data, not UI; no guard needed
+    # beyond what addon_utils already does.
+    addon_utils.enable("render_freestyle_svg")
+    C.scene.render.use_freestyle = True
+    if hasattr(C.scene, 'svg_export'):
+        C.scene.svg_export.use_svg_export = True
+    C.scene.render.line_thickness_mode = 'ABSOLUTE'
+    if 'LineStyle' in D.linestyles:
+        ls = D.linestyles['LineStyle']
+        _set_attr_safe(ls, 'use_export_strokes', True)
+        _set_attr_safe(ls, 'thickness', thickness)
+    settings = C.view_layer.freestyle_settings
+    _set_attr_safe(settings, 'crease_angle', crease_angle)
+    _set_attr_safe(settings, 'use_culling', False)
+    _set_attr_safe(settings, 'use_advanced_options', True)   # removed in 4.x
+    _set_attr_safe(settings, 'use_material_boundaries', True)
+    _set_attr_safe(settings, 'use_ridges_and_valleys', True)
+    _set_attr_safe(settings, 'use_smoothness', True)
+    _set_attr_safe(settings, 'use_suggestive_contours', True)
+    _set_attr_safe(settings, 'sphere_radius', sphere_radius)
+    _set_attr_safe(settings, 'kr_derivative_epsilon', kr_derivative_epsilon)
+    _do_render()
+    C.scene.render.use_freestyle = False
+
+def clay_renderer(samples:int, denoising:bool, motion_blur:bool, transparent:bool)->None:
+    # "Clay" = Cycles with white matte shading and AO emphasis, suitable for
+    # the :arctic visual style. Override every material to a near-white
+    # diffuse for the duration of the render, then restore on exit so the
+    # next render of the same scene gets its real materials back.
+    C.scene.render.engine = 'CYCLES'
+    C.scene.render.use_motion_blur = motion_blur
+    C.scene.render.film_transparent = transparent
+    _safe_set_denoising(denoising)
+    C.scene.view_layers[0].use_pass_ambient_occlusion = True
+    C.scene.cycles.samples = samples
+    ensure_default_world()
+    # Apply a global override-material (Cycles supports
+    # view_layer.material_override).
+    clay_mat = D.materials.get('KhepriClayOverride')
+    if clay_mat is None:
+        clay_mat = D.materials.new(name='KhepriClayOverride')
+        clay_mat.use_nodes = True
+        node = clay_mat.node_tree.nodes.get('Principled BSDF')
+        if node is not None:
+            node.inputs['Base Color'].default_value = (0.92, 0.92, 0.92, 1.0)
+            node.inputs['Roughness'].default_value = 0.85
+            try:
+                node.inputs['IOR Level'].default_value = 0.20
+            except KeyError:
+                pass
+    prev_override = C.view_layer.material_override
+    C.view_layer.material_override = clay_mat
+    _configure_cycles_gpu()
+    try:
+        try:
+            _do_render()
+        except RuntimeError as e:
+            if 'Denoiser' in str(e) or 'denois' in str(e).lower():
+                _safe_set_denoising(False)
+                _do_render()
+            else:
+                raise
+    finally:
+        C.view_layer.material_override = prev_override
+
+# Last resort
+
+def blender_cmd(expr:str)->None:
+    eval(expr)
+
+# Bounding box
+
+def get_global_bbox()->Tuple[Point3d, Point3d]:
+    min_coord = [float('inf')] * 3
+    max_coord = [float('-inf')] * 3
+    # Iterate ALL scene mesh objects, not D.collections: shapes created without an
+    # explicit collection live only in the scene's master collection, which is not
+    # in D.collections — get_global_bbox() then returned inf bounds and frame_all()
+    # aimed at nothing.
+    for obj in C.scene.objects:
+        if obj.type == 'MESH' and obj.bound_box:
+            for local_bbox_corner in obj.bound_box:
+                world_bbox_corner = obj.matrix_world @ Point3d(local_bbox_corner)
+                for i in range(3):
+                    min_coord[i] = min(min_coord[i], world_bbox_corner[i])
+                    max_coord[i] = max(max_coord[i], world_bbox_corner[i])
+    if min_coord[0] == float('inf'):
+        return Point3d((-1.0, -1.0, -1.0)), Point3d((1.0, 1.0, 1.0))
+    return Point3d(min_coord), Point3d(max_coord)
+
+def add_render_background(d:float, w:float, mat:MatId)->Id:
+    p0, p1 = get_global_bbox()
+    return quad(Point3d((p0[0]-w, p0[1]-w, p0[2]-d)),
+                Point3d((p1[0]+w, p0[1]-w, p0[2]-d)),
+                Point3d((p1[0]+w, p1[1]+w, p0[2]-d)),
+                Point3d((p0[0]-w, p1[1]+w, p0[2]-d)),
+                mat)
+
+"""
+    com.light_cache_bake()
+
+
+class _Point3dArray(object):
+    def write(self, conn, ps):
+        Int.write(conn, len(ps))
+        for p in ps:
+            Point3d.write(conn, p)
+    def read(self, conn):
+        n = Int.read(conn)
+        if n == -1:
+            raise RuntimeError(String.read(conn))
+        else:
+            pts = []
+            for i in range(n):
+                pts.append(Point3d.read(conn))
+            return pts
+
+Point3dArray = _Point3dArray()
+
+class _Frame3d(object):
+    def write(self, conn, ps):
+        raise Error("Bum")
+    def read(self, conn):
+        return u0(cs_from_o_vx_vy_vz(Point3d.read(conn),
+                                     Vector3d.read(conn),
+                                     Vector3d.read(conn),
+                                     Vector3d.read(conn)))
+
+Frame3d = _Frame3d()
+
+
+fast_mode = False
+
+class _ObjectId(Packer):
+    def __init__(self):
+        super().__init__('1i')
+    def read(self, conn):
+        if fast_mode:
+            return incr_id_counter()
+        else:
+            _id = super().read(conn)
+            if _id == -1:
+                raise RuntimeError(String.read(conn))
+            else:
+                return _id
+
+ObjectId = _ObjectId()
+Entity = _ObjectId()
+ElementId = _ObjectId()
+
+class _ObjectIdArray(object):
+    def write(self, conn, ids):
+        Int.write(conn, len(ids))
+        for _id in ids:
+            ObjectId.write(conn, _id)
+    def read(self, conn):
+        n = Int.read(conn)
+        if n == -1:
+            raise RuntimeError(String.read(conn))
+        else:
+            ids = []
+            for i in range(n):
+                ids.append(ObjectId.read(conn))
+            return ids
+
+ObjectIdArray = _ObjectIdArray()
+"""
+
+import struct
+from functools import partial
+
+def r_Vector(conn)->Vector:
+    return Vector(r_float3(conn))
+
+def w_Vector(e:Vector, conn)->None:
+    w_float3((e.x, e.y, e.z), conn)
+
+r_List_Vector = partial(r_List, r_Vector)
+w_List_Vector = partial(w_List, w_Vector)
+
+r_List_List_Vector = partial(r_List, r_List_Vector)
+w_List_List_Vector = partial(w_List, w_List_Vector)
+
+import addon_utils
+
+class Khepri(object):
+    def __init__(self):
+        pass
+
+# Run Blender as the client. Khepri's Julia side runs a single
+# khepri_socket_server (started by add_socket_backend_init_function on
+# `using KhepriBlender`) listening on port 12345. The Python plugin
+# connects out to that server, identifies itself as "Blender", and the
+# server-side accept loop creates a fresh BLR backend wired to the live
+# socket; that backend lands in `current_backends()` so user-side scripts
+# reach it via `top_backend()`.
+init_client_server("Blender", 0)
+
+if bpy.app.background:
+    while True:
+        execute_current_action()
+else:
+    bpy.app.timers.register(execute_current_action)
+
+"""
+def register():
+    global server
+#    server = Khepri()
+
+def unregister():
+    global server
+    warn('stopping server...')
+#    server.stop()
+#    del server
+
+if __name__ == "__main__":
+    register()
+"""
