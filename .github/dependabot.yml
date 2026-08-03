@@ -1,0 +1,17 @@
+# Root Dependabot configuration for the aptmcl/Khepri monorepo.
+#
+# Replaces Julia/KhepriThreejs/.github/dependabot.yml, the only one of the fifteen
+# packages that had one. Like the workflows it was inert at that path: only a
+# repository-root .github/dependabot.yml is read.
+#
+# Scope is unchanged from the file it replaces -- GitHub Actions pin updates only.
+# A Julia block is deliberately not enabled: CompatHelper already covers the Julia
+# side, and Dependabot's behaviour on Julia manifests was not verified here. If it
+# is ever adopted, enable it for ONE package first and compare its PRs against
+# CompatHelper's before switching over.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

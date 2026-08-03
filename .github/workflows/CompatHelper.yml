@@ -1,0 +1,69 @@
+# Root CompatHelper for the aptmcl/Khepri monorepo.
+#
+# Replaces the 14 inert copies at Julia/<Pkg>/.github/workflows/CompatHelper.yml
+# (KhepriFrame4DD never had one), each of which ran a bare CompatHelper.main() --
+# which would look for a Project.toml at the repository root that does not exist --
+# and passed COMPATHELPER_PRIV: secrets.DOCUMENTER_KEY, a secret this repository
+# does not have.
+#
+# `subdirs` defaults to [""], meaning the repository root. "" is excluded here for
+# the reason above: CompatHelper parses each subdir's Project.toml without an
+# existence check, so a bad path aborts the whole run rather than skipping it.
+#
+# The package environments go in ONE call, because CompatHelper names each PR
+# after the last path component and the package names are distinct. The docs
+# environments must NOT join that call: the last component of "Julia/<Pkg>/docs"
+# is "docs" for all fifteen, so the PR titles collide and CompatHelper's own
+# duplicate-title check would open one PR and silently abandon the rest. They are
+# looped with a distinguishing prefix instead.
+
+name: CompatHelper
+
+on:
+  schedule:
+    - cron: 0 0 * * *
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  CompatHelper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+
+      - name: Install CompatHelper
+        shell: julia --color=yes {0}
+        run: |
+          import Pkg
+          Pkg.add(; name = "CompatHelper", uuid = "aa819f21-2bde-4658-8897-bab36330d9b7", version = "3")
+
+      - name: Run CompatHelper on the package environments
+        shell: julia --color=yes {0}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          import CompatHelper
+          pkgs = ["Khepri", "KhepriAutoCAD", "KhepriBase", "KhepriBlender",
+                  "KhepriFrame4DD", "KhepriGrasshopper", "KhepriIllustrator",
+                  "KhepriLibrary", "KhepriPOVRay", "KhepriRevit", "KhepriRhino",
+                  "KhepriThreejs", "KhepriTikZ", "KhepriUnity", "KhepriUnreal"]
+          CompatHelper.main(; subdirs = ["Julia/$p" for p in pkgs])
+
+      - name: Run CompatHelper on the docs environments
+        shell: julia --color=yes {0}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          import CompatHelper
+          pkgs = ["Khepri", "KhepriAutoCAD", "KhepriBase", "KhepriBlender",
+                  "KhepriFrame4DD", "KhepriGrasshopper", "KhepriIllustrator",
+                  "KhepriLibrary", "KhepriPOVRay", "KhepriRevit", "KhepriRhino",
+                  "KhepriThreejs", "KhepriTikZ", "KhepriUnity", "KhepriUnreal"]
+          for p in pkgs
+            CompatHelper.main(; subdirs = ["Julia/$p/docs"], pr_title_prefix = "[$p docs] ")
+          end

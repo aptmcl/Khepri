@@ -1,0 +1,59 @@
+# Root TagBot for the aptmcl/Khepri monorepo.
+#
+# Replaces the 14 inert copies at Julia/<Pkg>/.github/workflows/TagBot.yml
+# (KhepriFrame4DD never had one), each of which passed
+# `ssh: ${{ secrets.DOCUMENTER_KEY }}` -- a secret that does not exist on this
+# repository.
+#
+# TagBot is a per-package invocation: `subdir` is a plain string, not a list, so
+# the packages go in a matrix. `tag_prefix` is deliberately omitted -- with
+# `subdir` set and `tag_prefix` empty, TagBot derives the prefix from that
+# subdirectory's Project.toml name and produces <Package>-v<version>, which is
+# exactly what the migration's --tag-rename already produced. Setting it by hand
+# would only create somewhere for the two to drift apart.
+#
+# There is deliberately no `permissions:` block; TagBot's README says to use the
+# defaults.
+#
+# Note: a package that is not in General makes TagBot log "This package is not
+# registered, skipping" and exit 0. Ten of these fifteen are in that state today,
+# so a green run here does not mean a tag was created.
+
+name: TagBot
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  TagBot:
+    if: github.event_name == 'workflow_dispatch' || github.actor == 'JuliaTagBot'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # An arbitrary hedge against GITHUB_TOKEN secondary rate limits during
+      # changelog generation, not a measured number.
+      max-parallel: 4
+      matrix:
+        package:
+          - Khepri
+          - KhepriAutoCAD
+          - KhepriBase
+          - KhepriBlender
+          - KhepriFrame4DD
+          - KhepriGrasshopper
+          - KhepriIllustrator
+          - KhepriLibrary
+          - KhepriPOVRay
+          - KhepriRevit
+          - KhepriRhino
+          - KhepriThreejs
+          - KhepriTikZ
+          - KhepriUnity
+          - KhepriUnreal
+    steps:
+      - uses: JuliaRegistries/TagBot@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          subdir: Julia/${{ matrix.package }}

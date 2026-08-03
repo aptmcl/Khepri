@@ -1,5 +1,12 @@
 * text=auto
 
+# CI runs on Linux runners, where bash rejects a CRLF script with
+# `$'\r': command not found`. `* text=auto` above already normalises these to LF
+# in the index, but it does so via git's text/binary heuristic; stating eol=lf
+# makes it a guarantee for the files where getting it wrong breaks every job,
+# and pins the CHECKOUT to LF as well.
+/.github/** text eol=lf
+
 # Never normalize binary render assets (git mis-detects .renv as text,
 # which would corrupt it)
 *.renv binary

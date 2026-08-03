@@ -1,0 +1,244 @@
+# Root CI for the aptmcl/Khepri monorepo.
+#
+# Replaces the 15 per-package workflows that the consolidation left at
+# Julia/<Pkg>/.github/workflows/. GitHub executes only the workflows at the
+# REPOSITORY ROOT, so every one of those is dead -- and they all still trigger on
+# `master`, which is no longer the branch.
+#
+# Preserved from the old per-package ci.yml: the ['1.12','nightly'] x
+# windows-latest matrix, buildpkg/runtest/processcoverage/codecov, the
+# `registry-deps` resolution job, the docs job, and cancel-in-progress for PRs
+# only.
+#
+# Changed because the monorepo requires it:
+#   * every julia-action is aimed at Julia/<Pkg> through its `project:` input --
+#     the repository root has no Project.toml, so the default `@.` would walk up
+#     and out of the workspace;
+#   * only the packages a change actually affects are built;
+#   * sibling Khepri packages are developed from the CHECKOUT rather than from
+#     https://github.com/aptmcl/KhepriBase.jl, which is about to be archived;
+#   * julia-actions/julia-docdeploy is not used -- see .github/scripts/build_docs.sh
+#     for why it cannot address a subdirectory package.
+#
+# Do NOT add `paths:` under `on:`. A workflow skipped by a path filter leaves its
+# required checks Pending forever and blocks merging; a JOB skipped by an `if:`
+# reports success. That is why selection happens in the `select` job below, and
+# why `ci-ok` exists.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    # Path filters are not evaluated for tag pushes, so the package is taken from
+    # the tag name. TagBot's subdir mode produces <Package>-v<version>, which is
+    # also what the migration's --tag-rename produced.
+    tags: ['*-v*']
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    name: Select packages
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.pick.outputs.packages }}
+      registered: ${{ steps.pick.outputs.registered }}
+      docs: ${{ steps.pick.outputs.docs }}
+      any_packages: ${{ steps.pick.outputs.any_packages }}
+      any_registered: ${{ steps.pick.outputs.any_registered }}
+      any_docs: ${{ steps.pick.outputs.any_docs }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Decide which packages this change affects
+        id: pick
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          sel=".github/scripts/select_packages.py"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            python3 "$sel" --tag "$GITHUB_REF_NAME" | tee -a "$GITHUB_OUTPUT"
+          elif [[ "$EVENT" == "pull_request" ]]; then
+            git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+            base="$(git merge-base "origin/${BASE_REF}" HEAD)"
+            git diff --name-only "$base" HEAD | python3 "$sel" --changed | tee -a "$GITHUB_OUTPUT"
+          elif [[ -z "$BEFORE" || "$BEFORE" =~ ^0+$ ]] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            # New branch, force-push, or a base commit that no longer exists.
+            # Over-testing is the safe direction.
+            echo "no usable base commit; selecting every package"
+            python3 "$sel" --all | tee -a "$GITHUB_OUTPUT"
+          else
+            git diff --name-only "$BEFORE" "$GITHUB_SHA" | python3 "$sel" --changed | tee -a "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    name: ${{ matrix.package }} / Julia ${{ matrix.version }}
+    needs: select
+    # An empty matrix vector is a hard workflow error, not a skip, and jobs.<id>.if
+    # cannot see the matrix context -- so the guard has to be a needs output.
+    if: needs.select.outputs.any_packages == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: write        # julia-actions/cache evicts superseded caches
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.select.outputs.packages) }}
+        version: ['1.12', 'nightly']
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: ${{ matrix.version }}
+          # Leave arch at 'default'. v3 turned "x86_64 requested on Apple Silicon"
+          # from a warning into a hard error, so a literal 'x64' is a trap.
+          arch: default
+
+      # Replaces a hand-rolled actions/cache@v6 keyed on hashFiles('**/Project.toml').
+      # In a monorepo that glob covers all 15 packages plus their docs
+      # environments, so any change invalidated every package's cache -- and it
+      # cached only ~/.julia/artifacts, not packages/ or compiled/.
+      - uses: julia-actions/cache@v3
+
+      # Was Pkg.develop(url="https://github.com/aptmcl/KhepriBase.jl"), which
+      # tested a soon-to-be-archived repo's default branch instead of the sibling
+      # commit under review. Skipped on tag builds so a release resolves the way a
+      # registry user's would.
+      - name: Develop in-repo Khepri dependencies
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: julia --color=yes --project=Julia/${{ matrix.package }} .github/scripts/dev_siblings.jl ${{ matrix.package }}
+
+      - uses: julia-actions/julia-buildpkg@v1
+        with:
+          project: Julia/${{ matrix.package }}
+
+      - uses: julia-actions/julia-runtest@v1
+        with:
+          project: Julia/${{ matrix.package }}
+
+      - uses: julia-actions/julia-processcoverage@v1
+        with:
+          # `src` only. The default is 'src,ext', and processcoverage exempts the
+          # LITERAL string "ext" from its isdir check and nothing else -- so a
+          # non-existent "Julia/<Pkg>/ext" raises `directory ... not found!` and
+          # fails the job. No package here has an ext/ directory; add one to this
+          # list only when it grows one.
+          directories: Julia/${{ matrix.package }}/src
+
+      # Windows plus a subdirectory project makes CoverageTools emit mixed
+      # separators, e.g. `SF:Julia/KhepriBase/src\KhepriBase.jl`. Whether Codecov
+      # path-matches that was not confirmed, so normalise; it is free.
+      - name: Normalise lcov path separators
+        shell: bash
+        run: sed -i 's|\\|/|g' lcov.info
+
+      - uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          flags: ${{ matrix.package }}
+
+  registry-deps:
+    name: Registry deps / ${{ matrix.package }}
+    needs: select
+    if: needs.select.outputs.any_registered == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.select.outputs.registered) }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - name: Load with every dependency resolved from the registry
+        run: julia --color=yes .github/scripts/registry_deps.jl ${{ matrix.package }}
+
+  docs-build:
+    name: Docs (build only)
+    needs: select
+    if: needs.select.outputs.any_docs == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - uses: julia-actions/cache@v3
+      # Neither GITHUB_TOKEN nor DOCUMENTER_KEY is in the environment, so
+      # Documenter's auth check fails and deploydocs declines to deploy. This job
+      # only proves the docs still build.
+      - name: Build docs
+        shell: bash
+        env:
+          PACKAGES: ${{ needs.select.outputs.docs }}
+        run: bash .github/scripts/build_docs.sh
+
+  docs:
+    name: Docs (build and deploy)
+    needs: select
+    if: needs.select.outputs.any_docs == 'true' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # deploydocs pushes gh-pages using GITHUB_TOKEN
+      statuses: write
+      actions: write
+    # All packages now share ONE gh-pages branch, and deploydocs pushes with a
+    # plain `git push` -- no rebase, no retry -- so concurrent deploys race and
+    # the losers are rejected. This job builds them sequentially, and the group
+    # serialises it across runs. cancel-in-progress MUST stay false or a deploy
+    # is silently dropped.
+    concurrency:
+      group: khepri-gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - uses: julia-actions/cache@v3
+      - name: Build and deploy docs
+        shell: bash
+        env:
+          PACKAGES: ${{ needs.select.outputs.docs }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Harmless while the secret does not exist: Documenter picks SSH only
+          # when DOCUMENTER_KEY is non-empty, and HTTPS + GITHUB_TOKEN otherwise.
+          # Adding the secret later switches auth with no workflow change.
+          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
+        run: bash .github/scripts/build_docs.sh
+
+  ci-ok:
+    # The only job that should be configured as a required status check.
+    # Matrix job names are dynamic ("KhepriTikZ / Julia 1.12") and exist only on
+    # runs that selected that package, so requiring one of those would leave it
+    # Pending and block every unrelated PR. This name is fixed, always runs, and
+    # is green when the jobs it waits on were skipped.
+    name: CI ok
+    if: always()
+    needs: [select, test, registry-deps, docs-build, docs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any upstream job failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
