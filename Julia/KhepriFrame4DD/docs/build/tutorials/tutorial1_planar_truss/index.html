@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Tutorial 1: Planar Truss · KhepriFrame4DD.jl</title><meta name="title" content="Tutorial 1: Planar Truss · KhepriFrame4DD.jl"/><meta property="og:title" content="Tutorial 1: Planar Truss · KhepriFrame4DD.jl"/><meta property="twitter:title" content="Tutorial 1: Planar Truss · KhepriFrame4DD.jl"/><meta name="description" content="Documentation for KhepriFrame4DD.jl."/><meta property="og:description" content="Documentation for KhepriFrame4DD.jl."/><meta property="twitter:description" content="Documentation for KhepriFrame4DD.jl."/><meta property="og:url" content="https://aptmcl.github.io/KhepriFrame4DD.jl/tutorials/tutorial1_planar_truss/"/><meta property="twitter:url" content="https://aptmcl.github.io/KhepriFrame4DD.jl/tutorials/tutorial1_planar_truss/"/><link rel="canonical" href="https://aptmcl.github.io/KhepriFrame4DD.jl/tutorials/tutorial1_planar_truss/"/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">KhepriFrame4DD.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><span class="tocitem">Tutorials</span><ul><li class="is-active"><a class="tocitem" href>Tutorial 1: Planar Truss</a><ul class="internal"><li><a class="tocitem" href="#Setting-Up"><span>Setting Up</span></a></li><li><a class="tocitem" href="#Support-Conditions"><span>Support Conditions</span></a></li><li><a class="tocitem" href="#Cross-Sections"><span>Cross-Sections</span></a></li><li><a class="tocitem" href="#Truss-Geometry"><span>Truss Geometry</span></a></li><li><a class="tocitem" href="#Applying-Loads-and-Running-Analysis"><span>Applying Loads and Running Analysis</span></a></li><li><a class="tocitem" href="#Displacement-Results"><span>Displacement Results</span></a></li><li><a class="tocitem" href="#Reaction-Forces"><span>Reaction Forces</span></a></li><li><a class="tocitem" href="#Element-Axial-Forces"><span>Element Axial Forces</span></a></li><li><a class="tocitem" href="#Visualizing-Deformation"><span>Visualizing Deformation</span></a></li><li><a class="tocitem" href="#Self-Weight-Analysis"><span>Self-Weight Analysis</span></a></li><li><a class="tocitem" href="#Parametric-Study:-Section-Size"><span>Parametric Study: Section Size</span></a></li><li><a class="tocitem" href="#Limitations-vs.-Robot-Structural-Analysis"><span>Limitations vs. Robot Structural Analysis</span></a></li><li><a class="tocitem" href="#Summary"><span>Summary</span></a></li></ul></li><li><a class="tocitem" href="../tutorial2_warren_bridge/">Tutorial 2: Warren Truss Bridge</a></li><li><a class="tocitem" href="../tutorial3_space_truss_tower/">Tutorial 3: Space Truss Tower</a></li><li><a class="tocitem" href="../tutorial4_truss_grid_deck/">Tutorial 4: Truss Grid Deck</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Tutorials</a></li><li class="is-active"><a href>Tutorial 1: Planar Truss</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Tutorial 1: Planar Truss</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/aptmcl/KhepriFrame4DD.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/aptmcl/KhepriFrame4DD.jl/blob/master/docs/src/tutorials/tutorial1_planar_truss.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Tutorial-1:-Planar-Truss-Analysis"><a class="docs-heading-anchor" href="#Tutorial-1:-Planar-Truss-Analysis">Tutorial 1: Planar Truss Analysis</a><a id="Tutorial-1:-Planar-Truss-Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Tutorial-1:-Planar-Truss-Analysis" title="Permalink"></a></h1><p>This tutorial introduces structural truss analysis with KhepriFrame4DD by building and analyzing a <strong>Pratt truss</strong> — the most common roof/bridge truss pattern. You will learn how to define supports, cross-sections, geometry, loads, and interpret results including displacements, reaction forces, and element axial forces.</p><p><em>Inspired by Autodesk Robot Structural Analysis Tutorial 1 (Frame 2D Design).</em></p><h2 id="Setting-Up"><a class="docs-heading-anchor" href="#Setting-Up">Setting Up</a><a id="Setting-Up-1"></a><a class="docs-heading-anchor-permalink" href="#Setting-Up" title="Permalink"></a></h2><p>Load the KhepriFrame4DD backend, which registers the Frame4DD structural solver as a Khepri backend:</p><pre><code class="language-julia hljs">using KhepriFrame4DD
+backend(frame4dd)
+delete_all_shapes()</code></pre><h2 id="Support-Conditions"><a class="docs-heading-anchor" href="#Support-Conditions">Support Conditions</a><a id="Support-Conditions-1"></a><a class="docs-heading-anchor-permalink" href="#Support-Conditions" title="Permalink"></a></h2><p>Truss nodes can be <strong>free</strong> (no constraints) or <strong>supported</strong> (some degrees of freedom are fixed). Each node has 6 degrees of freedom — 3 translations (<code>ux</code>, <code>uy</code>, <code>uz</code>) and 3 rotations (<code>rx</code>, <code>ry</code>, <code>rz</code>).</p><p>Common support types for trusses:</p><table><tr><th style="text-align: right">Support</th><th style="text-align: right">Translations fixed</th><th style="text-align: right">Rotations fixed</th><th style="text-align: right">Typical use</th></tr><tr><td style="text-align: right"><strong>Fixed</strong></td><td style="text-align: right"><code>ux, uy, uz</code></td><td style="text-align: right"><code>rx, ry, rz</code></td><td style="text-align: right">Rigid connection (all 6 DOFs)</td></tr><tr><td style="text-align: right"><strong>Pinned</strong></td><td style="text-align: right"><code>ux, uy, uz</code></td><td style="text-align: right">none</td><td style="text-align: right">Standard truss support</td></tr><tr><td style="text-align: right"><strong>Free</strong></td><td style="text-align: right">none</td><td style="text-align: right">none</td><td style="text-align: right">Loaded joints</td></tr></table><p>We define support families using <code>truss_node_family_element</code>:</p><pre><code class="language-julia hljs">fixed = truss_node_family_element(
+  default_truss_node_family(),
+  support=truss_node_support(ux=true, uy=true, uz=true, rx=true, ry=true, rz=true))
+
+pinned = truss_node_family_element(
+  default_truss_node_family(),
+  support=truss_node_support(ux=true, uy=true, uz=true))
+
+free = truss_node_family_element(default_truss_node_family())</code></pre><p>For our Pratt truss, we use a <strong>fixed</strong> support at the left end (all 6 DOFs constrained) and a <strong>pinned</strong> support at the right end (translations only). Since truss bars transmit only axial forces, the rotational constraints at the fixed support have no practical effect — both supports are equivalent to structural pins for a truss.</p><h2 id="Cross-Sections"><a class="docs-heading-anchor" href="#Cross-Sections">Cross-Sections</a><a id="Cross-Sections-1"></a><a class="docs-heading-anchor-permalink" href="#Cross-Sections" title="Permalink"></a></h2><p>Truss bars use <strong>circular tube</strong> cross-sections defined by outer radius and wall thickness. The default steel material has:</p><ul><li>Elastic modulus E = 210 GPa</li><li>Shear modulus G = 81 GPa</li><li>Density d = 7701 kg/m³</li></ul><pre><code class="language-julia hljs">bar_family = truss_bar_family_element(
+  default_truss_bar_family(),
+  radius=0.03,
+  inner_radius=0.025)</code></pre><p>This defines a tube with outer radius 30 mm and inner radius 25 mm (wall thickness 5 mm). Frame4DD automatically computes the section properties:</p><ul><li>Cross-section area: <span>$A_x = \pi(R_o^2 - R_i^2)$</span></li><li>Moments of inertia: <span>$I_{yy} = I_{zz} = \frac{\pi}{4}(R_o^4 - R_i^4)$</span></li><li>Torsional constant: <span>$J_{xx} = \frac{\pi}{2}(R_o^4 - R_i^4)$</span></li></ul><h2 id="Truss-Geometry"><a class="docs-heading-anchor" href="#Truss-Geometry">Truss Geometry</a><a id="Truss-Geometry-1"></a><a class="docs-heading-anchor-permalink" href="#Truss-Geometry" title="Permalink"></a></h2><p>A <strong>Pratt truss</strong> has parallel top and bottom chords, vertical members, and diagonals that slope toward the center. Our truss spans 12 m with 6 bays of 2 m each and a height of 2 m.</p><pre><code class="nohighlight hljs">    2     4     6     8    10
+    o-----o-----o-----o-----o        ← top chord (z = 2 m)
+   /|    /|    /|    /|    /|\
+  / |   / |   / |   / |   / | \
+ /  |  /  |  /  |  /  |  /  |  \
+o---o-----o-----o-----o-----o---o   ← bottom chord (z = 0)
+1   3     5     7     9    11  12
+▣                               △
+fixed                        pinned</code></pre><p>Build the nodes — bottom chord at z = 0, top chord at z = 2:</p><pre><code class="language-julia hljs">span = 12.0
+n_bays = 6
+bay = span / n_bays
+height = 2.0
+
+# Bottom chord: 7 nodes at x = 0, 2, 4, ..., 12
+bottom_pts = [xyz(i * bay, 0, 0) for i in 0:n_bays]
+
+# Top chord: 5 nodes at x = 2, 4, ..., 10 (no nodes above supports)
+top_pts = [xyz(i * bay, 0, height) for i in 1:(n_bays-1)]
+
+# Create nodes with support conditions
+truss_node(bottom_pts[1], fixed)            # left support (fixed)
+for p in bottom_pts[2:end-1]
+  truss_node(p, free)                       # interior bottom nodes
+end
+truss_node(bottom_pts[end], pinned)         # right support (pinned)
+for p in top_pts
+  truss_node(p, free)                       # top chord nodes
+end
+
+println(&quot;Nodes: $(length(bottom_pts) + length(top_pts))&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Nodes: 12</code></pre><p>Now connect the bars — bottom chord, top chord, verticals, and diagonals:</p><pre><code class="language-julia hljs"># Bottom chord bars
+for i in 1:(length(bottom_pts)-1)
+  truss_bar(bottom_pts[i], bottom_pts[i+1], 0, bar_family)
+end
+
+# Top chord bars
+for i in 1:(length(top_pts)-1)
+  truss_bar(top_pts[i], top_pts[i+1], 0, bar_family)
+end
+
+# Verticals (from bottom interior nodes to corresponding top nodes)
+for i in 1:length(top_pts)
+  truss_bar(bottom_pts[i+1], top_pts[i], 0, bar_family)
+end
+
+# Diagonals — left half slope right, right half slope left (Pratt pattern)
+mid = div(n_bays, 2)
+# Left half: diagonals from bottom-left to top-right
+for i in 1:mid
+  truss_bar(bottom_pts[i], top_pts[i], 0, bar_family)
+end
+# Right half: diagonals from bottom-right to top-left
+for i in mid:(n_bays-1)
+  truss_bar(bottom_pts[i+2], top_pts[i], 0, bar_family)
+end
+
+n_bars = (length(bottom_pts)-1) + (length(top_pts)-1) + length(top_pts) + (n_bays - 1)
+println(&quot;Bars: $n_bars&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Bars: 20</code></pre><h2 id="Applying-Loads-and-Running-Analysis"><a class="docs-heading-anchor" href="#Applying-Loads-and-Running-Analysis">Applying Loads and Running Analysis</a><a id="Applying-Loads-and-Running-Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Applying-Loads-and-Running-Analysis" title="Permalink"></a></h2><p>We apply a uniform downward load of 10 kN to each free node. The <code>truss_analysis</code> function takes a <strong>load vector</strong> applied to every non-supported node:</p><pre><code class="language-julia hljs">results = truss_analysis(vz(-10000), false, Dict())</code></pre><p>We can visualize the truss using KhepriThebes, a pure-Julia SVG renderer. Nodes are drawn as spheres and bars as cylinders:</p><pre><code class="language-julia hljs">using KhepriThebes
+img_dir = joinpath(dirname(dirname(pathof(KhepriFrame4DD))), &quot;docs&quot;, &quot;src&quot;, &quot;tutorials&quot;, &quot;images&quot;)
+mkpath(img_dir)
+backend(thebes)
+delete_all_shapes()
+set_view(xyz(6, -20, 5), xyz(6, 0, 1))
+green_mat = standard_material(base_color=rgba(0.2, 0.7, 0.2, 1))
+for nd in frame4dd.truss_node_data
+  sphere(nd.loc, 0.15, material=green_mat)
+end
+for bar in frame4dd.truss_bar_data
+  cylinder(bar.node1.loc, 0.05, bar.node2.loc, material=green_mat)
+end
+with(render_dir, img_dir) do
+  with(render_kind_dir, &quot;.&quot;) do
+    render_view(&quot;tut1_structure&quot;)
+  end
+end</code></pre><img src="77be0231.svg" alt="Example block output"/><pre><code class="language-julia hljs">backend(frame4dd)</code></pre><p>The solver:</p><ol><li>Assembles the global stiffness matrix from all element contributions</li><li>Applies boundary conditions (fixed DOFs)</li><li>Adds nodal loads (10 kN downward on each free node)</li><li>Solves the linear system <span>$[K]\{u\} = \{F\}$</span></li><li>Computes reaction forces and element end forces</li></ol><h2 id="Displacement-Results"><a class="docs-heading-anchor" href="#Displacement-Results">Displacement Results</a><a id="Displacement-Results-1"></a><a class="docs-heading-anchor-permalink" href="#Displacement-Results" title="Permalink"></a></h2><p>The <code>node_displacement_function</code> returns a closure that maps any <code>TrussNodeData</code> to its displacement vector:</p><pre><code class="language-julia hljs">disp = node_displacement_function(results)
+
+println(&quot;Node displacements (mm):&quot;)
+println(&quot;─&quot; ^ 50)
+for nd in frame4dd.truss_node_data
+  d = disp(nd)
+  label = truss_node_is_supported(nd) ? &quot; (support)&quot; : &quot;&quot;
+  println(&quot;  Node $(nd.id) at $(nd.loc): &quot; *
+          &quot;dx=$(round(d.x*1000, digits=3)), &quot; *
+          &quot;dy=$(round(d.y*1000, digits=3)), &quot; *
+          &quot;dz=$(round(d.z*1000, digits=3))$label&quot;)
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Node displacements (mm):
+──────────────────────────────────────────────────
+  Node 1 at xyz(0.0, 0, 0): dx=0.0, dy=0.0, dz=0.0 (support)
+  Node 2 at xyz(2.0, 0, 0): dx=-0.258, dy=0.0, dz=-3.42
+  Node 3 at xyz(4.0, 0, 0): dx=-0.185, dy=0.0, dz=-5.713
+  Node 4 at xyz(6.0, 0, 0): dx=-0.001, dy=0.0, dz=-6.321
+  Node 5 at xyz(8.0, 0, 0): dx=0.183, dy=0.0, dz=-5.716
+  Node 6 at xyz(10.0, 0, 0): dx=0.256, dy=0.0, dz=-3.428
+  Node 7 at xyz(12.0, 0, 0): dx=0.0, dy=0.0, dz=0.0 (support)
+  Node 8 at xyz(2.0, 0, 2.0): dx=1.429, dy=0.0, dz=-2.982
+  Node 9 at xyz(4.0, 0, 2.0): dx=0.88, dy=0.0, dz=-5.492
+  Node 10 at xyz(6.0, 0, 2.0): dx=-0.0, dy=0.0, dz=-6.211
+  Node 11 at xyz(8.0, 0, 2.0): dx=-0.881, dy=0.0, dz=-5.497
+  Node 12 at xyz(10.0, 0, 2.0): dx=-1.432, dy=0.0, dz=-2.989</code></pre><p>The <strong>maximum displacement</strong> is a key design metric:</p><pre><code class="language-julia hljs">max_d = max_displacement(results)
+println(&quot;Maximum displacement: $(round(max_d * 1000, digits=3)) mm&quot;)
+println(&quot;Span/deflection ratio: $(round(span / max_d, digits=0))&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Maximum displacement: 6.321 mm
+Span/deflection ratio: 1899.0</code></pre><p>A common design criterion is span/deflection &gt; 300. If our ratio is too low, we need stiffer sections or a deeper truss.</p><h2 id="Reaction-Forces"><a class="docs-heading-anchor" href="#Reaction-Forces">Reaction Forces</a><a id="Reaction-Forces-1"></a><a class="docs-heading-anchor-permalink" href="#Reaction-Forces" title="Permalink"></a></h2><p>The <code>reaction_forces</code> function returns a dictionary mapping supported node IDs to their reaction force vectors:</p><pre><code class="language-julia hljs">reactions = reaction_forces(results)
+
+println(&quot;Reaction forces (kN):&quot;)
+println(&quot;─&quot; ^ 50)
+for (id, r) in sort(collect(reactions), by=first)
+  println(&quot;  Node $id: &quot; *
+          &quot;Rx=$(round(r.x/1000, digits=2)) kN, &quot; *
+          &quot;Ry=$(round(r.y/1000, digits=2)) kN, &quot; *
+          &quot;Rz=$(round(r.z/1000, digits=2)) kN&quot;)
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Reaction forces (kN):
+──────────────────────────────────────────────────
+  Node 1: Rx=73.19 kN, Ry=0.0 kN, Rz=50.03 kN
+  Node 7: Rx=-73.19 kN, Ry=0.0 kN, Rz=49.97 kN</code></pre><p>We can verify <strong>static equilibrium</strong> — the sum of reactions must equal the total applied load:</p><pre><code class="language-julia hljs">n_free = count(!truss_node_is_supported, frame4dd.truss_node_data)
+total_applied = n_free * 10000  # 10 kN per free node
+
+total_rz = sum(r.z for r in values(reactions))
+total_rx = sum(r.x for r in values(reactions))
+
+println(&quot;Total applied load (downward): $(total_applied / 1000) kN&quot;)
+println(&quot;Total vertical reaction: $(round(total_rz / 1000, digits=2)) kN&quot;)
+println(&quot;Total horizontal reaction: $(round(total_rx / 1000, digits=2)) kN&quot;)
+println(&quot;Equilibrium check: ΣFz error = $(round(abs(total_rz - total_applied), digits=6)) N&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Total applied load (downward): 100.0 kN
+Total vertical reaction: 100.0 kN
+Total horizontal reaction: 0.0 kN
+Equilibrium check: ΣFz error = 0.0 N</code></pre><p>Both supports are pinned (all translations fixed), so horizontal reactions may appear at either end to maintain equilibrium.</p><h2 id="Element-Axial-Forces"><a class="docs-heading-anchor" href="#Element-Axial-Forces">Element Axial Forces</a><a id="Element-Axial-Forces-1"></a><a class="docs-heading-anchor-permalink" href="#Element-Axial-Forces" title="Permalink"></a></h2><p>The <code>element_axial_forces</code> function returns the axial force in each bar. <strong>Positive values indicate tension</strong>, negative indicate <strong>compression</strong>:</p><pre><code class="language-julia hljs">forces = element_axial_forces(results)
+
+println(&quot;Element axial forces (kN):&quot;)
+println(&quot;─&quot; ^ 60)
+for (i, bar) in enumerate(frame4dd.truss_bar_data)
+  f = forces[i]
+  state = f &gt; 100 ? &quot;TENSION&quot; : (f &lt; -100 ? &quot;COMPRESSION&quot; : &quot;~zero&quot;)
+  println(&quot;  Bar $i ($(bar.node1.id)→$(bar.node2.id)): &quot; *
+          &quot;N = $(round(f/1000, digits=2)) kN  [$state]&quot;)
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Element axial forces (kN):
+────────────────────────────────────────────────────────────
+  Bar 1 (1→2): N = -23.44 kN  [COMPRESSION]
+  Bar 2 (2→3): N = 6.63 kN  [TENSION]
+  Bar 3 (3→4): N = 16.69 kN  [TENSION]
+  Bar 4 (4→5): N = 16.7 kN  [TENSION]
+  Bar 5 (5→6): N = 6.68 kN  [TENSION]
+  Bar 6 (6→7): N = -23.25 kN  [COMPRESSION]
+  Bar 7 (8→9): N = -49.85 kN  [COMPRESSION]
+  Bar 8 (9→10): N = -79.84 kN  [COMPRESSION]
+  Bar 9 (10→11): N = -79.9 kN  [COMPRESSION]
+  Bar 10 (11→12): N = -50.0 kN  [COMPRESSION]
+  Bar 11 (2→8): N = 39.76 kN  [TENSION]
+  Bar 12 (3→9): N = 20.0 kN  [TENSION]
+  Bar 13 (4→10): N = 9.99 kN  [TENSION]
+  Bar 14 (5→11): N = 19.92 kN  [TENSION]
+  Bar 15 (6→12): N = 39.83 kN  [TENSION]
+  Bar 16 (1→8): N = -70.41 kN  [COMPRESSION]
+  Bar 17 (2→9): N = -42.36 kN  [COMPRESSION]
+  Bar 18 (3→10): N = -14.19 kN  [COMPRESSION]
+  Bar 19 (5→10): N = -14.11 kN  [COMPRESSION]
+  Bar 20 (6→11): N = -42.23 kN  [COMPRESSION]
+  Bar 21 (7→12): N = -70.61 kN  [COMPRESSION]</code></pre><p>In a Pratt truss under gravity-like loads:</p><ul><li><strong>Bottom chord</strong>: tension (positive)</li><li><strong>Top chord</strong>: compression (negative)</li><li><strong>Verticals</strong>: compression near supports, tension near midspan</li><li><strong>Diagonals</strong>: alternating tension/compression</li></ul><h2 id="Visualizing-Deformation"><a class="docs-heading-anchor" href="#Visualizing-Deformation">Visualizing Deformation</a><a id="Visualizing-Deformation-1"></a><a class="docs-heading-anchor-permalink" href="#Visualizing-Deformation" title="Permalink"></a></h2><p>KhepriFrame4DD includes a built-in deformation visualization that works with any Khepri visualization backend. Using <code>show_truss_deformation</code>, the original structure is shown in green and the deformed shape (amplified) in red:</p><pre><code class="language-julia hljs">using KhepriAutoCAD  # or KhepriThebes, KhepriMakie, etc.
+show_truss_deformation(results, autocad, factor=200)</code></pre><p>For a text-based comparison, we can show the deformed node positions directly:</p><pre><code class="language-julia hljs">disp = node_displacement_function(results)
+factor = 200
+
+println(&quot;Deformed positions (factor=$(factor)×):&quot;)
+println(&quot;─&quot; ^ 50)
+for nd in frame4dd.truss_node_data
+  d = disp(nd) * factor
+  p = nd.loc
+  println(&quot;  Node $(nd.id): ($(round(p.x + d.x, digits=3)), &quot; *
+          &quot;$(round(p.y + d.y, digits=3)), &quot; *
+          &quot;$(round(p.z + d.z, digits=3)))&quot;)
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Deformed positions (factor=200×):
+──────────────────────────────────────────────────
+  Node 1: (0.0, 0.0, 0.0)
+  Node 2: (1.948, 0.0, -0.684)
+  Node 3: (3.963, 0.0, -1.143)
+  Node 4: (6.0, 0.0, -1.264)
+  Node 5: (8.037, 0.0, -1.143)
+  Node 6: (10.051, 0.0, -0.686)
+  Node 7: (12.0, 0.0, 0.0)
+  Node 8: (2.286, 0.0, 1.404)
+  Node 9: (4.176, 0.0, 0.902)
+  Node 10: (6.0, 0.0, 0.758)
+  Node 11: (7.824, 0.0, 0.901)
+  Node 12: (9.714, 0.0, 1.402)</code></pre><p>We can overlay the deformed shape (red) on the original structure (green):</p><pre><code class="language-julia hljs">backend(thebes)
+delete_all_shapes()
+set_view(xyz(6, -20, 5), xyz(6, 0, 1))
+green_mat = standard_material(base_color=rgba(0.2, 0.7, 0.2, 1))
+red_mat = standard_material(base_color=rgba(0.8, 0.2, 0.2, 1))
+disp = node_displacement_function(results, frame4dd)
+factor = 200
+for nd in frame4dd.truss_node_data
+  sphere(nd.loc, 0.15, material=green_mat)
+end
+for bar in frame4dd.truss_bar_data
+  cylinder(bar.node1.loc, 0.05, bar.node2.loc, material=green_mat)
+end
+for nd in frame4dd.truss_node_data
+  d = disp(nd) * factor
+  sphere(nd.loc + d, 0.15, material=red_mat)
+end
+for bar in frame4dd.truss_bar_data
+  d1 = disp(bar.node1) * factor
+  d2 = disp(bar.node2) * factor
+  cylinder(bar.node1.loc + d1, 0.05, bar.node2.loc + d2, material=red_mat)
+end
+with(render_dir, img_dir) do
+  with(render_kind_dir, &quot;.&quot;) do
+    render_view(&quot;tut1_deformation&quot;)
+  end
+end</code></pre><img src="dac89b04.svg" alt="Example block output"/><pre><code class="language-julia hljs">backend(frame4dd)</code></pre><h2 id="Self-Weight-Analysis"><a class="docs-heading-anchor" href="#Self-Weight-Analysis">Self-Weight Analysis</a><a id="Self-Weight-Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Self-Weight-Analysis" title="Permalink"></a></h2><p>Real structures must carry their own weight. Re-run the analysis with <code>self_weight=true</code>:</p><pre><code class="language-julia hljs">delete_all_shapes()
+backend(frame4dd)
+
+# Recreate the same truss geometry
+bottom_pts = [xyz(i * bay, 0, 0) for i in 0:n_bays]
+top_pts = [xyz(i * bay, 0, height) for i in 1:(n_bays-1)]
+
+truss_node(bottom_pts[1], fixed)
+for p in bottom_pts[2:end-1]; truss_node(p, free); end
+truss_node(bottom_pts[end], pinned)
+for p in top_pts; truss_node(p, free); end
+
+for i in 1:(length(bottom_pts)-1)
+  truss_bar(bottom_pts[i], bottom_pts[i+1], 0, bar_family)
+end
+for i in 1:(length(top_pts)-1)
+  truss_bar(top_pts[i], top_pts[i+1], 0, bar_family)
+end
+for i in 1:length(top_pts)
+  truss_bar(bottom_pts[i+1], top_pts[i], 0, bar_family)
+end
+mid = div(n_bays, 2)
+for i in 1:mid
+  truss_bar(bottom_pts[i], top_pts[i], 0, bar_family)
+end
+for i in mid:(n_bays-1)
+  truss_bar(bottom_pts[i+2], top_pts[i], 0, bar_family)
+end
+
+# Analysis with external loads + self-weight
+results_sw = truss_analysis(vz(-10000), true, Dict())
+max_sw = max_displacement(results_sw)
+
+println(&quot;Without self-weight: $(round(max_d * 1000, digits=3)) mm&quot;)
+println(&quot;With self-weight:    $(round(max_sw * 1000, digits=3)) mm&quot;)
+println(&quot;Self-weight adds:    $(round((max_sw - max_d) / max_d * 100, digits=1))%&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Without self-weight: 6.321 mm
+With self-weight:    6.499 mm
+Self-weight adds:    2.8%</code></pre><h2 id="Parametric-Study:-Section-Size"><a class="docs-heading-anchor" href="#Parametric-Study:-Section-Size">Parametric Study: Section Size</a><a id="Parametric-Study:-Section-Size-1"></a><a class="docs-heading-anchor-permalink" href="#Parametric-Study:-Section-Size" title="Permalink"></a></h2><p>One advantage of programmatic modeling is easy parametric studies. Let&#39;s see how the tube radius affects stiffness:</p><pre><code class="language-julia hljs">println(&quot;Radius (mm) | Max displacement (mm) | Span/deflection&quot;)
+println(&quot;─&quot; ^ 55)
+
+for r in [0.02, 0.025, 0.03, 0.04, 0.05]
+  delete_all_shapes()
+  backend(frame4dd)
+
+  fam = truss_bar_family_element(
+    default_truss_bar_family(),
+    radius=r,
+    inner_radius=r - 0.005)
+
+  bottom_pts = [xyz(i * bay, 0, 0) for i in 0:n_bays]
+  top_pts = [xyz(i * bay, 0, height) for i in 1:(n_bays-1)]
+
+  truss_node(bottom_pts[1], fixed)
+  for p in bottom_pts[2:end-1]; truss_node(p, free); end
+  truss_node(bottom_pts[end], pinned)
+  for p in top_pts; truss_node(p, free); end
+
+  for i in 1:(length(bottom_pts)-1)
+    truss_bar(bottom_pts[i], bottom_pts[i+1], 0, fam)
+  end
+  for i in 1:(length(top_pts)-1)
+    truss_bar(top_pts[i], top_pts[i+1], 0, fam)
+  end
+  for i in 1:length(top_pts)
+    truss_bar(bottom_pts[i+1], top_pts[i], 0, fam)
+  end
+  mid = div(n_bays, 2)
+  for i in 1:mid
+    truss_bar(bottom_pts[i], top_pts[i], 0, fam)
+  end
+  for i in mid:(n_bays-1)
+    truss_bar(bottom_pts[i+2], top_pts[i], 0, fam)
+  end
+
+  res = truss_analysis(vz(-10000))
+  md = max_displacement(res)
+  println(&quot;  $(round(r*1000, digits=0))          | &quot; *
+          &quot;$(round(md*1000, digits=3))               | &quot; *
+          &quot;$(round(span/md, digits=0))&quot;)
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Radius (mm) | Max displacement (mm) | Span/deflection
+───────────────────────────────────────────────────────
+┌ Warning: Assignment to `bottom_pts` in soft scope is ambiguous because a global variable by the same name exists: `bottom_pts` will be treated as a new local. Disambiguate by using `local bottom_pts` to suppress this warning or `global bottom_pts` to assign to the existing global variable.
+└ @ tutorial1_planar_truss.md:422
+┌ Warning: Assignment to `top_pts` in soft scope is ambiguous because a global variable by the same name exists: `top_pts` will be treated as a new local. Disambiguate by using `local top_pts` to suppress this warning or `global top_pts` to assign to the existing global variable.
+└ @ tutorial1_planar_truss.md:423
+┌ Warning: Assignment to `mid` in soft scope is ambiguous because a global variable by the same name exists: `mid` will be treated as a new local. Disambiguate by using `local mid` to suppress this warning or `global mid` to assign to the existing global variable.
+└ @ tutorial1_planar_truss.md:439
+  20.0          | 9.945               | 1207.0
+  25.0          | 7.731               | 1552.0
+  30.0          | 6.321               | 1899.0
+  40.0          | 4.627               | 2593.0
+  50.0          | 3.645               | 3293.0</code></pre><p>Increasing the tube radius dramatically increases stiffness (displacement scales roughly as <span>$1/r^3$</span> for thin-walled tubes).</p><h2 id="Limitations-vs.-Robot-Structural-Analysis"><a class="docs-heading-anchor" href="#Limitations-vs.-Robot-Structural-Analysis">Limitations vs. Robot Structural Analysis</a><a id="Limitations-vs.-Robot-Structural-Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Limitations-vs.-Robot-Structural-Analysis" title="Permalink"></a></h2><table><tr><th style="text-align: right">Robot Feature</th><th style="text-align: right">KhepriFrame4DD Status</th><th style="text-align: right">Possible Extension</th></tr><tr><td style="text-align: right">I-beam / HEA / IPE sections</td><td style="text-align: right">Only circular tubes</td><td style="text-align: right">Add rectangular/I-section geometry calculators</td></tr><tr><td style="text-align: right">Bending moment diagrams</td><td style="text-align: right">N/A for trusses</td><td style="text-align: right">Element end forces available in solver</td></tr><tr><td style="text-align: right">Distributed loads on bars</td><td style="text-align: right">Solver supports, wrapper doesn&#39;t expose</td><td style="text-align: right">Expose <code>Frame4DD.add_uniform_load!</code></td></tr><tr><td style="text-align: right">Steel design code checks</td><td style="text-align: right">Not available</td><td style="text-align: right">Future: Eurocode 3 / AISC verification</td></tr><tr><td style="text-align: right">Interactive graphical model editor</td><td style="text-align: right">Programmatic only</td><td style="text-align: right">Khepri&#39;s strength is parametric scripting</td></tr></table><h2 id="Summary"><a class="docs-heading-anchor" href="#Summary">Summary</a><a id="Summary-1"></a><a class="docs-heading-anchor-permalink" href="#Summary" title="Permalink"></a></h2><p>In this tutorial you learned to:</p><ol><li>Define support conditions (fixed, pinned, free)</li><li>Create tube cross-sections with specified radius and wall thickness</li><li>Build a Pratt truss from parametric geometry</li><li>Run a structural analysis with nodal loads</li><li>Extract and interpret displacements, reaction forces, and axial forces</li><li>Verify static equilibrium from reaction forces</li><li>Include self-weight effects</li><li>Perform parametric studies by varying section properties</li></ol><p>The next tutorial builds on these skills with a Warren truss bridge under multiple load scenarios.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../">« Home</a><a class="docs-footer-nextpage" href="../tutorial2_warren_bridge/">Tutorial 2: Warren Truss Bridge »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Monday 16 February 2026 18:32">Monday 16 February 2026</span>. Using Julia version 1.12.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

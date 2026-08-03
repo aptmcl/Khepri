@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Tutorial 2: Warren Truss Bridge · KhepriFrame4DD.jl</title><meta name="title" content="Tutorial 2: Warren Truss Bridge · KhepriFrame4DD.jl"/><meta property="og:title" content="Tutorial 2: Warren Truss Bridge · KhepriFrame4DD.jl"/><meta property="twitter:title" content="Tutorial 2: Warren Truss Bridge · KhepriFrame4DD.jl"/><meta name="description" content="Documentation for KhepriFrame4DD.jl."/><meta property="og:description" content="Documentation for KhepriFrame4DD.jl."/><meta property="twitter:description" content="Documentation for KhepriFrame4DD.jl."/><meta property="og:url" content="https://aptmcl.github.io/KhepriFrame4DD.jl/tutorials/tutorial2_warren_bridge/"/><meta property="twitter:url" content="https://aptmcl.github.io/KhepriFrame4DD.jl/tutorials/tutorial2_warren_bridge/"/><link rel="canonical" href="https://aptmcl.github.io/KhepriFrame4DD.jl/tutorials/tutorial2_warren_bridge/"/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">KhepriFrame4DD.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><span class="tocitem">Tutorials</span><ul><li><a class="tocitem" href="../tutorial1_planar_truss/">Tutorial 1: Planar Truss</a></li><li class="is-active"><a class="tocitem" href>Tutorial 2: Warren Truss Bridge</a><ul class="internal"><li><a class="tocitem" href="#Setting-Up"><span>Setting Up</span></a></li><li><a class="tocitem" href="#Parametric-Warren-Truss"><span>Parametric Warren Truss</span></a></li><li><a class="tocitem" href="#Scenario-1:-Uniform-Dead-Load"><span>Scenario 1: Uniform Dead Load</span></a></li><li><a class="tocitem" href="#Scenario-2:-Self-Weight-Only"><span>Scenario 2: Self-Weight Only</span></a></li><li><a class="tocitem" href="#Scenario-3:-Midspan-Point-Load"><span>Scenario 3: Midspan Point Load</span></a></li><li><a class="tocitem" href="#Scenario-4:-Lateral-Wind-Load"><span>Scenario 4: Lateral Wind Load</span></a></li><li><a class="tocitem" href="#Results-Comparison"><span>Results Comparison</span></a></li><li><a class="tocitem" href="#Reaction-Forces-Comparison"><span>Reaction Forces Comparison</span></a></li><li><a class="tocitem" href="#Axial-Force-Distribution"><span>Axial Force Distribution</span></a></li><li><a class="tocitem" href="#Parametric-Study:-Truss-Depth"><span>Parametric Study: Truss Depth</span></a></li><li><a class="tocitem" href="#Deformation-Visualization"><span>Deformation Visualization</span></a></li><li><a class="tocitem" href="#Limitations-vs.-Robot-Structural-Analysis"><span>Limitations vs. Robot Structural Analysis</span></a></li><li><a class="tocitem" href="#Summary"><span>Summary</span></a></li></ul></li><li><a class="tocitem" href="../tutorial3_space_truss_tower/">Tutorial 3: Space Truss Tower</a></li><li><a class="tocitem" href="../tutorial4_truss_grid_deck/">Tutorial 4: Truss Grid Deck</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Tutorials</a></li><li class="is-active"><a href>Tutorial 2: Warren Truss Bridge</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Tutorial 2: Warren Truss Bridge</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/aptmcl/KhepriFrame4DD.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/aptmcl/KhepriFrame4DD.jl/blob/master/docs/src/tutorials/tutorial2_warren_bridge.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Tutorial-2:-Warren-Truss-Bridge-with-Multiple-Load-Scenarios"><a class="docs-heading-anchor" href="#Tutorial-2:-Warren-Truss-Bridge-with-Multiple-Load-Scenarios">Tutorial 2: Warren Truss Bridge with Multiple Load Scenarios</a><a id="Tutorial-2:-Warren-Truss-Bridge-with-Multiple-Load-Scenarios-1"></a><a class="docs-heading-anchor-permalink" href="#Tutorial-2:-Warren-Truss-Bridge-with-Multiple-Load-Scenarios" title="Permalink"></a></h1><p>This tutorial builds a <strong>Warren truss bridge</strong> using a parametric generator function, then analyzes it under four different load scenarios — dead load, self-weight, midspan point load, and lateral wind. You will learn to compare results across scenarios, visualize axial force distributions, and perform a parametric study on truss depth.</p><p><em>Inspired by Autodesk Robot Structural Analysis Tutorial 2 (Building Design).</em></p><h2 id="Setting-Up"><a class="docs-heading-anchor" href="#Setting-Up">Setting Up</a><a id="Setting-Up-1"></a><a class="docs-heading-anchor-permalink" href="#Setting-Up" title="Permalink"></a></h2><pre><code class="language-julia hljs">using KhepriFrame4DD</code></pre><h2 id="Parametric-Warren-Truss"><a class="docs-heading-anchor" href="#Parametric-Warren-Truss">Parametric Warren Truss</a><a id="Parametric-Warren-Truss-1"></a><a class="docs-heading-anchor-permalink" href="#Parametric-Warren-Truss" title="Permalink"></a></h2><p>A <strong>Warren truss</strong> has diagonal members alternating in orientation, forming a zig-zag pattern without vertical members. This is structurally efficient and commonly used in bridge design.</p><pre><code class="nohighlight hljs">  1     2     3     4     5     6     7     8     9    10
+  o─────o─────o─────o─────o─────o─────o─────o─────o─────o    ← top chord
+ / \   / \   / \   / \   / \   / \   / \   / \   / \   / \
+/   \ /   \ /   \ /   \ /   \ /   \ /   \ /   \ /   \ /   \
+o─────o─────o─────o─────o─────o─────o─────o─────o─────o─────o ← bottom chord
+▣                                                            △
+fixed                                                     pinned</code></pre><p>We define a reusable function that generates the complete Warren truss:</p><pre><code class="language-julia hljs">function warren_truss(n_bays, bay_length, height;
+                      bar_fam=nothing, fixed_fam=nothing,
+                      pinned_fam=nothing, free_fam=nothing)
+  # Default families
+  if bar_fam === nothing
+    bar_fam = truss_bar_family_element(
+      default_truss_bar_family(), radius=0.03, inner_radius=0.025)
+  end
+  if fixed_fam === nothing
+    fixed_fam = truss_node_family_element(
+      default_truss_node_family(),
+      support=truss_node_support(ux=true, uy=true, uz=true, rx=true, ry=true, rz=true))
+  end
+  if pinned_fam === nothing
+    pinned_fam = truss_node_family_element(
+      default_truss_node_family(),
+      support=truss_node_support(ux=true, uy=true, uz=true))
+  end
+  if free_fam === nothing
+    free_fam = truss_node_family_element(default_truss_node_family())
+  end
+
+  span = n_bays * bay_length
+
+  # Bottom chord nodes: n_bays + 1 nodes
+  bottom = [xyz(i * bay_length, 0, 0) for i in 0:n_bays]
+  # Top chord nodes: at midpoints of each bay
+  top = [xyz((i + 0.5) * bay_length, 0, height) for i in 0:(n_bays-1)]
+
+  # Create nodes
+  truss_node(bottom[1], fixed_fam)
+  for p in bottom[2:end-1]
+    truss_node(p, free_fam)
+  end
+  truss_node(bottom[end], pinned_fam)
+  for p in top
+    truss_node(p, free_fam)
+  end
+
+  # Bottom chord bars
+  for i in 1:(length(bottom)-1)
+    truss_bar(bottom[i], bottom[i+1], 0, bar_fam)
+  end
+  # Top chord bars
+  for i in 1:(length(top)-1)
+    truss_bar(top[i], top[i+1], 0, bar_fam)
+  end
+  # Diagonals: each top node connects to two adjacent bottom nodes
+  for i in 1:length(top)
+    truss_bar(bottom[i], top[i], 0, bar_fam)
+    truss_bar(top[i], bottom[i+1], 0, bar_fam)
+  end
+
+  (bottom=bottom, top=top)
+end</code></pre><p>Generate a 10-bay Warren truss, 30 m span, 2 m height:</p><pre><code class="language-julia hljs">backend(frame4dd)
+delete_all_shapes()
+pts = warren_truss(10, 3.0, 2.0)
+
+println(&quot;Bridge geometry:&quot;)
+println(&quot;  Span: 30 m&quot;)
+println(&quot;  Height: 2 m&quot;)
+println(&quot;  Bottom chord nodes: $(length(pts.bottom))&quot;)
+println(&quot;  Top chord nodes: $(length(pts.top))&quot;)
+println(&quot;  Total nodes: $(length(pts.bottom) + length(pts.top))&quot;)
+n_bars = (length(pts.bottom)-1) + (length(pts.top)-1) + 2*length(pts.top)
+println(&quot;  Total bars: $n_bars&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Bridge geometry:
+  Span: 30 m
+  Height: 2 m
+  Bottom chord nodes: 11
+  Top chord nodes: 10
+  Total nodes: 21
+  Total bars: 39</code></pre><h2 id="Scenario-1:-Uniform-Dead-Load"><a class="docs-heading-anchor" href="#Scenario-1:-Uniform-Dead-Load">Scenario 1: Uniform Dead Load</a><a id="Scenario-1:-Uniform-Dead-Load-1"></a><a class="docs-heading-anchor-permalink" href="#Scenario-1:-Uniform-Dead-Load" title="Permalink"></a></h2><p>Apply a uniform 5 kN downward load to all free nodes, representing the bridge deck and permanent fixtures:</p><pre><code class="language-julia hljs">results_dead = truss_analysis(vz(-5000))
+max_dead = max_displacement(results_dead)
+println(&quot;Scenario 1 — Dead load (5 kN/node):&quot;)
+println(&quot;  Max displacement: $(round(max_dead * 1000, digits=3)) mm&quot;)
+println(&quot;  Span/deflection: $(round(30.0 / max_dead, digits=0))&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Scenario 1 — Dead load (5 kN/node):
+  Max displacement: 63.396 mm
+  Span/deflection: 473.0</code></pre><h3 id="Visualizing-the-Bridge"><a class="docs-heading-anchor" href="#Visualizing-the-Bridge">Visualizing the Bridge</a><a id="Visualizing-the-Bridge-1"></a><a class="docs-heading-anchor-permalink" href="#Visualizing-the-Bridge" title="Permalink"></a></h3><pre><code class="language-julia hljs">using KhepriThebes
+img_dir = joinpath(dirname(dirname(pathof(KhepriFrame4DD))), &quot;docs&quot;, &quot;src&quot;, &quot;tutorials&quot;, &quot;images&quot;)
+mkpath(img_dir)
+backend(thebes)
+delete_all_shapes()
+set_view(xyz(15, -40, 8), xyz(15, 0, 1))
+green_mat = standard_material(base_color=rgba(0.2, 0.7, 0.2, 1))
+for nd in frame4dd.truss_node_data
+  sphere(nd.loc, 0.2, material=green_mat)
+end
+for bar in frame4dd.truss_bar_data
+  cylinder(bar.node1.loc, 0.06, bar.node2.loc, material=green_mat)
+end
+with(render_dir, img_dir) do
+  with(render_kind_dir, &quot;.&quot;) do
+    render_view(&quot;tut2_structure&quot;)
+  end
+end</code></pre><img src="c0816dca.svg" alt="Example block output"/><pre><code class="language-julia hljs">backend(frame4dd)</code></pre><h2 id="Scenario-2:-Self-Weight-Only"><a class="docs-heading-anchor" href="#Scenario-2:-Self-Weight-Only">Scenario 2: Self-Weight Only</a><a id="Scenario-2:-Self-Weight-Only-1"></a><a class="docs-heading-anchor-permalink" href="#Scenario-2:-Self-Weight-Only" title="Permalink"></a></h2><p>Re-create the truss and analyze under self-weight only (no external loads):</p><pre><code class="language-julia hljs">delete_all_shapes()
+backend(frame4dd)
+warren_truss(10, 3.0, 2.0)
+
+results_sw = truss_analysis(vz(0), true, Dict())
+max_sw = max_displacement(results_sw)
+println(&quot;Scenario 2 — Self-weight only:&quot;)
+println(&quot;  Max displacement: $(round(max_sw * 1000, digits=3)) mm&quot;)
+println(&quot;  Span/deflection: $(round(30.0 / max_sw, digits=0))&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Scenario 2 — Self-weight only:
+  Max displacement: 4.542 mm
+  Span/deflection: 6605.0</code></pre><h2 id="Scenario-3:-Midspan-Point-Load"><a class="docs-heading-anchor" href="#Scenario-3:-Midspan-Point-Load">Scenario 3: Midspan Point Load</a><a id="Scenario-3:-Midspan-Point-Load-1"></a><a class="docs-heading-anchor-permalink" href="#Scenario-3:-Midspan-Point-Load" title="Permalink"></a></h2><p>A heavy vehicle or concentrated load at the bridge midspan (x = 15 m). We apply 50 kN at the midspan bottom-chord node:</p><pre><code class="language-julia hljs">delete_all_shapes()
+backend(frame4dd)
+warren_truss(10, 3.0, 2.0)
+
+midspan_pt = xyz(15.0, 0, 0)
+results_point = truss_analysis(vz(0), false, Dict(vz(-50000) =&gt; [midspan_pt]))
+max_point = max_displacement(results_point)
+println(&quot;Scenario 3 — 50 kN midspan point load:&quot;)
+println(&quot;  Max displacement: $(round(max_point * 1000, digits=3)) mm&quot;)
+println(&quot;  Span/deflection: $(round(30.0 / max_point, digits=0))&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Scenario 3 — 50 kN midspan point load:
+  Max displacement: 54.121 mm
+  Span/deflection: 554.0</code></pre><h2 id="Scenario-4:-Lateral-Wind-Load"><a class="docs-heading-anchor" href="#Scenario-4:-Lateral-Wind-Load">Scenario 4: Lateral Wind Load</a><a id="Scenario-4:-Lateral-Wind-Load-1"></a><a class="docs-heading-anchor-permalink" href="#Scenario-4:-Lateral-Wind-Load" title="Permalink"></a></h2><p>Wind applies horizontal forces to the top chord nodes. We model a 2 kN horizontal force on each top chord node:</p><pre><code class="language-julia hljs">delete_all_shapes()
+backend(frame4dd)
+warren_truss(10, 3.0, 2.0)
+
+results_wind = truss_analysis(vx(2000))
+max_wind = max_displacement(results_wind)
+println(&quot;Scenario 4 — Lateral wind (2 kN/node horizontal):&quot;)
+println(&quot;  Max displacement: $(round(max_wind * 1000, digits=3)) mm&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Scenario 4 — Lateral wind (2 kN/node horizontal):
+  Max displacement: 0.997 mm</code></pre><h2 id="Results-Comparison"><a class="docs-heading-anchor" href="#Results-Comparison">Results Comparison</a><a id="Results-Comparison-1"></a><a class="docs-heading-anchor-permalink" href="#Results-Comparison" title="Permalink"></a></h2><pre><code class="language-julia hljs">println(&quot;╔══════════════════════════════════════════════════╗&quot;)
+println(&quot;║       Load Scenario Comparison (30 m span)      ║&quot;)
+println(&quot;╠═══════════════════════╦════════════╦═════════════╣&quot;)
+println(&quot;║ Scenario              ║ Max disp.  ║ Span/defl.  ║&quot;)
+println(&quot;╠═══════════════════════╬════════════╬═════════════╣&quot;)
+for (name, md) in [(&quot;Dead load (5 kN)&quot;, max_dead),
+                    (&quot;Self-weight&quot;,       max_sw),
+                    (&quot;Midspan 50 kN&quot;,     max_point),
+                    (&quot;Lateral wind 2 kN&quot;, max_wind)]
+  d_mm = round(md * 1000, digits=2)
+  ratio = round(30.0 / md, digits=0)
+  println(&quot;║ $(rpad(name, 22))║ $(lpad(&quot;$d_mm mm&quot;, 10)) ║ $(lpad(ratio, 11)) ║&quot;)
+end
+println(&quot;╚═══════════════════════╩════════════╩═════════════╝&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">╔══════════════════════════════════════════════════╗
+║       Load Scenario Comparison (30 m span)      ║
+╠═══════════════════════╦════════════╦═════════════╣
+║ Scenario              ║ Max disp.  ║ Span/defl.  ║
+╠═══════════════════════╬════════════╬═════════════╣
+║ Dead load (5 kN)      ║    63.4 mm ║       473.0 ║
+║ Self-weight           ║    4.54 mm ║      6605.0 ║
+║ Midspan 50 kN         ║   54.12 mm ║       554.0 ║
+║ Lateral wind 2 kN     ║     1.0 mm ║     30097.0 ║
+╚═══════════════════════╩════════════╩═════════════╝</code></pre><h2 id="Reaction-Forces-Comparison"><a class="docs-heading-anchor" href="#Reaction-Forces-Comparison">Reaction Forces Comparison</a><a id="Reaction-Forces-Comparison-1"></a><a class="docs-heading-anchor-permalink" href="#Reaction-Forces-Comparison" title="Permalink"></a></h2><pre><code class="language-julia hljs"># Re-run dead load scenario for reaction analysis
+delete_all_shapes()
+backend(frame4dd)
+warren_truss(10, 3.0, 2.0)
+results_dead = truss_analysis(vz(-5000))
+
+reactions_dead = reaction_forces(results_dead)
+println(&quot;Dead load reactions:&quot;)
+for (id, r) in sort(collect(reactions_dead), by=first)
+  println(&quot;  Node $id: Rx=$(round(r.x/1000, digits=2)) kN, &quot; *
+          &quot;Rz=$(round(r.z/1000, digits=2)) kN&quot;)
+end
+
+# Midspan point load reactions
+delete_all_shapes()
+backend(frame4dd)
+warren_truss(10, 3.0, 2.0)
+results_point = truss_analysis(vz(0), false, Dict(vz(-50000) =&gt; [xyz(15.0, 0, 0)]))
+
+reactions_point = reaction_forces(results_point)
+println(&quot;\nMidspan point load reactions:&quot;)
+for (id, r) in sort(collect(reactions_point), by=first)
+  println(&quot;  Node $id: Rx=$(round(r.x/1000, digits=2)) kN, &quot; *
+          &quot;Rz=$(round(r.z/1000, digits=2)) kN&quot;)
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Dead load reactions:
+  Node 1: Rx=125.35 kN, Rz=47.54 kN
+  Node 11: Rx=-125.35 kN, Rz=47.46 kN
+
+Midspan point load reactions:
+  Node 1: Rx=93.55 kN, Rz=25.03 kN
+  Node 11: Rx=-93.55 kN, Rz=24.97 kN</code></pre><p>For the symmetric midspan load, both supports should carry approximately equal vertical reactions (25 kN each for a 50 kN load).</p><h2 id="Axial-Force-Distribution"><a class="docs-heading-anchor" href="#Axial-Force-Distribution">Axial Force Distribution</a><a id="Axial-Force-Distribution-1"></a><a class="docs-heading-anchor-permalink" href="#Axial-Force-Distribution" title="Permalink"></a></h2><p>Understanding which members are in tension vs. compression is essential for design. Let&#39;s examine the dead load case:</p><pre><code class="language-julia hljs">forces_dead = element_axial_forces(results_dead)
+
+# Categorize bars by type based on their geometry
+println(&quot;Axial forces by member type (dead load):&quot;)
+println(&quot;─&quot; ^ 60)
+
+for (i, bar) in enumerate(frame4dd.truss_bar_data)
+  f = forces_dead[i]
+  # Determine bar type from node positions
+  z1 = bar.node1.loc.z
+  z2 = bar.node2.loc.z
+  bar_type = if z1 ≈ z2 &amp;&amp; z1 ≈ 0
+    &quot;bottom&quot;
+  elseif z1 ≈ z2 &amp;&amp; z1 &gt; 0
+    &quot;top   &quot;
+  else
+    &quot;diag  &quot;
+  end
+  state = f &gt; 100 ? &quot;T&quot; : (f &lt; -100 ? &quot;C&quot; : &quot;~&quot;)
+  println(&quot;  Bar $(lpad(i, 2)) ($bar_type, $(bar.node1.id)→$(bar.node2.id)): &quot; *
+          &quot;$(lpad(round(f/1000, digits=2), 8)) kN  [$state]&quot;)
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Axial forces by member type (dead load):
+────────────────────────────────────────────────────────────
+  Bar  1 (bottom, 1→2):   -90.22 kN  [C]
+  Bar  2 (bottom, 2→3):   -30.16 kN  [C]
+  Bar  3 (bottom, 3→4):    14.86 kN  [T]
+  Bar  4 (bottom, 4→5):     44.9 kN  [T]
+  Bar  5 (bottom, 5→6):    59.94 kN  [T]
+  Bar  6 (bottom, 6→7):     60.0 kN  [T]
+  Bar  7 (bottom, 7→8):    45.06 kN  [T]
+  Bar  8 (bottom, 8→9):    15.13 kN  [T]
+  Bar  9 (bottom, 9→10):    -29.8 kN  [C]
+  Bar 10 (bottom, 10→11):   -89.71 kN  [C]
+  Bar 11 (top   , 12→13):   -66.94 kN  [C]
+  Bar 12 (top   , 13→14):  -119.53 kN  [C]
+  Bar 13 (top   , 14→15):  -157.06 kN  [C]
+  Bar 14 (top   , 15→16):   -179.6 kN  [C]
+  Bar 15 (top   , 16→17):  -187.15 kN  [C]
+  Bar 16 (top   , 17→18):  -179.71 kN  [C]
+  Bar 17 (top   , 18→19):  -157.27 kN  [C]
+  Bar 18 (top   , 19→20):  -119.84 kN  [C]
+  Bar 19 (top   , 20→21):   -67.42 kN  [C]
+  Bar 20 (diag  , 1→12):    -58.9 kN  [C]
+  Bar 21 (diag  , 12→2):    52.91 kN  [T]
+  Bar 22 (diag  , 2→13):   -46.98 kN  [C]
+  Bar 23 (diag  , 13→3):    40.61 kN  [T]
+  Bar 24 (diag  , 3→14):    -34.4 kN  [C]
+  Bar 25 (diag  , 14→4):    28.11 kN  [T]
+  Bar 26 (diag  , 4→15):   -21.92 kN  [C]
+  Bar 27 (diag  , 15→5):    15.63 kN  [T]
+  Bar 28 (diag  , 5→16):    -9.44 kN  [C]
+  Bar 29 (diag  , 16→6):     3.14 kN  [T]
+  Bar 30 (diag  , 6→17):     3.05 kN  [T]
+  Bar 31 (diag  , 17→7):    -9.35 kN  [C]
+  Bar 32 (diag  , 7→18):    15.54 kN  [T]
+  Bar 33 (diag  , 18→8):   -21.83 kN  [C]
+  Bar 34 (diag  , 8→19):    28.03 kN  [T]
+  Bar 35 (diag  , 19→9):   -34.32 kN  [C]
+  Bar 36 (diag  , 9→20):    40.52 kN  [T]
+  Bar 37 (diag  , 20→10):   -46.81 kN  [C]
+  Bar 38 (diag  , 10→21):    52.99 kN  [T]
+  Bar 39 (diag  , 21→11):   -59.33 kN  [C]</code></pre><p>For a Warren truss under uniform load:</p><ul><li><strong>Bottom chord</strong> members are in <strong>tension</strong> (T), increasing toward midspan</li><li><strong>Top chord</strong> members are in <strong>compression</strong> (C), increasing toward midspan</li><li><strong>Diagonals</strong> alternate between tension and compression</li></ul><h2 id="Parametric-Study:-Truss-Depth"><a class="docs-heading-anchor" href="#Parametric-Study:-Truss-Depth">Parametric Study: Truss Depth</a><a id="Parametric-Study:-Truss-Depth-1"></a><a class="docs-heading-anchor-permalink" href="#Parametric-Study:-Truss-Depth" title="Permalink"></a></h2><p>The depth (height) of a truss critically affects its stiffness. Deeper trusses are stiffer because the chord forces decrease (larger moment arm) and the overall moment of inertia increases.</p><pre><code class="language-julia hljs">println(&quot;Height (m) | Max disp. (mm) | Span/defl. | Max axial (kN)&quot;)
+println(&quot;─&quot; ^ 60)
+
+for h in [1.0, 1.5, 2.0, 2.5, 3.0, 4.0]
+  delete_all_shapes()
+  backend(frame4dd)
+  warren_truss(10, 3.0, h)
+
+  res = truss_analysis(vz(-5000))
+  md = max_displacement(res)
+  af = element_axial_forces(res)
+  max_force = maximum(abs, af)
+
+  println(&quot;  $(rpad(h, 10)) | &quot; *
+          &quot;$(lpad(round(md * 1000, digits=2), 14)) | &quot; *
+          &quot;$(lpad(round(30.0 / md, digits=0), 10)) | &quot; *
+          &quot;$(lpad(round(max_force / 1000, digits=1), 13))&quot;)
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Height (m) | Max disp. (mm) | Span/defl. | Max axial (kN)
+────────────────────────────────────────────────────────────
+  1.0        |          238.6 |      126.0 |         371.8
+  1.5        |         108.81 |      276.0 |         249.1
+  2.0        |           63.4 |      473.0 |         187.1
+  2.5        |          42.62 |      704.0 |         149.8
+  3.0        |          31.59 |      950.0 |         124.9
+  4.0        |          21.23 |     1413.0 |          93.7</code></pre><p>Observations:</p><ul><li>Doubling the truss depth approximately halves the maximum chord force</li><li>Displacement decreases dramatically with depth (roughly proportional to <span>$1/h^2$</span>)</li><li>Diminishing returns beyond a certain depth, and taller trusses use more material in longer diagonal members</li></ul><h2 id="Deformation-Visualization"><a class="docs-heading-anchor" href="#Deformation-Visualization">Deformation Visualization</a><a id="Deformation-Visualization-1"></a><a class="docs-heading-anchor-permalink" href="#Deformation-Visualization" title="Permalink"></a></h2><p>For visualization with any Khepri backend (AutoCAD, Thebes, Makie, etc.):</p><pre><code class="language-julia hljs">using KhepriAutoCAD  # or any visualization backend
+show_truss_deformation(results_dead, autocad, factor=200)</code></pre><p>Text-based deformation summary for our dead load case:</p><pre><code class="language-julia hljs">delete_all_shapes()
+backend(frame4dd)
+warren_truss(10, 3.0, 2.0)
+results_dead = truss_analysis(vz(-5000))
+
+disp = node_displacement_function(results_dead)
+
+println(&quot;Bottom chord vertical deflections (dead load):&quot;)
+println(&quot;─&quot; ^ 45)
+for nd in frame4dd.truss_node_data
+  if nd.loc.z ≈ 0
+    d = disp(nd)
+    println(&quot;  x = $(rpad(round(nd.loc.x, digits=1), 5)) m: &quot; *
+            &quot;δz = $(round(d.z * 1000, digits=3)) mm&quot;)
+  end
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Bottom chord vertical deflections (dead load):
+─────────────────────────────────────────────
+  x = 0.0   m: δz = 0.0 mm
+  x = 3.0   m: δz = -18.335 mm
+  x = 6.0   m: δz = -36.085 mm
+  x = 9.0   m: δz = -50.628 mm
+  x = 12.0  m: δz = -60.105 mm
+  x = 15.0  m: δz = -63.396 mm
+  x = 18.0  m: δz = -60.128 mm
+  x = 21.0  m: δz = -50.669 mm
+  x = 24.0  m: δz = -36.134 mm
+  x = 27.0  m: δz = -18.377 mm
+  x = 30.0  m: δz = 0.0 mm</code></pre><p>The deflection profile should follow a parabolic shape, with maximum deflection at midspan — consistent with beam bending theory.</p><p>The deformed shape (red) overlaid on the original structure (green):</p><pre><code class="language-julia hljs">backend(thebes)
+delete_all_shapes()
+set_view(xyz(15, -40, 8), xyz(15, 0, 1))
+green_mat = standard_material(base_color=rgba(0.2, 0.7, 0.2, 1))
+red_mat = standard_material(base_color=rgba(0.8, 0.2, 0.2, 1))
+disp = node_displacement_function(results_dead, frame4dd)
+factor = 200
+for nd in frame4dd.truss_node_data
+  sphere(nd.loc, 0.2, material=green_mat)
+end
+for bar in frame4dd.truss_bar_data
+  cylinder(bar.node1.loc, 0.06, bar.node2.loc, material=green_mat)
+end
+for nd in frame4dd.truss_node_data
+  d = disp(nd) * factor
+  sphere(nd.loc + d, 0.2, material=red_mat)
+end
+for bar in frame4dd.truss_bar_data
+  d1 = disp(bar.node1) * factor
+  d2 = disp(bar.node2) * factor
+  cylinder(bar.node1.loc + d1, 0.06, bar.node2.loc + d2, material=red_mat)
+end
+with(render_dir, img_dir) do
+  with(render_kind_dir, &quot;.&quot;) do
+    render_view(&quot;tut2_deformation&quot;)
+  end
+end</code></pre><img src="e4ae51ce.svg" alt="Example block output"/><pre><code class="language-julia hljs">backend(frame4dd)</code></pre><h2 id="Limitations-vs.-Robot-Structural-Analysis"><a class="docs-heading-anchor" href="#Limitations-vs.-Robot-Structural-Analysis">Limitations vs. Robot Structural Analysis</a><a id="Limitations-vs.-Robot-Structural-Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Limitations-vs.-Robot-Structural-Analysis" title="Permalink"></a></h2><table><tr><th style="text-align: right">Robot Feature</th><th style="text-align: right">KhepriFrame4DD Status</th><th style="text-align: right">Possible Extension</th></tr><tr><td style="text-align: right">Seismic/modal analysis</td><td style="text-align: right">Solver supports modal analysis</td><td style="text-align: right">Expose <code>ModalOptions</code>/<code>ModalResults</code></td></tr><tr><td style="text-align: right">Load combinations (ULS/SLS)</td><td style="text-align: right">Single load case at a time</td><td style="text-align: right">Support multiple load cases (solver already can)</td></tr><tr><td style="text-align: right">Floor/deck plate elements</td><td style="text-align: right">Not available</td><td style="text-align: right">Future: panel elements</td></tr><tr><td style="text-align: right">Automatic meshing</td><td style="text-align: right">Manual node/bar creation</td><td style="text-align: right">Future: mesh generators</td></tr><tr><td style="text-align: right">Moving load analysis</td><td style="text-align: right">Not available</td><td style="text-align: right">Sweep point loads across span</td></tr></table><h2 id="Summary"><a class="docs-heading-anchor" href="#Summary">Summary</a><a id="Summary-1"></a><a class="docs-heading-anchor-permalink" href="#Summary" title="Permalink"></a></h2><p>In this tutorial you learned to:</p><ol><li>Create a parametric truss generator function for reuse</li><li>Model a Warren truss bridge with proper supports</li><li>Analyze multiple load scenarios: dead, self-weight, point, and lateral loads</li><li>Compare results across scenarios using displacements and reactions</li><li>Examine axial force distributions to identify critical members</li><li>Study the effect of truss depth on structural performance</li></ol><p>The next tutorial extends to 3D with a space truss tower.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../tutorial1_planar_truss/">« Tutorial 1: Planar Truss</a><a class="docs-footer-nextpage" href="../tutorial3_space_truss_tower/">Tutorial 3: Space Truss Tower »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Monday 16 February 2026 15:50">Monday 16 February 2026</span>. Using Julia version 1.12.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

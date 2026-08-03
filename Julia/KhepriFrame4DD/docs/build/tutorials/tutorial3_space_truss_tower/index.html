@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Tutorial 3: Space Truss Tower · KhepriFrame4DD.jl</title><meta name="title" content="Tutorial 3: Space Truss Tower · KhepriFrame4DD.jl"/><meta property="og:title" content="Tutorial 3: Space Truss Tower · KhepriFrame4DD.jl"/><meta property="twitter:title" content="Tutorial 3: Space Truss Tower · KhepriFrame4DD.jl"/><meta name="description" content="Documentation for KhepriFrame4DD.jl."/><meta property="og:description" content="Documentation for KhepriFrame4DD.jl."/><meta property="twitter:description" content="Documentation for KhepriFrame4DD.jl."/><meta property="og:url" content="https://aptmcl.github.io/KhepriFrame4DD.jl/tutorials/tutorial3_space_truss_tower/"/><meta property="twitter:url" content="https://aptmcl.github.io/KhepriFrame4DD.jl/tutorials/tutorial3_space_truss_tower/"/><link rel="canonical" href="https://aptmcl.github.io/KhepriFrame4DD.jl/tutorials/tutorial3_space_truss_tower/"/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">KhepriFrame4DD.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><span class="tocitem">Tutorials</span><ul><li><a class="tocitem" href="../tutorial1_planar_truss/">Tutorial 1: Planar Truss</a></li><li><a class="tocitem" href="../tutorial2_warren_bridge/">Tutorial 2: Warren Truss Bridge</a></li><li class="is-active"><a class="tocitem" href>Tutorial 3: Space Truss Tower</a><ul class="internal"><li><a class="tocitem" href="#Setting-Up"><span>Setting Up</span></a></li><li><a class="tocitem" href="#Parametric-Tower-Generator"><span>Parametric Tower Generator</span></a></li><li><a class="tocitem" href="#3D-Geometry-Summary"><span>3D Geometry Summary</span></a></li><li><a class="tocitem" href="#Vertical-Dead-Load"><span>Vertical Dead Load</span></a></li><li><a class="tocitem" href="#Combined-Loading:-Vertical-Lateral-Wind"><span>Combined Loading: Vertical + Lateral Wind</span></a></li><li><a class="tocitem" href="#3D-Displacement-Analysis"><span>3D Displacement Analysis</span></a></li><li><a class="tocitem" href="#Reaction-Forces"><span>Reaction Forces</span></a></li><li><a class="tocitem" href="#Axial-Forces-and-Approximate-Stress-Check"><span>Axial Forces and Approximate Stress Check</span></a></li><li><a class="tocitem" href="#Buckling-Check-for-Compression-Members"><span>Buckling Check for Compression Members</span></a></li><li><a class="tocitem" href="#Parametric-Study:-Base-Width-vs.-Height-Ratio"><span>Parametric Study: Base Width vs. Height Ratio</span></a></li><li><a class="tocitem" href="#3D-Visualization"><span>3D Visualization</span></a></li><li><a class="tocitem" href="#Limitations-vs.-Robot-Structural-Analysis"><span>Limitations vs. Robot Structural Analysis</span></a></li><li><a class="tocitem" href="#Summary"><span>Summary</span></a></li></ul></li><li><a class="tocitem" href="../tutorial4_truss_grid_deck/">Tutorial 4: Truss Grid Deck</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Tutorials</a></li><li class="is-active"><a href>Tutorial 3: Space Truss Tower</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Tutorial 3: Space Truss Tower</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/aptmcl/KhepriFrame4DD.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/aptmcl/KhepriFrame4DD.jl/blob/master/docs/src/tutorials/tutorial3_space_truss_tower.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Tutorial-3:-3D-Space-Truss-Tower"><a class="docs-heading-anchor" href="#Tutorial-3:-3D-Space-Truss-Tower">Tutorial 3: 3D Space Truss Tower</a><a id="Tutorial-3:-3D-Space-Truss-Tower-1"></a><a class="docs-heading-anchor-permalink" href="#Tutorial-3:-3D-Space-Truss-Tower" title="Permalink"></a></h1><p>This tutorial moves from 2D to <strong>3D analysis</strong> by building a space truss tower — a common structural form for transmission towers, observation platforms, and industrial structures. You will learn to model 3D geometry with bracing patterns, apply combined vertical and lateral loads, and perform approximate stress checks.</p><p><em>Inspired by Autodesk Robot Structural Analysis Tutorial 3 (Frame 3D Design).</em></p><h2 id="Setting-Up"><a class="docs-heading-anchor" href="#Setting-Up">Setting Up</a><a id="Setting-Up-1"></a><a class="docs-heading-anchor-permalink" href="#Setting-Up" title="Permalink"></a></h2><pre><code class="language-julia hljs">using KhepriFrame4DD</code></pre><h2 id="Parametric-Tower-Generator"><a class="docs-heading-anchor" href="#Parametric-Tower-Generator">Parametric Tower Generator</a><a id="Parametric-Tower-Generator-1"></a><a class="docs-heading-anchor-permalink" href="#Parametric-Tower-Generator" title="Permalink"></a></h2><p>Our tower has a <strong>square base</strong> with corner columns connected by horizontal braces and face diagonals at each level, plus horizontal cross-bracing for torsional stiffness.</p><pre><code class="nohighlight hljs">        Level 4 (top) ─── z = 12 m
+        ┌───┐
+        │ × │  ← horizontal cross-brace
+        └───┘
+        │   │
+        │ ╲ │  ← face diagonals
+        │ ╱ │
+        │   │
+        ┌───┐
+        │ × │  Level 3 ─── z = 9 m
+        └───┘
+        │   │
+        │   │
+        ┌───┐
+        │ × │  Level 2 ─── z = 6 m
+        └───┘
+        │   │
+        │   │
+        ┌───┐
+        │ × │  Level 1 ─── z = 3 m
+        └───┘
+        │   │
+        │   │
+        ╔═══╗
+        ║   ║  Level 0 (base) ─── z = 0
+        ╚═══╝
+        △ △ △ △  (all 4 corners pinned)</code></pre><pre><code class="language-julia hljs">function truss_tower(base_size, height, n_levels;
+                     bar_fam=nothing, pinned_fam=nothing, free_fam=nothing)
+  if bar_fam === nothing
+    bar_fam = truss_bar_family_element(
+      default_truss_bar_family(), radius=0.04, inner_radius=0.035)
+  end
+  if pinned_fam === nothing
+    pinned_fam = truss_node_family_element(
+      default_truss_node_family(),
+      support=truss_node_support(ux=true, uy=true, uz=true))
+  end
+  if free_fam === nothing
+    free_fam = truss_node_family_element(default_truss_node_family())
+  end
+
+  half = base_size / 2
+  level_height = height / n_levels
+
+  # Corner offsets (counter-clockwise from +x, +y)
+  corners = [vxy(half, half), vxy(-half, half),
+             vxy(-half, -half), vxy(half, -half)]
+
+  # Generate nodes at each level
+  levels = []
+  for lev in 0:n_levels
+    z = lev * level_height
+    fam = lev == 0 ? pinned_fam : free_fam
+    pts = [xyz(c.x, c.y, z) for c in corners]
+    for p in pts
+      truss_node(p, fam)
+    end
+    push!(levels, pts)
+  end
+
+  # Connect bars
+  for lev in 1:(n_levels+1)
+    pts = levels[lev]
+    # Horizontal braces at this level
+    for i in 1:4
+      j = mod1(i + 1, 4)
+      truss_bar(pts[i], pts[j], 0, bar_fam)
+    end
+    # Horizontal cross-braces (diagonals in plan)
+    truss_bar(pts[1], pts[3], 0, bar_fam)
+    truss_bar(pts[2], pts[4], 0, bar_fam)
+
+    if lev &gt; 1
+      prev = levels[lev - 1]
+      for i in 1:4
+        # Vertical columns
+        truss_bar(prev[i], pts[i], 0, bar_fam)
+        # Face diagonals (X-bracing on each face)
+        j = mod1(i + 1, 4)
+        truss_bar(prev[i], pts[j], 0, bar_fam)
+        truss_bar(prev[j], pts[i], 0, bar_fam)
+      end
+    end
+  end
+
+  levels
+end</code></pre><p>Build a tower: 4 m × 4 m base, 12 m tall, 4 levels:</p><pre><code class="language-julia hljs">backend(frame4dd)
+delete_all_shapes()
+levels = truss_tower(4.0, 12.0, 4)
+
+n_nodes = length(frame4dd.truss_nodes)
+n_bars = length(frame4dd.truss_bars)
+println(&quot;Tower geometry:&quot;)
+println(&quot;  Base: 4 m × 4 m&quot;)
+println(&quot;  Height: 12 m&quot;)
+println(&quot;  Levels: 4 (at 3 m spacing)&quot;)
+println(&quot;  Nodes: $n_nodes&quot;)
+println(&quot;  Bars: $n_bars&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Tower geometry:
+  Base: 4 m × 4 m
+  Height: 12 m
+  Levels: 4 (at 3 m spacing)
+  Nodes: 20
+  Bars: 78</code></pre><h2 id="3D-Geometry-Summary"><a class="docs-heading-anchor" href="#3D-Geometry-Summary">3D Geometry Summary</a><a id="3D-Geometry-Summary-1"></a><a class="docs-heading-anchor-permalink" href="#3D-Geometry-Summary" title="Permalink"></a></h2><p>The tower has distinct structural member types:</p><pre><code class="language-julia hljs"># Count members by type
+is_horizontal(bar) = bar.node1.loc.z ≈ bar.node2.loc.z
+is_vertical(bar) = bar.node1.loc.x ≈ bar.node2.loc.x &amp;&amp; bar.node1.loc.y ≈ bar.node2.loc.y &amp;&amp; !is_horizontal(bar)
+
+n_horizontals = count(is_horizontal, frame4dd.truss_bar_data)
+n_verticals = count(is_vertical, frame4dd.truss_bar_data)
+n_diagonals = length(frame4dd.truss_bar_data) - n_horizontals - n_verticals
+
+println(&quot;Member types:&quot;)
+println(&quot;  Vertical columns: $n_verticals&quot;)
+println(&quot;  Horizontal braces: $n_horizontals (includes cross-braces)&quot;)
+println(&quot;  Face diagonals: $n_diagonals&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Member types:
+  Vertical columns: 0
+  Horizontal braces: 19 (includes cross-braces)
+  Face diagonals: 20</code></pre><h2 id="Vertical-Dead-Load"><a class="docs-heading-anchor" href="#Vertical-Dead-Load">Vertical Dead Load</a><a id="Vertical-Dead-Load-1"></a><a class="docs-heading-anchor-permalink" href="#Vertical-Dead-Load" title="Permalink"></a></h2><p>Apply a 20 kN downward load to all top-level nodes (simulating equipment, platform, antenna, etc.):</p><pre><code class="language-julia hljs">top_pts = levels[end]
+results_vert = truss_analysis(vz(0), false,
+  Dict(vz(-20000) =&gt; top_pts))
+
+max_vert = max_displacement(results_vert)
+println(&quot;Vertical load (20 kN per top node):&quot;)
+println(&quot;  Max displacement: $(round(max_vert * 1000, digits=3)) mm&quot;)
+println(&quot;  Height/deflection: $(round(12.0 / max_vert, digits=0))&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Vertical load (20 kN per top node):
+  Max displacement: 0.751 mm
+  Height/deflection: 15985.0</code></pre><h3 id="Visualizing-the-Tower"><a class="docs-heading-anchor" href="#Visualizing-the-Tower">Visualizing the Tower</a><a id="Visualizing-the-Tower-1"></a><a class="docs-heading-anchor-permalink" href="#Visualizing-the-Tower" title="Permalink"></a></h3><pre><code class="language-julia hljs">using KhepriThebes
+img_dir = joinpath(dirname(dirname(pathof(KhepriFrame4DD))), &quot;docs&quot;, &quot;src&quot;, &quot;tutorials&quot;, &quot;images&quot;)
+mkpath(img_dir)
+backend(thebes)
+delete_all_shapes()
+set_view(xyz(15, 15, 20), xyz(0, 0, 6))
+green_mat = standard_material(base_color=rgba(0.2, 0.7, 0.2, 1))
+for nd in frame4dd.truss_node_data
+  sphere(nd.loc, 0.15, material=green_mat)
+end
+for bar in frame4dd.truss_bar_data
+  cylinder(bar.node1.loc, 0.04, bar.node2.loc, material=green_mat)
+end
+with(render_dir, img_dir) do
+  with(render_kind_dir, &quot;.&quot;) do
+    render_view(&quot;tut3_structure&quot;)
+  end
+end</code></pre><img src="bc08f487.svg" alt="Example block output"/><pre><code class="language-julia hljs">backend(frame4dd)</code></pre><h2 id="Combined-Loading:-Vertical-Lateral-Wind"><a class="docs-heading-anchor" href="#Combined-Loading:-Vertical-Lateral-Wind">Combined Loading: Vertical + Lateral Wind</a><a id="Combined-Loading:-Vertical-Lateral-Wind-1"></a><a class="docs-heading-anchor-permalink" href="#Combined-Loading:-Vertical-Lateral-Wind" title="Permalink"></a></h2><p>Wind loads on a tower are critical for design. We apply both vertical loads on the top and horizontal wind loads on all windward-face nodes:</p><pre><code class="language-julia hljs">delete_all_shapes()
+backend(frame4dd)
+levels = truss_tower(4.0, 12.0, 4)
+
+# Wind loads on nodes at y = +2 (windward face), increasing with height
+wind_loads = Dict{Any, Vector{Any}}()
+top_pts = levels[end]
+for (lev_idx, pts) in enumerate(levels)
+  z = (lev_idx - 1) * 3.0
+  if z &gt; 0  # no wind at ground level (it&#39;s fixed)
+    wind_force = 3000 * (z / 12.0)  # 3 kN at top, linearly decreasing
+    for p in pts
+      if p.y &gt; 0  # windward face (y &gt; 0)
+        load = vy(wind_force)
+        if haskey(wind_loads, load)
+          push!(wind_loads[load], p)
+        else
+          wind_loads[load] = [p]
+        end
+      end
+    end
+  end
+end
+
+# Merge vertical loads on top nodes with wind loads
+point_loads = merge(wind_loads, Dict(vz(-20000) =&gt; top_pts))
+results_combined = truss_analysis(vz(0), false, point_loads)
+
+max_combined = max_displacement(results_combined)
+println(&quot;Combined loading (vertical + wind):&quot;)
+println(&quot;  Max displacement: $(round(max_combined * 1000, digits=3)) mm&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Combined loading (vertical + wind):
+  Max displacement: 0.589 mm</code></pre><h2 id="3D-Displacement-Analysis"><a class="docs-heading-anchor" href="#3D-Displacement-Analysis">3D Displacement Analysis</a><a id="3D-Displacement-Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#3D-Displacement-Analysis" title="Permalink"></a></h2><p>In 3D, we need to examine displacements in all three directions. Lateral drift (horizontal displacement at the top) is a key design criterion for towers:</p><pre><code class="language-julia hljs">disp = node_displacement_function(results_combined)
+
+println(&quot;Displacements by level (combined loading):&quot;)
+println(&quot;─&quot; ^ 65)
+println(&quot;Level | z (m) | δx (mm)  | δy (mm)  | δz (mm)  | Total (mm)&quot;)
+println(&quot;─&quot; ^ 65)
+
+for (lev_idx, pts) in enumerate(levels)
+  z = (lev_idx - 1) * 3.0
+  # Average displacement of corner nodes at this level
+  disps = [disp(nd) for nd in frame4dd.truss_node_data
+           if nd.loc.z ≈ z]
+  if !isempty(disps)
+    avg_dx = sum(d.x for d in disps) / length(disps)
+    avg_dy = sum(d.y for d in disps) / length(disps)
+    avg_dz = sum(d.z for d in disps) / length(disps)
+    total = sqrt(avg_dx^2 + avg_dy^2 + avg_dz^2)
+    println(&quot;  $(lpad(lev_idx-1, 2))   | $(rpad(round(z, digits=0), 5)) | &quot; *
+            &quot;$(lpad(round(avg_dx*1000, digits=2), 8)) | &quot; *
+            &quot;$(lpad(round(avg_dy*1000, digits=2), 8)) | &quot; *
+            &quot;$(lpad(round(avg_dz*1000, digits=2), 8)) | &quot; *
+            &quot;$(lpad(round(total*1000, digits=2), 9))&quot;)
+  end
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Displacements by level (combined loading):
+─────────────────────────────────────────────────────────────────
+Level | z (m) | δx (mm)  | δy (mm)  | δz (mm)  | Total (mm)
+─────────────────────────────────────────────────────────────────
+   0   | 0.0   |      0.0 |      0.0 |      0.0 |       0.0
+   1   | 3.0   |      0.0 |     0.15 |    -0.09 |      0.17
+   2   | 6.0   |      0.0 |     0.31 |    -0.19 |      0.36
+   3   | 9.0   |      0.0 |     0.39 |    -0.28 |      0.48
+   4   | 12.0  |      0.0 |     0.31 |    -0.38 |      0.49</code></pre><p>The <strong>drift ratio</strong> (lateral displacement / height) is limited to H/200 for serviceability:</p><pre><code class="language-julia hljs"># Find maximum lateral displacement at top
+top_disps = [disp(nd) for nd in frame4dd.truss_node_data
+             if nd.loc.z ≈ 12.0]
+max_lateral = maximum(sqrt(d.x^2 + d.y^2) for d in top_disps)
+println(&quot;Maximum lateral drift at top: $(round(max_lateral * 1000, digits=2)) mm&quot;)
+println(&quot;Drift ratio: H/$(round(12.0 / max_lateral, digits=0))&quot;)
+println(&quot;Limit H/200: $(round(12.0 / 200 * 1000, digits=1)) mm&quot;)
+println(&quot;Status: $(max_lateral &lt; 12.0/200 ? &quot;OK&quot; : &quot;EXCEEDS LIMIT&quot;)&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Maximum lateral drift at top: 0.32 mm
+Drift ratio: H/37057.0
+Limit H/200: 60.0 mm
+Status: OK</code></pre><h2 id="Reaction-Forces"><a class="docs-heading-anchor" href="#Reaction-Forces">Reaction Forces</a><a id="Reaction-Forces-1"></a><a class="docs-heading-anchor-permalink" href="#Reaction-Forces" title="Permalink"></a></h2><p>With 4 base supports, the reaction distribution shows how the tower transfers loads to the foundation:</p><pre><code class="language-julia hljs">reactions = reaction_forces(results_combined)
+
+println(&quot;Base reactions (combined loading):&quot;)
+println(&quot;─&quot; ^ 55)
+for (id, r) in sort(collect(reactions), by=first)
+  nd = frame4dd.truss_node_data[id]
+  println(&quot;  Node $id at ($(nd.loc.x), $(nd.loc.y)): &quot; *
+          &quot;Rx=$(round(r.x/1000, digits=2)), &quot; *
+          &quot;Ry=$(round(r.y/1000, digits=2)), &quot; *
+          &quot;Rz=$(round(r.z/1000, digits=2)) kN&quot;)
+end
+total_Rx = sum(r.x for r in values(reactions))
+total_Ry = sum(r.y for r in values(reactions))
+total_Rz = sum(r.z for r in values(reactions))
+println(&quot;─&quot; ^ 55)
+println(&quot;  Totals: Rx=$(round(total_Rx/1000, digits=2)), &quot; *
+        &quot;Ry=$(round(total_Ry/1000, digits=2)), &quot; *
+        &quot;Rz=$(round(total_Rz/1000, digits=2)) kN&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Base reactions (combined loading):
+───────────────────────────────────────────────────────
+  Node 1 at (2.0, 2.0): Rx=-2.53, Ry=-5.4, Rz=16.88 kN
+  Node 2 at (-2.0, 2.0): Rx=2.53, Ry=-5.4, Rz=16.88 kN
+  Node 3 at (-2.0, -2.0): Rx=0.86, Ry=-2.1, Rz=3.12 kN
+  Node 4 at (2.0, -2.0): Rx=-0.86, Ry=-2.1, Rz=3.12 kN
+───────────────────────────────────────────────────────
+  Totals: Rx=-0.0, Ry=-15.0, Rz=40.0 kN</code></pre><p>Under combined loading, the windward supports carry more vertical load (due to overturning moment) while the leeward supports may experience uplift (negative Rz).</p><h2 id="Axial-Forces-and-Approximate-Stress-Check"><a class="docs-heading-anchor" href="#Axial-Forces-and-Approximate-Stress-Check">Axial Forces and Approximate Stress Check</a><a id="Axial-Forces-and-Approximate-Stress-Check-1"></a><a class="docs-heading-anchor-permalink" href="#Axial-Forces-and-Approximate-Stress-Check" title="Permalink"></a></h2><p>For a preliminary design check, we compute axial stress <span>$\sigma = N / A$</span> and compare it to the yield stress:</p><pre><code class="language-julia hljs">forces = element_axial_forces(results_combined)
+
+# Cross-section area for the tube (Ro=40mm, Ri=35mm)
+Ro_tower = 0.04
+Ri_tower = 0.035
+A = π * (Ro_tower^2 - Ri_tower^2)
+σ_yield = 250e6  # 250 MPa for S250 steel
+
+println(&quot;Section area: $(round(A * 1e6, digits=1)) mm²&quot;)
+println(&quot;Yield stress: $(round(σ_yield / 1e6, digits=0)) MPa&quot;)
+println()
+
+# Find most stressed members
+max_tension_idx = argmax(forces)
+max_compression_idx = argmin(forces)
+
+println(&quot;Most stressed members:&quot;)
+println(&quot;─&quot; ^ 55)
+
+for (label, idx) in [(&quot;Max tension&quot;, max_tension_idx),
+                      (&quot;Max compression&quot;, max_compression_idx)]
+  bar = frame4dd.truss_bar_data[idx]
+  f = forces[idx]
+  σ = abs(f) / A
+  util = σ / σ_yield * 100
+  println(&quot;  $label:&quot;)
+  println(&quot;    Bar $idx ($(bar.node1.id)→$(bar.node2.id))&quot;)
+  println(&quot;    Force: $(round(f/1000, digits=2)) kN&quot;)
+  println(&quot;    Stress: $(round(σ/1e6, digits=1)) MPa&quot;)
+  println(&quot;    Utilization: $(round(util, digits=1))%&quot;)
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Section area: 1178.1 mm²
+Yield stress: 250.0 MPa
+
+Most stressed members:
+───────────────────────────────────────────────────────
+  Max tension:
+    Bar 45 (15→16)
+    Force: 3.8 kN
+    Stress: 3.2 MPa
+    Utilization: 1.3%
+  Max compression:
+    Bar 73 (15→19)
+    Force: -15.69 kN
+    Stress: 13.3 MPa
+    Utilization: 5.3%</code></pre><div class="admonition is-info" id="Approximate-Check-Only-20ed7f3a8be24956"><header class="admonition-header">Approximate Check Only<a class="admonition-anchor" href="#Approximate-Check-Only-20ed7f3a8be24956" title="Permalink"></a></header><div class="admonition-body"><p>This stress check considers axial forces only. A complete design verification would include buckling checks for compression members (Euler critical load), connection design, and code-specific safety factors.</p></div></div><h2 id="Buckling-Check-for-Compression-Members"><a class="docs-heading-anchor" href="#Buckling-Check-for-Compression-Members">Buckling Check for Compression Members</a><a id="Buckling-Check-for-Compression-Members-1"></a><a class="docs-heading-anchor-permalink" href="#Buckling-Check-for-Compression-Members" title="Permalink"></a></h2><p>For slender compression members, buckling governs before material yield. The <strong>Euler critical load</strong> for a pinned-pinned column is:</p><p class="math-container">\[N_{cr} = \frac{\pi^2 E I}{L^2}\]</p><pre><code class="language-julia hljs">E = 210e9  # Young&#39;s modulus
+# Moment of inertia for circular tube (Ro=40mm, Ri=35mm)
+I = π/4 * (Ro_tower^4 - Ri_tower^4)
+
+println(&quot;Buckling check for compression members:&quot;)
+println(&quot;─&quot; ^ 60)
+
+let n_failing = 0
+  for (i, bar) in enumerate(frame4dd.truss_bar_data)
+    f = forces[i]
+    if f &lt; -100  # compression member
+      L = norm(bar.node2.loc - bar.node1.loc)
+      N_cr = π^2 * E * I / L^2
+      ratio = abs(f) / N_cr
+      if ratio &gt; 0.5  # flag members above 50% of critical load
+        n_failing += 1
+        println(&quot;  Bar $i (L=$(round(L, digits=2)) m): &quot; *
+                &quot;N=$(round(f/1000, digits=1)) kN, &quot; *
+                &quot;N_cr=$(round(N_cr/1000, digits=1)) kN, &quot; *
+                &quot;ratio=$(round(ratio*100, digits=1))%&quot;)
+      end
+    end
+  end
+  if n_failing == 0
+    println(&quot;  All compression members below 50% of Euler critical load.&quot;)
+  end
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Buckling check for compression members:
+────────────────────────────────────────────────────────────
+  All compression members below 50% of Euler critical load.</code></pre><h2 id="Parametric-Study:-Base-Width-vs.-Height-Ratio"><a class="docs-heading-anchor" href="#Parametric-Study:-Base-Width-vs.-Height-Ratio">Parametric Study: Base Width vs. Height Ratio</a><a id="Parametric-Study:-Base-Width-vs.-Height-Ratio-1"></a><a class="docs-heading-anchor-permalink" href="#Parametric-Study:-Base-Width-vs.-Height-Ratio" title="Permalink"></a></h2><p>The aspect ratio of the tower affects lateral stiffness. We vary the base size while keeping height constant:</p><pre><code class="language-julia hljs">println(&quot;Base (m) | Height/Base | Max lateral (mm) | Drift ratio&quot;)
+println(&quot;─&quot; ^ 60)
+
+for base in [2.0, 3.0, 4.0, 5.0, 6.0]
+  delete_all_shapes()
+  backend(frame4dd)
+  levels = truss_tower(base, 12.0, 4)
+
+  # Same combined loading pattern
+  top_pts = levels[end]
+  wind_loads = Dict{Any, Vector{Any}}()
+  for (lev_idx, pts) in enumerate(levels)
+    z = (lev_idx - 1) * 3.0
+    if z &gt; 0
+      wind_force = 3000 * (z / 12.0)
+      for p in pts
+        if p.y &gt; base/4  # windward face
+          load = vy(wind_force)
+          if haskey(wind_loads, load)
+            push!(wind_loads[load], p)
+          else
+            wind_loads[load] = [p]
+          end
+        end
+      end
+    end
+  end
+  point_loads = merge(wind_loads, Dict(vz(-20000) =&gt; top_pts))
+  res = truss_analysis(vz(0), false, point_loads)
+
+  disp_fn = node_displacement_function(res)
+  top_disps = [disp_fn(nd) for nd in frame4dd.truss_node_data
+               if nd.loc.z ≈ 12.0]
+  max_lat = maximum(sqrt(d.x^2 + d.y^2) for d in top_disps)
+
+  ratio = round(12.0 / base, digits=1)
+  println(&quot;  $(rpad(base, 8)) | $(lpad(ratio, 11)) | &quot; *
+          &quot;$(lpad(round(max_lat*1000, digits=2), 16)) | &quot; *
+          &quot;H/$(round(12.0 / max_lat, digits=0))&quot;)
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Base (m) | Height/Base | Max lateral (mm) | Drift ratio
+────────────────────────────────────────────────────────────
+┌ Warning: Assignment to `levels` in soft scope is ambiguous because a global variable by the same name exists: `levels` will be treated as a new local. Disambiguate by using `local levels` to suppress this warning or `global levels` to assign to the existing global variable.
+└ @ tutorial3_space_truss_tower.md:407
+┌ Warning: Assignment to `top_pts` in soft scope is ambiguous because a global variable by the same name exists: `top_pts` will be treated as a new local. Disambiguate by using `local top_pts` to suppress this warning or `global top_pts` to assign to the existing global variable.
+└ @ tutorial3_space_truss_tower.md:410
+┌ Warning: Assignment to `wind_loads` in soft scope is ambiguous because a global variable by the same name exists: `wind_loads` will be treated as a new local. Disambiguate by using `local wind_loads` to suppress this warning or `global wind_loads` to assign to the existing global variable.
+└ @ tutorial3_space_truss_tower.md:411
+┌ Warning: Assignment to `point_loads` in soft scope is ambiguous because a global variable by the same name exists: `point_loads` will be treated as a new local. Disambiguate by using `local point_loads` to suppress this warning or `global point_loads` to assign to the existing global variable.
+└ @ tutorial3_space_truss_tower.md:428
+┌ Warning: Assignment to `top_disps` in soft scope is ambiguous because a global variable by the same name exists: `top_disps` will be treated as a new local. Disambiguate by using `local top_disps` to suppress this warning or `global top_disps` to assign to the existing global variable.
+└ @ tutorial3_space_truss_tower.md:432
+  2.0      |         6.0 |             2.38 | H/5032.0
+  3.0      |         4.0 |             0.84 | H/14252.0
+  4.0      |         3.0 |             0.32 | H/37057.0
+  5.0      |         2.4 |             0.13 | H/91541.0
+  6.0      |         2.0 |             0.07 | H/171440.0</code></pre><p>A wider base dramatically improves lateral stiffness by increasing the overturning resistance (longer lever arm for the base reactions).</p><h2 id="3D-Visualization"><a class="docs-heading-anchor" href="#3D-Visualization">3D Visualization</a><a id="3D-Visualization-1"></a><a class="docs-heading-anchor-permalink" href="#3D-Visualization" title="Permalink"></a></h2><p>The deformed tower (red) overlaid on the original structure (green) under combined vertical + wind loading:</p><pre><code class="language-julia hljs">delete_all_shapes()
+backend(frame4dd)
+levels = truss_tower(4.0, 12.0, 4)
+top_pts = levels[end]
+wind_loads = Dict{Any, Vector{Any}}()
+for (lev_idx, pts) in enumerate(levels)
+  z = (lev_idx - 1) * 3.0
+  if z &gt; 0
+    wind_force = 3000 * (z / 12.0)
+    for p in pts
+      if p.y &gt; 0
+        load = vy(wind_force)
+        if haskey(wind_loads, load)
+          push!(wind_loads[load], p)
+        else
+          wind_loads[load] = [p]
+        end
+      end
+    end
+  end
+end
+point_loads = merge(wind_loads, Dict(vz(-20000) =&gt; top_pts))
+results_combined = truss_analysis(vz(0), false, point_loads)
+
+backend(thebes)
+delete_all_shapes()
+set_view(xyz(15, 15, 20), xyz(0, 0, 6))
+green_mat = standard_material(base_color=rgba(0.2, 0.7, 0.2, 1))
+red_mat = standard_material(base_color=rgba(0.8, 0.2, 0.2, 1))
+disp = node_displacement_function(results_combined, frame4dd)
+factor = 100
+for nd in frame4dd.truss_node_data
+  sphere(nd.loc, 0.15, material=green_mat)
+end
+for bar in frame4dd.truss_bar_data
+  cylinder(bar.node1.loc, 0.04, bar.node2.loc, material=green_mat)
+end
+for nd in frame4dd.truss_node_data
+  d = disp(nd) * factor
+  sphere(nd.loc + d, 0.15, material=red_mat)
+end
+for bar in frame4dd.truss_bar_data
+  d1 = disp(bar.node1) * factor
+  d2 = disp(bar.node2) * factor
+  cylinder(bar.node1.loc + d1, 0.04, bar.node2.loc + d2, material=red_mat)
+end
+with(render_dir, img_dir) do
+  with(render_kind_dir, &quot;.&quot;) do
+    render_view(&quot;tut3_deformation&quot;)
+  end
+end</code></pre><img src="8f044443.svg" alt="Example block output"/><pre><code class="language-julia hljs">backend(frame4dd)</code></pre><p>Multiple viewpoints help understand 3D behavior — front view shows lateral drift, side view shows any torsional effects, and top view shows plan displacement.</p><h2 id="Limitations-vs.-Robot-Structural-Analysis"><a class="docs-heading-anchor" href="#Limitations-vs.-Robot-Structural-Analysis">Limitations vs. Robot Structural Analysis</a><a id="Limitations-vs.-Robot-Structural-Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Limitations-vs.-Robot-Structural-Analysis" title="Permalink"></a></h2><table><tr><th style="text-align: right">Robot Feature</th><th style="text-align: right">KhepriFrame4DD Status</th><th style="text-align: right">Possible Extension</th></tr><tr><td style="text-align: right">Moment-resistant connections</td><td style="text-align: right">Pin-jointed only</td><td style="text-align: right">Frame4DD solver supports frame elements</td></tr><tr><td style="text-align: right">Steel design codes (EC3/AISC)</td><td style="text-align: right">Manual stress check only</td><td style="text-align: right">Future: code compliance module</td></tr><tr><td style="text-align: right">Non-linear analysis</td><td style="text-align: right">Linear elastic only</td><td style="text-align: right">Future: geometric non-linearity</td></tr><tr><td style="text-align: right">Foundation design</td><td style="text-align: right">Reactions only</td><td style="text-align: right">Export reactions for foundation software</td></tr><tr><td style="text-align: right">Dynamic/seismic analysis</td><td style="text-align: right">Solver supports modal</td><td style="text-align: right">Expose <code>ModalOptions</code>/<code>ModalResults</code></td></tr></table><h2 id="Summary"><a class="docs-heading-anchor" href="#Summary">Summary</a><a id="Summary-1"></a><a class="docs-heading-anchor-permalink" href="#Summary" title="Permalink"></a></h2><p>In this tutorial you learned to:</p><ol><li>Create a parametric 3D truss tower generator with multi-level bracing</li><li>Model combined vertical + height-dependent wind loads using <code>point_loads</code></li><li>Analyze 3D displacements and separate lateral drift from vertical deflection</li><li>Check the drift ratio against serviceability limits</li><li>Perform approximate axial stress checks and compute utilization ratios</li><li>Evaluate Euler buckling for compression members</li><li>Study the effect of base-to-height ratio on lateral performance</li></ol><p>The next tutorial models a flat space-frame deck — a truss grid that approximates plate behavior.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../tutorial2_warren_bridge/">« Tutorial 2: Warren Truss Bridge</a><a class="docs-footer-nextpage" href="../tutorial4_truss_grid_deck/">Tutorial 4: Truss Grid Deck »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Monday 16 February 2026 15:48">Monday 16 February 2026</span>. Using Julia version 1.12.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
