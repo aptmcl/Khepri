@@ -1,0 +1,312 @@
+﻿using System;
+using System.Diagnostics;
+using System.Linq;
+using System.Linq.Expressions;
+using System.Reflection;
+
+namespace KhepriBase {
+    /// <summary>
+    /// Dynamic RMI via .NET Expression Trees. Given a method name from Julia, uses
+    /// reflection to find it on the Primitives class, then builds a compiled delegate
+    /// that deserializes parameters from the channel, calls the method, and serializes
+    /// the result back. This compilation happens once per method (on first call);
+    /// subsequent calls use the cached delegate directly.
+    ///
+    /// Constraint: method names must be unique (no overloads) because Type.GetMethod(name)
+    /// throws AmbiguousMatchException for overloaded methods.
+    /// </summary>
+    public class RMIfy {
+        /* Reflection machinery
+         *
+         * Used by codegen to find a Channel reader/writer by its naming convention
+         * (e.g. `rInt32`, `wString`, `wByte`). Several call sites pass a name whose
+         * intended overload is parameterless (readers like `rInt32`, `wVoid`, also
+         * `wByte` used as a writer-of-byte-then-call-with-arg) but at least one
+         * Channel name has two overloads — `rObject()` (the public reader) and
+         * `rObject(byte code)` (the virtual dispatch helper for self-describing
+         * heterogeneous values, overridden in subclasses).
+         *
+         * Plain `Type.GetMethod(name)` throws `AmbiguousMatchException` whenever two
+         * methods share a name, even if their arity differs. So when an RPC carries an
+         * `object[]` parameter (e.g. `InsertWindow`, `InsertDoorWithParams`),
+         * `BuildReader` recurses to `Object`, calls this method with name `"rObject"`,
+         * and used to crash the whole RMI registration — taking the connection down
+         * with it because nothing along the call stack catches the exception. We
+         * constrain the lookup to the parameterless overload via `Type.EmptyTypes` so
+         * the reader codegen path stays unambiguous.
+         *
+         * See also: `GetMethod(Type, String, Type)` for the writer path that already
+         * disambiguates by argument type, and `KhepriBase.Channel.rObject` for the
+         * overload pair that motivates this guard.
+         */
+        static MethodInfo GetMethod(Type t, String name) {
+            try {
+                MethodInfo m = t.GetMethod(name, Type.EmptyTypes);
+                if (m != null) {
+                    return m;
+                } else {
+                    throw new Exception("There is no parameterless method named '" + name + "' in type '" + t + "'");
+                }
+            } catch (AmbiguousMatchException) {
+                throw new Exception("The method '" + name + "' is ambiguous in type '" + t + "'");
+            }
+        }
+
+        static MethodInfo TryGetMethod(Type t, String name, out String error) {
+            try {
+                MethodInfo m = t.GetMethod(name);
+                if (m != null) {
+                    error = null;
+                    return m;
+                } else {
+                    error = "Method '" + name + "' not found in " + t.Name;
+                    return null;
+                }
+            } catch (AmbiguousMatchException) {
+                error = "Method '" + name + "' is ambiguous in " + t.Name;
+                return null;
+            }
+        }
+
+        // Get method with specific parameter type to avoid ambiguity when overloads exist
+        static MethodInfo GetMethod(Type t, String name, Type paramType) {
+            try {
+                MethodInfo m = t.GetMethod(name, new Type[] { paramType });
+                if (m != null) {
+                    return m;
+                } else {
+                    throw new Exception("There is no method named '" + name + "(" + paramType + ")' in type '" + t + "'");
+                }
+            } catch (AmbiguousMatchException) {
+                throw new Exception("The method '" + name + "(" + paramType + ")' is ambiguous in type '" + t + "'");
+            }
+        }
+
+        // Maps .NET types to Channel read/write method names (e.g., Int32 → rInt32/wInt32,
+        // Int32[] → rInt32Array/wInt32Array). This is the link between the type system
+        // and the r/w naming convention in Channel.
+        static String MethodNameFromType(Type t) =>
+            t.IsArray ? MethodNameFromType(t.GetElementType()) + "Array" : t.Name;
+
+        // Build a reader expression for a type. For arrays, inlines a
+        // length-prefixed loop that recursively reads each element.
+        static Expression BuildReader(ParameterExpression c, Type t) {
+            if (t.IsArray) {
+                Type elemType = t.GetElementType();
+                var len = Expression.Variable(typeof(int), "len");
+                var arr = Expression.Variable(t, "arr");
+                var idx = Expression.Variable(typeof(int), "idx");
+                var exit = Expression.Label(t);
+                return Expression.Block(t,
+                    new[] { len, arr, idx },
+                    Expression.Assign(len, Expression.Call(c, GetMethod(c.Type, "rInt32"))),
+                    Expression.Assign(arr, Expression.NewArrayBounds(elemType, len)),
+                    Expression.Assign(idx, Expression.Constant(0)),
+                    Expression.Loop(
+                        Expression.IfThenElse(
+                            Expression.LessThan(idx, len),
+                            Expression.Block(
+                                Expression.Assign(
+                                    Expression.ArrayAccess(arr, idx),
+                                    BuildReader(c, elemType)),
+                                Expression.PostIncrementAssign(idx)),
+                            Expression.Break(exit, arr)),
+                        exit));
+            }
+            return Expression.Call(c, GetMethod(c.Type, "r" + t.Name));
+        }
+
+        static Expression DeserializeParameter(ParameterExpression c, ParameterInfo p) =>
+            BuildReader(c, p.ParameterType);
+
+        // Build a writer expression for a type. For arrays, inlines a
+        // length-prefixed loop that recursively writes each element.
+        static Expression BuildWriter(ParameterExpression c, Type t, Expression value) {
+            if (t.IsArray) {
+                Type elemType = t.GetElementType();
+                var arr = Expression.Variable(t, "arr");
+                var idx = Expression.Variable(typeof(int), "idx");
+                var len = Expression.ArrayLength(arr);
+                var exit = Expression.Label();
+                return Expression.Block(
+                    new[] { arr, idx },
+                    Expression.Assign(arr, value),
+                    Expression.Call(c, GetMethod(c.Type, "wInt32", typeof(int)), len),
+                    Expression.Assign(idx, Expression.Constant(0)),
+                    Expression.Loop(
+                        Expression.IfThenElse(
+                            Expression.LessThan(idx, len),
+                            Expression.Block(
+                                BuildWriter(c, elemType, Expression.ArrayIndex(arr, idx)),
+                                Expression.PostIncrementAssign(idx)),
+                            Expression.Break(exit)),
+                        exit));
+            }
+            return Expression.Call(c, GetMethod(c.Type, "w" + t.Name, t), value);
+        }
+
+        // Generates the OK path of the response: writes a 0x00 status prefix byte followed
+        // by the serialized return value (or just wVoid for void methods). The status prefix
+        // is the application-layer mechanism for distinguishing success from error; it lives
+        // inside the frame payload, keeping the framing layer (Int32 length prefix) clean.
+        static Expression SerializeReturn(ParameterExpression c, ParameterInfo p, Expression e) {
+            var returnType = p.ParameterType;
+            var wByteMethod = GetMethod(c.Type, "wByte", typeof(byte));
+            var okPrefix = Expression.Call(c, wByteMethod, Expression.Constant((byte)0));
+            if (returnType == typeof(void)) {
+                var writer = GetMethod(c.Type, "wVoid");
+                return Expression.Block(e, okPrefix, Expression.Call(c, writer));
+            } else {
+                var resultVar = Expression.Variable(returnType, "result");
+                return Expression.Block(
+                    new[] { resultVar },
+                    Expression.Assign(resultVar, e),
+                    okPrefix,
+                    BuildWriter(c, returnType, resultVar));
+            }
+        }
+
+        // Wraps the OK-path expression in a try-catch: on exception, writes a 0x01 (NOTOK)
+        // prefix followed by the error message and stack trace. The Julia side reads the
+        // prefix byte first and either decodes the return value (0x00) or throws a
+        // BackendError (0x01).
+        //
+        // The catch must FIRST reset the buffered response: SerializeReturn writes the
+        // 0x00 OK prefix before the return-value writer runs, and writers are not pure
+        // (they can mutate the host document and throw mid-serialization). Without the
+        // reset, the NOTOK record would be appended after the partial OK bytes and Julia
+        // would read prefix 0x00 and decode garbage. The response is buffered in memory
+        // until EndFrame (see Channel.ResetResponse), so the rewind is cheap and yields
+        // a clean NOTOK frame.
+        static Expression SerializeErrors(ParameterExpression c, ParameterInfo p, Expression e) {
+            var resetResponseMethod = GetMethod(c.Type, "ResetResponse");
+            var wByteMethod = GetMethod(c.Type, "wByte", typeof(byte));
+            var wStringMethod = GetMethod(c.Type, "wString", typeof(string));
+            var resetResponse = Expression.Call(c, resetResponseMethod);
+            var notokPrefix = Expression.Call(c, wByteMethod, Expression.Constant((byte)1));
+            var ex = Expression.Parameter(typeof(Exception), "ex");
+            var errorMsg = Expression.Call(
+                typeof(string).GetMethod("Concat", new[] { typeof(string), typeof(string), typeof(string) }),
+                Expression.Property(ex, "Message"),
+                Expression.Constant("\n"),
+                Expression.Property(ex, "StackTrace"));
+            return Expression.TryCatch(e,
+                Expression.Catch(ex,
+                    Expression.Block(resetResponse, notokPrefix, Expression.Call(c, wStringMethod, errorMsg))));
+        }
+
+        // Composes the full delegate: DeserializeParams → Call → SerializeReturn (OK prefix)
+        // → SerializeErrors (try-catch with NOTOK prefix). The Expression Tree is compiled
+        // once into a native delegate.
+        static Action<C,P> GenerateRMIFor<C,P>(C channel, P primitives, MethodInfo f) {
+            ParameterExpression c = Expression.Parameter(typeof(C), "channel");
+            ParameterExpression p = Expression.Parameter(typeof(P), "primitives");
+            BlockExpression block = Expression.Block(
+                SerializeErrors(
+                    c,
+                    f.ReturnParameter,
+                    SerializeReturn(
+                        c,
+                        f.ReturnParameter,
+                        Expression.Call(
+                            p,
+                            f,
+                            f.GetParameters().Select(pr => DeserializeParameter(c, pr))))));
+            return Expression.Lambda<Action<C, P>>(block, new ParameterExpression[] { c, p }).Compile();
+        }
+
+        // Canonical signature mechanism: Julia sends an expected signature string
+        // (e.g., "Int32(Point3d,Double)") and C# computes the actual one from reflection.
+        // If they don't match, the operation is rejected before registering, catching
+        // protocol drift between Julia and C# at connection time rather than at runtime.
+        static string CanonicalFromReflection(MethodInfo m) {
+            var ret = MethodNameFromType(m.ReturnType);
+            var parms = string.Join(",", m.GetParameters().Select(p => MethodNameFromType(p.ParameterType)));
+            return $"{ret}({parms})";
+        }
+
+        /*
+         * Pre-validation of the Channel reader/writer lookups that codegen performs.
+         *
+         * GenerateRMIFor resolves a Channel `r<Type>` method for every parameter type
+         * (BuildReader) and a `w<Type>` method for the return type (BuildWriter)
+         * eagerly, while building the expression tree. Those lookups go through
+         * GetMethod, which throws a plain Exception when the Channel lacks the
+         * reader/writer — e.g. a Primitives method declared to return a type for
+         * which nobody wrote a `w<Type>`. If that exception escaped RMIFor, the
+         * NOTOK response would never be written, the begun frame would never be
+         * completed, and the Julia client — whose receive() has no timeout — would
+         * hang forever with the real error visible only on the CAD side.
+         *
+         * These helpers walk the exact same types in the exact same way as
+         * BuildReader/BuildWriter (including the array recursion and the
+         * rInt32/wInt32 length prefix), so a method that passes validation cannot
+         * fail the subsequent codegen lookups, and a method that fails surfaces in
+         * Julia as a clean BackendError naming the missing method.
+         *
+         * See also: BuildReader, BuildWriter (the codegen counterparts whose
+         * lookups these mirror) and RMIFor (the only caller).
+         */
+        static void ValidateReader(Type channelType, Type t) {
+            if (t.IsArray) {
+                GetMethod(channelType, "rInt32");
+                ValidateReader(channelType, t.GetElementType());
+            } else {
+                GetMethod(channelType, "r" + t.Name);
+            }
+        }
+
+        static void ValidateWriter(Type channelType, Type t) {
+            if (t.IsArray) {
+                GetMethod(channelType, "wInt32", typeof(int));
+                ValidateWriter(channelType, t.GetElementType());
+            } else {
+                GetMethod(channelType, "w" + t.Name, t);
+            }
+        }
+
+        // Returns null when every parameter type has a reader and the return type a
+        // writer on the channel type; otherwise returns the lookup error message.
+        static String ReaderWriterLookupError(Type channelType, MethodInfo f) {
+            try {
+                foreach (var pr in f.GetParameters()) {
+                    ValidateReader(channelType, pr.ParameterType);
+                }
+                if (f.ReturnType != typeof(void)) {
+                    ValidateWriter(channelType, f.ReturnType);
+                }
+                return null;
+            } catch (Exception e) {
+                return e.Message;
+            }
+        }
+
+        public static Action<C,P> RMIFor<C,P>(C channel, P primitives, String name, String expectedCanonical) where C : Channel {
+            String error;
+            MethodInfo f = TryGetMethod(primitives.GetType(), name, out error);
+            if (f == null) {
+                channel.wByte(1);
+                channel.wString(error);
+                channel.Flush();
+                return null;
+            }
+            var actualCanonical = CanonicalFromReflection(f);
+            if (expectedCanonical != actualCanonical) {
+                channel.wByte(1);
+                channel.wString($"Signature mismatch for '{name}': Julia expects {expectedCanonical} but C# has {actualCanonical}");
+                channel.Flush();
+                return null;
+            }
+            // Validate against typeof(C), the same type GenerateRMIFor binds its
+            // channel parameter to, so validation and codegen see the same methods.
+            var lookupError = ReaderWriterLookupError(typeof(C), f);
+            if (lookupError != null) {
+                channel.wByte(1);
+                channel.wString($"Cannot register '{name}': {lookupError}");
+                channel.Flush();
+                return null;
+            }
+            return GenerateRMIFor(channel, primitives, f);
+        }
+    }
+}
