@@ -16,6 +16,7 @@
 /Assets/
 /Tools/
 /Environments/
+/.claude/
 *.jl.*.cov
 *.jl.mem
 deps/deps.jl
