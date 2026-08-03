@@ -21,20 +21,25 @@ using TOML
 
 const ROOT = "Julia"
 
-khepri_deps(pkg) =
-  let f = joinpath(ROOT, pkg, "Project.toml")
-    isfile(f) || return String[]
+# Any dependency that is present in this repository, NOT merely the ones named
+# Khepri*. KhepriFrame4DD depends on Frame4DD -- a plain Julia solver with no
+# Khepri in its name and no entry in the General registry -- so a Khepri-only
+# filter would leave it unresolvable and the package unbuildable.
+in_repo_deps(f) =
+  isfile(f) ?
     [d for d in keys(get(TOML.parsefile(f), "deps", Dict{String,Any}()))
-       if startswith(d, "Khepri") && isdir(joinpath(ROOT, d))]
-  end
+       if isdir(joinpath(ROOT, d))] :
+    String[]
 
-closure(pkg) =
-  let seen = Set{String}(), todo = khepri_deps(pkg)
+pkg_deps(pkg) = in_repo_deps(joinpath(ROOT, pkg, "Project.toml"))
+
+closure(roots) =
+  let seen = Set{String}(), todo = collect(roots)
     while !isempty(todo)
       d = pop!(todo)
       d in seen && continue
       push!(seen, d)
-      append!(todo, khepri_deps(d))
+      append!(todo, pkg_deps(d))
     end
     sort!(collect(seen))
   end
@@ -43,7 +48,13 @@ isempty(ARGS) && error("usage: dev_siblings.jl <Package> [--with-self]")
 
 let pkg = ARGS[1],
     with_self = length(ARGS) > 1 && ARGS[2] == "--with-self",
-    paths = [joinpath(ROOT, d) for d in closure(pkg)]
+    # A docs environment may name in-repo packages the package itself does not
+    # depend on -- KhepriFrame4DD's docs render with a backend it has no runtime
+    # dependency on. Those are unregistered, so they must be developed by path or
+    # Pkg.instantiate fails on the docs environment.
+    roots = vcat(pkg_deps(pkg),
+                 with_self ? in_repo_deps(joinpath(ROOT, pkg, "docs", "Project.toml")) : String[]),
+    paths = [joinpath(ROOT, d) for d in closure(roots) if d != pkg]
   isdir(joinpath(ROOT, pkg)) || error("no such package: $(joinpath(ROOT, pkg))")
   with_self && pushfirst!(paths, joinpath(ROOT, pkg))
   if isempty(paths)
