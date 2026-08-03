@@ -266,6 +266,11 @@ using Test
       "abrigoEsfericoTubos",
       "predioSinusoidal",
       "corrimaoCaracol",
+      # Path ORDER varies between runs while the set of paths is identical -- two
+      # independent mints are permutations of the same 2505 paths, so regolding
+      # cannot fix it: any golden written today fails the next run. The real
+      # repair is a stable depth sort in Thebes.jl, as KhepriTikZ now has.
+      "loft_circles",
     ]
     run_visual_tests(thebes,
       golden_dir = joinpath(@__DIR__, "golden"),
