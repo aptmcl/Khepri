@@ -5,10 +5,10 @@
 # REPOSITORY ROOT, so every one of those is dead -- and they all still trigger on
 # `master`, which is no longer the branch.
 #
-# Preserved from the old per-package ci.yml: the ['1.12','nightly'] x
-# windows-latest matrix, buildpkg/runtest/processcoverage/codecov, the
-# `registry-deps` resolution job, the docs job, and cancel-in-progress for PRs
-# only.
+# Preserved from the old per-package ci.yml: the windows-latest test matrix,
+# buildpkg/runtest/processcoverage/codecov, the `registry-deps` resolution job,
+# the docs job, and cancel-in-progress for PRs only. Nightly moved from every push
+# to the weekly schedule -- see the `schedule` trigger.
 #
 # Changed because the monorepo requires it:
 #   * every julia-action is aimed at Julia/<Pkg> through its `project:` input --
@@ -36,6 +36,12 @@ on:
     tags: ['*-v*']
   pull_request:
     branches: [main]
+  # Nightly Julia is exercised on a schedule rather than on every push. It doubled
+  # the job count -- 18 packages x 2 versions = 36 Windows jobs -- for breakage that
+  # is real but rarely urgent, and a feedback loop over an hour long is one people
+  # stop waiting for. A scheduled run has no diff base, so it selects every package.
+  schedule:
+    - cron: '0 3 * * 1'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -52,13 +58,20 @@ jobs:
       packages: ${{ steps.pick.outputs.packages }}
       registered: ${{ steps.pick.outputs.registered }}
       docs: ${{ steps.pick.outputs.docs }}
+      versions: ${{ steps.pick.outputs.versions }}
       any_packages: ${{ steps.pick.outputs.any_packages }}
       any_registered: ${{ steps.pick.outputs.any_registered }}
       any_docs: ${{ steps.pick.outputs.any_docs }}
     steps:
       - uses: actions/checkout@v6
         with:
+          # Full history: the diff against the previous commit is how packages are
+          # selected. Sparse tree: nothing here reads Plugins/ or VSCode/, and not
+          # writing them saves ~687 MB per job. Cone mode keeps all root files.
           fetch-depth: 0
+          sparse-checkout: |
+            Julia
+            .github
 
       - name: Decide which packages this change affects
         id: pick
@@ -84,6 +97,12 @@ jobs:
           else
             git diff --name-only "$BEFORE" "$GITHUB_SHA" | python3 "$sel" --changed | tee -a "$GITHUB_OUTPUT"
           fi
+          # nightly only on the scheduled sweep; see the `schedule` trigger above.
+          if [[ "$EVENT" == "schedule" ]]; then
+            echo 'versions=["1.12","nightly"]' | tee -a "$GITHUB_OUTPUT"
+          else
+            echo 'versions=["1.12"]' | tee -a "$GITHUB_OUTPUT"
+          fi
 
   test:
     name: ${{ matrix.package }} / Julia ${{ matrix.version }}
@@ -99,9 +118,18 @@ jobs:
       fail-fast: false
       matrix:
         package: ${{ fromJSON(needs.select.outputs.packages) }}
-        version: ['1.12', 'nightly']
+        version: ${{ fromJSON(needs.select.outputs.versions) }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Only Julia/ and the helper scripts are read here. Skipping Plugins/ and
+          # VSCode/ avoids writing ~687 MB per job -- on Windows the checkout write
+          # is a large share of the runtime. It does NOT shrink the fetch: `filter`
+          # would, but action.yml says filter overrides sparse-checkout, so the two
+          # cannot be combined.
+          sparse-checkout: |
+            Julia
+            .github
 
       - uses: julia-actions/setup-julia@v3
         with:
@@ -164,6 +192,10 @@ jobs:
         package: ${{ fromJSON(needs.select.outputs.registered) }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            Julia
+            .github
       - uses: julia-actions/setup-julia@v3
         with:
           version: '1'
@@ -179,6 +211,9 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          sparse-checkout: |
+            Julia
+            .github
       - uses: julia-actions/setup-julia@v3
         with:
           version: '1'
@@ -213,6 +248,9 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          sparse-checkout: |
+            Julia
+            .github
       - uses: julia-actions/setup-julia@v3
         with:
           version: '1'
