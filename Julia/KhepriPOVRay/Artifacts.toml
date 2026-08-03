@@ -1,0 +1,7 @@
+[studio_small_05_4k_hdr]
+git-tree-sha1 = "ac9cea2debfaa13d7723888026ada2b77d3e0462"
+lazy = true
+
+    [[studio_small_05_4k_hdr.download]]
+    sha256 = "680f5956e7d495f0e34e4ea12f57149343fdb4c1160162a772e103567ea10924"
+    url = "https://github.com/aptmcl/KhepriAssets/releases/download/assets-v1/studio_small_05_4k_hdr.tar.gz"
