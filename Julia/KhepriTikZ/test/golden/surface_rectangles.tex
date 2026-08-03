@@ -1,0 +1,18 @@
+\documentclass{standalone}
+\usepackage{tikz,tikz-3dplot}
+\usetikzlibrary{perspective,patterns}
+\usetikzlibrary{calc,fadings,decorations.pathreplacing}
+\usetikzlibrary{shapes,fit}
+\usetikzlibrary{hobby}
+\usetikzlibrary{arrows.meta}
+\begin{document}
+\tikzset{illustration/.style={very thin}}
+\tikzset{dimension/.style={very thin,lightgray}}
+\definecolor{s100}{gray}{1.0}
+\begin{tikzpicture}[]
+\fill[s100] (6,0,0)--(8,0,0)--(8,4,0)--cycle;
+\fill[s100] (6,0,0)--(8,4,0)--(6,4,0)--cycle;
+\fill[s100] (0,0,0)--(5,0,0)--(5,3,0)--cycle;
+\fill[s100] (0,0,0)--(5,3,0)--(0,3,0)--cycle;
+\end{tikzpicture}
+\end{document}

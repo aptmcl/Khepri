@@ -1,0 +1,19 @@
+\documentclass{standalone}
+\usepackage{tikz,tikz-3dplot}
+\usetikzlibrary{perspective,patterns}
+\usetikzlibrary{calc,fadings,decorations.pathreplacing}
+\usetikzlibrary{shapes,fit}
+\usetikzlibrary{hobby}
+\usetikzlibrary{arrows.meta}
+\begin{document}
+\tikzset{illustration/.style={very thin}}
+\tikzset{dimension/.style={very thin,lightgray}}
+\begin{tikzpicture}[]
+\draw (4.0,0.0)--(2.5,0.866)--(2.5,-0.866)--cycle;
+\draw (7.0,0.0)--(6.0,1.0)--(5.0,0)--(6.0,-1.0)--cycle;
+\draw (10.0,0.0)--(9.309,0.951)--(8.191,0.588)--(8.191,-0.588)--(9.309,-0.951)--cycle;
+\draw (13.0,0.0)--(12.5,0.866)--(11.5,0.866)--(11.0,0)--(11.5,-0.866)--(12.5,-0.866)--cycle;
+\draw (16.0,0.0)--(15.623,0.782)--(14.777,0.975)--(14.099,0.434)--(14.099,-0.434)--(14.777,-0.975)--(15.623,-0.782)--cycle;
+\draw (19.0,0.0)--(18.707,0.707)--(18.0,1.0)--(17.293,0.707)--(17.0,0)--(17.293,-0.707)--(18.0,-1.0)--(18.707,-0.707)--cycle;
+\end{tikzpicture}
+\end{document}

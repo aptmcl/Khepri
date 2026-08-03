@@ -1,0 +1,19 @@
+\documentclass{standalone}
+\usepackage{tikz,tikz-3dplot}
+\usetikzlibrary{perspective,patterns}
+\usetikzlibrary{calc,fadings,decorations.pathreplacing}
+\usetikzlibrary{shapes,fit}
+\usetikzlibrary{hobby}
+\usetikzlibrary{arrows.meta}
+\begin{document}
+\tikzset{illustration/.style={very thin}}
+\tikzset{dimension/.style={very thin,lightgray}}
+\begin{tikzpicture}[]
+\draw (0.0,0.0)circle(4cm);
+\draw [anchor=base west](5.0,0.0)node[font=\fontfamily{phv}\selectfont,outer sep=0pt,inner sep=0pt,xscale=3.7,yscale=3.7]{Raio: 4};
+\draw (2.828,2.828)circle(2cm);
+\draw [anchor=base west](5.328,2.828)node[font=\fontfamily{phv}\selectfont,outer sep=0pt,inner sep=0pt,xscale=1.85,yscale=1.85]{Raio: 2};
+\draw (4.243,4.243)circle(1cm);
+\draw [anchor=base west](5.493,4.243)node[font=\fontfamily{phv}\selectfont,outer sep=0pt,inner sep=0pt,xscale=0.925,yscale=0.925]{Raio: 1};
+\end{tikzpicture}
+\end{document}
