@@ -29,11 +29,12 @@ ROOT = Path("Julia")
 # registered.
 REGISTERED = {"Khepri", "KhepriAutoCAD", "KhepriBase", "KhepriIllustrator", "KhepriTikZ"}
 
-# KhepriFrame4DD's docs environment depends on KhepriThebes, which is neither in
-# this repository nor in the General registry, so Pkg.instantiate() for it cannot
-# succeed. Excluded from docs builds until that is resolved -- a knowingly-failing
-# job trains people to ignore red.
-DOCS_EXCLUDED = {"KhepriFrame4DD": "docs/Project.toml requires KhepriThebes, which is unregistered"}
+# Packages whose docs cannot be built, mapped to the reason. Keep this empty unless
+# something is genuinely unbuildable: a knowingly-failing job trains people to
+# ignore red. KhepriFrame4DD was listed here while its docs needed KhepriThebes and
+# its library needed Frame4DD, neither of which was in the repository or the
+# registry; both are now imported.
+DOCS_EXCLUDED = {}
 
 
 def packages():
