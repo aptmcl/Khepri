@@ -1,0 +1,39 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.sln.docstates
+
+# Unreal Engine
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+*.sln
+*.VC.db
+*.VC.opendb
+
+# Build files
+Build/
+obj/
+*.pdb
+
+# Plugins binaries and intermediates
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+
+# IDE
+.idea/
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Unreal starter/example content (engine-regenerable)
+Content/
+/Plugins/Khepri/Content/
+
+# Plugin icon resources (not referenced by .uplugin)
+/Plugins/Khepri/Resources/
