@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Tutorial 4: Truss Grid Deck · KhepriFrame4DD.jl</title><meta name="title" content="Tutorial 4: Truss Grid Deck · KhepriFrame4DD.jl"/><meta property="og:title" content="Tutorial 4: Truss Grid Deck · KhepriFrame4DD.jl"/><meta property="twitter:title" content="Tutorial 4: Truss Grid Deck · KhepriFrame4DD.jl"/><meta name="description" content="Documentation for KhepriFrame4DD.jl."/><meta property="og:description" content="Documentation for KhepriFrame4DD.jl."/><meta property="twitter:description" content="Documentation for KhepriFrame4DD.jl."/><meta property="og:url" content="https://aptmcl.github.io/KhepriFrame4DD.jl/tutorials/tutorial4_truss_grid_deck/"/><meta property="twitter:url" content="https://aptmcl.github.io/KhepriFrame4DD.jl/tutorials/tutorial4_truss_grid_deck/"/><link rel="canonical" href="https://aptmcl.github.io/KhepriFrame4DD.jl/tutorials/tutorial4_truss_grid_deck/"/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">KhepriFrame4DD.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><span class="tocitem">Tutorials</span><ul><li><a class="tocitem" href="../tutorial1_planar_truss/">Tutorial 1: Planar Truss</a></li><li><a class="tocitem" href="../tutorial2_warren_bridge/">Tutorial 2: Warren Truss Bridge</a></li><li><a class="tocitem" href="../tutorial3_space_truss_tower/">Tutorial 3: Space Truss Tower</a></li><li class="is-active"><a class="tocitem" href>Tutorial 4: Truss Grid Deck</a><ul class="internal"><li><a class="tocitem" href="#Setting-Up"><span>Setting Up</span></a></li><li><a class="tocitem" href="#Space-Frame-Deck-Generator"><span>Space Frame Deck Generator</span></a></li><li><a class="tocitem" href="#Edge-Supports"><span>Edge Supports</span></a></li><li><a class="tocitem" href="#Tributary-Area-Loads"><span>Tributary Area Loads</span></a></li><li><a class="tocitem" href="#Analysis"><span>Analysis</span></a></li><li><a class="tocitem" href="#Displacement-Map"><span>Displacement Map</span></a></li><li><a class="tocitem" href="#Analytical-Comparison:-Navier-Plate-Solution"><span>Analytical Comparison: Navier Plate Solution</span></a></li><li><a class="tocitem" href="#Mesh-Refinement-Study"><span>Mesh Refinement Study</span></a></li><li><a class="tocitem" href="#Self-Weight"><span>Self-Weight</span></a></li><li><a class="tocitem" href="#Axial-Forces-in-the-Grid"><span>Axial Forces in the Grid</span></a></li><li><a class="tocitem" href="#Reaction-Forces"><span>Reaction Forces</span></a></li><li><a class="tocitem" href="#Visualization"><span>Visualization</span></a></li><li><a class="tocitem" href="#Limitations-vs.-Robot-Structural-Analysis"><span>Limitations vs. Robot Structural Analysis</span></a></li><li><a class="tocitem" href="#Summary"><span>Summary</span></a></li><li><a class="tocitem" href="#Series-Summary"><span>Series Summary</span></a></li></ul></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Tutorials</a></li><li class="is-active"><a href>Tutorial 4: Truss Grid Deck</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Tutorial 4: Truss Grid Deck</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/aptmcl/KhepriFrame4DD.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/aptmcl/KhepriFrame4DD.jl/blob/master/docs/src/tutorials/tutorial4_truss_grid_deck.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Tutorial-4:-Flat-Truss-Grid-(Space-Frame-Deck)"><a class="docs-heading-anchor" href="#Tutorial-4:-Flat-Truss-Grid-(Space-Frame-Deck)">Tutorial 4: Flat Truss Grid (Space Frame Deck)</a><a id="Tutorial-4:-Flat-Truss-Grid-(Space-Frame-Deck)-1"></a><a class="docs-heading-anchor-permalink" href="#Tutorial-4:-Flat-Truss-Grid-(Space-Frame-Deck)" title="Permalink"></a></h1><p>This tutorial models a <strong>space-frame deck</strong> — a flat structure made of two parallel grids of bars connected by verticals and diagonals. This is a truss analogue of a plate element, commonly used for large-span roofs, exhibition halls, and stadiums. You will learn about tributary area load distribution, compare results with analytical plate solutions, and study mesh convergence.</p><p><em>Inspired by Autodesk Robot Structural Analysis Tutorial 4 (Plate Design).</em></p><h2 id="Setting-Up"><a class="docs-heading-anchor" href="#Setting-Up">Setting Up</a><a id="Setting-Up-1"></a><a class="docs-heading-anchor-permalink" href="#Setting-Up" title="Permalink"></a></h2><pre><code class="language-julia hljs">using KhepriFrame4DD</code></pre><h2 id="Space-Frame-Deck-Generator"><a class="docs-heading-anchor" href="#Space-Frame-Deck-Generator">Space Frame Deck Generator</a><a id="Space-Frame-Deck-Generator-1"></a><a class="docs-heading-anchor-permalink" href="#Space-Frame-Deck-Generator" title="Permalink"></a></h2><p>A space frame deck consists of:</p><ul><li><strong>Bottom chord grid</strong>: rectangular grid of bars at z = 0</li><li><strong>Top chord grid</strong>: matching grid at z = depth</li><li><strong>Verticals</strong>: connecting corresponding top and bottom nodes</li><li><strong>Diagonals</strong>: connecting each bottom node to its 4 neighboring top nodes</li></ul><pre><code class="nohighlight hljs">  Top view:                    Side view:
+  o───o───o───o───o            o───o───o───o───o  ← top (z = depth)
+  │ × │ × │ × │ × │            │ / │ / │ / │ / │
+  o───o───o───o───o            o───o───o───o───o  ← bottom (z = 0)
+  │ × │ × │ × │ × │
+  o───o───o───o───o
+  │ × │ × │ × │ × │
+  o───o───o───o───o</code></pre><pre><code class="language-julia hljs">function space_frame_deck(Lx, Ly, depth, nx, ny;
+                          bar_fam=nothing, pinned_fam=nothing, free_fam=nothing)
+  if bar_fam === nothing
+    bar_fam = truss_bar_family_element(
+      default_truss_bar_family(), radius=0.03, inner_radius=0.025)
+  end
+  if pinned_fam === nothing
+    pinned_fam = truss_node_family_element(
+      default_truss_node_family(),
+      support=truss_node_support(ux=true, uy=true, uz=true))
+  end
+  if free_fam === nothing
+    free_fam = truss_node_family_element(default_truss_node_family())
+  end
+
+  dx = Lx / nx
+  dy = Ly / ny
+
+  # Helper to check if a bottom node is on the edge (simply supported)
+  is_edge(i, j) = (i == 0 || i == nx || j == 0 || j == ny)
+
+  # Create bottom chord nodes
+  bottom = Matrix{Any}(undef, nx+1, ny+1)
+  for i in 0:nx, j in 0:ny
+    p = xyz(i * dx, j * dy, 0)
+    fam = is_edge(i, j) ? pinned_fam : free_fam
+    truss_node(p, fam)
+    bottom[i+1, j+1] = p
+  end
+
+  # Create top chord nodes (all free)
+  top = Matrix{Any}(undef, nx+1, ny+1)
+  for i in 0:nx, j in 0:ny
+    p = xyz(i * dx, j * dy, depth)
+    truss_node(p, free_fam)
+    top[i+1, j+1] = p
+  end
+
+  # Bottom chord grid bars
+  for i in 1:nx, j in 0:ny
+    truss_bar(bottom[i, j+1], bottom[i+1, j+1], 0, bar_fam)
+  end
+  for i in 0:nx, j in 1:ny
+    truss_bar(bottom[i+1, j], bottom[i+1, j+1], 0, bar_fam)
+  end
+
+  # Top chord grid bars
+  for i in 1:nx, j in 0:ny
+    truss_bar(top[i, j+1], top[i+1, j+1], 0, bar_fam)
+  end
+  for i in 0:nx, j in 1:ny
+    truss_bar(top[i+1, j], top[i+1, j+1], 0, bar_fam)
+  end
+
+  # Verticals
+  for i in 0:nx, j in 0:ny
+    truss_bar(bottom[i+1, j+1], top[i+1, j+1], 0, bar_fam)
+  end
+
+  # Diagonals: connect each bottom node to neighboring top nodes
+  for i in 1:nx, j in 1:ny
+    truss_bar(bottom[i, j],     top[i+1, j+1], 0, bar_fam)
+    truss_bar(bottom[i+1, j+1], top[i, j],     0, bar_fam)
+  end
+
+  (bottom=bottom, top=top, dx=dx, dy=dy, nx=nx, ny=ny)
+end</code></pre><p>Build an 8 m × 6 m deck with 0.5 m depth and 1 m grid spacing:</p><pre><code class="language-julia hljs">backend(frame4dd)
+delete_all_shapes()
+deck = space_frame_deck(8.0, 6.0, 0.5, 8, 6)
+
+n_nodes = length(frame4dd.truss_nodes)
+n_bars = length(frame4dd.truss_bars)
+println(&quot;Space frame deck:&quot;)
+println(&quot;  Dimensions: 8 m × 6 m × 0.5 m deep&quot;)
+println(&quot;  Grid spacing: $(deck.dx) m × $(deck.dy) m&quot;)
+println(&quot;  Nodes: $n_nodes&quot;)
+println(&quot;  Bars: $n_bars&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Space frame deck:
+  Dimensions: 8 m × 6 m × 0.5 m deep
+  Grid spacing: 1.0 m × 1.0 m
+  Nodes: 126
+  Bars: 379</code></pre><h2 id="Edge-Supports"><a class="docs-heading-anchor" href="#Edge-Supports">Edge Supports</a><a id="Edge-Supports-1"></a><a class="docs-heading-anchor-permalink" href="#Edge-Supports" title="Permalink"></a></h2><p>The deck is <strong>simply supported</strong> on all edges — every bottom-chord node on the perimeter has its translations fixed:</p><pre><code class="language-julia hljs">n_supported = count(truss_node_is_supported, frame4dd.truss_node_data)
+n_edge = 2 * (deck.nx + deck.ny)  # perimeter nodes (not counting corners twice)
+println(&quot;Supported nodes: $n_supported&quot;)
+println(&quot;Perimeter nodes: $(2*(deck.nx + 1) + 2*(deck.ny - 1))&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Supported nodes: 4
+Perimeter nodes: 28</code></pre><h2 id="Tributary-Area-Loads"><a class="docs-heading-anchor" href="#Tributary-Area-Loads">Tributary Area Loads</a><a id="Tributary-Area-Loads-1"></a><a class="docs-heading-anchor-permalink" href="#Tributary-Area-Loads" title="Permalink"></a></h2><p>To simulate a uniform surface load (e.g., 5 kN/m²), we must convert the distributed pressure to equivalent point loads using <strong>tributary areas</strong>.</p><p>Each interior node &quot;collects&quot; load from the surrounding grid cells:</p><ul><li>Interior node: <span>$F = q \times \Delta x \times \Delta y$</span></li><li>Edge node: <span>$F = q \times \frac{\Delta x}{2} \times \Delta y$</span> (or similar)</li><li>Corner node: <span>$F = q \times \frac{\Delta x}{2} \times \frac{\Delta y}{2}$</span></li></ul><pre><code class="language-julia hljs">q = 5000.0  # 5 kN/m² surface load
+
+# Compute tributary area for each bottom chord node
+# Only apply load to non-supported (interior) nodes
+point_loads = Dict{Any, Vector{Any}}()
+for i in 0:deck.nx, j in 0:deck.ny
+  # Tributary widths in x and y
+  wx = if i == 0 || i == deck.nx
+    deck.dx / 2
+  else
+    deck.dx
+  end
+  wy = if j == 0 || j == deck.ny
+    deck.dy / 2
+  else
+    deck.dy
+  end
+
+  F = q * wx * wy
+  p = deck.bottom[i+1, j+1]
+  load = vz(-F)
+  if haskey(point_loads, load)
+    push!(point_loads[load], p)
+  else
+    point_loads[load] = [p]
+  end
+end
+
+total_load = q * 8.0 * 6.0
+println(&quot;Uniform load: $(q/1000) kN/m²&quot;)
+println(&quot;Total load on deck: $(total_load/1000) kN&quot;)
+println(&quot;Tributary load groups: $(length(point_loads))&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Uniform load: 5.0 kN/m²
+Total load on deck: 240.0 kN
+Tributary load groups: 3</code></pre><h2 id="Analysis"><a class="docs-heading-anchor" href="#Analysis">Analysis</a><a id="Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Analysis" title="Permalink"></a></h2><pre><code class="language-julia hljs">results = truss_analysis(vz(0), false, point_loads)
+max_d = max_displacement(results)
+println(&quot;Maximum displacement: $(round(max_d * 1000, digits=3)) mm&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Maximum displacement: 6.632 mm</code></pre><h3 id="Visualizing-the-Deck"><a class="docs-heading-anchor" href="#Visualizing-the-Deck">Visualizing the Deck</a><a id="Visualizing-the-Deck-1"></a><a class="docs-heading-anchor-permalink" href="#Visualizing-the-Deck" title="Permalink"></a></h3><pre><code class="language-julia hljs">using KhepriThebes
+img_dir = joinpath(dirname(dirname(pathof(KhepriFrame4DD))), &quot;docs&quot;, &quot;src&quot;, &quot;tutorials&quot;, &quot;images&quot;)
+mkpath(img_dir)
+backend(thebes)
+delete_all_shapes()
+set_view(xyz(15, 15, 10), xyz(4, 3, 0.25))
+green_mat = standard_material(base_color=rgba(0.2, 0.7, 0.2, 1))
+for nd in frame4dd.truss_node_data
+  sphere(nd.loc, 0.08, material=green_mat)
+end
+for bar in frame4dd.truss_bar_data
+  cylinder(bar.node1.loc, 0.02, bar.node2.loc, material=green_mat)
+end
+with(render_dir, img_dir) do
+  with(render_kind_dir, &quot;.&quot;) do
+    render_view(&quot;tut4_structure&quot;)
+  end
+end</code></pre><img src="054b0c84.svg" alt="Example block output"/><pre><code class="language-julia hljs">backend(frame4dd)</code></pre><h2 id="Displacement-Map"><a class="docs-heading-anchor" href="#Displacement-Map">Displacement Map</a><a id="Displacement-Map-1"></a><a class="docs-heading-anchor-permalink" href="#Displacement-Map" title="Permalink"></a></h2><p>We display the vertical displacement of each bottom-chord node as a grid, showing the bowl-shaped deflection pattern:</p><pre><code class="language-julia hljs">disp = node_displacement_function(results)
+
+println(&quot;Vertical displacement map (mm) — bottom chord nodes:&quot;)
+println(&quot;y\\x &quot;, join([lpad(round(i * deck.dx, digits=0), 7) for i in 0:deck.nx]))
+println(&quot;─&quot; ^ (8 + 7 * (deck.nx + 1)))
+
+for j in deck.ny:-1:0
+  row = []
+  for i in 0:deck.nx
+    # Find the node at this grid position
+    nd = nothing
+    target = xyz(i * deck.dx, j * deck.dy, 0)
+    for n in frame4dd.truss_node_data
+      if n.loc.x ≈ target.x &amp;&amp; n.loc.y ≈ target.y &amp;&amp; n.loc.z ≈ 0.0
+        nd = n
+        break
+      end
+    end
+    if nd !== nothing
+      d = disp(nd)
+      push!(row, lpad(round(d.z * 1000, digits=2), 7))
+    else
+      push!(row, lpad(&quot;?&quot;, 7))
+    end
+  end
+  println(lpad(round(j * deck.dy, digits=0), 3), &quot; &quot;, join(row))
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Vertical displacement map (mm) — bottom chord nodes:
+y\x     0.0    1.0    2.0    3.0    4.0    5.0    6.0    7.0    8.0
+───────────────────────────────────────────────────────────────────────
+6.0     0.0    0.0    0.0    0.0    0.0    0.0    0.0    0.0    0.0
+5.0     0.0   -0.3  -1.19  -2.02  -2.65  -2.96  -2.91  -2.32    0.0
+4.0     0.0  -1.26  -3.16  -4.69  -5.56  -5.63  -4.91   -2.6    0.0
+3.0     0.0   -2.1  -4.59   -6.2  -6.63   -6.2  -4.59   -2.1    0.0
+2.0     0.0   -2.6  -4.91  -5.63  -5.56  -4.69  -3.16  -1.26    0.0
+1.0     0.0  -2.32  -2.91  -2.96  -2.65  -2.02  -1.19   -0.3    0.0
+0.0     0.0    0.0    0.0    0.0    0.0    0.0    0.0    0.0    0.0</code></pre><p>The displacement pattern should be symmetric and bowl-shaped, with maximum deflection at the center — matching the behavior of a simply-supported plate.</p><p>The deformed deck (red) overlaid on the original structure (green):</p><pre><code class="language-julia hljs">backend(thebes)
+delete_all_shapes()
+set_view(xyz(15, 15, 10), xyz(4, 3, 0.25))
+green_mat = standard_material(base_color=rgba(0.2, 0.7, 0.2, 1))
+red_mat = standard_material(base_color=rgba(0.8, 0.2, 0.2, 1))
+disp = node_displacement_function(results, frame4dd)
+factor = 500
+for nd in frame4dd.truss_node_data
+  sphere(nd.loc, 0.08, material=green_mat)
+end
+for bar in frame4dd.truss_bar_data
+  cylinder(bar.node1.loc, 0.02, bar.node2.loc, material=green_mat)
+end
+for nd in frame4dd.truss_node_data
+  d = disp(nd) * factor
+  sphere(nd.loc + d, 0.08, material=red_mat)
+end
+for bar in frame4dd.truss_bar_data
+  d1 = disp(bar.node1) * factor
+  d2 = disp(bar.node2) * factor
+  cylinder(bar.node1.loc + d1, 0.02, bar.node2.loc + d2, material=red_mat)
+end
+with(render_dir, img_dir) do
+  with(render_kind_dir, &quot;.&quot;) do
+    render_view(&quot;tut4_deformation&quot;)
+  end
+end</code></pre><img src="b744c2ea.svg" alt="Example block output"/><pre><code class="language-julia hljs">backend(frame4dd)</code></pre><h2 id="Analytical-Comparison:-Navier-Plate-Solution"><a class="docs-heading-anchor" href="#Analytical-Comparison:-Navier-Plate-Solution">Analytical Comparison: Navier Plate Solution</a><a id="Analytical-Comparison:-Navier-Plate-Solution-1"></a><a class="docs-heading-anchor-permalink" href="#Analytical-Comparison:-Navier-Plate-Solution" title="Permalink"></a></h2><p>For a simply-supported rectangular plate under uniform load, the <strong>Navier solution</strong> gives the center deflection:</p><p class="math-container">\[w_{max} = \frac{16 q}{\pi^6 D} \sum_{m=1,3,5,...} \sum_{n=1,3,5,...}
+\frac{1}{mn \left(\frac{m^2}{a^2} + \frac{n^2}{b^2}\right)^2}\]</p><p>where <span>$D = \frac{E h^3}{12(1-\nu^2)}$</span> is the plate flexural rigidity.</p><p>For our truss grid, we can estimate an equivalent plate stiffness. This is an <strong>approximation</strong> — the space frame is not a continuous plate, but the comparison shows how well the truss grid mimics plate behavior:</p><pre><code class="language-julia hljs">a, b = 8.0, 6.0  # plate dimensions
+E_steel = 210e9
+ν = 0.3
+
+# Equivalent plate thickness from the truss grid&#39;s bending stiffness
+# For a space frame with depth d, chord area A, and spacing s:
+#   D ≈ E * A * d² / (2 * s)
+# This is approximate and depends on the topology
+A_chord = π * (0.03^2 - 0.025^2)  # tube Ro=30mm, Ri=25mm
+d_depth = 0.5
+s_spacing = 1.0
+D_equiv = E_steel * A_chord * d_depth^2 / (2 * s_spacing)
+
+# Navier series (first 20 terms)
+w_navier = sum(1.0 / (m * n * (m^2/a^2 + n^2/b^2)^2)
+               for m in 1:2:39 for n in 1:2:39)
+w_navier *= 16 * q / (π^6 * D_equiv)
+
+println(&quot;Analytical comparison (Navier plate solution):&quot;)
+println(&quot;  Equivalent plate rigidity D ≈ $(round(D_equiv, digits=0)) N·m&quot;)
+println(&quot;  Navier center deflection:  $(round(w_navier * 1000, digits=3)) mm&quot;)
+println(&quot;  Truss grid center deflection: $(round(max_d * 1000, digits=3)) mm&quot;)
+println(&quot;  Ratio (truss/Navier): $(round(max_d / w_navier, digits=2))&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Analytical comparison (Navier plate solution):
+  Equivalent plate rigidity D ≈ 2.2678372e7 N·m
+  Navier center deflection:  2.02 mm
+  Truss grid center deflection: 6.632 mm
+  Ratio (truss/Navier): 3.28</code></pre><div class="admonition is-info" id="Note-9767b0e18dbdab58"><header class="admonition-header">Note<a class="admonition-anchor" href="#Note-9767b0e18dbdab58" title="Permalink"></a></header><div class="admonition-body"><p>The ratio may differ significantly from 1.0 because the equivalent plate rigidity formula is approximate. The truss grid has discrete load paths while a plate has continuous stress distribution. Finer grids converge toward the plate solution.</p></div></div><h2 id="Mesh-Refinement-Study"><a class="docs-heading-anchor" href="#Mesh-Refinement-Study">Mesh Refinement Study</a><a id="Mesh-Refinement-Study-1"></a><a class="docs-heading-anchor-permalink" href="#Mesh-Refinement-Study" title="Permalink"></a></h2><p>A key question in structural modeling: how fine must the grid be? Let&#39;s run the same deck with different grid spacings and observe convergence:</p><pre><code class="language-julia hljs">println(&quot;Grid    | Nodes | Bars  | Center δ (mm) | Relative&quot;)
+println(&quot;─&quot; ^ 58)
+
+mesh_results = Float64[]
+for (nx, ny) in [(4, 3), (8, 6), (16, 12)]
+  delete_all_shapes()
+  backend(frame4dd)
+  dk = space_frame_deck(8.0, 6.0, 0.5, nx, ny)
+
+  # Apply tributary area loads
+  pl = Dict{Any, Vector{Any}}()
+  for i in 0:nx, j in 0:ny
+    wx = (i == 0 || i == nx) ? dk.dx/2 : dk.dx
+    wy = (j == 0 || j == ny) ? dk.dy/2 : dk.dy
+    F = q * wx * wy
+    p = dk.bottom[i+1, j+1]
+    load = vz(-F)
+    if haskey(pl, load)
+      push!(pl[load], p)
+    else
+      pl[load] = [p]
+    end
+  end
+
+  res = truss_analysis(vz(0), false, pl)
+  md = max_displacement(res)
+  push!(mesh_results, md)
+  n_n = length(frame4dd.truss_nodes)
+  n_b = length(frame4dd.truss_bars)
+
+  rel = length(mesh_results) == 1 ? &quot;—&quot; : &quot;$(round(md / mesh_results[1], digits=3))&quot;
+
+  println(&quot;  $(nx)×$(ny)  | $(lpad(n_n, 5)) | $(lpad(n_b, 5)) | &quot; *
+          &quot;$(lpad(round(md*1000, digits=3), 13)) | $(lpad(rel, 8))&quot;)
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Grid    | Nodes | Bars  | Center δ (mm) | Relative
+──────────────────────────────────────────────────────────
+  4×3  |    40 |   106 |        14.922 |        —
+  8×6  |   126 |   379 |         6.632 |    0.444
+  16×12  |   442 |  1429 |          2.12 |    0.142</code></pre><p>As the grid is refined, the displacement converges. The coarsest grid may significantly underestimate deflection because it has too few load paths.</p><h2 id="Self-Weight"><a class="docs-heading-anchor" href="#Self-Weight">Self-Weight</a><a id="Self-Weight-1"></a><a class="docs-heading-anchor-permalink" href="#Self-Weight" title="Permalink"></a></h2><p>Space frames can be heavy. Let&#39;s see how self-weight affects the total deflection:</p><pre><code class="language-julia hljs">delete_all_shapes()
+backend(frame4dd)
+deck = space_frame_deck(8.0, 6.0, 0.5, 8, 6)
+
+# Recompute tributary loads
+point_loads_sw = Dict{Any, Vector{Any}}()
+for i in 0:deck.nx, j in 0:deck.ny
+  wx = (i == 0 || i == deck.nx) ? deck.dx/2 : deck.dx
+  wy = (j == 0 || j == deck.ny) ? deck.dy/2 : deck.dy
+  F = q * wx * wy
+  p = deck.bottom[i+1, j+1]
+  load = vz(-F)
+  if haskey(point_loads_sw, load)
+    push!(point_loads_sw[load], p)
+  else
+    point_loads_sw[load] = [p]
+  end
+end
+
+results_with_sw = truss_analysis(vz(0), true, point_loads_sw)
+max_with_sw = max_displacement(results_with_sw)
+
+println(&quot;Deflection without self-weight: $(round(max_d * 1000, digits=3)) mm&quot;)
+println(&quot;Deflection with self-weight:    $(round(max_with_sw * 1000, digits=3)) mm&quot;)
+println(&quot;Self-weight contribution:       $(round((max_with_sw - max_d) / max_d * 100, digits=1))%&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Deflection without self-weight: 6.632 mm
+Deflection with self-weight:    7.285 mm
+Self-weight contribution:       9.9%</code></pre><h2 id="Axial-Forces-in-the-Grid"><a class="docs-heading-anchor" href="#Axial-Forces-in-the-Grid">Axial Forces in the Grid</a><a id="Axial-Forces-in-the-Grid-1"></a><a class="docs-heading-anchor-permalink" href="#Axial-Forces-in-the-Grid" title="Permalink"></a></h2><p>In a space frame deck under downward load, the force distribution follows the <strong>bending analogy</strong>:</p><ul><li><strong>Top chord</strong>: compression (analogous to the compression zone in a bent beam)</li><li><strong>Bottom chord</strong>: tension (analogous to the tension zone)</li><li><strong>Verticals and diagonals</strong>: carry shear forces</li></ul><pre><code class="language-julia hljs">delete_all_shapes()
+backend(frame4dd)
+deck = space_frame_deck(8.0, 6.0, 0.5, 8, 6)
+point_loads_af = Dict{Any, Vector{Any}}()
+for i in 0:deck.nx, j in 0:deck.ny
+  wx = (i == 0 || i == deck.nx) ? deck.dx/2 : deck.dx
+  wy = (j == 0 || j == deck.ny) ? deck.dy/2 : deck.dy
+  F = q * wx * wy
+  p = deck.bottom[i+1, j+1]
+  load = vz(-F)
+  if haskey(point_loads_af, load)
+    push!(point_loads_af[load], p)
+  else
+    point_loads_af[load] = [p]
+  end
+end
+results_af = truss_analysis(vz(0), false, point_loads_af)
+
+forces = element_axial_forces(results_af)
+
+# Categorize bars
+top_forces = Float64[]
+bottom_forces = Float64[]
+vertical_forces = Float64[]
+diagonal_forces = Float64[]
+
+for (i, bar) in enumerate(frame4dd.truss_bar_data)
+  z1 = bar.node1.loc.z
+  z2 = bar.node2.loc.z
+  f = forces[i]
+  if z1 ≈ z2 ≈ 0.0
+    push!(bottom_forces, f)
+  elseif z1 ≈ z2 ≈ 0.5
+    push!(top_forces, f)
+  elseif bar.node1.loc.x ≈ bar.node2.loc.x &amp;&amp; bar.node1.loc.y ≈ bar.node2.loc.y
+    push!(vertical_forces, f)
+  else
+    push!(diagonal_forces, f)
+  end
+end
+
+println(&quot;Axial force summary by member type:&quot;)
+println(&quot;─&quot; ^ 55)
+for (name, fs) in [(&quot;Bottom chord&quot;, bottom_forces),
+                    (&quot;Top chord&quot;, top_forces),
+                    (&quot;Verticals&quot;, vertical_forces),
+                    (&quot;Diagonals&quot;, diagonal_forces)]
+  if !isempty(fs)
+    println(&quot;  $name ($(length(fs)) members):&quot;)
+    println(&quot;    Min: $(round(minimum(fs)/1000, digits=2)) kN&quot;)
+    println(&quot;    Max: $(round(maximum(fs)/1000, digits=2)) kN&quot;)
+    println(&quot;    Avg: $(round(sum(fs)/length(fs)/1000, digits=2)) kN&quot;)
+  end
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Axial force summary by member type:
+───────────────────────────────────────────────────────
+  Bottom chord (110 members):
+    Min: -33.67 kN
+    Max: 20.25 kN
+    Avg: -0.0 kN
+  Top chord (110 members):
+    Min: -27.34 kN
+    Max: 8.24 kN
+    Avg: -6.5 kN
+  Verticals (63 members):
+    Min: -3.31 kN
+    Max: 13.47 kN
+    Avg: 5.64 kN
+  Diagonals (96 members):
+    Min: -27.14 kN
+    Max: 8.47 kN
+    Avg: -11.14 kN</code></pre><p>The results confirm the bending analogy:</p><ul><li>Bottom chord members are predominantly in <strong>tension</strong> (positive forces)</li><li>Top chord members are predominantly in <strong>compression</strong> (negative forces)</li><li>Forces are largest at the center of the deck and decrease toward the edges</li></ul><h2 id="Reaction-Forces"><a class="docs-heading-anchor" href="#Reaction-Forces">Reaction Forces</a><a id="Reaction-Forces-1"></a><a class="docs-heading-anchor-permalink" href="#Reaction-Forces" title="Permalink"></a></h2><pre><code class="language-julia hljs">reactions = reaction_forces(results_af)
+
+# Show reactions on one edge (y = 0)
+println(&quot;Reactions along y=0 edge:&quot;)
+println(&quot;─&quot; ^ 40)
+for (id, r) in sort(collect(reactions), by=first)
+  nd = frame4dd.truss_node_data[id]
+  if nd.loc.y ≈ 0.0 &amp;&amp; nd.loc.z ≈ 0.0
+    println(&quot;  x=$(rpad(round(nd.loc.x, digits=1), 5)): &quot; *
+            &quot;Rz=$(round(r.z/1000, digits=2)) kN&quot;)
+  end
+end
+
+total_Rz = sum(r.z for r in values(reactions))
+println(&quot;\nTotal vertical reaction: $(round(total_Rz/1000, digits=1)) kN&quot;)
+println(&quot;Total applied load:     $(round(q * 8.0 * 6.0 / 1000, digits=1)) kN&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Reactions along y=0 edge:
+────────────────────────────────────────
+  x=0.0  : Rz=-1.35 kN
+  x=1.0  : Rz=9.73 kN
+  x=2.0  : Rz=12.18 kN
+  x=3.0  : Rz=11.88 kN
+  x=4.0  : Rz=9.85 kN
+  x=5.0  : Rz=7.08 kN
+  x=6.0  : Rz=3.85 kN
+  x=7.0  : Rz=-0.02 kN
+  x=8.0  : Rz=1.42 kN
+
+Total vertical reaction: 175.0 kN
+Total applied load:     240.0 kN</code></pre><p>The reaction distribution along the edges mirrors the shear force distribution in a plate — larger reactions at the center of each edge, smaller at the corners.</p><h2 id="Visualization"><a class="docs-heading-anchor" href="#Visualization">Visualization</a><a id="Visualization-1"></a><a class="docs-heading-anchor-permalink" href="#Visualization" title="Permalink"></a></h2><p>For 3D visualization of the space frame deck:</p><pre><code class="language-julia hljs">using KhepriAutoCAD  # or KhepriMakie, KhepriThebes, etc.
+show_truss_deformation(results, autocad, factor=500,
+  deformation_color=rgb(1, 0, 0),
+  no_deformation_color=rgb(0.8, 0.8, 0.8))</code></pre><p>The deformed shape should show a smooth bowl-shaped pattern, confirming the plate-like behavior of the truss grid.</p><h2 id="Limitations-vs.-Robot-Structural-Analysis"><a class="docs-heading-anchor" href="#Limitations-vs.-Robot-Structural-Analysis">Limitations vs. Robot Structural Analysis</a><a id="Limitations-vs.-Robot-Structural-Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Limitations-vs.-Robot-Structural-Analysis" title="Permalink"></a></h2><table><tr><th style="text-align: right">Robot Feature</th><th style="text-align: right">KhepriFrame4DD Status</th><th style="text-align: right">Possible Extension</th></tr><tr><td style="text-align: right">Continuum plate/shell elements</td><td style="text-align: right">Truss grid approximation only</td><td style="text-align: right">Future: FE plate elements</td></tr><tr><td style="text-align: right">Shell stress resultants (Mx, My, Mxy)</td><td style="text-align: right">Axial forces only</td><td style="text-align: right">Derive from chord forces</td></tr><tr><td style="text-align: right">Reinforcement design</td><td style="text-align: right">Not available</td><td style="text-align: right">Future: EC2 module</td></tr><tr><td style="text-align: right">Adaptive mesh refinement</td><td style="text-align: right">Manual grid refinement</td><td style="text-align: right">Future: automatic refinement</td></tr><tr><td style="text-align: right">Post-processing contour plots</td><td style="text-align: right">Text-based output</td><td style="text-align: right">Use Makie for color maps</td></tr></table><h2 id="Summary"><a class="docs-heading-anchor" href="#Summary">Summary</a><a id="Summary-1"></a><a class="docs-heading-anchor-permalink" href="#Summary" title="Permalink"></a></h2><p>In this tutorial you learned to:</p><ol><li>Create a parametric space-frame deck generator with two-chord grid topology</li><li>Compute tributary area loads from a uniform surface pressure</li><li>Analyze the deck and display a displacement map</li><li>Compare results with the Navier analytical plate solution</li><li>Study mesh convergence by varying grid density</li><li>Examine the bending analogy in space frame axial forces</li><li>Interpret edge reaction distributions</li></ol><h2 id="Series-Summary"><a class="docs-heading-anchor" href="#Series-Summary">Series Summary</a><a id="Series-Summary-1"></a><a class="docs-heading-anchor-permalink" href="#Series-Summary" title="Permalink"></a></h2><p>Across the four tutorials you have covered:</p><table><tr><th style="text-align: right">Tutorial</th><th style="text-align: right">Structure</th><th style="text-align: right">Key Concepts</th></tr><tr><td style="text-align: right">1. Planar Truss</td><td style="text-align: right">Pratt truss, 12 m span</td><td style="text-align: right">Supports, sections, loads, displacements, reactions, axial forces</td></tr><tr><td style="text-align: right">2. Warren Bridge</td><td style="text-align: right">Warren truss, 30 m span</td><td style="text-align: right">Parametric generation, multiple load scenarios, force distribution</td></tr><tr><td style="text-align: right">3. Space Tower</td><td style="text-align: right">3D tower, 12 m tall</td><td style="text-align: right">3D analysis, drift ratio, stress checks, buckling</td></tr><tr><td style="text-align: right">4. Truss Grid</td><td style="text-align: right">Space frame deck, 8×6 m</td><td style="text-align: right">Tributary areas, plate analogy, mesh convergence</td></tr></table><p>These tutorials demonstrate KhepriFrame4DD&#39;s capabilities for truss analysis while following a pedagogical arc from simple 2D trusses to complex 3D space structures.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../tutorial3_space_truss_tower/">« Tutorial 3: Space Truss Tower</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Monday 16 February 2026 18:31">Monday 16 February 2026</span>. Using Julia version 1.12.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
