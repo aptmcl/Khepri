@@ -16,6 +16,6 @@ test_cell(p=u0(), l=8, d=6, h=3, t=0.03, w2wr=0.9;
       end
     end
     with_roof_family(thickness=roof_thickness) do
-      roof(path, level=h)
+      roof(path, level=height)
     end
   end

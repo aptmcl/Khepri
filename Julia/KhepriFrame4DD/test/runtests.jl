@@ -1,6 +1,7 @@
 using KhepriFrame4DD
 using KhepriBase
-using KhepriBase: truss_node_family_element, truss_bar_family_element
+using KhepriBase: truss_node_family_element, truss_bar_family_element,
+  family_ref, truss_bar_family_cross_section_area
 using Test
 
 @testset "KhepriFrame4DD.jl" begin
@@ -355,4 +356,87 @@ using Test
     @test max_small > max_large
   end
 
+  @testset "Mixed bar families in one truss" begin
+    # Regression: all user bar families used to share ONE mutable backend family
+    # (b_get_family_ref assigned into the registered template's geometry Ref), so a
+    # truss mixing two bar families was analysed with whichever section realized last.
+    fixed = truss_node_family_element(
+      default_truss_node_family(),
+      support=truss_node_support(ux=true, uy=true, uz=true, rx=true, ry=true, rz=true))
+    pinned = truss_node_family_element(
+      default_truss_node_family(),
+      support=truss_node_support(ux=true, uy=true, uz=true))
+    free = truss_node_family_element(default_truss_node_family())
+
+    new_chord() = truss_bar_family_element(
+      default_truss_bar_family(), radius=0.05, inner_radius=0.04)
+    new_diag() = truss_bar_family_element(
+      default_truss_bar_family(), radius=0.02, inner_radius=0.015)
+
+    # Triangle with an interleaved bar order (diag, chord, diag): under the aliased
+    # behavior the third bar read the shared geometry Ref, still holding the chord's
+    # section, so it was analysed as a chord.
+    analyzed_triangle(fam1, fam2, fam3) =
+      begin
+        delete_all_shapes()
+        backend(frame4dd)
+        truss_node(xyz(0, 0, 0), fixed)
+        truss_node(xyz(5, 0, 0), pinned)
+        truss_node(xyz(2.5, 0, 3), free)
+        truss_bar(xyz(0, 0, 0), xyz(2.5, 0, 3), 0, fam1)
+        truss_bar(xyz(0, 0, 0), xyz(5, 0, 0), 0, fam2)
+        truss_bar(xyz(5, 0, 0), xyz(2.5, 0, 3), 0, fam3)
+        max_displacement(truss_analysis(vz(-10000)))
+      end
+
+    chord_fam = new_chord()
+    diag_fam = new_diag()
+    mixed = analyzed_triangle(diag_fam, chord_fam, diag_fam)
+    @test mixed > 0
+
+    # Each user family must own its backend family with its own section
+    chord_ref = family_ref(frame4dd, chord_fam)
+    diag_ref = family_ref(frame4dd, diag_fam)
+    @test chord_ref !== diag_ref
+    @test truss_bar_family_cross_section_area(chord_ref) ≈ π*(0.05^2 - 0.04^2) atol=1e-12
+    @test truss_bar_family_cross_section_area(diag_ref) ≈ π*(0.02^2 - 0.015^2) atol=1e-12
+
+    # A unique fresh family per bar is immune to aliasing (every bar realizes its own
+    # family and the section is read eagerly), so this is the correct reference result.
+    expected = analyzed_triangle(new_diag(), new_chord(), new_diag())
+    @test mixed ≈ expected rtol=1e-9
+
+    # The aliased behavior analysed the mixed truss as (diag, chord, chord);
+    # build that truss for real and require the mixed result to differ from it.
+    aliased = analyzed_triangle(new_diag(), new_chord(), new_chord())
+    @test aliased > 0
+    @test !isapprox(mixed, aliased, rtol=1e-6)
+  end
+
+  @testset "Frontend view operations" begin
+    delete_all_shapes()
+    backend(frame4dd)
+
+    @test (set_view(xyz(10, 10, 10), xyz(0, 0, 0)); true)
+    let (camera, target, lens) = get_view()
+      @test camera.x ≈ 10 && camera.y ≈ 10 && camera.z ≈ 10
+      @test target.x ≈ 0 && target.y ≈ 0 && target.z ≈ 0
+      @test lens == 50
+    end
+    @test (zoom_extents(); true)
+  end
+
+end
+
+
+# Guard against silently-dead b_* methods: every hook method this backend
+# defines must have a positional arity KhepriBase actually dispatches -- see
+# BackendHookConformanceTests.jl's header for the shipped bugs that motivated
+# this (4-arg table/chair trio, 7-arg Blender spotlight, 9-slot Measure sky).
+@testset "Hook arity conformance" begin
+  using KhepriBase
+  include(joinpath(dirname(pathof(KhepriBase)), "..", "test",
+                   "BackendHookConformanceTests.jl"))
+  using .BackendHookConformanceTests
+  run_hook_conformance(KhepriFrame4DD)
 end

@@ -7,7 +7,6 @@ export frame4dd,
   realized::Parameter{Bool}=Parameter(false)
   truss_nodes::Vector{<:TrussNode}=TrussNode[]
   truss_bars::Vector{<:TrussBar}=TrussBar[]
-  shapes::Vector{<:Shape}=Shape[]
   truss_node_data::Vector{TrussNodeData}=TrussNodeData[]
   truss_bar_data::Vector{TrussBarData}=TrussBarData[]
   view::View=default_view()
@@ -24,6 +23,9 @@ void_ref(b::FR4DD) = -1
 const frame4dd = FR4DD()
 
 KhepriBase.backend_name(b::FR4DD) = "Frame4DD"
+
+# View state lives in the backend's own `view` field
+KhepriBase.view_type(::Type{<:Frame4DDBackend}) = FrontendView()
 
 # Frame4DD needs to merge nodes and bars
 save_shape!(b::FR4DD, s::TrussNode) = maybe_merged_node(b, s)
@@ -85,11 +87,13 @@ frame4dd_circular_tube_truss_bar_geometry(rₒ, e) =
       Izz=Ixxyy)
   end
 
+# Return a fresh backend family per user family: `tbf` is the registered template,
+# shared by every user family based on it — mutating its geometry Ref would alias
+# all bar sections to whichever family realized last.
 b_get_family_ref(b::FR4DD, f::TrussBarFamily, tbf::Frame4DDTrussBarFamily) =
-  begin
-    tbf.geometry[] = frame4dd_circular_tube_truss_bar_geometry(f.radius, f.radius-f.inner_radius)
-    tbf
-  end
+  Frame4DDTrussBarFamily(
+    geometry=Ref{Any}(frame4dd_circular_tube_truss_bar_geometry(f.radius, f.radius-f.inner_radius)),
+    E=tbf.E, G=tbf.G, p=tbf.p, d=tbf.d)
 
 KhepriBase.b_delete_all_shape_refs(b::FR4DD) =
   begin
@@ -98,15 +102,6 @@ KhepriBase.b_delete_all_shape_refs(b::FR4DD) =
     b.realized(false)
     b
   end
-
-realize(b::FR4DD, s::TrussNode) =
-  error("BUM")
-
-realize(b::FR4DD, s::TrussBar) =
-  error("BUM")
-
-realize(b::FR4DD, s::Panel) =
-  error("BUM")
 
 # Core analysis function — builds a Frame4DD.Model and solves it directly
 KhepriBase.b_truss_analysis(b::FR4DD, load::Vec, self_weight::Bool, point_loads::Dict) =
