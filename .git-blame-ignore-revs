@@ -1,0 +1,22 @@
+# Revisions ignored by `git blame`.
+#
+# GitHub only honours this file at the repository root, so the per-package
+# Julia/*/.git-blame-ignore-revs copies are kept for local use and aggregated
+# here. SHAs are the post-import ones: the monorepo migration rewrote every
+# commit, so the originals recorded in the source repos no longer resolve.
+#
+# One-time line-ending normalization (mechanical, no content change)
+bdfc133bdf8bfb047a8b5d8944ed0ca158a8dc0f  # Julia/Khepri
+4058df18930a6f55142c4ea21b433ff6e8728bfa  # Julia/KhepriAutoCAD
+680c9531df39cbf3d4168d4038c6e218cc82c4c1  # Julia/KhepriBase
+2ad75bec544689e48692b6df0256c37bce4f574c  # Julia/KhepriBlender
+ff5b4a913986cc7c9135ba24d8097489dc2cabb3  # Julia/KhepriFrame4DD
+303316094b21d715610e7fb0d6bd2f9090221373  # Julia/KhepriGrasshopper
+c050bb08bb8773befb30df183285a69abadde995  # Julia/KhepriLibrary
+2c6b3c4cc910b3b2bb22ba0691a889e97b3ff0db  # Julia/KhepriPOVRay
+5f365e8e27d90644dd4558c3f987c05c6787edfa  # Julia/KhepriRevit
+43ff63a6c6d7519698d8c2676a36f7bde751c75f  # Julia/KhepriRhino
+81a3498a6f41fe0da2a2fdb6eae06fda40e70153  # Julia/KhepriThreejs
+0d8b3a5bc37bd182c58a5ca98fead34dddff22e0  # Julia/KhepriTikZ
+bab3fdff8d5adb3430f0e04a7b5f45be4c2eb5d7  # Julia/KhepriUnity
+7930216bc6bd84422170f68c086cc639c699d2f6  # Julia/KhepriUnreal
