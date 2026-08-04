@@ -16,6 +16,6 @@
 *.svg
 *.png
 *.pdf
+*.tex
 !assets/**
 !test/golden/**
-*.tex
