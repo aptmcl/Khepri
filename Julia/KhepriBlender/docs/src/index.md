@@ -20,7 +20,7 @@ KhepriBlender is a **SocketBackend** using the `:PY` (Python) binary protocol. J
 - **BlenderKit materials**: Integration with Blender's material add-on via `blender_family_materials()`
 - **Headless mode**: Batch processing when `headless_blender()` is enabled
 - **HDRI environments**: Environment map support for realistic lighting
-- **SVG export**: Freestyle-based vector output via `render_svg()`
+- **SVG export**: Freestyle-based vector output via the `:technical`/`:pen`/`:sketchy`/`:wireframe` visual styles
 - **Auto-launch**: `start_blender()` can locate and launch Blender automatically
 
 ## Setup

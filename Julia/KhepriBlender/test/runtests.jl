@@ -136,3 +136,16 @@ using Test
     end
   end
 end
+
+
+# Guard against silently-dead b_* methods: every hook method this backend
+# defines must have a positional arity KhepriBase actually dispatches -- see
+# BackendHookConformanceTests.jl's header for the shipped bugs that motivated
+# this (4-arg table/chair trio, 7-arg Blender spotlight, 9-slot Measure sky).
+@testset "Hook arity conformance" begin
+  using KhepriBase
+  include(joinpath(dirname(pathof(KhepriBase)), "..", "test",
+                   "BackendHookConformanceTests.jl"))
+  using .BackendHookConformanceTests
+  run_hook_conformance(KhepriBlender)
+end

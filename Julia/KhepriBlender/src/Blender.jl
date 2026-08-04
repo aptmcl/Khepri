@@ -546,8 +546,11 @@ KhepriBase.b_pointlight(b::BLR, loc, energy, color) =
 KhepriBase.b_arealight(b::BLR, loc, dir, size, energy, color) =
   @remote(b, arealight(loc, dir, size, energy, color))
 
-KhepriBase.b_spotlight(b::BLR, loc, dir, hotspot, falloff, energy, color) =
-  @remote(b, spotlight(loc, dir, hotspot, falloff, energy, color))
+# The contract carries no energy/color: fix them at 1 kW white (b_ieslight's
+# default). Blender wants (outer angle, blend fraction), so size = falloff and
+# blend = the softened fraction of the cone between hotspot and falloff.
+KhepriBase.b_spotlight(b::BLR, loc, dir, hotspot, falloff) =
+  @remote(b, spotlight(loc, dir, falloff, clamp(1 - hotspot/falloff, 0.0, 1.0), 1000.0, rgb(1, 1, 1)))
 
 KhepriBase.b_ieslight(b::BLR, file, loc, dir, alpha, beta, gamma) =
   @remote(b, ieslight(loc, dir, file, 1000.0))
@@ -645,8 +648,7 @@ KhepriBase.b_view_settings(b::BLR;
   elseif renderer == :clay
     @remote(b, clay_renderer(samples, denoising, motion_blur, transparent))
   elseif renderer == :freestyle
-    # For Freestyle via view_settings, use modest defaults; full control stays
-    # on the explicit render_svg(...) function.
+    # Modest defaults: thickness, crease_angle, sphere_radius, kr_derivative_epsilon.
     @remote(b, freestylesvg_renderer(1.0, 0.0, 1.0, 1e-6))
   elseif renderer == :default
     @remote(b, default_renderer())
@@ -798,12 +800,6 @@ KhepriBase.b_shot_view(b::BLR, path::String) =
 
 KhepriBase.b_shot_view(b::BLR, path::String, opts::RenderViewOptions) =
   b_render_and_save_view(b, path, opts)
-
-export render_svg
-render_svg(b::BLR, path) =
-  with_render_setup(b, path) do
-    @remote(b, freestylesvg_renderer(1.0, 0.0))
-  end
 
 #=
 render_size(1920,1080)

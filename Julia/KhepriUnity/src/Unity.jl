@@ -218,8 +218,8 @@ KhepriBase.has_boolean_ops(::Type{<:Unity}) = HasBooleanOps{false}()
 #
 # Primitives
 
-KhepriBase.b_point(b::Unity, p, mat) = (println("Creating point $p with material $mat");
-  b_sphere(b, p, 0.01, mat))
+KhepriBase.b_point(b::Unity, p, mat) =
+  b_sphere(b, p, 0.01, mat)
 
 KhepriBase.b_line(b::Unity, ps, mat) =
   @remote(b, Line(ps, mat))
@@ -433,10 +433,6 @@ KhepriBase.b_subtract_ref(b::Unity, s, r) =
       @remote(b, DeleteMany([s, r]))
       result
     end
-realize(b::Unity, s::Slice) =
-  slice_ref(b, ref(b, s.shape), s.p, s.n)
-
-
 realize(b::Unity, s::Move) =
   let r = map_ref(b, s.shape) do r
             @remote(b, Move(r, s.v))
@@ -540,25 +536,12 @@ set_backend_family(default_panel_family(), unity, unity_material_family("Default
 set_backend_family(default_truss_node_family(), unity, unity_material_family("Default/Materials/Steel"))
 set_backend_family(default_truss_bar_family(), unity, unity_material_family("Default/Materials/Steel"))
 =#
-set_backend_family(default_table_family(), unity, unity_resource_family("Default/Prefabs/Table"))
-set_backend_family(default_chair_family(), unity, unity_resource_family("Default/Prefabs/Chair"))
-set_backend_family(default_table_chair_family(), unity, unity_resource_family("Default/Prefabs/TableChair"))
-
 #=
 set_backend_family(default_curtain_wall_family().panel, unity, unity_material_family("Default/Materials/Glass"))
 set_backend_family(default_curtain_wall_family().boundary_frame, unity, unity_material_family("Default/Materials/Steel"))
 set_backend_family(default_curtain_wall_family().transom_frame, unity, unity_material_family("Default/Materials/Steel"))
 set_backend_family(default_curtain_wall_family().mullion_frame, unity, unity_material_family("Default/Materials/Steel"))
 =#
-
-KhepriBase.b_table(b::Unity, c, angle, family) =
-    @remote(b, InstantiateBIMElement(family_ref(b, family), c, -angle))
-
-KhepriBase.b_chair(b::Unity, c, angle, family) =
-    @remote(b, InstantiateBIMElement(family_ref(b, family), c, -angle))
-
-KhepriBase.b_table_and_chairs(b::Unity, c, angle, family) =
-    @remote(b, InstantiateBIMElement(family_ref(b, family), c, -angle))
 
 ############################################
 
@@ -747,14 +730,11 @@ supplied no render hook at all and `render_view` fell through to the default
 default hook does, so the screenshot lands where the frontend expects it.
 =#
 KhepriBase.b_render_view(b::Unity, name, opts::RenderViewOptions=RenderViewOptions()) =
-    let c = connection(b),
-        path = prepare_for_saving_file(b_render_pathname(b, name))
-      @remote(b, SetResolution(render_width(), render_height()))
-      interrupt_processing(c)
-      @remote(b, ScreenShot(path))
-      interrupt_processing(c)
-      path
-    end
+  let path = prepare_for_saving_file(b_render_pathname(b, name))
+    @remote(b, SetResolution(render_width(), render_height()))
+    @remote(b, ScreenShot(path))
+    path
+  end
 
 KhepriBase.b_highlight_refs(b::Unity, rs::Vector{UnityId}) =
   @remote(b, SelectGameObjects(rs))
