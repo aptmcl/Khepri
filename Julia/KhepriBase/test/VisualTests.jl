@@ -1836,6 +1836,13 @@ function run_visual_tests(b;
           warn_if_stale(golden_dir, name;
                         width=width, height=height, compare=compare_name) === :missing &&
             push!(missing_provenance, name)
+        elseif haskey(ENV, "KHEPRI_REQUIRE_GOLDEN")
+          # CI/stress mode: a missing golden is a failure, not an auto-mint. Minting scores
+          # a pass, so a scene with no committed golden is silently untested -- and a golden
+          # deleted or renamed by mistake turns a regression into a green run. This mirrors
+          # the guard check_golden already applies in test_codegen.jl.
+          @error "golden missing (unset KHEPRI_REQUIRE_GOLDEN to mint)" golden_path
+          @test isfile(golden_path)
         else
           let (result, info) = mint_golden!(name, category, test_path, golden_path;
                 validate_golden=validate_golden,

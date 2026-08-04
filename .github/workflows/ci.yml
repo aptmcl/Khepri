@@ -111,6 +111,13 @@ jobs:
     # cannot see the matrix context -- so the guard has to be a needs output.
     if: needs.select.outputs.any_packages == 'true'
     runs-on: windows-latest
+    env:
+      # A visual test with no committed golden MINTS one and scores a pass, so a
+      # scene can be silently untested and a golden deleted by mistake turns a
+      # regression green. Under this variable a missing golden is a failure.
+      # Verified to pass as-is for all four golden-carrying backends: every scene
+      # that actually runs has a committed golden today.
+      KHEPRI_REQUIRE_GOLDEN: '1'
     permissions:
       contents: read
       actions: write        # julia-actions/cache evicts superseded caches
