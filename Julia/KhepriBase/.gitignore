@@ -1,0 +1,13 @@
+*.jl.*.cov
+*.jl.cov
+*.jl.mem
+/Manifest.toml
+/docs/build/
+
+# Editor backups
+*~
+*.bak
+*.tmp
+
+# Local HDRI / texture bundle — large binary asset, not part of source.
+/resources.zip

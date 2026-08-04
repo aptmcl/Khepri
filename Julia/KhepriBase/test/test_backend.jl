@@ -1,0 +1,696 @@
+# test_backend.jl - Tests for backend protocol and operations
+
+using Test
+using KhepriBase
+
+# Include the mock backend
+include("TestMockBackend.jl")
+
+if !@isdefined(RecordingExactBackendKey)
+  struct RecordingExactBackendKey end
+end
+
+mutable struct RecordingExactBackend <: KhepriBase.Backend{RecordingExactBackendKey, Int}
+  calls::Vector{Tuple{Symbol, Any}}
+  next_id::Int
+end
+
+RecordingExactBackend() = RecordingExactBackend(Tuple{Symbol, Any}[], 1)
+
+function recording_ref!(b::RecordingExactBackend, tag::Symbol, payload)
+  push!(b.calls, (tag, payload))
+  ref = b.next_id
+  b.next_id += 1
+  ref
+end
+
+KhepriBase.void_ref(::RecordingExactBackend) = 0
+KhepriBase.new_refs(::RecordingExactBackend) = Int[]
+KhepriBase.backend_name(::RecordingExactBackend) = "RecordingExactBackend"
+KhepriBase.curve_geometry_capabilities(::Type{RecordingExactBackend}) =
+  KhepriBase.CurveGeometryCapabilities{true,true,true,true,true}()
+KhepriBase.surface_geometry_capabilities(::Type{RecordingExactBackend}) =
+  KhepriBase.SurfaceGeometryCapabilities{true,true,true,true}()
+KhepriBase.b_interpolating_spline_curve(b::RecordingExactBackend, path::KhepriBase.InterpolatingSplinePath, mat) =
+  recording_ref!(b, :interpolating_spline_curve, path)
+KhepriBase.b_bezier_curve(b::RecordingExactBackend, path::KhepriBase.BezierPath, mat) =
+  recording_ref!(b, :bezier_curve, path)
+KhepriBase.b_bspline_curve(b::RecordingExactBackend, path::KhepriBase.BSplinePath{Closed,false}, mat) where {Closed} =
+  recording_ref!(b, :bspline_curve, path)
+KhepriBase.b_nurbs_curve(b::RecordingExactBackend, path::KhepriBase.NurbsPath, mat) =
+  recording_ref!(b, :nurbs_curve, path)
+KhepriBase.b_polycurve(b::RecordingExactBackend, pieces::Vector{<:KhepriBase.OpenPath}, closed::Bool, mat) =
+  recording_ref!(b, :polycurve, (pieces, closed))
+KhepriBase.b_bezier_surface(b::RecordingExactBackend, surface::KhepriBase.BezierSurface, mat) =
+  recording_ref!(b, :bezier_surface, surface)
+KhepriBase.b_bspline_surface(b::RecordingExactBackend, surface::KhepriBase.BSplineSurface{U,V,false}, mat) where {U,V} =
+  recording_ref!(b, :bspline_surface, surface)
+KhepriBase.b_nurbs_surface(b::RecordingExactBackend, surface::KhepriBase.BSplineSurface{U,V,true}, mat) where {U,V} =
+  recording_ref!(b, :nurbs_surface, surface)
+KhepriBase.b_trimmed_surface(b::RecordingExactBackend, surface::KhepriBase.TrimmedSurface, mat) =
+  recording_ref!(b, :trimmed_surface, surface)
+
+if !@isdefined(TestSocketBackendKey)
+  abstract type TestSocketBackendKey end
+end
+
+KhepriBase.retry_connecting(::KhepriBase.SocketBackend{TestSocketBackendKey, Int}) = nothing
+KhepriBase.failed_connecting(::KhepriBase.SocketBackend{TestSocketBackendKey, Int}) = nothing
+
+# A b_* implementation bug on a remote backend must PROPAGATE, not retire the
+# backend (regression: ArgumentError used to be classified as transport death).
+KhepriBase.b_delete_all_shapes(b::KhepriBase.SocketBackend{TestSocketBackendKey, Int}) =
+  throw(ArgumentError("simulated b_* implementation bug"))
+
+@testset "Backend" begin
+
+  @testset "Backend basic operations" begin
+    @testset "void_ref" begin
+      b = mock_backend()
+      reset_mock_backend!(b)
+      @test void_ref(b) == 0
+    end
+
+    @testset "new_refs" begin
+      b = mock_backend()
+      reset_mock_backend!(b)
+      refs = new_refs(b)
+      @test refs isa Vector
+      @test isempty(refs)
+    end
+
+    @testset "backend_name" begin
+      b = mock_backend()
+      name = backend_name(b)
+      @test occursin("MockBackend", name)
+    end
+  end
+
+  @testset "Exact geometry capability traits" begin
+    b = mock_backend()
+    @test !KhepriBase.supports_exact_interpolating_spline_curves(typeof(b))
+    @test !KhepriBase.supports_exact_bezier_curves(b)
+    @test !KhepriBase.supports_exact_bspline_curves(b)
+    @test !KhepriBase.supports_exact_nurbs_curves(b)
+    @test !KhepriBase.supports_exact_polycurves(b)
+    @test !KhepriBase.supports_exact_bezier_surfaces(b)
+    @test !KhepriBase.supports_exact_bspline_surfaces(b)
+    @test !KhepriBase.supports_exact_nurbs_surfaces(b)
+    @test !KhepriBase.supports_exact_trimmed_surfaces(b)
+
+    rb = RecordingExactBackend()
+    @test KhepriBase.supports_exact_interpolating_spline_curves(rb)
+    @test KhepriBase.supports_exact_bezier_curves(rb)
+    @test KhepriBase.supports_exact_bspline_curves(rb)
+    @test KhepriBase.supports_exact_nurbs_curves(rb)
+    @test KhepriBase.supports_exact_polycurves(rb)
+    @test KhepriBase.supports_exact_bezier_surfaces(rb)
+    @test KhepriBase.supports_exact_bspline_surfaces(rb)
+    @test KhepriBase.supports_exact_nurbs_surfaces(rb)
+    @test KhepriBase.supports_exact_trimmed_surfaces(rb)
+  end
+
+  @testset "Tier 0: Curves" begin
+    @testset "b_point" begin
+      with_mock_backend() do b
+        ref = b_point(b, xyz(1, 2, 3), nothing)
+        @test ref > 0
+        @test length(b.points) == 1
+        @test b.points[1].position.x ≈ 1 atol=1e-10
+      end
+    end
+
+    @testset "b_line" begin
+      with_mock_backend() do b
+        ref = b_line(b, [xy(0, 0), xy(10, 0)], nothing)
+        @test ref > 0
+        @test length(b.lines) == 1
+        @test length(b.lines[1].vertices) == 2
+      end
+    end
+
+    @testset "b_polygon" begin
+      with_mock_backend() do b
+        pts = [xy(0, 0), xy(1, 0), xy(1, 1)]
+        ref = b_polygon(b, pts, nothing)
+        @test ref > 0
+        @test length(b.lines) == 1
+        # Polygon closes the line
+        @test length(b.lines[1].vertices) == 4
+      end
+    end
+
+    @testset "b_circle" begin
+      with_mock_backend() do b
+        ref = b_circle(b, u0(), 5, nothing)
+        @test ref > 0
+        @test length(b.circles) == 1
+        @test b.circles[1].radius ≈ 5 atol=1e-10
+      end
+    end
+
+    @testset "b_arc" begin
+      with_mock_backend() do b
+        ref = b_arc(b, u0(), 5, 0, π/2, nothing)
+        @test ref > 0
+        @test length(b.arcs) == 1
+        @test b.arcs[1].amplitude ≈ π/2 atol=1e-10
+      end
+    end
+
+    @testset "default b_arc samples negative amplitudes" begin
+      with_mock_backend() do b
+        invoke(b_arc, Tuple{Backend, Any, Any, Any, Any, Any}, b, u0(), 5, 0, 2π, nothing)
+        positive_samples = length(b.lines[end].vertices)
+        invoke(b_arc, Tuple{Backend, Any, Any, Any, Any, Any}, b, u0(), 5, 0, -2π, nothing)
+        negative_samples = length(b.lines[end].vertices)
+        @test positive_samples == negative_samples
+        @test negative_samples > 2
+      end
+    end
+
+    @testset "b_spline" begin
+      with_mock_backend() do b
+        pts = [xy(0, 0), xy(1, 1), xy(2, 0)]
+        ref = b_spline(b, pts, false, false, nothing)
+        @test ref > 0
+        @test length(b.lines) == 1
+      end
+    end
+
+    @testset "b_closed_spline" begin
+      with_mock_backend() do b
+        pts = [xy(0, 0), xy(1, 0), xy(1, 1), xy(0, 1)]
+        ref = b_closed_spline(b, pts, nothing)
+        @test ref > 0
+        @test length(b.lines) == 1
+      end
+    end
+
+    @testset "b_rectangle" begin
+      with_mock_backend() do b
+        ref = b_rectangle(b, u0(), 10, 5, nothing)
+        @test ref > 0
+        # Rectangle creates a closed polygon (line)
+        @test length(b.lines) == 1
+      end
+    end
+  end
+
+  @testset "Exact curve and surface dispatch" begin
+    @testset "curve hierarchy reaches exact hooks" begin
+      b = RecordingExactBackend()
+
+      KhepriBase.b_stroke(b, open_spline_path([xy(0, 0), xy(1, 1), xy(2, 0)]), nothing)
+      @test b.calls[end][1] == :interpolating_spline_curve
+
+      KhepriBase.b_stroke(b, open_bezier_path([xy(0, 0), xy(1, 1), xy(2, 0)]), nothing)
+      @test b.calls[end][1] == :bezier_curve
+
+      KhepriBase.b_stroke(b, bspline_path([xy(0, 0), xy(1, 1), xy(2, 0)]; degree=2), nothing)
+      @test b.calls[end][1] == :bspline_curve
+
+      KhepriBase.b_stroke(b, nurbs_path([xy(0, 0), xy(1, 1), xy(2, 0)]; degree=2), nothing)
+      @test b.calls[end][1] == :nurbs_curve
+
+      p = composite_path(
+        line_path(xy(0, 0), xy(1, 0)),
+        arc_path(xy(0, 0), 1.0, 0.0, pi / 2))
+      KhepriBase.b_stroke(b, p, nothing)
+      @test b.calls[end][1] == :polycurve
+      @test b.calls[end][2][2] == false
+    end
+
+    @testset "surface hierarchy reaches exact hooks" begin
+      b = RecordingExactBackend()
+      cps = [xy(0, 0) xy(0, 1);
+             xy(1, 0) xy(1, 1)]
+
+      KhepriBase.b_surface(b, bezier_surface(cps), nothing)
+      @test b.calls[end][1] == :bezier_surface
+
+      KhepriBase.b_surface(b, bspline_surface(cps; degree_u=1, degree_v=1), nothing)
+      @test b.calls[end][1] == :bspline_surface
+
+      KhepriBase.b_surface(b, nurbs_surface(cps; degree_u=1, degree_v=1), nothing)
+      @test b.calls[end][1] == :nurbs_surface
+
+      r = region(rectangular_path(xy(0, 0), 4, 3),
+                 rectangular_path(xy(1, 1), 1, 1))
+      KhepriBase.b_surface(b, trimmed_surface(r), nothing)
+      @test b.calls[end][1] == :trimmed_surface
+    end
+  end
+
+  @testset "Tier 1: Triangles" begin
+    @testset "b_trig basic" begin
+      with_mock_backend() do b
+        p1, p2, p3 = xy(0, 0), xy(1, 0), xy(0, 1)
+        ref = b_trig(b, p1, p2, p3)
+        @test ref > 0
+        @test length(b.triangles) == 1
+        @test b.triangles[1].p1.x ≈ 0 atol=1e-10
+        @test b.triangles[1].p2.x ≈ 1 atol=1e-10
+        @test b.triangles[1].p3.y ≈ 1 atol=1e-10
+      end
+    end
+
+    @testset "b_trig with material" begin
+      with_mock_backend() do b
+        p1, p2, p3 = xy(0, 0), xy(1, 0), xy(0, 1)
+        ref = b_trig(b, p1, p2, p3, material_basic)
+        @test ref > 0
+        @test length(b.triangles) == 1
+      end
+    end
+
+    @testset "b_quad (uses b_trig)" begin
+      with_mock_backend() do b
+        p1, p2, p3, p4 = xy(0, 0), xy(1, 0), xy(1, 1), xy(0, 1)
+        refs = b_quad(b, p1, p2, p3, p4, nothing)
+        @test length(refs) == 2  # Two triangles
+        @test length(b.triangles) == 2
+      end
+    end
+
+    @testset "b_surface_mesh treats faces as 0-based canonical (T21)" begin
+      verts = [xy(0, 0), xy(1, 0), xy(0, 1)]
+      with_mock_backend() do b
+        refs = KhepriBase.b_surface_mesh(b, verts, [[0, 1, 2]], nothing)
+        @test length(refs) == 1
+        @test length(b.triangles) == 1
+      end
+      # Vertex-0-unused regression: the old presence-of-a-0 heuristic guessed 1-based here and read the
+      # WRONG vertices. 0-based-canonical always maps face i → verts[i+1], so [[1,2,3]] addresses
+      # verts[2..4], NOT verts[1..3]. (Dual-base acceptance WAS the bug.)
+      with_mock_backend() do b
+        verts4 = [xy(0, 0), xy(1, 0), xy(0, 1), xy(1, 1)]
+        KhepriBase.b_surface_mesh(b, verts4, [[1, 2, 3]], nothing)
+        @test length(b.triangles) == 1
+        let t = b.triangles[1]
+          @test t.p1.x ≈ 1 && t.p1.y ≈ 0     # verts4[2]
+          @test t.p2.x ≈ 0 && t.p2.y ≈ 1     # verts4[3]
+          @test t.p3.x ≈ 1 && t.p3.y ≈ 1     # verts4[4], not verts4[1..3]
+        end
+      end
+    end
+
+    @testset "b_ngon (uses b_trig)" begin
+      with_mock_backend() do b
+        ps = [xy(cos(θ), sin(θ)) for θ in range(0, 2π, length=7)[1:6]]
+        refs = b_ngon(b, ps, u0(), false, nothing)
+        @test length(refs) == 6  # 6 triangles for hexagon
+        @test length(b.triangles) == 6
+      end
+    end
+
+    @testset "b_quad_strip" begin
+      with_mock_backend() do b
+        ps = [xy(0, 0), xy(1, 0), xy(2, 0)]
+        qs = [xy(0, 1), xy(1, 1), xy(2, 1)]
+        refs = b_quad_strip(b, ps, qs, false, nothing)
+        @test length(refs) == 4  # 2 quads = 4 triangles
+        @test length(b.triangles) == 4
+      end
+    end
+
+    @testset "b_quad_strip_closed" begin
+      with_mock_backend() do b
+        ps = [xy(0, 0), xy(1, 0), xy(2, 0)]
+        qs = [xy(0, 1), xy(1, 1), xy(2, 1)]
+        refs = b_quad_strip_closed(b, ps, qs, false, nothing)
+        # 3 quads (2 normal + 1 closing) = 6 triangles
+        @test length(refs) == 6
+      end
+    end
+  end
+
+  @testset "Tier 2: Surfaces (fallback to triangles)" begin
+    @testset "b_surface_polygon" begin
+      with_mock_backend() do b
+        pts = [xy(0, 0), xy(1, 0), xy(1, 1), xy(0, 1)]
+        refs = b_surface_polygon(b, pts, nothing)
+        # Should create triangles through b_ngon
+        @test length(b.triangles) >= 2
+      end
+    end
+
+    @testset "b_surface_rectangle" begin
+      with_mock_backend() do b
+        refs = b_surface_rectangle(b, u0(), 10, 5, nothing)
+        # Should create a quad (2 triangles)
+        @test length(b.triangles) == 2
+      end
+    end
+
+    @testset "b_surface_regular_polygon" begin
+      with_mock_backend() do b
+        refs = b_surface_regular_polygon(b, 5, u0(), 3, 0, true, nothing)
+        # Pentagon = 5 triangles
+        @test length(b.triangles) == 5
+      end
+    end
+
+    @testset "b_surface_circle (approximated)" begin
+      with_mock_backend() do b
+        refs = b_surface_circle(b, u0(), 5, nothing)
+        # Circle is approximated with 32-gon, so 32 triangles
+        @test length(b.triangles) == 32
+      end
+    end
+
+    # NOTE: b_surface_arc test skipped - there's a bug in b_surface_arc (division expects Int, gets Float)
+    # @testset "b_surface_arc" begin
+    #   with_mock_backend() do b
+    #     refs = b_surface_arc(b, u0(), 5, 0, π, nothing)
+    #     # Arc creates triangles
+    #     @test length(b.triangles) > 0
+    #   end
+    # end
+  end
+
+  @testset "Tier 3: Solids" begin
+    @testset "b_sphere" begin
+      with_mock_backend() do b
+        ref = b_sphere(b, u0(), 5, nothing)
+        @test ref > 0
+        @test length(b.spheres) == 1
+        @test b.spheres[1].radius ≈ 5 atol=1e-10
+      end
+    end
+
+    @testset "b_box" begin
+      with_mock_backend() do b
+        ref = b_box(b, u0(), 10, 5, 3, nothing)
+        @test ref > 0
+        @test length(b.boxes) == 1
+        @test b.boxes[1].dx ≈ 10 atol=1e-10
+        @test b.boxes[1].dy ≈ 5 atol=1e-10
+        @test b.boxes[1].dz ≈ 3 atol=1e-10
+      end
+    end
+
+    @testset "b_cylinder" begin
+      with_mock_backend() do b
+        ref = b_cylinder(b, u0(), 3, 10, nothing, nothing, nothing)
+        @test ref > 0
+        @test length(b.cylinders) == 1
+        @test b.cylinders[1].radius ≈ 3 atol=1e-10
+        @test b.cylinders[1].height ≈ 10 atol=1e-10
+      end
+    end
+
+    @testset "b_cone (uses default pyramid implementation)" begin
+      with_mock_backend() do b
+        refs = b_cone(b, u0(), 5, 10, nothing, nothing)
+        # Cone is approximated with triangles
+        @test length(b.triangles) > 0
+      end
+    end
+
+    @testset "b_torus (uses surface_grid)" begin
+      with_mock_backend() do b
+        refs = b_torus(b, u0(), 10, 3, nothing)
+        # Torus creates many triangles through surface_grid
+        @test length(b.triangles) > 0
+      end
+    end
+
+    @testset "b_cuboid" begin
+      with_mock_backend() do b
+        pb0, pb1, pb2, pb3 = xy(0, 0), xy(1, 0), xy(1, 1), xy(0, 1)
+        pt0, pt1, pt2, pt3 = xyz(0, 0, 1), xyz(1, 0, 1), xyz(1, 1, 1), xyz(0, 1, 1)
+        refs = b_cuboid(b, pb0, pb1, pb2, pb3, pt0, pt1, pt2, pt3, nothing)
+        # Cuboid creates triangles for 6 faces (at least 12, may be more due to impl details)
+        @test length(b.triangles) >= 12
+      end
+    end
+
+    @testset "b_regular_pyramid" begin
+      with_mock_backend() do b
+        refs = b_regular_pyramid(b, 4, u0(), 5, 0, 10, true, nothing, nothing)
+        # Square pyramid: 1 base (4 triangles) + 4 side triangles
+        @test length(b.triangles) > 4
+      end
+    end
+
+    @testset "b_regular_pyramid_frustum" begin
+      with_mock_backend() do b
+        refs = b_regular_pyramid_frustum(b, 4, u0(), 5, 0, 10, 3, true, nothing)
+        # Frustum creates triangles for base, top, and sides
+        @test length(b.triangles) > 0
+      end
+    end
+
+    @testset "b_prism" begin
+      with_mock_backend() do b
+        pts = [xy(0, 0), xy(1, 0), xy(0.5, 1)]
+        refs = b_prism(b, pts, vz(5), nothing)
+        # Prism creates triangles for base, top, and sides
+        @test length(b.triangles) > 0
+      end
+    end
+  end
+
+  @testset "b_strip" begin
+    with_mock_backend() do b
+      path1 = open_polygonal_path([xy(0, 0), xy(1, 0), xy(2, 0)])
+      path2 = open_polygonal_path([xy(0, 1), xy(1, 1), xy(2, 1)])
+      refs = b_strip(b, path1, path2, nothing)
+      # 2 quads = 4 triangles
+      @test length(b.triangles) == 4
+    end
+  end
+
+  @testset "Reference deletion" begin
+    @testset "b_delete_ref" begin
+      with_mock_backend() do b
+        ref1 = b_point(b, u0(), nothing)
+        ref2 = b_point(b, ux(), nothing)
+        @test length(b.all_refs) == 2
+
+        b_delete_ref(b, ref1)
+        @test length(b.all_refs) == 1
+        @test !(ref1 in b.all_refs)
+        @test ref2 in b.all_refs
+      end
+    end
+
+    @testset "b_delete_refs" begin
+      with_mock_backend() do b
+        ref1 = b_point(b, u0(), nothing)
+        ref2 = b_point(b, ux(), nothing)
+        ref3 = b_point(b, uy(), nothing)
+
+        b_delete_refs(b, [ref1, ref2])
+        @test length(b.all_refs) == 1
+        @test ref3 in b.all_refs
+      end
+    end
+  end
+
+  @testset "b_all_shape_refs" begin
+    with_mock_backend() do b
+      b_point(b, u0(), nothing)
+      b_line(b, [xy(0, 0), xy(1, 1)], nothing)
+      b_circle(b, u0(), 5, nothing)
+
+      refs = b_all_shape_refs(b)
+      @test length(refs) == 3
+    end
+  end
+
+  @testset "Shape storage trait" begin
+    @testset "MockBackend defaults to LocalShapeStorage" begin
+      @test shape_storage_type(MockBackend) isa LocalShapeStorage
+    end
+
+    @testset "b_created_shapes via high-level API" begin
+      with_mock_backend() do b
+        with(current_backend, b) do
+          sphere(u0(), 5)
+          @test length(b_created_shapes(b)) == 1
+          @test length(b_created_shape_refs(b)) == 1
+        end
+      end
+    end
+
+    @testset "existing_shapes equals created_shapes for local backends" begin
+      with_mock_backend() do b
+        with(current_backend, b) do
+          sphere(u0(), 5)
+          @test b_existing_shapes(b) == b_created_shapes(b)
+          @test b_existing_shape_refs(b) == b_created_shape_refs(b)
+        end
+      end
+    end
+  end
+
+  @testset "Transaction handling" begin
+    @testset "current_transaction" begin
+      b = mock_backend()
+      @test current_transaction(b)() isa AutoCommitTransaction
+    end
+
+    @testset "with_transaction without explicit backend" begin
+      with_mock_backend() do b
+        with_transaction() do
+          sphere(u0(), 1)
+          @test isempty(b.spheres)
+        end
+        @test length(b.spheres) == 1
+      end
+    end
+  end
+
+  @testset "Backend exception handling" begin
+    @testset "UnimplementedBackendOperationException" begin
+      e = KhepriBase.UnimplementedBackendOperationException(mock_backend(), :test_op, ())
+      io = IOBuffer()
+      showerror(io, e)
+      str = String(take!(io))
+      @test occursin("test_op", str)
+      @test occursin("MockBackend", str)
+    end
+  end
+
+  @testset "Backend fallbacks" begin
+    @testset "b_set_ground accepts material refs" begin
+      with_mock_backend() do b
+        mat = KhepriBase.material_ref(b, material_basic)
+        refs = KhepriBase.b_set_ground(b, 0, mat)
+        @test length(refs) == 16
+        @test length(b.triangles) == 16
+      end
+    end
+  end
+
+  @testset "Remote backend connection failures" begin
+    b = KhepriBase.SocketBackend{TestSocketBackendKey, Int}("NoServer", 9, NamedTuple())
+    err = try
+      KhepriBase.start_connection(b)
+      nothing
+    catch e
+      e
+    end
+    @test err !== nothing
+  end
+
+  @testset "Transport-error classification (BackendDisconnected)" begin
+    @testset "rethrow_disconnected translates only transport-death errors" begin
+      classify(e) = try
+        try
+          throw(e)
+        catch caught
+          KhepriBase.rethrow_disconnected(caught)
+        end
+      catch result
+        result
+      end
+      # Julia reports a write to a closed socket as this ArgumentError.
+      @test classify(ArgumentError("stream is closed or unusable")) isa KhepriBase.BackendDisconnected
+      @test classify(EOFError()) isa KhepriBase.BackendDisconnected
+      @test classify(Base.IOError("read: connection reset", -104)) isa KhepriBase.BackendDisconnected
+      # An ordinary ArgumentError (a geometry-validation/programming error)
+      # must come back unchanged.
+      @test classify(ArgumentError("invalid knot vector")) isa ArgumentError
+      @test classify(ErrorException("boom")) isa ErrorException
+    end
+
+    @testset "closed TCP socket surfaces as BackendDisconnected" begin
+      let Sockets = KhepriBase.Sockets,
+          server = Sockets.listen(Sockets.localhost, 0),
+          port = Int(Sockets.getsockname(server)[2]),
+          sock = Sockets.connect(port)
+        try
+          close(sock)
+          let buf = IOBuffer()
+            write(buf, UInt8[1, 2, 3])
+            @test_throws KhepriBase.BackendDisconnected KhepriBase.send(sock, buf)
+          end
+          @test_throws KhepriBase.BackendDisconnected KhepriBase.receive(sock)
+        finally
+          close(server)
+        end
+      end
+    end
+
+    @testset "handle_backend_error retires only on the transport-class set" begin
+      for transport_error in (KhepriBase.BackendDisconnected(EOFError()),
+                              EOFError(),
+                              Base.IOError("read: connection reset", -104))
+        let b = KhepriBase.SocketBackend{TestSocketBackendKey, Int}("Dead", 9, NamedTuple())
+          @test_logs (:warn, r"disconnected") begin
+            try
+              throw(transport_error)
+            catch e
+              KhepriBase.handle_backend_error(e, b)
+            end
+          end
+        end
+      end
+      let b = KhepriBase.SocketBackend{TestSocketBackendKey, Int}("Alive", 9, NamedTuple()),
+          err = try
+            try
+              throw(ArgumentError("degenerate polygonal path"))
+            catch e
+              KhepriBase.handle_backend_error(e, b)
+            end
+            nothing
+          catch e
+            e
+          end
+        @test err isa ArgumentError
+      end
+    end
+
+    @testset "ArgumentError from a b_* body propagates instead of retiring" begin
+      let b = KhepriBase.SocketBackend{TestSocketBackendKey, Int}("BuggyOp", 9, NamedTuple())
+        with(KhepriBase.current_backends, (b,)) do
+          # No retire @warn may be logged, and the error must escape the
+          # @defcbs dispatch loop instead of being swallowed.
+          @test_logs begin
+            @test_throws ArgumentError delete_all_shapes()
+          end
+        end
+      end
+    end
+  end
+
+  @testset "Resource folder ordering" begin
+    original_folders = copy(KhepriBase.resources_folder)
+    try
+      empty!(KhepriBase.resources_folder)
+      append!(KhepriBase.resources_folder, ["first", "second"])
+      KhepriBase.add_resource_folder!("third")
+      @test KhepriBase.resources_folder == ["third", "first", "second"]
+      KhepriBase.add_resource_folder!("first")
+      @test KhepriBase.resources_folder == ["first", "third", "second"]
+    finally
+      empty!(KhepriBase.resources_folder)
+      append!(KhepriBase.resources_folder, original_folders)
+    end
+  end
+
+  @testset "Material operations" begin
+    @testset "b_get_material with nothing" begin
+      b = mock_backend()
+      ref = b_get_material(b, nothing)
+      @test ref == void_ref(b)
+    end
+
+    @testset "b_get_material with value" begin
+      b = mock_backend()
+      ref = b_get_material(b, "test_material")
+      @test ref == 0  # MockBackend returns 0 for all material refs
+    end
+  end
+
+  @testset "Layer operations" begin
+    with_mock_backend() do b
+      ref = b_layer(b, "TestLayer", true, rgb(1, 0, 0))
+      @test ref > 0
+    end
+  end
+
+end

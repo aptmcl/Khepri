@@ -1,0 +1,746 @@
+#=
+julia_type(ctype, is_array) = is_array ? :(Vector{$(julia_type(ctype, false))}) : julia_type_for_c_type[ctype]
+=#
+
+function my_symbol(prefix, name)
+  Symbol(prefix * replace(string(name), ":" => "_"))
+end
+
+function translate(sym)
+  Symbol(replace(string(sym), r"[:<>]" => "_", ))
+end
+
+#=
+We parameterize signatures to support different programming languages, e.g.
+Val{:CPP} is for C++ functions, while Val{:CS} is for C# static methods
+
+A basic type is represented with an identically-named symbol, e.g.,
+int -> :int
+An array type is represented with a tuple, e.g.,
+int[] -> (:array, :int)
+A parametric type is represented with a tuple, e.g.,
+Dict<int, string> -> (:Dict, :int, :string)
+=#
+###########################################################
+# C++
+parse_signature(::Val{:CPP}, sig::AbstractString) =
+  let func_name(name) = replace(name, ":" => "_"),
+      type_name(name) = replace(name, r"[:<>]" => "_"),
+      packtype(t, n) = foldr((i,v)->Vector{v}, 1:n, init=Val{Symbol(t)}),
+      m = match(r"^ *(public|) *(\w+) *([\[\]]*) +((?:\w|:|<|>)+) *\( *(.*) *\)", sig),
+      ret = packtype(type_name(m.captures[2]), count(c -> c=='[', something(m.captures[3], ""))),
+      name = m.captures[4],
+      params = split(m.captures[5], r" *, *", keepempty=false),
+      parse_c_decl(decl) =
+        let m = match(r"^ *((?:\w|:|<|>)+) *([\[\]]*) *(\w+)$", decl)
+          (packtype(type_name(m.captures[1]), count(c -> c=='[', something(m.captures[2], ""))), Symbol(m.captures[3]))
+        end
+    (func_name(name), name, [parse_c_decl(decl) for decl in params], ret)
+  end
+
+# C#
+parse_signature(::Val{:CS}, sig::AbstractString) =
+  let packtype(t, n) = foldr((i,v)->Vector{v}, 1:n, init=Val{Symbol(t)}),
+      m = match(r"^ *(public|) *(\w+) *([\[\]]*) +(\w+) *\( *(.*) *\)", sig),
+      ret = packtype(m.captures[2], count(c -> c=='[', something(m.captures[3], ""))),
+      name = m.captures[4],
+      params = split(m.captures[5], r" *, *", keepempty=false),
+      parse_c_decl(decl) =
+        let m = match(r"^ *(\w+) *([\[\]]*) *(\w+)$", decl)
+          (packtype(m.captures[1], count(c -> c=='[', something(m.captures[2], ""))), Symbol(m.captures[3]))
+    end
+    (name, name, [parse_c_decl(decl) for decl in params], ret)
+  end
+
+# Python
+parse_signature(::Val{:PY}, sig::AbstractString) =
+  let m = match(r"^ *def +(\w+) *(\(.*\)) *(-> *(.+) *)?: *", sig),
+      name = m.captures[1],
+      params = m.captures[2],
+      ret = m.captures[4],
+      parse_type(t) =
+        if t isa Symbol
+          Val{t}
+        elseif t.head === :ref
+          if t.args[1] === :List
+            Vector{parse_type(t.args[2])}
+          elseif t.args[1] === :Tuple
+            Tuple{map(parse_type, t.args[2:end])...}
+          else
+            error("Unknown expression type $(t) in signature $(sig)")
+          end
+        else
+          error("Unknown expression type $(t) in signature $(sig)")
+        end,
+      parse_params(ast) =
+        let parse_param(p) = (parse_type(p.args[3]), p.args[2])
+          if ast isa Symbol
+            error("Missing type information in parameter $(ast) in signature $(sig)")
+          elseif ast.head === :tuple
+            map(parse_param, ast.args)
+          elseif ast.head === :call
+            [parse_param(ast)]
+          else
+            error("Uknown kind of parameter $(ast) in signature $(sig)")
+          end
+        end
+    isnothing(ret) && error("Missing return type information in signature $(sig)")
+    (name, name, parse_params(Meta.parse(params)), parse_type(Meta.parse(ret)))
+  end
+
+# JavaScript
+#=
+This is JavaScript, not TypeScript. As a result, the signatures were improvised by me and
+they look like this:
+typedFunction([Vector3, Float64, Id], Id, (c, r, mat) => {
+=#
+
+parse_signature(::Val{:JS}, sig::AbstractString) =
+  let m = match(r"^ *typed(?:Async)?.*Function *\(\"(.*)\", *(\[.*\]), *(.+), *(\(.*\)) *=>", sig),
+      name = m.captures[1],
+      paramTypes = m.captures[2],
+      params = m.captures[4],
+      ret = m.captures[3],
+      parse_type(t) =
+        if t isa Symbol
+          Val{t}
+        elseif t.head === :vect
+          Vector{parse_type(t.args[1])}
+        else
+          error("Unknown expression type $(t) in signature $(sig)")
+        end,
+      parse_params(ast, typesAst) =
+        ast isa Symbol ? # Julia parses (foo) as foo
+          parse_params(:(($ast,)), typesAst) :
+          [(parse_type(type), p) for (type, p) in zip(typesAst.args, ast.args)]
+    (name, name, parse_params(Meta.parse(params), Meta.parse(paramTypes)), parse_type(Meta.parse(ret)))
+  end
+
+# TypeScript
+#=
+TypeScript does not provide reflective capabilities. 
+As a result, the signatures were improvised by me and
+they look like this:
+typedFunction("sphere", [Point3d, Float32, MatId], Id, (c: THREE.Vector3, r: number, mat: THREE.Material) => {
+=#
+
+parse_signature(::Val{:TS}, sig::AbstractString) =
+  let m = match(r"^ *typed(?:Async)?Function *\(\"(.*)\", *(\[.*\]), *(.+), *\((.*)\) *=>", sig),
+      name = m.captures[1],
+      paramTypes = m.captures[2],
+      params = all(isspace, m.captures[4]) ? "()" : "($(m.captures[4]),)", # Enforce a tuple, even if there is a single parameter
+      ret = m.captures[3],
+      parse_type(t) =
+        t isa Symbol ?
+          Val{t} :
+          t.head === :vect ?
+            Vector{parse_type(t.args[1])} :
+            error("Unknown expression type $(t) in signature $(sig)"),
+      parse_param(p) = 
+        p isa Symbol ? # foo
+          p :
+          p isa Expr && p.head === :call ? # (foo: type)
+              (p.args[1] === :(:) ? p.args[2] : p.args[1]) :
+              error("Unknown parameter $(p) in signature $(sig)"), 
+      parse_params(ast, typesAst) =
+        [(parse_type(type), parse_param(p)) for (type, p) in zip(typesAst.args, ast.args)]
+    (name, name, parse_params(Meta.parse(params), Meta.parse(paramTypes)), parse_type(Meta.parse(ret)))
+  end
+
+#=
+Canonical signature computation for remote method validation.
+Both Julia and C# produce the same string: "ReturnType(ParamType1,ParamType2,...)"
+using CLR reflection names (what Type.Name returns in C#).
+=#
+
+const cs_source_to_clr = Dict{String,String}(
+  "int" => "Int32", "double" => "Double", "float" => "Single",
+  "string" => "String", "bool" => "Boolean", "byte" => "Byte",
+  "short" => "Int16", "long" => "Int64", "void" => "Void",
+)
+
+public clr_name
+clr_name(name::AbstractString) = get(cs_source_to_clr, name, name)
+clr_name(::Val, name::AbstractString) = clr_name(name)
+
+clr_type_str(ns, ::Type{Val{T}}) where T = clr_name(ns, string(T))
+clr_type_str(ns, ::Type{Vector{T}}) where T = clr_type_str(ns, T) * "Array"
+clr_type_str(ns, ::Type{T}) where T <: Tuple =
+  "Tuple" * join([clr_type_str(ns, t) for t in T.types], "")
+
+canonical_signature(ns, params, ret) =
+  clr_type_str(ns, ret) * "(" * join([clr_type_str(ns, p[1]) for p in params], ",") * ")"
+
+#=
+A remote function encapsulates the information needed for communicating with remote
+applications, including the opcode that represents the remote function and that
+is generated by the remote application from the remote_name upon request.
+=#
+
+#=
+This is the static part which does not even depend on the backend being alive.
+=#
+struct RemoteFunctionInfo{T}
+  namespace::T
+  signature::String
+  canonical::String
+  local_name::String
+  remote_name::String
+  encoder::Function
+end
+
+remote_function_info(ns::T,
+                     sig::AbstractString,
+                     canonical::AbstractString,
+                     local_name::AbstractString,
+                     remote_name::AbstractString,
+                     encoder::Function) where {T} =
+    RemoteFunctionInfo{T}(ns, string(sig), string(canonical), string(local_name), string(remote_name), encoder)
+
+#=
+This is the dynamic part, to be incrementally fullfiled when the backend is alive.
+=#
+mutable struct RemoteFunction{T} <: Function
+  info::RemoteFunctionInfo{T}
+  opcode::Int32
+  buffer::IOBuffer
+end
+
+RemoteFunction(info::RemoteFunctionInfo{T}) where {T} =
+  RemoteFunction{T}(info, Int32(-1), IOBuffer())
+
+#=
+We assume there are two fundamental operations:
+ - send(conn, buffer) sends the content of the buffer to the remote application
+ - receive(conn) receives data from the remote application and returns it as a buffer
+
+Note that in the case of sockets, the receive operation might return the socket itself
+=#
+
+send(conn, buf) = write(conn, take!(buf))
+receive(conn) = conn
+
+# Each RPC call is wrapped in a length-prefixed frame: send writes Int32 length + payload,
+# receive reads Int32 length then that many bytes into an IOBuffer. This matches
+# Channel.cs's BeginFrame/EndFrame on the C# side.
+# Transport failures (IOError, EOFError, and Julia's closed-stream
+# ArgumentError) are rethrown as BackendDisconnected so that the retire
+# policy in handle_backend_error never confuses them with ordinary
+# ArgumentErrors raised by b_* implementations — see the prose block above
+# BackendDisconnected in Backends.jl.
+send(conn::TCPSocket, buf::IOBuffer) =
+  let n = buf.size
+    try
+      write(conn, Int32(n))
+      unsafe_write(conn, pointer(buf.data), n)
+    catch e
+      rethrow_disconnected(e)
+    end
+    truncate(buf, 0)
+  end
+
+receive(conn::TCPSocket) =
+  try
+    let len = read(conn, Int32)
+      IOBuffer(read(conn, len))
+    end
+  catch e
+    rethrow_disconnected(e)
+  end
+
+# Julia side of the lazy registration protocol: sends opcode 0 (ProvideOperation) with the
+# method name and canonical signature, receives back the assigned opcode for future calls.
+# The response goes through decode_with_prefix so registration errors (method not found,
+# signature mismatch) are caught as BackendError.
+request_operation(f::RemoteFunction, conn) =
+  let i = f.info,
+      buf = f.buffer
+    encode(i.namespace, Val(:int), buf, 0)
+    encode(i.namespace, Val(:string), buf, i.remote_name)
+    encode(i.namespace, Val(:string), buf, i.canonical)
+    send(conn, buf)
+    let buf = receive(conn)
+      decode_with_prefix(i.namespace, Val(:int), buf)
+    end
+  end
+
+
+#interrupt_processing(conn) = write(conn, Int32(-1))
+
+# Opcodes are lazily assigned: first call triggers registration via request_operation;
+# subsequent calls reuse the cached opcode.
+ensure_opcode(f::RemoteFunction, conn) =
+  f.opcode == -1 ?
+    f.opcode = Int32(request_operation(f, conn)) :
+    f.opcode
+
+reset_opcode(f::RemoteFunction) =
+  f.opcode = -1
+
+# RPC instrumentation: count calls and optionally record per-call times.
+public rpc_count, reset_rpc_count!, rpc_timing, rpc_times
+const rpc_count = Ref(0)
+reset_rpc_count!() = (rpc_count[] = 0)
+const rpc_timing = Parameter(false)
+const rpc_times = Float64[]
+
+# Encode opcode + arguments into the buffer, send as a frame, receive the response
+# frame, decode with prefix-based error detection.
+call_remote(f::RemoteFunction, conn, args...) =
+  begin
+    rpc_count[] += 1
+    if rpc_timing()
+      let t0 = time_ns()
+        result = f.info.encoder(ensure_opcode(f, conn), conn, f.buffer, args...)
+        push!(rpc_times, (time_ns() - t0) / 1e6)  # ms
+        result
+      end
+    else
+      f.info.encoder(ensure_opcode(f, conn), conn, f.buffer, args...)
+    end
+  end
+
+(f::RemoteFunction)(conn, args...) = call_remote(f, conn, args...)
+
+#=
+The most important part is the lang_rpc function. It parses the string describing the
+signature of the remote function, generates a function to encode arguments and
+retrieve results and, finally, creates the remote_function object.
+=#
+type_constructor(t) =
+  t <: Tuple ?
+    Expr(:tuple, map(type_constructor, t.types)...) :
+    Expr(:call, t)
+
+remote_function_meta_program(nssym, sig, canon, local_name, remote_name, params, ret) =
+  let namespace = :(Val{$(nssym)}())
+    :(remote_function_info(
+           $(namespace),
+           $(sig),
+           $(canon),
+           $(local_name),
+           $(remote_name),
+           (opcode, conn, buf, $([p[2] for p in params]...)) -> begin
+              truncate(buf, 0) # Reset the buffer just in case there was an encoding error on a previous call
+              encode($(namespace), Val(:int), buf, opcode)
+              $([:(encode($(namespace),
+                          $(type_constructor(p[1])),
+                          buf,
+                          $(p[2])))
+                 for p in params]...)
+              send(conn, buf)
+              let buf = receive(conn)
+                decode_with_prefix($(namespace), $(type_constructor(ret)), buf)
+              end
+            end))
+  end
+
+#=
+let lang = :CS,
+    str = "public Entity Sphere(Point3d c, double r)",
+    (local_name, remote_name, params, ret) = parse_signature(Val(lang), str),
+    canon = canonical_signature(Val(lang), params, ret)
+  (Symbol(local_name), remote_function_meta_program(Val(lang), str, canon, local_name, remote_name, params, ret))
+ end
+
+let lang = :CS,
+   str = "public Entity[][] Spheres(Point3d c, double[][] r)",
+   (local_name, remote_name, params, ret) = parse_signature(Val(lang), str),
+   canon = canonical_signature(Val(lang), params, ret)
+ (Symbol(local_name), remote_function_meta_program(Val(lang), str, canon, local_name, remote_name, params, ret))
+end
+
+let lang = :CS,
+    str = "public ElementId[] Test()",
+    (local_name, remote_name, params, ret) = parse_signature(Val(lang), str),
+    canon = canonical_signature(Val(lang), params, ret)
+  (Symbol(local_name), remote_function_meta_program(Val(lang), str, canon, local_name, remote_name, params, ret))
+ end
+
+=#
+
+#=
+The function returns an array of tuples containing the static information about all remote functions.
+=#
+lang_rpc(lang, sigs) =
+  [let (local_name, remote_name, params, ret) =
+      try
+        parse_signature(Val(lang.value), str)
+      catch e
+        println(e)
+        error("Cannot parse in $(lang) the signature $(str)")
+      end,
+      canon = canonical_signature(Val(lang.value), params, ret)
+    (Symbol(local_name), remote_function_meta_program(lang, str, canon, local_name, remote_name, params, ret))
+   end
+   for str in split(sigs, "\n") if str != ""]
+
+
+
+#=
+Given that remote apps might fail, it might be necessary to reset a connection.
+This can be done either by resetting the opcodes of all remote functions or by
+simply recreating all of them. This second alternative looks better because it
+also allows to access multiple instances of the same remote app (as long as it)
+support multiple separate connections.
+
+=#
+
+#=
+The idea is that a particular remote application will store all of its functions
+in a struct, as follows:
+
+@remote_functions :CS """
+  int add(int a, int b)
+  int sub(int a, int b)
+"""
+=#
+
+public @remote_api
+macro remote_api(lang, str)
+  let remotes = lang_rpc(lang, str)
+    Expr(:tuple, [Expr(:(=), remote...) for remote in remotes]...)
+  end
+end
+
+#=
+Before instantiating the backend, we need to map from the static function info to the corresponding dynamic function.
+=#
+public remote_functions
+remote_functions(infos) = map(RemoteFunction, infos)
+
+#=
+@macroexpand @remote_api :CS """
+  int add(int a, int b)
+  int sub(int a, int b)
+"""
+
+@macroexpand @remote_api :PY """
+def get_view()->Tuple[Point3d, Point3d, float]:
+"""
+=#
+
+# Prefix-based error detection: 0x00 = OK (value follows), 0x01 = NOTOK (error string follows)
+decode_with_prefix(ns::Val{NS}, t, c::IO) where {NS} =
+  let prefix = read(c, UInt8)
+    prefix == 0x00 ? decode(ns, t, c) :
+    prefix == 0x01 ? backend_error(ns, c) :
+    error("Unknown RPC response prefix: $prefix")
+  end
+
+struct BackendError
+  msg::String
+  backtrace
+end
+
+show(io::IO, e::BackendError) =
+  print(io, "Backend Error: $(e.msg)")
+
+# In order to read arrays or process error messages,
+# we need a few basic types, namely :size and :string,
+# that need to be specified for each backend.
+
+backend_error(ns::Val{NS}, c::IO) where {NS} =
+  throw(BackendError(decode(ns, Val(:string), c), backtrace()))
+
+## To present errors in the backends that call back to Julia
+exception_backtrace(e) = backtrace()
+exception_backtrace(e::BackendError) = e.backtrace
+
+public errormsg
+errormsg(e) =
+  sprint((io, e) -> showerror(io, e, exception_backtrace(e), backtrace=true), e)
+
+# Encoding and decoding vectors
+encode(ns::Val{NS}, t::Vector{T}, c::IO, v) where {NS,T} = begin
+  sub = T()
+  encode(ns, Val(:size), c, length(v))
+  for e in v encode(ns, sub, c, e) end
+end
+decode(ns::Val{NS}, t::Vector{T}, c::IO) where {NS,T} = begin
+  sub = T()
+  len = decode(ns, Val(:size), c)
+  [decode(ns, sub, c) for i in 1:len]
+end
+
+# Encoding and decoding vectors of tuples
+encode(ns::Val{NS}, t::Vector{Tuple{T1,T2}}, c::IO, v) where {NS,T1,T2} = begin
+  sub1 = T1()
+  sub2 = T2()
+  encode(ns, Val(:size), c, length(v))
+  for (e1, e2) in v
+    encode(ns, sub1, c, e1)
+    encode(ns, sub2, c, e2)
+  end
+end
+decode(ns::Val{NS}, t::Vector{Tuple{T1,T2}}, c::IO) where {NS,T1,T2} = begin
+  sub1 = T1()
+  sub2 = T2()
+  len = decode(ns, Val(:size), c)
+  [(decode(ns, sub1, c), decode(ns, sub2, c)) for i in 1:len]
+end
+
+# Some generic conversions for C#, C++, JavaScript, and Python
+const SizeIsInt = Union{Val{:CS},Val{:CPP},Val{:JS},Val{:TS},Val{:PY}}
+encode(ns::SizeIsInt, t::Val{:size}, c::IO, v) =
+  encode(ns, Val(:int), c, v)
+decode(ns::SizeIsInt, t::Val{:size}, c::IO) =
+  decode(ns, Val(:int), c)
+encode(ns::SizeIsInt, t::Val{:address}, c::IO, v) =
+  encode(ns, Val(:long), c, v)
+decode(ns::SizeIsInt, t::Val{:address}, c::IO) =
+  decode(ns, Val(:long), c)
+
+const BoolIsByte = Union{Val{:CS},Val{:JS},Val{:TS},Val{:PY},Val{:CPP}}  # :CPP so :UE (delegates to :CPP) can decode bool
+encode(ns::BoolIsByte, t::Val{:bool}, c::IO, v::Bool) =
+  encode(ns, Val(:byte), c, v ? 1 : 0)
+decode(ns::BoolIsByte, t::Val{:bool}, c::IO) =
+  decode(ns, Val(:byte), c) == UInt8(1)
+
+const ByteIsUInt8 = Union{Val{:CS},Val{:CPP},Val{:JS},Val{:TS},Val{:PY}}
+encode(::ByteIsUInt8, t::Val{:byte}, c::IO, v) =
+  write(c, convert(UInt8, v))
+decode(::ByteIsUInt8, t::Val{:byte}, c::IO) =
+  convert(UInt8, read(c, UInt8))
+
+# Assuming short is two bytes in C#, C++ and Python
+const ShortIsInt16 = Union{Val{:CS},Val{:CPP},Val{:PY}}
+encode(::ShortIsInt16, t::Val{:short}, c::IO, v) =
+  write(c, convert(Int16, v))
+decode(::ShortIsInt16, t::Val{:short}, c::IO) =
+  convert(Int16, read(c, Int16))
+
+# Assuming int is four bytes in C#, C++, JavaScript, and Python
+const IntIsInt32 = Union{Val{:CS},Val{:CPP},Val{:JS},Val{:TS},Val{:PY}}
+encode(::IntIsInt32, t::Val{:int}, c::IO, v) =
+  write(c, convert(Int32, v))
+decode(::IntIsInt32, t::Val{:int}, c::IO) =
+  convert(Int32, read(c, Int32))
+
+# Assuming long is eight bytes in C#, C++, JavaScript
+const LongIsInt64 = Union{Val{:CS},Val{:CPP},Val{:JS},Val{:TS}}
+encode(::LongIsInt64, t::Val{:long}, c::IO, v) =
+  write(c, convert(Int64, v))
+decode(::LongIsInt64, t::Val{:long}, c::IO) =
+  convert(Int64, read(c, Int64))
+
+# Assuming float is four bytes in C#, C++, JavaScript
+const FloatIsFloat32 = Union{Val{:CS},Val{:CPP},Val{:JS},Val{:TS}}
+encode(::FloatIsFloat32, t::Val{:float}, c::IO, v) =
+  write(c, convert(Float32, v))
+decode(ns::FloatIsFloat32, t::Val{:float}, c::IO) =
+  convert(Float64, read(c, Float32))
+
+# Assuming float is eight bytes in Python
+const FloatIsFloat64 = Union{Val{:PY}}
+encode(::FloatIsFloat64, t::Val{:float}, c::IO, v) =
+  write(c, convert(Float64, v))
+decode(ns::FloatIsFloat64, t::Val{:float}, c::IO) =
+  convert(Float64, read(c, Float64))
+
+# Assuming double is eight bytes in C#, C++, JavaScript
+const DoubleIsFloat64 = Union{Val{:CS},Val{:CPP},Val{:JS},Val{:TS}}
+encode(::DoubleIsFloat64, t::Val{:double}, c::IO, v) =
+  write(c, convert(Float64, v))
+decode(ns::DoubleIsFloat64, t::Val{:double}, c::IO) =
+  read(c, Float64)
+
+# The binary_stream we use with C++, JavaScript, and Python replicates C# behavior
+const StringIsCSString = Union{Val{:CS},Val{:CPP},Val{:PY},Val{:JS},Val{:TS}}
+encode(::StringIsCSString, ::Union{Val{:string},Val{:String},Val{:str}}, c::IO, v) = begin
+  str = string(v)
+  size = sizeof(str) # length is not applicable to unicode strings
+  array = UInt8[]
+  while true
+    byte = size & 0x7f
+    size >>= 7
+    if size > 0
+      push!(array, byte | 0x80)
+    else
+      push!(array, byte)
+      break
+    end
+  end
+  write(c, array)
+  write(c, str)
+end
+
+
+decode(ns::StringIsCSString, ::Union{Val{:string},Val{:String},Val{:str}}, c::IO) = begin
+  size::Int = 0
+  shift::Int = 0
+  while true
+    b = convert(Int, read(c, UInt8))
+    size = size | ((b & 0x7f) << shift)
+    if (b & 0x80) == 0
+      str = String(read(c, size))
+      return str
+    else
+      shift += 7
+      shift >= 63 && error("Malformed variable-length integer in wire protocol")
+    end
+  end
+end
+
+const VoidIsByte = Union{Val{:CS},Val{:PY},Val{:JS},Val{:TS},Val{:CPP}}  # :CPP so :UE (delegates to :CPP) can decode void
+decode(ns::VoidIsByte, t::Union{Val{:void},Val{:None}}, c::IO) =
+  decode(ns, Val(:byte), c) == 0x00
+
+# Useful CS types
+public Guid, Guids
+const Guid = UInt128
+const Guids = Vector{Guid}
+
+encode(::Val{:CS}, ::Val{:Guid}, c::IO, v) =
+  write(c, v % UInt128)
+decode(ns::Val{:CS}, ::Val{:Guid}, c::IO) =
+  read(c, UInt128)
+
+# It is also useful to encode/decode generic objects.
+const SupportsObjects = Union{Val{:JS},Val{:TS},Val{:PY},Val{:CS}}
+
+encode(ns::SupportsObjects, ::Val{:Any}, c::IO, v) =
+  let (code, type) = 
+        v isa Bool ? (0, :bool) :
+        v isa UInt8 ? (1, :byte) :
+        v isa Int32 ? (2, :int) :
+        v isa Int64 ? (3, :long) :
+        v isa Float32 ? (4, :float) :
+        v isa Float64 ? (5, :double) :
+        v isa String ? (6, :string) :
+        v isa RGB ? (7, :RGB) :
+        v isa RGBA ? (8, :RGBA) : 
+        v isa Dict ? (9, :Dict) : 
+        error("Unknown encoding for object $v of type $(typeof(v))")
+    encode(ns, Val(:byte), c, code)
+    encode(ns, Val(type), c, v)
+  end
+decode(ns::SupportsObjects, ::Val{:Any}, c::IO) =
+  let code = decode(ns, Val(:byte), c),
+      type = code == 0 ? :bool :
+             code == 1 ? :byte :
+             code == 2 ? :int :
+             code == 3 ? :long :
+             code == 4 ? :float :
+             code == 5 ? :double :
+             code == 6 ? :string :
+             code == 7 ? :RGB :
+             code == 8 ? :RGBA :
+             code == 9 ? :Dict :
+             error("Unknown decoding for type code $code")
+    decode(ns, Val(type), c)
+  end
+
+encode(ns::SupportsObjects, ::Val{:Dict}, c::IO, dict) =
+  begin
+    encode(ns, Val(:int), c, length(dict))
+    for (k, v) in pairs(dict)
+      encode(ns, Val(:string), c, k)
+      encode(ns, Val(:Any), c, v)
+    end
+  end
+decode(ns::SupportsObjects, ::Val{:Dict}, c::IO) =
+  let len = decode(ns, Val(:int), c),
+      dict = Dict{String,Any}()
+    for i in 1:len
+      let k = decode(ns, Val(:string), c),
+          v = decode(ns, Val(:Any), c)
+        dict[k] = v
+      end
+    end
+    dict
+  end
+
+const SupportsTuples = Union{Val{:CS},Val{:CPP},Val{:JS},Val{:TS},Val{:PY}}
+encode(ns::SupportsTuples, t::Tuple{T1,T2}, c::IO, v) where {T1,T2} =
+  begin
+    encode(ns, T1(), c, v[1])
+    encode(ns, T2(), c, v[2])
+  end
+decode(ns::SupportsTuples, t::Tuple{T1,T2}, c::IO) where {T1,T2} =
+  (decode(ns, T1(), c),
+   decode(ns, T2(), c))
+encode(ns::SupportsTuples, t::Tuple{T1,T2,T3}, c::IO, v) where {T1,T2,T3} =
+  begin
+    encode(ns, T1(), c, v[1])
+    encode(ns, T2(), c, v[2])
+    encode(ns, T3(), c, v[3])
+  end
+decode(ns::SupportsTuples, t::Tuple{T1,T2,T3}, c::IO) where {T1,T2,T3} =
+  (decode(ns, T1(), c),
+   decode(ns, T2(), c),
+   decode(ns, T3(), c))
+encode(ns::SupportsTuples, t::Tuple{T1,T2,T3,T4}, c::IO, v) where {T1,T2,T3,T4} =
+  begin
+    encode(ns, T1(), c, v[1])
+    encode(ns, T2(), c, v[2])
+    encode(ns, T3(), c, v[3])
+    encode(ns, T4(), c, v[4])
+  end
+decode(ns::SupportsTuples, t::Tuple{T1,T2,T3,T4}, c::IO) where {T1,T2,T3,T4} =
+  (decode(ns, T1(), c),
+   decode(ns, T2(), c),
+   decode(ns, T3(), c),
+   decode(ns, T4(), c))
+
+encode(ns::SupportsTuples, ::Val{:float2}, c::IO, v) =
+  encode(ns, (Val(:float),Val(:float)), c, v)
+decode(ns::SupportsTuples, ::Val{:float2}, c::IO) =
+  decode(ns, (Val(:float),Val(:float)), c)
+
+encode(ns::SupportsTuples, ::Val{:float3}, c::IO, v) =
+  encode(ns, (Val(:float),Val(:float),Val(:float)), c, v)
+decode(ns::SupportsTuples, ::Val{:float3}, c::IO) =
+  decode(ns, (Val(:float),Val(:float),Val(:float)), c)
+
+encode(ns::SupportsTuples, ::Val{:float4}, c::IO, v) =
+  encode(ns, (Val(:float),Val(:float),Val(:float),Val(:float)), c, v)
+decode(ns::SupportsTuples, ::Val{:float4}, c::IO) =
+  decode(ns, (Val(:float),Val(:float),Val(:float),Val(:float)), c)
+
+encode(ns::SupportsTuples, ::Val{:double3}, c::IO, v) =
+  encode(ns, (Val(:double),Val(:double),Val(:double)), c, v)
+decode(ns::SupportsTuples, ::Val{:double3}, c::IO) =
+  decode(ns, (Val(:double),Val(:double),Val(:double)), c)
+
+encode(ns::SupportsTuples, ::Val{:RGB}, c::IO, v) =
+  encode(ns, (Val(:float),Val(:float),Val(:float)), c, (red(v), green(v), blue(v)))
+decode(ns::SupportsTuples, ::Val{:RGB}, c::IO) =
+  RGB(decode(ns, (Val(:float),Val(:float),Val(:float)), c)...)
+
+encode(ns::SupportsTuples, ::Val{:RGBA}, c::IO, v) =
+  encode(ns, (Val(:float),Val(:float),Val(:float),Val(:float)), c, (red(v), green(v), blue(v), alpha(v)))
+decode(ns::SupportsTuples, ::Val{:RGBA}, c::IO) =
+  RGBA(decode(ns, (Val(:float),Val(:float),Val(:float),Val(:float)), c)...)
+
+# Canonical color wire format: 4xfloat RGBA, alpha-last (was packed 4-byte ARGB).
+# Delegates to :RGBA so every Color-typed op shares the one unified color encoding;
+# the endpoint stays a color value (C# System.Drawing.Color / Julia RGBA), only the
+# wire bytes change. See the materials design note (P0). Backends whose native color
+# type is non-byte (Unity, Unreal) override the reader/writer with the same 4-float
+# layout, not a different format.
+encode(ns::SupportsTuples, ::Val{:Color}, c::IO, v) =
+  encode(ns, Val(:RGBA), c, v)
+decode(ns::SupportsTuples, ::Val{:Color}, c::IO) =
+  decode(ns, Val(:RGBA), c)
+
+#
+const one_year_milliseconds = 366*24*60*60*1000
+
+encode(ns::Val{:CS}, ::Val{:DateTime}, c::IO, v) =
+  encode(ns, Val(:long), c, (Dates.datetime2epochms(v) - one_year_milliseconds)*10000) # Julia uses milliseconds since 0000-01-01T00:00:00 while C# uses 100s of nanoseconds since 0001-01-01T00:00:00
+
+decode(ns::Val{:CS}, ::Val{:DateTime}, c::IO) =
+  Dates.epochms2datetime(decode(ns, Val(:long), c) ÷ 10000 + one_year_milliseconds)
+
+
+# It is frequently necessary to encode/decode an abstract type that is
+# implemented os some primitive type
+macro encode_decode_as(ns, from, to)
+  esc(
+    quote
+      encode(ns::Val{$ns}, ::$from, c::IO, v) = encode(ns, $to(), c, v)
+      decode(ns::Val{$ns}, ::$from, c::IO) = decode(ns, $to(), c)
+    end)
+end
+
