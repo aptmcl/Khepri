@@ -1,0 +1,8 @@
+*.jl.*.cov
+*.jl.cov
+*.jl.mem
+/Manifest.toml
+/docs/build/
+
+# AutoCAD per-drawing lock files; created at open, removed at close.
+*.dwl*
