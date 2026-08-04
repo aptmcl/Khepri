@@ -1,0 +1,10 @@
+*.jl.*.cov
+*.jl.cov
+*.jl.mem
+/Manifest.toml
+/docs/build/
+# KhepriStudio.renv is now tracked: its 29.8 MB <embedded-files> copy of the HDRI
+# has been stripped, leaving a 22 KB archive that points at the shared lazy
+# artifact. The local .exr stays ignored -- it is the artifact's content, and is
+# resolved from the depot rather than the source tree.
+/src/studio_small_05_4k.exr
