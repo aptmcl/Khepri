@@ -126,8 +126,11 @@ println("  Span/deflection: $(round(30.0 / max_dead, digits=0))")
 
 ```@example tut2
 using KhepriThebes
-img_dir = joinpath(dirname(dirname(pathof(KhepriFrame4DD))), "docs", "src", "tutorials", "images")
-mkpath(img_dir)
+# PNG, not Thebes' default SVG: these scenes tessellate every sphere and
+# cylinder into vector paths, so an SVG figure reaches tens of MB and
+# Documenter's HTML writer takes hours on it (4h39m in CI run 30897859291).
+set_thebes_format!(:png)
+img_dir = mktempdir()
 backend(thebes)
 delete_all_shapes()
 set_view(xyz(15, -40, 8), xyz(15, 0, 1))

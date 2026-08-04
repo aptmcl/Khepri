@@ -7,9 +7,10 @@ makedocs(;
     modules=[KhepriFrame4DD],
     authors="António Menezes Leitão <antonio.menezes.leitao@gmail.com>",
     sitename="KhepriFrame4DD.jl",
+    repo=Documenter.Remotes.GitHub("aptmcl", "Khepri"),
     format=Documenter.HTML(;
         canonical="https://aptmcl.github.io/Khepri/KhepriFrame4DD/stable",
-        edit_link="master",
+        edit_link="main",
         assets=String[],
     ),
     pages=[
