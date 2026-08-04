@@ -98,7 +98,10 @@ b_get_material(b::MeasureBackend, spec) = 0
 b_get_material(b::MeasureBackend, ::BackendDefault) = 0
 b_material(b::MeasureBackend, name, base_color) = _meas_next_ref!(b)
 b_set_view(b::MeasureBackend, camera, target, lens, aperture) = nothing
-b_realistic_sky(b::MeasureBackend, date, latitude, longitude, meridian, altitude, azimuth, turbidity, sun) = nothing
+# Both reachable arities (Backend.jl): the date form the realistic_sky() frontend
+# calls, and the sun-position form the date form forwards to.
+b_realistic_sky(b::MeasureBackend, date, latitude, longitude, elevation, meridian, turbidity, sun) = nothing
+b_realistic_sky(b::MeasureBackend, altitude, azimuth, turbidity, sun) = nothing
 b_render_and_save_view(b::MeasureBackend, path) = path
 
 export measure_backend, MeasureBackend, reset_measure!, measure_watermark, measured_shapes,

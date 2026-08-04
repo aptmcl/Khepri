@@ -740,6 +740,15 @@ public b_layer, b_current_layer_ref,
 b_layer(b::Backend, name, visible, color) = BasicLayer(name, visible, color)
 b_current_layer_ref(b::Backend) = b.current_layer
 b_current_layer_ref(b::Backend, layer) = b.current_layer = layer
+#=
+The exported `switch_to_layer` (Frontend.jl) had no generic default, so every
+backend without an override (all but AutoCAD and Unity) threw
+UndefinedBackendException. The portable meaning is just "subsequent shapes go
+to this layer", i.e. the current-layer machinery above; backends with richer
+switching semantics (AutoCAD also swaps layer visibility) override the hook.
+=#
+b_switch_to_layer(b::Backend, layer) =
+  b_current_layer_ref(b, ref_value(b, layer))
 # `b.layers` is populated lazily (a key appears only once a shape is added to that
 # layer, via `get!(layers, cur, Proxy[])`).  A layer that exists but holds no shapes
 # has no key, so index with `get(...)` and fall back to an empty collection rather

@@ -680,7 +680,15 @@ b_surface_arc(b::Backend, c, r, α, Δα, mat) =
             for a in division(α, α + Δα, max(ceil(Int, abs(Δα)*32/2/π), 2), true)],
            c, false, mat)
 
-@bdef(b_surface_closed_spline(ps, mat))
+#=
+`fill()` on a ClosedSplinePath bottoms out here (see b_fill below), and as a
+`@bdef` this threw on every backend without a native override (only AutoCAD
+and Unreal have one). Same repair as b_surface_ellipse above: sample the
+interpolating spline (the ClosedPolygonalPath conversion polylinizes it) and
+land on b_surface_polygon, the most widely implemented surface op.
+=#
+b_surface_closed_spline(b::Backend, ps, mat) =
+  b_surface_polygon(b, path_vertices(convert(ClosedPolygonalPath, closed_spline_path(ps))), mat)
 
 #=
 This implementation is based on independent quadstrips, therefore, it is impossible
@@ -3408,6 +3416,14 @@ b_set_ground(b::Backend, level, mat) =
 
 b_realistic_sky(b::Backend, date, latitude, longitude, elevation, meridian, turbidity, sun) =
   b_realistic_sky(b, sun_pos(date, meridian, latitude, longitude)..., turbidity, sun)
+
+# The sun-position arity the date form forwards to had no fallback, so backends
+# without a native sky raised a raw MethodError. Same graceful default as the
+# lights above: the script must still run everywhere, sky-less.
+b_realistic_sky(b::Backend, altitude, azimuth, turbidity, sun) = begin
+  @warn "$(backend_name(b)) does not support realistic skies; ignoring." maxlog=1
+  void_ref(b)
+end
 
 # Rendering
 

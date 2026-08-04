@@ -1295,10 +1295,15 @@ b_map_division(b::Backend, f::Function, s::Shape1D, n::Int) =
   map_division(f, shape_path(s), n)
 
 #=
-b_map_division(b::Backend, f::Function, s::Shape2D, nu::Int, nv::Int) =
-  map_division(f, )
-  #@bdef map_division(f::Function, s::SurfaceGrid, nu::Int, nv::Int)
+The surface arity has no portable default: dividing an arbitrary Shape2D
+needs its parametric domain, which only the backend knows (b_surface_domain
+is itself backend-defined). It was left as a half-written comment here, so
+the frontend map_division(f, s::Shape2D, nu, nv) raised a raw MethodError
+on every backend without an override (only AutoCAD and Rhino have one).
+The @bdef declares the contract arity and raises the standard
+UnimplementedBackendOperationException instead.
 =#
+@bdef(b_map_division(f::Function, s::Shape2D, nu::Int, nv::Int))
 
 path_vertices(s::Shape1D) = path_vertices(shape_path(s))
 path_frames(s::Shape1D) = path_frames(shape_path(s))
@@ -1871,7 +1876,15 @@ union(shapes::Shapes) = union(shapes...)
 #####################################################################
 ## Paths can be used to generate surfaces and solids
 
-@defproxy(sweep_path, Shape3D, path::Path=polygonal_path(), profile::Path=circular_path(), rotation::Real=0, scale::Real=1)
+@defproxy(sweep_path, Shape3D, path::Path=polygonal_path(), profile::Path=circular_path(), rotation::Real=0, scale::Real=1, material::Material=default_material())
+#=
+The @defproxy-generated realize dispatches to b_sweep_path, which no backend
+and no generic ever defined — every sweep_path aborted with UndefVarError.
+Realize like sweep() does for a Path profile: through b_swept_curve, whose
+generic (Backend.jl) samples path and profile into a b_surface_grid.
+=#
+realize(b::Backend, s::SweepPath) =
+  b_swept_curve(b, s.path, s.profile, s.rotation, s.scale, material_ref(b, s))
 
 
 #####################################################################

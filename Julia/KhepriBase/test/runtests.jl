@@ -90,4 +90,8 @@ using Test
     )
   end
 
+  # Phase 7: b_* hook arity-conformance guard self-test
+  # (last, so every b_* method the test files define in Main is covered)
+  include("test_hook_conformance.jl")
+
 end

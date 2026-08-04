@@ -50,6 +50,23 @@ KhepriBase.b_nurbs_surface(b::RecordingExactBackend, surface::KhepriBase.BSpline
 KhepriBase.b_trimmed_surface(b::RecordingExactBackend, surface::KhepriBase.TrimmedSurface, mat) =
   recording_ref!(b, :trimmed_surface, surface)
 
+#=
+Scratch backend that KEEPS the Backends.jl current-layer defaults (it has the
+`current_layer` field they assume), unlike MockBackend whose overriding no-op
+setter would hide whether the generic b_switch_to_layer routes through them.
+=#
+if !@isdefined(SwitchLayerScratchKey)
+  struct SwitchLayerScratchKey end
+end
+
+mutable struct SwitchLayerScratchBackend <: KhepriBase.Backend{SwitchLayerScratchKey, Int}
+  current_layer::Any
+  refs::KhepriBase.References{SwitchLayerScratchKey, Int}
+end
+
+KhepriBase.void_ref(::SwitchLayerScratchBackend) = 0
+KhepriBase.backend_name(::SwitchLayerScratchBackend) = "SwitchLayerScratchBackend"
+
 if !@isdefined(TestSocketBackendKey)
   abstract type TestSocketBackendKey end
 end
@@ -690,6 +707,25 @@ KhepriBase.b_delete_all_shapes(b::KhepriBase.SocketBackend{TestSocketBackendKey,
     with_mock_backend() do b
       ref = b_layer(b, "TestLayer", true, rgb(1, 0, 0))
       @test ref > 0
+    end
+
+    @testset "b_switch_to_layer generic default" begin
+      # Exported frontend on a backend without an override: must not throw
+      # UndefinedBackendException.
+      with_mock_backend() do b
+        let l = layer("SwitchTarget")
+          @test switch_to_layer(l, (b,)) === nothing
+        end
+      end
+      # The default routes through b_current_layer_ref with the layer's
+      # realized ref value.
+      let b = SwitchLayerScratchBackend(nothing,
+                KhepriBase.References{SwitchLayerScratchKey, Int}()),
+          l = layer("Guarded")
+        b_switch_to_layer(b, l)
+        @test b_current_layer_ref(b) isa KhepriBase.BasicLayer
+        @test b_current_layer_ref(b).name == "Guarded"
+      end
     end
   end
 

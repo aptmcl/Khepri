@@ -43,12 +43,17 @@ not have to carry TOML as a dependency just for testing.)
 =#
 const Dates = KhepriBase.Dates
 
-# Detect unimplemented backend operations (thrown as ErrorException wrapping
-# UnimplementedBackendOperationException, or as UndefVarError for undefined b_* ops)
+#=
+Detect unimplemented backend operations. missing_specialization (Backend.jl)
+raises `error(UnimplementedBackendOperationException(...))`, i.e. an
+ErrorException whose message embeds the printed exception — hence the
+occursin, which is the only reliable signature. Nothing else is treated as
+"unimplemented": a UndefVarError for a `b_*` name is a genuine dispatch bug
+(a hook nobody defines), and mapping it to @test_broken silently masked the
+sweep_path/b_sweep_path failure on every backend.
+=#
 is_unimplemented(e::ErrorException) =
   occursin("UnimplementedBackendOperationException", e.msg)
-is_unimplemented(e::UndefVarError) =
-  startswith(string(e.var), "b_")
 is_unimplemented(::Any) = false
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -811,7 +816,6 @@ register_test("loft_circles", :extrusions) do
   set_view(xyz(76.69, 3.10, 63.36), xyz(75.91, 3.11, 62.73), 200)
 end
 
-#ERROR
 register_test("sweep_circle_path", :extrusions) do
   sweep_path(
     open_spline_path([xyz(0,0,0), xyz(2,3,1), xyz(5,2,3), xyz(8,0,2)]),
