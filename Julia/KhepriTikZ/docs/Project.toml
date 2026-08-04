@@ -4,3 +4,4 @@ KhepriTikZ = "d7448f13-5788-4f2e-89b7-cfef8ec02b84"
 
 [compat]
 Documenter = "1"
+KhepriTikZ = "0.1"
