@@ -2,9 +2,14 @@
 #
 # Replaces the 14 inert copies at Julia/<Pkg>/.github/workflows/CompatHelper.yml
 # (KhepriFrame4DD never had one), each of which ran a bare CompatHelper.main() --
-# which would look for a Project.toml at the repository root that does not exist --
-# and passed COMPATHELPER_PRIV: secrets.DOCUMENTER_KEY, a secret this repository
-# does not have.
+# which would look for a Project.toml at the repository root that does not exist.
+#
+# COMPATHELPER_PRIV matters: without it CompatHelper pushes its branches with the
+# default GITHUB_TOKEN, and events created by GITHUB_TOKEN do not trigger other
+# workflows -- so no CI ever runs on a CompatHelper PR, and a required `CI ok`
+# status check pins every one of them at "Expected -- waiting for status".
+# DOCUMENTER_KEY is the base64 private half of the repository deploy key added
+# 2026-08-04; the same secret drives deploydocs (ci.yml) and TagBot.
 #
 # `subdirs` defaults to [""], meaning the repository root. "" is excluded here for
 # the reason above: CompatHelper parses each subdir's Project.toml without an
@@ -51,6 +56,7 @@ jobs:
         shell: julia --color=yes {0}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMPATHELPER_PRIV: ${{ secrets.DOCUMENTER_KEY }}
         run: |
           import CompatHelper
           pkgs = ["Khepri", "KhepriAutoCAD", "KhepriBase", "KhepriBlender",
@@ -63,6 +69,7 @@ jobs:
         shell: julia --color=yes {0}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMPATHELPER_PRIV: ${{ secrets.DOCUMENTER_KEY }}
         run: |
           import CompatHelper
           pkgs = ["Khepri", "KhepriAutoCAD", "KhepriBase", "KhepriBlender",

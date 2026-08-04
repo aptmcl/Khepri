@@ -30,3 +30,7 @@ deps/deps.jl
 # Stray tool output
 acad.err
 jqerr.txt
+
+# Documenter output — built by CI, never committed. KhepriFrame4DD's was
+# tracked by accident and broke local rebuilds (Documenter clears build/).
+Julia/*/docs/build/

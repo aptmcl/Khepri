@@ -37,6 +37,14 @@ REGISTERED = {"Khepri", "KhepriAutoCAD", "KhepriBase", "KhepriIllustrator", "Khe
 DOCS_EXCLUDED = {}
 
 
+def has_docs(name):
+    # Eligibility is the presence of docs/make.jl, the file build_docs.sh runs.
+    # KhepriSVG has no docs/ at all, and an exclusion map that must be updated by
+    # hand would just fail the docs job again the next time a package is added
+    # without docs.
+    return (ROOT / name / "docs" / "make.jl").is_file()
+
+
 def packages():
     return sorted(p.parent.name for p in ROOT.glob("*/Project.toml"))
 
@@ -85,10 +93,13 @@ def affected(changed_paths, names):
 def emit(selected, names):
     selected = sorted(selected)
     registered = [p for p in selected if p in REGISTERED]
-    docs = [p for p in selected if p not in DOCS_EXCLUDED]
+    docs = [p for p in selected if has_docs(p) and p not in DOCS_EXCLUDED]
     for name, value in (("packages", selected), ("registered", registered), ("docs", docs)):
         print(f"{name}={json.dumps(value, separators=(',', ':'))}")
         print(f"any_{name}={'true' if value else 'false'}")
+    for pkg in selected:
+        if not has_docs(pkg):
+            print(f"::notice::docs skipped for {pkg}: no docs/make.jl", file=sys.stderr)
     for pkg, why in DOCS_EXCLUDED.items():
         if pkg in selected:
             print(f"::notice::docs skipped for {pkg}: {why}", file=sys.stderr)

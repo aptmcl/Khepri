@@ -1,9 +1,13 @@
 # Root TagBot for the aptmcl/Khepri monorepo.
 #
 # Replaces the 14 inert copies at Julia/<Pkg>/.github/workflows/TagBot.yml
-# (KhepriFrame4DD never had one), each of which passed
-# `ssh: ${{ secrets.DOCUMENTER_KEY }}` -- a secret that does not exist on this
-# repository.
+# (KhepriFrame4DD never had one).
+#
+# `ssh` matters: tags created with the default GITHUB_TOKEN do not trigger other
+# workflows, so without it ci.yml's entire tag pathway -- the registry-resolution
+# release test and the versioned/stable docs deploy -- silently never runs.
+# DOCUMENTER_KEY is the base64 private half of the repository deploy key added
+# 2026-08-04; the same secret drives deploydocs (ci.yml) and CompatHelper.
 #
 # TagBot is a per-package invocation: `subdir` is a plain string, not a list, so
 # the packages go in a matrix. `tag_prefix` is deliberately omitted -- with
@@ -56,4 +60,5 @@ jobs:
       - uses: JuliaRegistries/TagBot@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          ssh: ${{ secrets.DOCUMENTER_KEY }}
           subdir: Julia/${{ matrix.package }}

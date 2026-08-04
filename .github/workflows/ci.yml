@@ -54,6 +54,9 @@ jobs:
   select:
     name: Select packages
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read     # listing this workflow's runs to find the last green one
     outputs:
       packages: ${{ steps.pick.outputs.packages }}
       registered: ${{ steps.pick.outputs.registered }}
@@ -80,6 +83,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
           BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           sel=".github/scripts/select_packages.py"
@@ -89,13 +93,39 @@ jobs:
             git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
             base="$(git merge-base "origin/${BASE_REF}" HEAD)"
             git diff --name-only "$base" HEAD | python3 "$sel" --changed | tee -a "$GITHUB_OUTPUT"
-          elif [[ -z "$BEFORE" || "$BEFORE" =~ ^0+$ ]] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-            # New branch, force-push, or a base commit that no longer exists.
-            # Over-testing is the safe direction.
-            echo "no usable base commit; selecting every package"
-            python3 "$sel" --all | tee -a "$GITHUB_OUTPUT"
           else
-            git diff --name-only "$BEFORE" "$GITHUB_SHA" | python3 "$sel" --changed | tee -a "$GITHUB_OUTPUT"
+            # Push or schedule. For pushes, prefer diffing from the head of the
+            # last run of THIS workflow that SUCCEEDED on this branch, not from
+            # github.event.before: the concurrency group above keeps at most one
+            # pending run per ref and auto-cancels the rest, and the next push's
+            # BEFORE..SHA range starts at the cancelled run's *untested* head --
+            # so a range lost to cancellation would never be selected by any
+            # later run. (Observed on main 2026-08-04: 3 of 7 consecutive push
+            # runs cancelled while pending.) Diffing from the last green head
+            # re-covers everything since the last commit that actually passed.
+            # A schedule run keeps the deliberate full sweep: BEFORE is unset,
+            # so it falls through to --all below.
+            base=""
+            if [[ "$EVENT" == "push" ]]; then
+              base="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=${GITHUB_REF_NAME}&event=push&status=success&per_page=1" \
+                        --jq '.workflow_runs[0].head_sha // empty' 2>/dev/null || true)"
+              if [[ -n "$base" ]] && ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+                echo "last green head ${base} not in history; falling back"
+                base=""
+              fi
+            fi
+            if [[ -z "$base" && -n "$BEFORE" ]] && [[ ! "$BEFORE" =~ ^0+$ ]] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+              base="$BEFORE"
+            fi
+            if [[ -z "$base" ]]; then
+              # New branch, force-push, schedule, or no usable base commit.
+              # Over-testing is the safe direction.
+              echo "no usable base commit; selecting every package"
+              python3 "$sel" --all | tee -a "$GITHUB_OUTPUT"
+            else
+              echo "diffing from ${base}"
+              git diff --name-only "$base" "$GITHUB_SHA" | python3 "$sel" --changed | tee -a "$GITHUB_OUTPUT"
+            fi
           fi
           # nightly only on the scheduled sweep; see the `schedule` trigger above.
           if [[ "$EVENT" == "schedule" ]]; then
@@ -115,8 +145,13 @@ jobs:
       # A visual test with no committed golden MINTS one and scores a pass, so a
       # scene can be silently untested and a golden deleted by mistake turns a
       # regression green. Under this variable a missing golden is a failure.
-      # Verified to pass as-is for all four golden-carrying backends: every scene
-      # that actually runs has a committed golden today.
+      # Four backends run their visual suites unconditionally in CI -- TikZ,
+      # POVRay, SVG, and Thebes -- and each must keep a committed golden for
+      # every scene that produces output (scenes aborting on an unimplemented
+      # hook score @test_broken and need none). The gated live suites (AutoCAD,
+      # Rhino) see the flag only when run by hand with their KHEPRI_*_TESTS
+      # gates. Thebes' goldens were completed 2026-08-04; before that this flag
+      # failed KhepriThebes on every run that selected it.
       KHEPRI_REQUIRE_GOLDEN: '1'
     permissions:
       contents: read
