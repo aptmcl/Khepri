@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 36e87b0cee30abe489cdf24800486d3d
+labels:
+- Granite
+- PBR
+- mat
+- material
+- matte
+- rough
+- texture
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
