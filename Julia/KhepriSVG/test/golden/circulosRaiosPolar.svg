@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="-4.5 -5.743 15.333 10.243">
+<defs>
+</defs>
+<g stroke-width="0.008">
+<circle cx="0" cy="0" r="4" style="fill:none;stroke:rgb(0,0,0)"/>
+<text x="5" y="0" style="font-family:Helvetica,Arial,sans-serif;font-size:1.4">Raio: 4</text>
+<circle cx="2.828" cy="-2.828" r="2" style="fill:none;stroke:rgb(0,0,0)"/>
+<text x="5.328" y="-2.828" style="font-family:Helvetica,Arial,sans-serif;font-size:0.7">Raio: 2</text>
+<circle cx="4.243" cy="-4.243" r="1" style="fill:none;stroke:rgb(0,0,0)"/>
+<text x="5.493" y="-4.243" style="font-family:Helvetica,Arial,sans-serif;font-size:0.35">Raio: 1</text>
+</g>
+</svg>
