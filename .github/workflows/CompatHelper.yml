@@ -20,8 +20,13 @@
 name: CompatHelper
 
 on:
+  # Weekly, not daily. This walks 18 package environments plus 18 docs
+  # environments, so a single run opens on the order of 26 pull requests -- the
+  # daily cadence inherited from the per-package workflows produced that every
+  # night and buried everything else. Weekly still catches upstream releases well
+  # inside any reasonable response time.
   schedule:
-    - cron: 0 0 * * *
+    - cron: 0 0 * * 1
   workflow_dispatch:
 
 permissions:
