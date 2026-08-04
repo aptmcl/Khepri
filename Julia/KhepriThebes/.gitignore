@@ -1,0 +1,17 @@
+*.jl.*.cov
+*.jl.cov
+*.jl.mem
+/Manifest.toml
+/docs/build/
+
+# Editor backups
+*~
+*.bak
+*.tmp
+
+# Test/scratch output
+*.svg
+*.png
+*.pdf
+!assets/**
+*.tex
