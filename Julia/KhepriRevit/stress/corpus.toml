@@ -1,0 +1,131 @@
+# GSG model ladder corpus for the Khepri BIM->AD stress suite.
+# Hand-parsed by run_corpus.sh (grep/sed/awk) — keep the flat `key = value` shape,
+# one field per line, single-quoted literal strings for Windows paths.
+
+[models.gsg02]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\GSGRevit\GSG_02_Create_Walls.rvt'
+description = 'Stage 02: exterior walls only'
+skip = false
+
+[models.gsg03]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\GSGRevit\GSG_03_Terrain_Pad.rvt'
+description = 'Stage 03: terrain surface and building pad'
+skip = false
+
+[models.gsg04]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\GSGRevit\GSG_04_add_floor.rvt'
+description = 'Stage 04: adds floor slab'
+skip = false
+
+[models.gsg05]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\GSGRevit\GSG_05_add_roof.rvt'
+description = 'Stage 05: adds roof'
+skip = false
+
+[models.gsg06]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\GSGRevit\GSG_06_place_doors.rvt'
+description = 'Stage 06: places doors'
+skip = false
+
+[models.gsg07]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\GSGRevit\GSG_07_place_windows.rvt'
+description = 'Stage 07: places windows'
+skip = false
+
+[models.gsg08]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\GSGRevit\GSG_08_place_curtainwall.rvt'
+description = 'Stage 08: places curtain wall'
+skip = false
+
+[models.gsg09]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\GSGRevit\GSG_09_stairs_railings.rvt'
+description = 'Stage 09: stairs and railings'
+skip = false
+
+[models.gsg10]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\GSGRevit\GSG_10_views.rvt'
+description = 'Stage 10: views'
+skip = true
+reason = 'views/annotations-only delta'
+
+[models.gsg11]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\GSGRevit\GSG_11_Dimensions.rvt'
+description = 'Stage 11: dimensions'
+skip = true
+reason = 'views/annotations-only delta'
+
+[models.gsg12]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\GSGRevit\GSG_12_notes.rvt'
+description = 'Stage 12: notes'
+skip = true
+reason = 'views/annotations-only delta'
+
+[models.gsg13]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\GSGRevit\GSG_13_sheets.rvt'
+description = 'Stage 13: sheets'
+skip = true
+reason = 'views/annotations-only delta'
+
+[models.tutorial]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\GSGRevit\GSG_Tutorial_Project.rvt'
+description = 'Full GSG tutorial project'
+skip = false
+
+[models.complete]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\GSGRevit\GSG_Complete.rvt'
+description = 'Complete GSG model (final state)'
+skip = false
+
+[models.moradia]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\DDN\OneDrive_1_5-2-2025\Moradia T4_v1.rvt'
+description = 'DDN Moradia T4 house (55 MB real project; arc walls, stairs, groups)'
+skip = false
+# Rebuilt walls auto-join at junctions, extending location lines by ~half a wall thickness
+# (+1.0 m over 21 walls) — a Revit regeneration semantic, not a codegen defect.
+length_rtol = '0.02'
+
+[models.moradia3]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\DDN\OneDrive_1_5-2-2025\Moradia T3_v5.rvt'
+description = 'DDN Moradia T3 house v5 (real project)'
+skip = false
+length_rtol = '0.02'
+
+[models.snowdon]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\ExternalStress\snowdon_architectural.rvt'
+description = 'Snowdon Towers (Autodesk 2024 sample): multi-storey architectural tower, 94 MB'
+skip = false
+
+[models.goldennugget]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\ExternalStress\golden_nugget_architektur.rvt'
+description = 'BIM Projekt Golden Nugget (MuM 2024 sample): large mixed-use building, 148 MB'
+skip = false
+
+[models.racbasic]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\ExternalStress\rac_basic_2024.rvt'
+description = 'Autodesk rac_basic 2024 sample: the canonical demo residence (19 MB, downloaded)'
+skip = false
+
+[models.racadvanced]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\ExternalStress\rac_advanced_2024.rvt'
+description = 'Autodesk rac_advanced 2024 sample: office building, curtain walls, ramps (17 MB, downloaded)'
+skip = false
+
+[models.wspoffice]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\ExternalStress\wsp_office_smallcut.rvt'
+description = 'WSP Office SmallCut (MIT, Azure samples): real office building, Revit 2020 upgrade-on-open (27 MB, downloaded)'
+skip = false
+
+[models.ulaarq]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\Projeto ULA RVT\PC26001-6PC-ARQ.Z.0.00.M3_0001.rvt'
+description = 'ULA project (Tecnico PC26001-6PC): architectural model (178 MB). WORKSHARED CENTRAL model — FAILs headless open (journal shows DocumentSynchronizedWithCentral); needs detach-from-central handling in the harness'
+skip = false
+
+[models.ulaest]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\Projeto ULA RVT\PC26001-6PC-EST.Z.0.00.M3_0001.rvt'
+description = 'ULA project (Tecnico PC26001-6PC): structural model (91 MB). Same project — likely workshared central (see ulaarq)'
+skip = false
+
+[models.ulatop]
+path = 'C:\Users\aml\Vault\AML\Projects\KhepriProjects\RAD\Revit\Projeto ULA RVT\PC26001-6PC-TOP.Z.0.00.M3_0001.rvt'
+description = 'ULA project (Tecnico PC26001-6PC): topography/survey model (5 MB). Same project — likely workshared central (see ulaarq)'
+skip = false
