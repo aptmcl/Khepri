@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<!--
+  Landing page for https://aptmcl.github.io/Khepri/
+
+  Every package deploys under its own `dirname`, so nothing lands at the Pages
+  root and this address would otherwise 404. Documenter writes only inside each
+  package's own directory, so this file survives subsequent deployments.
+
+  Hand-maintained: add a row when a package starts publishing documentation.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Khepri — documentation</title>
+<style>
+  :root {
+    --fg: #1a1a1a; --muted: #666; --bg: #ffffff;
+    --rule: #e4e4e4; --link: #0b5fff; --card: #fafafa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #e8e8e8; --muted: #9a9a9a; --bg: #16181d;
+      --rule: #2c2f36; --link: #6ea8ff; --card: #1c1f26;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 3rem 1.25rem 5rem;
+    background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1 { font-size: 2rem; margin: 0 0 .35rem; letter-spacing: -.02em; }
+  .lede { color: var(--muted); margin: 0 0 2.5rem; font-size: 1.05rem; }
+  h2 {
+    font-size: .78rem; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--muted); font-weight: 600;
+    margin: 2.5rem 0 .75rem; padding-bottom: .4rem; border-bottom: 1px solid var(--rule);
+  }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { border-bottom: 1px solid var(--rule); }
+  li:last-child { border-bottom: 0; }
+  a.pkg {
+    display: flex; gap: 1rem; align-items: baseline;
+    padding: .7rem .6rem; margin: 0 -.6rem;
+    text-decoration: none; color: inherit; border-radius: 6px;
+  }
+  a.pkg:hover { background: var(--card); }
+  a.pkg .name {
+    flex: 0 0 11.5rem; font-weight: 600; color: var(--link);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .93rem;
+  }
+  a.pkg .what { color: var(--muted); font-size: .93rem; }
+  @media (max-width: 34rem) {
+    a.pkg { display: block; }
+    a.pkg .name { margin-bottom: .15rem; }
+  }
+  footer {
+    margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--rule);
+    color: var(--muted); font-size: .88rem;
+  }
+  footer a { color: var(--link); }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .88em; background: var(--card); padding: .12em .38em; border-radius: 4px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Khepri</h1>
+  <p class="lede">
+    An algorithmic design tool that integrates design, analysis, and optimization.
+    The same program produces an equivalent design in every backend — only the
+    <code>using</code> line changes.
+  </p>
+
+  <h2>Core</h2>
+  <ul>
+    <li><a class="pkg" href="KhepriBase/"><span class="name">KhepriBase</span><span class="what">Geometry, materials, levels and families, and the backend protocol.</span></a></li>
+    <li><a class="pkg" href="Khepri/"><span class="name">Khepri</span><span class="what">Umbrella entry point for Khepri users.</span></a></li>
+  </ul>
+
+  <h2>CAD and BIM</h2>
+  <ul>
+    <li><a class="pkg" href="KhepriAutoCAD/"><span class="name">KhepriAutoCAD</span><span class="what">AutoCAD, over a C# plugin.</span></a></li>
+    <li><a class="pkg" href="KhepriRevit/"><span class="name">KhepriRevit</span><span class="what">Autodesk Revit, over a C# plugin.</span></a></li>
+    <li><a class="pkg" href="KhepriRhino/"><span class="name">KhepriRhino</span><span class="what">Rhinoceros 3D, over a C# plugin.</span></a></li>
+    <li><a class="pkg" href="KhepriGrasshopper/"><span class="name">KhepriGrasshopper</span><span class="what">Grasshopper, Rhino's visual programming environment.</span></a></li>
+  </ul>
+
+  <h2>Rendering and visualization</h2>
+  <ul>
+    <li><a class="pkg" href="KhepriBlender/"><span class="name">KhepriBlender</span><span class="what">Blender, over a Python plugin.</span></a></li>
+    <li><a class="pkg" href="KhepriUnity/"><span class="name">KhepriUnity</span><span class="what">The Unity engine, over a C# plugin.</span></a></li>
+    <li><a class="pkg" href="KhepriUnreal/"><span class="name">KhepriUnreal</span><span class="what">Unreal Engine, over a C++ plugin.</span></a></li>
+    <li><a class="pkg" href="KhepriPOVRay/"><span class="name">KhepriPOVRay</span><span class="what">Ray-traced rendering via POV-Ray.</span></a></li>
+    <li><a class="pkg" href="KhepriThreejs/"><span class="name">KhepriThreejs</span><span class="what">3D visualization in the browser via Three.js.</span></a></li>
+    <li><a class="pkg" href="KhepriTikZ/"><span class="name">KhepriTikZ</span><span class="what">TikZ output for standalone figures and LaTeX documents.</span></a></li>
+    <li><a class="pkg" href="KhepriThebes/"><span class="name">KhepriThebes</span><span class="what">Pure-Julia SVG rendering, built on Thebes.jl and Luxor.jl.</span></a></li>
+  </ul>
+
+  <h2>Analysis and tools</h2>
+  <ul>
+    <li><a class="pkg" href="KhepriFrame4DD/"><span class="name">KhepriFrame4DD</span><span class="what">Structural analysis, built on Frame4DD.</span></a></li>
+    <li><a class="pkg" href="KhepriLibrary/"><span class="name">KhepriLibrary</span><span class="what">Reusable parametric building components.</span></a></li>
+    <li><a class="pkg" href="KhepriIllustrator/"><span class="name">KhepriIllustrator</span><span class="what">Step-by-step visual tracing of a Khepri program's evaluation.</span></a></li>
+  </ul>
+
+  <footer>
+    Source at <a href="https://github.com/aptmcl/Khepri">github.com/aptmcl/Khepri</a>.
+    <code>Frame4DD</code> and <code>KhepriSVG</code> ship in the repository but publish
+    no documentation site. MIT licensed.
+  </footer>
+</main>
+</body>
+</html>
