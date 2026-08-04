@@ -9,9 +9,13 @@
 *.bak
 *.tmp
 
-# Test/scratch output
+# Test/scratch output. The golden exception matters: without it, freshly
+# minted goldens under test/golden/ are silently ignored, `git status` stays
+# clean, and CI fails on the missing files under KHEPRI_REQUIRE_GOLDEN --
+# which is exactly what happened to 28 of the 53 goldens before 2026-08-04.
 *.svg
 *.png
 *.pdf
 !assets/**
+!test/golden/**
 *.tex

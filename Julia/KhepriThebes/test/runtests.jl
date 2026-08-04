@@ -272,6 +272,14 @@ using Test
       # repair is a stable depth sort in Thebes.jl, as KhepriTikZ now has.
       "loft_circles",
     ]
+    # Deterministic, but their SVG goldens are too large to commit: arvores3D
+    # mints at 348 MB (GitHub rejects blobs over 100 MB outright) and
+    # cidadeEspacial at 74 MB (above the 50 MB warning). Skipped until goldens
+    # can be compared by digest instead of committed full text.
+    oversized_golden_skip = [
+      "arvores3D",
+      "cidadeEspacial",
+    ]
     run_visual_tests(thebes,
       golden_dir = joinpath(@__DIR__, "golden"),
       reset! = () -> begin
@@ -281,7 +289,7 @@ using Test
       end,
       compare = text_compare,
       skip = [:csg],
-      skip_tests = nondeterministic_skip,
+      skip_tests = vcat(nondeterministic_skip, oversized_golden_skip),
     )
   end
 
