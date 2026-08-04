@@ -17,7 +17,7 @@ Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
-ColorTypes = "0.11"
+ColorTypes = "0.11, 0.12"
 Colors = "0.13.1"
 Dates = "1.9"
 HTTP = "1.10"
