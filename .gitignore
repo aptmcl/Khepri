@@ -1,4 +1,22 @@
 *.jl.cov
+# Julia/, Plugins/ and VSCode/ were ignored here while each was its own
+# repository checked out inside this one. They are content now, not nested
+# repos, so those rules are gone -- leaving them would silently exclude the
+# entire monorepo from `git add`.
+
+# Workspace-private. This repository is the development home, but these
+# files describe how the workspace is run rather than what the packages do,
+# and they stay on the maintainer's disk. They were filtered out of history
+# at the migration, so committing them now would publish them for the first
+# time. Root-anchored: a package's own CLAUDE.md is unaffected.
+/PLANS.md
+/CLAUDE.md
+/AGENTS.md
+/Docs/
+/Assets/
+/Tools/
+/Environments/
+/.claude/
 *.jl.*.cov
 *.jl.mem
 deps/deps.jl
@@ -8,9 +26,6 @@ deps/deps.jl
 # Nested independent git repos — each has its own .git and GitHub remote.
 # This root repo versions only the workspace-level files (Docs, Assets,
 # Environments, guidelines).
-/Julia/
-/Plugins/
-/VSCode/
 
 # Stray tool output
 acad.err
