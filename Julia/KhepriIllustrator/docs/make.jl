@@ -6,11 +6,11 @@ DocMeta.setdocmeta!(KhepriIllustrator, :DocTestSetup, :(using KhepriIllustrator)
 makedocs(;
     modules=[KhepriIllustrator],
     authors="António Menezes Leitão <antonio.menezes.leitao@gmail.com>",
-    repo="https://github.com/aptmcl/KhepriIllustrator.jl/blob/{commit}{path}#{line}",
+    repo=Documenter.Remotes.GitHub("aptmcl", "Khepri"),
     sitename="KhepriIllustrator.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://aptmcl.github.io/KhepriIllustrator.jl",
+        canonical="https://aptmcl.github.io/Khepri/KhepriIllustrator/stable",
         edit_link="master",
         assets=String[],
     ),
@@ -20,6 +20,8 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/aptmcl/KhepriIllustrator.jl",
-    devbranch="master",
+    repo="github.com/aptmcl/Khepri.git",
+    devbranch="main",
+    dirname="KhepriIllustrator",
+    tag_prefix="KhepriIllustrator-",
 )

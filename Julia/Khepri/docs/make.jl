@@ -4,11 +4,11 @@ using Documenter
 makedocs(;
     modules=[Khepri],
     authors="António Menezes Leitão <antonio.menezes.leitao@gmail.com>",
-    repo="https://github.com/aptmcl/Khepri.jl/blob/{commit}{path}#L{line}",
+    repo=Documenter.Remotes.GitHub("aptmcl", "Khepri"),
     sitename="Khepri.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://aptmcl.github.io/Khepri.jl",
+        canonical="https://aptmcl.github.io/Khepri/Khepri/stable",
         assets=String[],
     ),
     pages=[
@@ -17,6 +17,8 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/aptmcl/Khepri.jl",
-    devbranch="master",
+    repo="github.com/aptmcl/Khepri.git",
+    devbranch="main",
+    dirname="Khepri",
+    tag_prefix="Khepri-",
 )

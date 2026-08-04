@@ -1,3 +1,6 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 KhepriBlender = "972dbe12-e583-40ed-b27f-1957d74bf95d"
+
+[compat]
+Documenter = "1"
