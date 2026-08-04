@@ -4,3 +4,4 @@ KhepriBase = "4cc0fe96-1163-46f3-ba32-de1e65d9548f"
 
 [compat]
 Documenter = "1"
+KhepriBase = "0.8"
