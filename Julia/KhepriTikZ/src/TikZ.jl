@@ -405,14 +405,19 @@ tikz_text(out::IO, txt, p::Loc, h::Real) =
     tikz_e(out, "}")
   end
 
+# Channels may be fixed-point (rgba(1,0,0,1) is RGBA{N0f8}); Float64 them
+# first or tikz_number prints the raw fixed-point literal (e.g. 1.0N0f8),
+# which xcolor cannot parse.
 tikz_color(c) =
-  join(vcat(c.alpha ≈ 1.0 ?
-              [] :
-              ["opacity=$(tikz_number_string(c.alpha))"],
-            c.r ≈ 1.0 && c.g ≈ 1.0 && c.b ≈ 1.0 ?
-              [] :
-              ["color={rgb,1:red,$(tikz_number_string(c.r));green,$(tikz_number_string(c.g));blue,$(tikz_number_string(c.b))}"]),
-       ",")
+  let (r, g, b, alpha) = Float64.((c.r, c.g, c.b, c.alpha))
+    join(vcat(alpha ≈ 1.0 ?
+                [] :
+                ["opacity=$(tikz_number_string(alpha))"],
+              r ≈ 1.0 && g ≈ 1.0 && b ≈ 1.0 ?
+                [] :
+                ["color={rgb,1:red,$(tikz_number_string(r));green,$(tikz_number_string(g));blue,$(tikz_number_string(b))}"]),
+         ",")
+  end
 
 tikz_transform(out::IO, f::Function, c::Loc) =
   let m = c.cs.transform,
@@ -478,25 +483,27 @@ KhepriBase.merge_backend_materials(b::TikZ, m1::String, m2::String) =
 b_layer_material overrides KhepriBase's layer-aware generic
 (Shapes.jl: b_layer_material(b, layer, spec)). The macro-generated
 realize(::MaterialInLayer) calls THAT generic with the realized layer
-(a BasicLayer, carrying .color) and the backend spec. The previous name
-b_get_material(b, layer, spec) matched no generic at all, so this 3-arg
-method was unreachable: every layer colour fell through to the 2-arg
-b_get_material(b, spec) default and collapsed to void_ref, i.e. TikZ
-layer colouring was dead code.
+(a BasicLayer, carrying .color) and the backend spec — for TikZ the
+option string stored by tikz_option (e.g. "very thin", "-latex"), or
+nothing when the material has no TikZ entry. Both halves must survive:
+dropping the spec silently voids every tikz_option material (the
+exported line styles and arrow materials realized to void_ref and
+vanished from the output).
 
 The default-white test must be approximate. Layer colours are Float
 channels; a colour that only rounds to white (e.g. 1 - eps) fails an
 exact ==rgba(1,1,1,1) and would emit a spurious near-white scope. The
 per-channel ≈ 1 here mirrors tikz_color's own ≈ 1.0 channel suppression,
-so a default-white layer yields void_ref (no \begin{scope} emitted).
+so a default-white layer contributes no colour options.
 =#
 KhepriBase.b_layer_material(b::TikZ, layer, spec) =
-  let c = layer.color
-    (c.r ≈ 1 && c.g ≈ 1 && c.b ≈ 1 && c.alpha ≈ 1) ?
-      void_ref(b) :
-      tikz_color(c)
+  let c = layer.color,
+      white = c.r ≈ 1 && c.g ≈ 1 && c.b ≈ 1 && c.alpha ≈ 1
+    isnothing(spec) ?
+      (white ? void_ref(b) : tikz_color(c)) :
+      (white ? spec : merge_backend_materials(b, tikz_color(c), spec))
   end
-  
+
 # 2-arg material resolution for an explicit nothing spec (PbrMaterial
 # with no backend override). Distinct from the layer-aware
 # b_layer_material above; kept so b_get_material(b, nothing) -> void_ref.
@@ -504,13 +511,6 @@ KhepriBase.b_get_material(b::TikZ, spec::Nothing) = void_ref(b)
 
 KhepriBase.b_material(b::TikZ, name, base_color) =
   tikz_color(base_color)
-
-KhepriBase.after_connecting(b::TikZ) =
-  begin
-    set_material()
-	#set_material(blender, material_grass, "asset_base_id:97b171b4-2085-4c25-8793-2bfe65650266 asset_type:material")
-	#set_material(blender, material_grass, "asset_base_id:7b05be22-6bed-4584-a063-d0e616ddea6a asset_type:material")
-  end
 
 withTikZXForm(f, b, c, mat) =
   let out = connection(b),

@@ -233,20 +233,36 @@ KhepriBase.merge_backend_materials(b::SVG, m1::String, m2::String) =
     join(["$k:$v" for (k, v) in merge(props1, props2)], ";")
   end
 
-KhepriBase.b_get_material(b::SVG, layer, spec) =
-  let c = layer.color
-    c == rgba(1,1,1,1) ?
-      void_ref(b) :
-      svg_color_value(c)
+#= b_layer_material is the layer-aware hook the macro-generated
+   realize(::MaterialInLayer) dispatches to (Shapes.jl:
+   b_layer_material(b, layer, spec)); a former 3-arg b_get_material
+   spelling matched no generic, so layer colouring was dead code.
+   `layer` is the realized BasicLayer (carrying .color) and `spec` the
+   CSS string stored by svg_option, or nothing without an SVG entry.
+
+   The colour half is a BARE value (svg_color_value) so svg_style can
+   still choose fill: vs stroke: at emission time; that also means
+   merge_backend_materials is unusable here (it keeps only key:value
+   segments and would drop the bare colour), so we join by hand with
+   the colour FIRST — svg_style's bare-colour branch prefixes exactly
+   the first segment.
+
+   The default-white test is approximate (per-channel ≈ 1, mirroring
+   the TikZ backend): layer colours are Float channels, and a colour
+   that only rounds to white would otherwise emit a spurious
+   near-white style. =#
+KhepriBase.b_layer_material(b::SVG, layer, spec) =
+  let c = layer.color,
+      white = c.r ≈ 1 && c.g ≈ 1 && c.b ≈ 1 && c.alpha ≈ 1
+    isnothing(spec) ?
+      (white ? void_ref(b) : svg_color_value(c)) :
+      (white ? spec : "$(svg_color_value(c));$(spec)")
   end
 
 KhepriBase.b_get_material(b::SVG, spec::Nothing) = void_ref(b)
 
 KhepriBase.b_material(b::SVG, name, base_color) =
   svg_color_value(base_color)
-
-KhepriBase.after_connecting(b::SVG) =
-  set_material()
 
 # ============================================================
 # SVG shape emitters
@@ -420,6 +436,16 @@ const _font_family = "Helvetica,Arial,sans-serif"
    different convention is desired. =#
 const _cap_to_em = 1.4
 
+#= Realized materials reach text either as bare colour values
+   (b_material / layer colours, e.g. "rgb(255,0,0)") or as CSS property
+   strings (svg_option). A bare value pasted into style= is an invalid
+   declaration renderers drop, so coloured text silently rendered
+   black. Text is painted by fill, so wrap each valueless segment as a
+   fill: declaration and pass proper declarations through. =#
+svg_text_css(mat) =
+  join([contains(seg, ":") ? String(seg) : "fill:$(seg)"
+        for seg in split(mat, ";") if !isempty(strip(seg))], ";")
+
 #= TikZ-equivalent label/text anchoring. TikZ's `anchor=base west` puts
    the baseline-left corner of the glyph box at the coordinate; the SVG
    defaults (`text-anchor=start`, `dominant-baseline=alphabetic`) are
@@ -432,7 +458,7 @@ svg_text(out::IO, str, c, size, mat) =
       style_parts = String["font-family:$(_font_family)",
                            "font-size:$(svg_number(size * _cap_to_em))"]
     if !(mat isa Integer) && !isnothing(mat) && mat != ""
-      push!(style_parts, mat)
+      push!(style_parts, svg_text_css(mat))
     end
     println(out, "<text x=\"$(svg_number(x))\" y=\"$(svg_number(y))\" style=\"$(join(style_parts, ";"))\">$(svg_escape(string(str)))</text>")
   end
@@ -600,7 +626,7 @@ svg_node(out::IO, p, txt, mat) =
       style_parts = String["font-family:$(_font_family)",
                            "font-size:$(svg_number(0.3 * _cap_to_em))"]
     if !(mat isa Integer) && !isnothing(mat) && mat != ""
-      push!(style_parts, mat)
+      push!(style_parts, svg_text_css(mat))
     end
     println(out, "<text x=\"$(svg_number(x))\" y=\"$(svg_number(y))\" text-anchor=\"middle\" dominant-baseline=\"central\" style=\"$(join(style_parts, ";"))\">$(svg_escape(string(txt)))</text>")
   end
@@ -759,24 +785,27 @@ KhepriBase.b_arc_dimension(b::SVG, c, r, α, Δα, rstr, Δstr, size, offset, ma
 
 #= Annotations (vectors_illustration / radii_illustration / etc.) carry
    geometric positions that the user clearly wants visible — yet
-   `shapes_bbox` doesn't see them, because `shape_locs(::Annotation)`
-   defaults to `Loc[]`. The result is an SVG viewBox that crops out
-   the very labels we just drew. We extend `shape_locs` for every
-   illustration type so the world-space bbox now spans the enveloping
-   circles of each annotation.
+   `shapes_bbox` doesn't see them, because annotations contribute no
+   `shape_locs`. The result is an SVG viewBox that crops out the very
+   labels we just drew. `svg_shape_locs` is an SVG-LOCAL widening of
+   `shape_locs` covering Text and every illustration type, so the
+   world-space bbox spans the enveloping circles of each annotation.
 
-   These overrides are local to KhepriSVG so we don't change
-   bbox/zoom behaviour for backends that handle annotation extents
-   their own way (TikZ defers to LaTeX's automatic `tikzpicture`
-   bounding box, for instance). =#
+   It must stay internal: these are KhepriBase-owned types, so
+   extending `KhepriBase.shape_locs` for them here would be type
+   piracy — the methods would leak into every backend the moment
+   KhepriSVG loads, changing bbox/zoom behaviour for backends that
+   handle annotation extents their own way (TikZ defers to LaTeX's
+   automatic `tikzpicture` bounding box, for instance). =#
+svg_shape_locs(b::SVG, s) = shape_locs(s)
 
 #= Text contributes a width-aware bbox so labels at the edges of the
    drawing don't get cropped out of the viewBox. KhepriBase's
    `b_text_size` uses the built-in glyph metrics to give a sensible
    pixel rectangle for any string, so we use it directly. =#
-KhepriBase.shape_locs(s::KhepriBase.Text) =
-  let p = s.corner, h = s.height
-    (minx, maxx, miny, maxy) = b_text_size(svg, s.str, h, nothing)
+svg_shape_locs(b::SVG, s::KhepriBase.Text) =
+  let p = s.corner, h = s.height,
+      (minx, maxx, miny, maxy) = b_text_size(b, s.str, h, nothing)
     [add_xy(p, minx, miny), add_xy(p, maxx, maxy)]
   end
 
@@ -786,18 +815,18 @@ _radial_locs(c, r) =
 
 # Fallback — annotations without an explicit override contribute no
 # locs (matches the default Shape behaviour).
-KhepriBase.shape_locs(::KhepriBase.Annotation) = Loc[]
+svg_shape_locs(b::SVG, ::KhepriBase.Annotation) = Loc[]
 
-KhepriBase.shape_locs(s::KhepriBase.Dimension) =
+svg_shape_locs(b::SVG, s::KhepriBase.Dimension) =
   [s.from, s.to]
 
-KhepriBase.shape_locs(s::KhepriBase.ArcDimension) =
+svg_shape_locs(b::SVG, s::KhepriBase.ArcDimension) =
   isnothing(s.center) ? Loc[] : _radial_locs(s.center, s.radius)
 
-KhepriBase.shape_locs(s::KhepriBase.RadiiIllustration) =
+svg_shape_locs(b::SVG, s::KhepriBase.RadiiIllustration) =
   isempty(s.radii) ? Loc[] : _radial_locs(s.center, maximum(s.radii))
 
-KhepriBase.shape_locs(s::KhepriBase.VectorsIllustration) =
+svg_shape_locs(b::SVG, s::KhepriBase.VectorsIllustration) =
   isempty(s.radii) ? Loc[] :
     let rmax = maximum(s.radii), p = s.start, a = s.angle
       # The line goes from p to p+vpol(rmax, a) — return the line endpoints
@@ -805,13 +834,13 @@ KhepriBase.shape_locs(s::KhepriBase.VectorsIllustration) =
       [p, p + vpol(rmax, a)]
     end
 
-KhepriBase.shape_locs(s::KhepriBase.AnglesIllustration) =
+svg_shape_locs(b::SVG, s::KhepriBase.AnglesIllustration) =
   isempty(s.radii) ? Loc[] : _radial_locs(s.center, maximum(s.radii))
 
-KhepriBase.shape_locs(s::KhepriBase.ArcsIllustration) =
+svg_shape_locs(b::SVG, s::KhepriBase.ArcsIllustration) =
   isempty(s.radii) ? Loc[] : _radial_locs(s.center, maximum(s.radii))
 
-KhepriBase.shape_locs(s::KhepriBase.Labels) =
+svg_shape_locs(b::SVG, s::KhepriBase.Labels) =
   # Radial reach of the dot + label fan. 0.5 is the label radius
   # consistent with svg_label_at_angle's default offset.
   _radial_locs(s.p, 0.5)
@@ -1029,12 +1058,12 @@ svg_arrow_markers(out::IO, b::SVG) =
    both ref dictionaries through the same `shape_locs` pipeline that
    shapes_bbox uses, then return the union.
 
-   See also: shape_locs(::RadiiIllustration) etc. above. =#
+   See also: svg_shape_locs above. =#
 svg_shapes_bbox(b::SVG) =
   let bmin = [Inf, Inf, Inf],
       bmax = [-Inf, -Inf, -Inf]
     fold_locs!(s) =
-      for loc in shape_locs(s)
+      for loc in svg_shape_locs(b, s)
         let wp = in_world(loc)
           bmin[1] = min(bmin[1], wp.x)
           bmin[2] = min(bmin[2], wp.y)
@@ -1101,8 +1130,30 @@ gen_svg_document(b::SVG) =
     println(out, "</svg>")
   end
 
+#= Depth differences below this are treated as ties by the painter's sort.
+
+   SVG has no depth buffer, so triangles are emitted back to front and the
+   order is the visible output. Two triangles at genuinely the same
+   distance must not swap places merely because the two distances, arrived
+   at through sin/cos, came back an ulp apart on another machine — sorting
+   on the raw Float64 reordered a symmetric TikZ scene wholesale on
+   aarch64 (see KhepriTikZ's painter_depth_tolerance, whose repair this
+   mirrors; kept local by decision in PLANS.md). Quantising the depth to
+   this tolerance collapses near-ties into one bucket, and a stable sort
+   leaves them in insertion order, which is deterministic everywhere. The
+   value is far below the 3 decimals coordinates are printed at, so it
+   cannot merge depths that are actually distinguishable in the output. =#
+const painter_depth_tolerance = Parameter(1e-6)
+
+# Depths are computed once rather than inside the comparison, which
+# previously re-derived each triangle's centre and distance on every one
+# of the O(n log n) comparisons.
 painter_sorter!(trigs, camera) =
-  sort!(trigs, lt=(t2, t1) -> distance(trig_center(t1[1:end-1]...), camera) < distance(trig_center(t2[1:end-1]...), camera))
+  let depths = [distance(trig_center(t[1:end-1]...), camera) for t in trigs],
+      buckets = round.(depths ./ painter_depth_tolerance()),
+      order = sortperm(buckets, rev=true, alg=MergeSort)
+    permute!(trigs, order)
+  end
 
 paint_trig(b::SVG, (p1, p2, p3, mat)) =
   let n = try trig_normal(p1, p2, p3) catch; return end,

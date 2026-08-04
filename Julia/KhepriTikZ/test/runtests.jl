@@ -243,13 +243,30 @@ end
     end
   end
 
-  # NOTE: tikz_option test skipped - function has complex dispatch issues
-  # @testset "tikz_option function" begin
-  #   @testset "tikz_option with material" begin
-  #     opt = tikz_option(very_thin)
-  #     @test opt isa Union{String, Nothing}
-  #   end
-  # end
+  # The original version of this testset called tikz_option(very_thin),
+  # i.e. passed a Material where a spec string is expected — a MethodError,
+  # not a meaningful expectation. What tikz_option must guarantee is that
+  # the materials it builds realize to their option string (they used to
+  # collapse to void_ref because b_layer_material dropped the spec).
+  @testset "tikz_option function" begin
+    @testset "tikz_option builds materials" begin
+      @test tikz_option("dashed") isa KhepriBase.Material
+    end
+
+    @testset "tikz_option materials realize to their spec" begin
+      @test KhepriBase.material_ref(tikz, very_thin) == "very thin"
+      @test KhepriBase.material_ref(tikz, very_thick) == "very thick"
+      @test KhepriBase.material_ref(tikz, var"<->") == "<->"
+    end
+
+    @testset "layer color merges with the spec" begin
+      let red_thick = material(layer("red thick", true, rgba(1, 0, 0, 1)),
+                               KhepriBase.BackendParameter(TikZ=>"very thick"))
+        @test KhepriBase.material_ref(tikz, red_thick) ==
+              "color={rgb,1:red,1.0;green,0.0;blue,0.0},very thick"
+      end
+    end
+  end
 
   # Shared visual-test corpus, Tier-1 artifact oracle, and parser tests.
   # TikZOracle.jl defines validate_tikz_golden (and pulls in the analytic
@@ -280,4 +297,17 @@ end
     )
   end
 
+end
+
+
+# Guard against silently-dead b_* methods: every hook method this backend
+# defines must have a positional arity KhepriBase actually dispatches -- see
+# BackendHookConformanceTests.jl's header for the shipped bugs that motivated
+# this (4-arg table/chair trio, 7-arg Blender spotlight, 9-slot Measure sky).
+@testset "Hook arity conformance" begin
+  using KhepriBase
+  include(joinpath(dirname(pathof(KhepriBase)), "..", "test",
+                   "BackendHookConformanceTests.jl"))
+  using .BackendHookConformanceTests
+  run_hook_conformance(KhepriTikZ)
 end
