@@ -15,8 +15,10 @@ upgrade_plugin() =
 
 #
 
+env(name) = Sys.iswindows() ? ENV[name] : ""
+
 update_plugin() =
-  let grasshopper_user_plugins = joinpath(ENV["APPDATA"], "Grasshopper", "Libraries"),
+  let grasshopper_user_plugins = joinpath(env("APPDATA"), "Grasshopper", "Libraries"),
       local_khepri_plugin = joinpath(julia_khepri, "Plugin")
     try
       for dll in khepri_grasshopper_dlls

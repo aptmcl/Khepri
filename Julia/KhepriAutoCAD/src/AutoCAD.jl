@@ -744,7 +744,8 @@ KhepriBase.b_surface(b::ACAD, region::Region, mat) =
   end
 
 KhepriBase.b_surface_closed_spline(b::ACAD, ps, mat) =
-  @remote(b, SurfaceFromCurves([@remote(b, InterpClosedSpline(ps.vertices))], mat))
+  # ps is the vertex vector (the b_fill caller passes path.vertices), not a path
+  @remote(b, SurfaceFromCurves([@remote(b, InterpClosedSpline(ps))], mat))
 
 KhepriBase.b_surface_circle(b::ACAD, c, r, mat) =
   @remote(b, SurfaceCircle(c, vz(1, c.cs), r, mat))
@@ -1371,15 +1372,6 @@ realize(b::ACAD, f::TableChairFamily) =
             f.spacing)) :
         b_get_family_ref(b, f, bf)
     end
-
-KhepriBase.b_table(b::ACAD, c, angle, family) =
-    @remote(b, Table(c, angle, family_ref(b, family)))
-
-KhepriBase.b_chair(b::ACAD, c, angle, family) =
-    @remote(b, Chair(c, angle, family_ref(b, family)))
-
-KhepriBase.b_table_and_chairs(b::ACAD, c, angle, family) =
-    @remote(b, TableAndChairs(c, angle, family_ref(b, family)))
 
 ############################################
 

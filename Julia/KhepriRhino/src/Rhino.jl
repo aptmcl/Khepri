@@ -1064,15 +1064,6 @@ realize(b::RH, f::TableChairFamily) =
         b_get_family_ref(b, f, bf)
     end
 
-KhepriBase.b_table(b::RH, c, angle, family) =
-    @remote(b, Table(c, angle, family_ref(b, family)))
-
-KhepriBase.b_chair(b::RH, c, angle, family) =
-    @remote(b, Chair(c, angle, family_ref(b, family)))
-
-KhepriBase.b_table_and_chairs(b::RH, c, angle, family) =
-    @remote(b, TableAndChairs(c, angle, family_ref(b, family)))
-
 # Lights
 KhepriBase.b_pointlight(b::RH, loc, energy, color) =
   @remote(b, PointLight(loc, color, energy))
@@ -1082,8 +1073,7 @@ KhepriBase.b_pointlight(b::RH, loc, energy, color) =
 # Dimensioning
 
 no_props = Dict()
-base_props = Dict("TextHeight"=>Float64(0.2))
-base_props = Dict("DimensionScale"=>Float64(0.2))
+base_props = Dict("TextHeight"=>Float64(0.2), "DimensionScale"=>Float64(0.2))
 label_props = merge(base_props)
 angular_props = merge(base_props)
 diametric_props = merge(base_props)
@@ -1324,13 +1314,15 @@ KhepriBase.b_select_position(b::RH, prompt::String) =
   end
 
 KhepriBase.b_select_positions(b::RH, prompt::String) =
-  let ps = Loc[]
-      p = nothing
-    @info "$(prompt) on the $(b) backend."
-    while ((p = @remote(b, GetPosition(prompt)) |> length)) > 0
-        push!(ps, p...)
+  let sel() =
+    let p = select_position(prompt, b)
+      if isnothing(p)
+        []
+      else
+        [p, sel()...]
+      end
     end
-    ps
+    sel()
   end
 
 # HACK: The next operations should receive a set of shapes to avoid re-creating already existing shapes
