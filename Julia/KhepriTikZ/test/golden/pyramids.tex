@@ -1,0 +1,41 @@
+\documentclass{standalone}
+\usepackage{tikz,tikz-3dplot}
+\usetikzlibrary{perspective,patterns}
+\usetikzlibrary{calc,fadings,decorations.pathreplacing}
+\usetikzlibrary{shapes,fit}
+\usetikzlibrary{hobby}
+\usetikzlibrary{arrows.meta}
+\begin{document}
+\tikzset{illustration/.style={very thin}}
+\tikzset{dimension/.style={very thin,lightgray}}
+\definecolor{s28}{gray}{0.28}
+\definecolor{s33}{gray}{0.33}
+\definecolor{s35}{gray}{0.35}
+\definecolor{s42}{gray}{0.42}
+\definecolor{s49}{gray}{0.49}
+\definecolor{s60}{gray}{0.6}
+\definecolor{s67}{gray}{0.67}
+\definecolor{s73}{gray}{0.73}
+\definecolor{s76}{gray}{0.76}
+\definecolor{s79}{gray}{0.79}
+\definecolor{s83}{gray}{0.83}
+\definecolor{s95}{gray}{0.95}
+\begin{tikzpicture}[3d view={145.0079798014413}{28.941784084694106},fill=gray]
+\fill (-1.0,-1.732)--(-1.0,1.732)--(2.0,0.0)--cycle;
+\fill (6.0,-2.0)--(4.0,0)--(6.0,2.0)--(8.0,0.0)--cycle;
+\fill (13.0,-1.732)--(11.0,-1.732)--(10.0,0)--(11.0,1.732)--(13.0,1.732)--(14.0,0.0)--cycle;
+\fill[s60] (0,0,3)--(-1.0,1.732,0.0)--(-1.0,-1.732,0.0)--cycle;
+\fill[s28] (0,0,3)--(-1.0,-1.732,0.0)--(2.0,0.0,0.0)--cycle;
+\fill[s79] (0,0,3)--(2.0,0.0,0.0)--(-1.0,1.732,0.0)--cycle;
+\fill[s42] (6,0,3)--(4.0,0,0.0)--(6.0,-2.0,0.0)--cycle;
+\fill[s35] (6,0,3)--(6.0,-2.0,0.0)--(8.0,0.0,0.0)--cycle;
+\fill[s83] (6,0,3)--(6.0,2.0,0.0)--(4.0,0,0.0)--cycle;
+\fill[s73] (6,0,3)--(8.0,0.0,0.0)--(6.0,2.0,0.0)--cycle;
+\fill[s33] (12,0,3)--(11.0,-1.732,0.0)--(13.0,-1.732,0.0)--cycle;
+\fill[s49] (12,0,3)--(10.0,0,0.0)--(11.0,-1.732,0.0)--cycle;
+\fill[s42] (12,0,3)--(13.0,-1.732,0.0)--(14.0,0.0,0.0)--cycle;
+\fill[s76] (12,0,3)--(11.0,1.732,0.0)--(10.0,0,0.0)--cycle;
+\fill[s67] (12,0,3)--(14.0,0.0,0.0)--(13.0,1.732,0.0)--cycle;
+\fill[s95] (12,0,3)--(13.0,1.732,0.0)--(11.0,1.732,0.0)--cycle;
+\end{tikzpicture}
+\end{document}

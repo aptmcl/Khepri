@@ -1,0 +1,15 @@
+\documentclass{standalone}
+\usepackage{tikz,tikz-3dplot}
+\usetikzlibrary{perspective,patterns}
+\usetikzlibrary{calc,fadings,decorations.pathreplacing}
+\usetikzlibrary{shapes,fit}
+\usetikzlibrary{hobby}
+\usetikzlibrary{arrows.meta}
+\begin{document}
+\tikzset{illustration/.style={very thin}}
+\tikzset{dimension/.style={very thin,lightgray}}
+\begin{tikzpicture}[]
+\draw (2,3)circle(1cm);
+\draw [anchor=base west](1,1)node[font=\fontfamily{phv}\selectfont,outer sep=0pt,inner sep=0pt,xscale=3.7,yscale=3.7]{AutoCAD};
+\end{tikzpicture}
+\end{document}

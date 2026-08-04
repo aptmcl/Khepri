@@ -1,0 +1,16 @@
+\documentclass{standalone}
+\usepackage{tikz,tikz-3dplot}
+\usetikzlibrary{perspective,patterns}
+\usetikzlibrary{calc,fadings,decorations.pathreplacing}
+\usetikzlibrary{shapes,fit}
+\usetikzlibrary{hobby}
+\usetikzlibrary{arrows.meta}
+\begin{document}
+\tikzset{illustration/.style={very thin}}
+\tikzset{dimension/.style={very thin,lightgray}}
+\begin{tikzpicture}[]
+\draw (5.0,0.0)arc(0.0:90.0:5cm);
+\draw (2.828,2.828)arc(45.0:225.0:4cm);
+\draw (0,0)circle(3cm);
+\end{tikzpicture}
+\end{document}

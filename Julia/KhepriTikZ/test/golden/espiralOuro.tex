@@ -1,0 +1,37 @@
+\documentclass{standalone}
+\usepackage{tikz,tikz-3dplot}
+\usetikzlibrary{perspective,patterns}
+\usetikzlibrary{calc,fadings,decorations.pathreplacing}
+\usetikzlibrary{shapes,fit}
+\usetikzlibrary{hobby}
+\usetikzlibrary{arrows.meta}
+\begin{document}
+\tikzset{illustration/.style={very thin}}
+\tikzset{dimension/.style={very thin,lightgray}}
+\begin{tikzpicture}[]
+\draw (40.0,1.0)arc(90.0:180.0:1cm);
+\draw (40,0)rectangle(39.0,1.0);
+\draw (39.0,0)arc(180.0:270.0:1.618cm);
+\draw (40.618,0)rectangle(39.0,-1.618);
+\draw (40.618,-1.618)arc(270.0:360.0:2.618cm);
+\draw (40.618,1.0)rectangle(43.236,-1.618);
+\draw (43.236,1.0)arc(360.0:450.0:4.236cm);
+\draw (39.0,1.0)rectangle(43.236,5.236);
+\draw (39.0,5.236)arc(450.0:540.0:6.854cm);
+\draw (39.0,-1.618)rectangle(32.147,5.236);
+\draw (32.147,-1.618)arc(540.0:630.0:11.089cm);
+\draw (43.236,-1.618)rectangle(32.147,-12.707);
+\draw (43.236,-12.707)arc(630.0:720.0:17.942cm);
+\draw (43.236,5.235)rectangle(61.178,-12.707);
+\draw (61.178,5.235)arc(720.0:810.0:29.03cm);
+\draw (32.147,5.235)rectangle(61.178,34.265);
+\draw (32.147,34.265)arc(810.0:900.0:46.971cm);
+\draw (32.147,-12.705)rectangle(-14.823,34.265);
+\draw (-14.823,-12.705)arc(900.0:990.0:75.999cm);
+\draw (61.175,-12.705)rectangle(-14.823,-88.704);
+\draw (61.175,-88.704)arc(990.0:1080.0:122.966cm);
+\draw (61.175,34.262)rectangle(184.141,-88.704);
+\fill (184.141,34.262)circle(0.03cm);
+\draw (-14.818,34.262)rectangle(266.553,34.262);
+\end{tikzpicture}
+\end{document}
