@@ -1,0 +1,29 @@
+{
+  "FileVersion": 3,
+  "Version": 2,
+  "VersionName": "2.0",
+  "FriendlyName": "Khepri",
+  "Description": "Khepri architectural design backend for Unreal Engine",
+  "Category": "Design",
+  "CreatedBy": "Khepri Project",
+  "CreatedByURL": "https://github.com/aptmcl",
+  "DocsURL": "",
+  "MarketplaceURL": "",
+  "SupportURL": "",
+  "EngineVersion": "5.7.0",
+  "CanContainContent": true,
+  "Installed": true,
+  "Plugins": [
+    {
+      "Name": "ProceduralMeshComponent",
+      "Enabled": true
+    }
+  ],
+  "Modules": [
+    {
+      "Name": "Khepri",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ]
+}
