@@ -1,0 +1,752 @@
+#=
+A backend for POVRay
+=#
+
+export POVRay,
+       povray,
+       povray_material
+
+# We will use MIME types to encode for POVRay
+const MIMEPOVRay = MIME"text/povray"
+
+# First, basic types
+show(io::IO, ::MIMEPOVRay, s::String) =
+  show(io, s)
+show(io::IO, ::MIMEPOVRay, s::Symbol) =
+  print(io, s)
+show(io::IO, ::MIMEPOVRay, r::Real) =
+  show(io, r)
+show(io::IO, mime::MIMEPOVRay, v::Vector) =
+  begin
+    write(io, "<")
+    for (i, e) in enumerate(v)
+      if i > 1
+        write(io, ", ")
+      end
+      show(io, mime, e)
+    end
+    write(io, ">")
+    nothing
+  end
+show(io::IO, ::MIMEPOVRay, p::Union{Loc,Vec}) =
+  # swap y with z to make it consistent with POVRay coordinate system
+  let p = in_world(p)
+    print(io, "<$(p.x), $(p.z), $(p.y)>")
+  end
+show(io::IO, ::MIMEPOVRay, c::RGB) =
+  print(io, "color rgb <$(Float64(red(c))), $(Float64(green(c))), $(Float64(blue(c)))>")
+show(io::IO, ::MIMEPOVRay, c::RGBA) =
+  print(io, "color rgbt <$(Float64(red(c))), $(Float64(green(c))), $(Float64(blue(c))), $(Float64(1-alpha(c)))>")
+
+#=
+`flags` exists because POV-Ray's grammar splits an object body into the
+numeric arguments, then OBJECT_FLAGS (`open`, `sturm`, ...), then object
+modifiers (`texture`, `matrix`, ...) — in that order. Emitting a flag from
+the `f` do-block puts it AFTER the texture written here, and POV-Ray 3.7
+aborts with "No matching } in cylinder, open found instead" (this corrupted
+the extrusion_circle golden). Flags passed here are written right after the
+argument line, before the material, where the grammar requires them.
+=#
+write_povray_object(f::Function, io::IO, type, material, args...; flags=String[]) =
+  let mime = MIMEPOVRay()
+    write(io, "$(type) {")
+    for (i, arg) in enumerate(args)
+      if i == 1
+        write(io, "\n  ")
+      elseif i > 1
+        write(io, ", ")
+      end
+      show(io, mime, arg)
+    end
+    write(io, '\n')
+    for flag in flags
+      write(io, "  ", flag, "\n")
+    end
+    if ! isnothing(material)
+      write_povray_material(io, material)
+    end
+    let res = f()
+      write(io, "}\n")
+      res
+    end
+  end
+
+write_povray_object(io::IO, type, material, args...; flags=String[]) =
+  write_povray_object(io, type, material, args...; flags=flags) do
+    -1 # Default id
+  end
+
+write_povray_value(io::IO, value::Any) =
+  show(io, MIMEPOVRay(), value)
+
+write_povray_values(io::IO, values) =
+  let first = true
+    for value in values
+      if !first
+        print(io, ", ")
+      else
+        first = false
+      end
+      write_povray_value(io, value)
+    end
+  end
+
+write_povray_param(io::IO, name::String, value::Any) =
+  begin
+    write(io, "  ", name, " ")
+    write_povray_value(io, value)
+    write(io, '\n')
+  end
+
+write_povray_call(io::IO, name::String, values...) =
+  begin
+    write(io, "  ", name, "(")
+    write_povray_values(io, values)
+    write(io, ")\n")
+  end
+
+
+write_povray_material(io::IO, material) =
+  begin
+    write(io, "  ")
+    write_povray_value(io, material)
+    write(io, '\n')
+  end
+
+write_povray_matrix(io::IO, p::Loc) =
+  let t = (translated_cs(p.cs, p.x, p.y, p.z).transform)
+    write_povray_param(io, "matrix",
+      [t[1,1], t[3,1], t[2,1],
+       t[1,2], t[3,2], t[2,2],
+       t[1,3], t[3,3], t[2,3],
+       t[1,4], t[3,4], t[2,4]])
+  end
+
+write_povray_camera(io::IO, camera, target, lens) =
+  write_povray_object(io, "camera", nothing) do
+    write_povray_param(io, "location", camera)
+    write_povray_param(io, "look_at", target)
+    write_povray_param(io, "right", Symbol("x*image_width/image_height"))
+    write_povray_param(io, "angle", view_angles(lens)[1])
+  end
+
+write_povray_pointlight(io::IO, location, color) =
+  write_povray_object(io, "light_source", nothing, location, color)
+
+abstract type POVRayMaterial end
+
+struct POVRayDefinition <: POVRayMaterial
+  name::String
+  kind::String
+  description::String
+end
+
+convert_to_povray_identifier(name) = replace(name, " " => "_")
+
+write_povray_definition(io::IO, d::POVRayDefinition) =
+  write(io, "#declare $(convert_to_povray_identifier(d.name)) =\n  $(d.kind) $(d.description)\n")
+
+show(io::IO, ::MIMEPOVRay, d::POVRayDefinition) =
+  write(io, "$(d.kind) { $(convert_to_povray_identifier(d.name)) }")
+
+struct POVRayInclude <: POVRayMaterial
+  filename::AbstractString
+  kind::String
+  name::String
+end
+
+write_povray_definition(io::IO, m::POVRayInclude) =
+  write(io, "#include \"$(m.filename)\"\n")
+
+show(io::IO, ::MIMEPOVRay, m::POVRayInclude) =
+  write(io, "$(m.kind) { $(m.name) }")
+
+export povray_definition, povray_include, povray_material
+"""
+    povray_definition(name, kind, description) -> POVRayDefinition
+
+Create a named POVRay material from an inline SDL fragment. `name` is the Khepri
+identifier (spaces become underscores in the emitted `#declare`); `kind` is the
+POVRay statement that wraps the body (e.g. `"texture"`, `"pigment"`, `"material"`);
+`description` is the literal POVRay SDL block (braces included).
+"""
+const povray_definition = POVRayDefinition
+"""
+    povray_include(filename, kind, name) -> POVRayInclude
+
+Reference a predefined POVRay material by `name` from the standard include
+`filename` (e.g. `"textures.inc"`). `kind` is the wrapping POVRay statement
+(e.g. `"texture"` or `"material"`); the corresponding `#include` is emitted once
+at scene export.
+"""
+const povray_include = POVRayInclude
+
+const povray_concrete =
+  povray_definition("Concrete", "texture", """{
+   pigment {
+     granite turbulence 1.5 color_map {
+       [0  .25 color White color Gray75] [.25  .5 color White color Gray75]
+       [.5 .75 color White color Gray75] [.75 1.1 color White color Gray75]}}
+  finish {
+    ambient 0.2 diffuse 0.3 crand 0.03 reflection 0 }
+  normal {
+    dents .5 scale .5 }}""")
+
+const povray_neutral =
+  povray_definition("Material", "texture",
+    "{ pigment { color rgb 0.3 } finish { reflection 0 ambient 0 }}")
+
+"""
+    povray_material(name; gray, red, green, blue, specularity, roughness, metallic,
+                    emission_red, emission_green, emission_blue, transmissivity,
+                    transmitted_specular) -> POVRayDefinition
+
+Build a diffuse/metallic/emissive POVRay material named `name`. Colour channels
+(`red`/`green`/`blue`, default `gray`) and `emission_*` are in [0,1] linear RGB
+(emission may exceed 1 for intensity); `specularity`, `roughness`, `metallic` are
+dimensionless [0,1]; `transmissivity` in [0,1] sets pigment `transmit` transparency.
+Only non-default terms are emitted, so a plain diffuse material keeps minimal SDL.
+"""
+povray_material(name::String;
+                gray::Real=0.3,
+                red::Real=gray, green::Real=gray, blue::Real=gray,
+                specularity=0, roughness=0,
+                metallic=0,
+                emission_red=0, emission_green=0, emission_blue=0,
+                transmissivity=nothing, transmitted_specular=nothing) =
+  #= Optional finish/pigment terms are appended only when non-default so a plain
+     diffuse material keeps its previous minimal output (regression safety) and
+     only metallic/emissive/transparent materials gain extra terms.
+       metallic   -> POVRay `finish { metallic AMOUNT }`: tints highlights and
+                     reflection toward the surface colour (the POVRay analogue of
+                     PBR metalness; Khepri `metallic`).
+       emission_* -> POVRay 3.7 `finish { emission COLOR }` self-illumination. The
+                     caller premultiplies emission_color by emission_strength,
+                     since POVRay's emission term takes a single colour (values >1
+                     are valid intensities). Channels are passed separately so the
+                     `red`/`green`/`blue` keyword args do not shadow the colour
+                     accessor functions of the same name.
+       transmissivity -> POVRay pigment `transmit AMOUNT` transparency. This kwarg
+                     was previously accepted but never emitted, so any transmission
+                     value rendered opaque; it is now honoured. =#
+  let transmit = isnothing(transmissivity) ? "" : " transmit $(Float64(transmissivity))",
+      metallic_term = Float64(metallic) == 0 ? "" : " metallic $(Float64(metallic))",
+      emission_term = (Float64(emission_red) == 0 && Float64(emission_green) == 0 && Float64(emission_blue) == 0) ?
+                        "" :
+                        " emission <$(Float64(emission_red)),$(Float64(emission_green)),$(Float64(emission_blue))>"
+    povray_definition(name, "texture", """{
+  pigment { rgb <$(Float64(red)),$(Float64(green)),$(Float64(blue))>$(transmit) }
+  finish { specular $(specularity) roughness $(roughness)$(metallic_term)$(emission_term) }
+}""")
+  end
+
+const povray_grass =
+  povray_definition("Grass", "texture",
+   "{ pigment{ color <0.2,0.5,0.1>*0.5} normal { bumps 0.5 scale 0.005 }}")
+
+const povray_gray_ground =
+  povray_definition("Ground", "texture", "{ pigment { color rgb 0.8 } finish { reflection 0 ambient 0 }}")
+
+#=
+IMAGE_MAP:
+  pigment {
+    image_map {
+      [BITMAP_TYPE] "bitmap[.ext]" [gamma GAMMA] [premultiplied BOOL]
+      [IMAGE_MAP_MODS...]
+      }
+  [PIGMENT_MODFIERS...]
+  }
+ IMAGE_MAP:
+  pigment {
+   image_map {
+     FUNCTION_IMAGE
+     }
+  [PIGMENT_MODFIERS...]
+  }
+ BITMAP_TYPE:
+   exr | gif | hdr | iff | jpeg | pgm | png | ppm | sys | tga | tiff
+ IMAGE_MAP_MODS:
+   map_type Type | once | interpolate Type |
+   filter Palette, Amount | filter all Amount |
+   transmit Palette, Amount | transmit all Amount
+ FUNCTION_IMAGE:
+   function I_WIDTH, I_HEIGHT { FUNCTION_IMAGE_BODY }
+ FUNCTION_IMAGE_BODY:
+   PIGMENT | FN_FLOAT | pattern { PATTERN [PATTERN_MODIFIERS] }
+=#
+"""
+    povray_image_map_material(name; image_map, map_type=0) -> POVRayDefinition
+
+Build a POVRay material named `name` that textures surfaces with the bitmap given
+by `image_map` (a POVRay `image_map` body such as `png "tex.png"`). `map_type` is
+the POVRay projection code (0 = planar, 1 = spherical, 2 = cylindrical, 5 = toroidal).
+"""
+povray_image_map_material(name::String; image_map, map_type=0) =
+  povray_definition(name, "texture", """{
+  pigment { image_map $(image_map) map_type $(map_type) }
+  }""")
+
+####################################################
+# Sky models
+
+povray_realistic_sky_string(turbidity, inner) = """
+#version 3.7;
+#include "colors.inc"
+#include "CIE.inc"
+#include "lightsys.inc"
+#include "lightsys_constants.inc"
+#include "sunpos.inc"
+#declare Current_Turbidity = $(turbidity);
+//To solve a bug in CIE_Skylight.in
+#local fiLuminous=finish{ambient 0 emission 1 diffuse 0 specular 0 phong 0 reflection 0 crand 0 irid{0}}
+#include "CIE_Skylight.inc"
+global_settings {
+  assumed_gamma 1.0
+  radiosity {
+  }
+}
+#default {finish {ambient 0 diffuse 1}}
+light_source{
+  $(inner)
+  Light_Color(SunColor,3)
+  translate SolarPosition
+}
+"""
+# This one seems to work better. Still 3.5 though.
+
+#=
+povray_realistic_sky_string(turbidity, inner) = """
+#version 3.5;
+#include "colors.inc"
+#include "CIE.inc"
+#include "lightsys.inc"
+#include "lightsys_constants.inc"
+#include "sunpos.inc"
+global_settings {
+  assumed_gamma 1.0
+  radiosity {
+  }
+}
+#default {finish {ambient 0 diffuse 1}}
+CIE_ColorSystemWhitepoint(Beta_ColSys, Daylight2Whitepoint(Kt_Daylight_Film))
+CIE_GamutMapping(off)
+#declare Lightsys_Brightness = 1.0;
+#declare Lightsys_Filter = <1,1,1>;
+#declare Al=38;    // sun altitude
+#declare Az=100;   // sun rotation
+#declare North=-z;
+#declare DomeSize=1e5;
+#declare Current_Turbidity = 5.0;
+#declare Intensity_Mult = 0.7;
+#include "CIE_Skylight.inc"
+light_source{ 0
+  Light_Color(SunColor,5)
+  translate SolarPosition
+}
+"""
+=#
+
+povray_realistic_sky_string(altitude, azimuth, turbidity, withsun) =
+  povray_realistic_sky_string(
+    turbidity,
+    "vrotate(<0,0,1000000000>,<-$(altitude),$(azimuth+180),0>)")
+
+povray_realistic_sky_string(date, latitude, longitude, meridian, turbidity, withsun) =
+  povray_realistic_sky_string(
+    turbidity,
+    """
+#local xpto = SunPos($(year(date)), $(month(date)), $(day(date)), $(hour(date)), $(minute(date)), $(meridian), $(latitude), $(longitude));
+vrotate(<0,0,1000000000>,<-Al,Az,0>)
+""")
+
+####################################################
+# Clay models
+povray_clay_settings_string_old() =
+"""
+#version 3.7;
+global_settings {
+  assumed_gamma 1.0
+  radiosity {
+      pretrace_start 64/image_width  //0.04
+      pretrace_end 1/image_width     //0.002
+      count 1000
+      nearest_count 10
+      error_bound 0.1
+      recursion_limit 1
+      low_error_factor 0.2 //0.7
+      gray_threshold 0
+      minimum_reuse 0.001  //0.01
+      brightness 1.2
+      adc_bailout 0.01/2
+  }
+}
+sky_sphere {
+    pigment {
+      color rgb 1
+    }
+  }
+"""
+
+povray_clay_settings_string(camera, target) =
+  let rot = (11π/6 - (camera - target).ϕ)*180/π
+    """#version 3.7;
+global_settings {
+  assumed_gamma 1.0
+  radiosity {
+    pretrace_start 64/image_width  //0.04
+    pretrace_end 1/image_width     //0.002
+    count 1000
+    error_bound 0.1
+    recursion_limit 1
+  }
+}
+#default{ finish { ambient 0 diffuse 1 conserve_energy }}
+sky_sphere{ 
+  pigment{ 
+    image_map{ hdr "studio_small_05_4k.hdr"
+               gamma 1.0
+               map_type 1 interpolate 2 }
+    }
+  rotate < 0,$rot,0>
+}
+"""
+  end
+
+####################################################
+@defbackend POVRay POVRay begin
+  id_type = Any
+  void_ref = -1
+  view_type = FrontendView()
+  parent = LocalBackend
+  mixin(local_shapes)
+  mixin(render_state)
+  mixin(io)
+  view::View = default_view()
+end
+
+# Traits
+# Although we have boolean operation in POVRay at the level of shapes, we do
+# not have boolean operations at the level of references
+KhepriBase.has_boolean_ops(::Type{POVRay}) = HasBooleanOps{false}()
+
+const povray = POVRay()
+
+KhepriBase.b_material(b::POVRay, name,
+						              base_color,
+						              metallic, roughness, specular,
+						              ior,
+						              transmission, transmission_roughness,
+	                        clearcoat, clearcoat_roughness,
+	                        emission_color,
+						              emission_strength) =
+  povray_material(name,
+    red=Float64(red(base_color)), green=Float64(green(base_color)), blue=Float64(blue(base_color)),
+    specularity=Float64(specular), roughness=Float64(roughness),
+    metallic=Float64(metallic),
+    emission_red=Float64(red(emission_color))*Float64(emission_strength),
+    emission_green=Float64(green(emission_color))*Float64(emission_strength),
+    emission_blue=Float64(blue(emission_color))*Float64(emission_strength),
+    transmissivity=transmission > 0 ? Float64(transmission) : nothing)
+KhepriBase.b_plastic_material(b::POVRay, name, color, roughness) =
+  povray_material(name,
+    red=Float64(red(color)), green=Float64(green(color)), blue=Float64(blue(color)),
+    roughness=Float64(roughness))
+KhepriBase.b_metal_material(b::POVRay, name, color, roughness, ior) =
+  povray_material(name,
+    red=Float64(red(color)), green=Float64(green(color)), blue=Float64(blue(color)),
+    specularity=0.8, roughness=Float64(roughness))
+KhepriBase.b_glass_material(b::POVRay, name, color, roughness, ior) =
+  povray_material(name,
+    red=Float64(red(color)), green=Float64(green(color)), blue=Float64(blue(color)),
+    transmissivity=0.7, roughness=Float64(roughness))
+KhepriBase.b_mirror_material(b::POVRay, name, color) =
+  povray_material(name,
+    red=Float64(red(color)), green=Float64(green(color)), blue=Float64(blue(color)),
+    specularity=1.0)
+
+#
+KhepriBase.b_trig(b::POVRay, p1, p2, p3, mat) =
+  write_povray_object(connection(b), "triangle", mat, p1, p2, p3)
+
+KhepriBase.b_surface_polygon(b::POVRay, ps, mat) =
+  # No vertices -> no polygon. Without this guard `ps[1]` (the closing vertex
+  # POVRay's polygon syntax repeats) raises a BoundsError on an empty `ps`.
+  # Mirrors the degenerate-input contract of b_arc/b_surface_arc: emit void_ref.
+  isempty(ps) ?
+    void_ref(b) :
+    write_povray_object(connection(b), "polygon", mat, length(ps) + 1, ps..., ps[1])
+
+KhepriBase.b_surface_polygon_with_holes(b::POVRay, ps, qss, mat) =
+  # Empty outer ring -> no surface. The inner `mapreduce(vs->[vs..., vs[1]], ...)`
+  # repeats each ring's first vertex to close it, so an empty `ps` makes `vs[1]`
+  # raise a BoundsError. As with b_surface_polygon, emit void_ref for the
+  # degenerate case rather than crashing.
+  isempty(ps) ?
+    void_ref(b) :
+    let vss = [ps, qss...]
+      write_povray_object(connection(b), "polygon", mat,
+        mapreduce(length, +, vss) + length(vss),
+        mapreduce(vs->[vs..., vs[1]], vcat, vss)...)
+    end
+
+KhepriBase.b_surface_circle(b::POVRay, c, r, mat) =
+  	write_povray_object(connection(b), "disc", mat, c, uvz(c.cs), r)
+
+KhepriBase.b_surface_grid(b::POVRay, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
+  let io = connection(b),
+      ptss = maybe_interpolate_grid(ptss, smooth_u, smooth_v),
+      (si, sj) = size(ptss),
+      idxs = quad_grid_indexes(si, sj, closed_u, closed_v)
+    write_povray_object(io, "mesh2", nothing) do
+      write_povray_object(io, "vertex_vectors", nothing, si*sj, reshape(permutedims(ptss), :)...)
+      # Must understand how to handle smoothness along one direction
+      if smooth_u || smooth_v
+        write_povray_object(io, "normal_vectors", nothing, si*sj, reshape(permutedims(add_z.(ptss, 1) .- ptss), :)...)
+      end
+      write_povray_object(io, "face_indices", nothing, length(idxs), idxs...)
+      #write_povray_object(buf, "normal_indices", nothing, length(idxs), idxs...)
+      write_povray_material(io, mat)
+    end
+  end
+
+KhepriBase.b_cylinder(b::POVRay, cb, r, h, bmat, tmat, smat) =
+  isnothing(bmat) || isnothing(tmat) ?
+    isnothing(bmat) && isnothing(tmat) ?
+      let buf = connection(b)
+        # `open` is an OBJECT_FLAG: it must precede the texture (see the
+        # flags prose on write_povray_object), so it cannot live in this
+        # do-block, which runs after the material is written.
+        write_povray_object(buf, "cylinder", smat, [0,0,0], [0,0,h], r, flags=["open"]) do
+          write_povray_matrix(buf, cb)
+        end
+        -1
+      end :
+      b_cylinder_surfaces(b, cb, r, h, bmat, tmat, smat) :
+    let buf = connection(b)
+      write_povray_object(buf, "cylinder", smat, [0,0,0], [0,0,h], r) do
+        write_povray_matrix(buf, cb)
+      end
+      -1
+    end
+
+KhepriBase.b_sphere(b::POVRay, c, r, mat) =
+  write_povray_object(connection(b), "sphere", mat, c, r)
+
+KhepriBase.b_torus(b::POVRay, c, ra, rb, mat) =
+  let buf = connection(b)
+    write_povray_object(buf, "torus", mat, ra, rb) do
+      write_povray_param(buf, "rotate", [90,0,0])
+      write_povray_matrix(buf, c)
+    end
+    -1
+  end
+
+KhepriBase.b_box(b::POVRay, c, dx, dy, dz, mat) =
+  let buf = connection(b)
+    write_povray_object(buf, "box", mat, [0,0,0], [dx, dy, dz]) do
+      write_povray_matrix(buf, c)
+    end
+    -1
+  end
+
+KhepriBase.b_cone(b::POVRay, cb, r, h, bmat, smat) =
+  write_povray_object(connection(b), "cone", smat, cb, r, add_z(cb, h), 0)
+
+KhepriBase.b_cone_frustum(b::POVRay, cb, rb, h, rt, bmat, tmat, smat) =
+  write_povray_object(connection(b), "cone", smat, cb, rb, add_z(cb, h), rt)
+
+# This works (including the smooth bit) BUT
+# 1. It does not seem to run faster on POVRay than multiple polygons
+# 2. It does not support multiple materials
+# 3. The vector must be strictly perpendicular to the profile
+# So..., I'm disabling it for now.
+# KhepriBase.b_generic_prism(b::POVRay, bs, smooth, v, bmat, tmat, smat) =
+#   let buf = connection(b),
+#       cs = cs_from_o_vz(bs[1], -v),
+#       ps = [[p.x, p.y] for p in in_cs(bs, cs)]
+#     write_povray_object(buf, "prism", smat) do
+#       if smooth
+#         write(buf, "linear_sweep cubic_spline ")
+#         write_povray_values(buf, [0, norm(v), length(ps) + 3, ps[end], ps..., ps[1], ps[2]])
+#       else
+#         write(buf, "linear_sweep linear_spline ")
+#         write_povray_values(buf, [0, norm(v), length(ps) + 1, ps..., ps[1]])
+#       end
+#       write_povray_matrix(buf, u0(rotated_x_cs(cs, -pi/2)))
+#       -1
+#     end
+#   end
+#
+
+#=
+KhepriBase's `pointlight` proxy defaults `intensity` to 1500 candela
+(BIM.jl `@defproxy(pointlight, ... intensity::Real=1500.0 ...)`). A POVRay
+`light_source` takes a plain RGB colour with no physical intensity unit, so we
+fold the candela value into the colour by normalising against this default: a
+1500 cd light reproduces the source colour at full strength, and brighter or
+dimmer lights scale it linearly. The divisor is in candela and must track the
+KhepriBase proxy default; change it only if that default changes.
+See also: b_pointlight, KhepriBase.pointlight.
+=#
+"Reference luminous intensity (candela) that maps a point light to full colour."
+const povray_default_candela = 1500
+
+# Signature must match the canonical b_pointlight(b, loc, energy, color) (Backend.jl) or it never
+# dispatches and POVRay point lights silently fall through to the ignoring default.
+KhepriBase.b_pointlight(b::POVRay, loc, energy, color) =
+  write_povray_pointlight(connection(b), loc,
+    rgb(red(color)*energy/povray_default_candela,
+        green(color)*energy/povray_default_candela,
+        blue(color)*energy/povray_default_candela))
+
+KhepriBase.b_ieslight(b::POVRay, file, loc, dir, alpha, beta, gamma) =
+  write_povray_pointlight(connection(b), loc, rgb(1, 1, 1))
+
+KhepriBase.b_arealight(b::POVRay, loc, dir, size, energy, color) =
+  write_povray_pointlight(connection(b), loc, color)
+
+export povray_family_materials
+
+"""
+    povray_family_materials(m1, m2=m1, m3=m2, m4=m3) -> NamedTuple
+
+Bundle up to four POVRay materials into the `(materials=(...),)` named tuple
+expected by Khepri family definitions (e.g. slab top/bottom/sides). Omitted
+materials default to the previous one, so `povray_family_materials(m)` applies `m`
+to all four faces.
+"""
+povray_family_materials(m1, m2=m1, m3=m2, m4=m3) = (materials=(m1, m2, m3, m4), )
+
+export povray_stone, povray_metal, povray_wood, povray_glass
+
+"Predefined stone material (`T_Stone35` from POVRay's `stones2.inc`)."
+povray_stone = povray_include("stones2.inc", "texture", "T_Stone35")
+"Predefined metal material (`Chrome_Metal` from POVRay's `textures.inc`)."
+povray_metal = povray_include("textures.inc", "texture", "Chrome_Metal")
+#povray_wood = povray_include("textures.inc", "texture", "DMFWood1")
+"Predefined wood material (`T_Wood10` from POVRay's `woods.inc`)."
+povray_wood = povray_include("woods.inc", "texture", "T_Wood10")
+"Predefined glass material (`M_Glass` from POVRay's `textures.inc`)."
+povray_glass = povray_include("textures.inc", "material", "M_Glass")
+
+povray_environment_string(b::POVRay, env::RealisticSkyEnvironment) =
+  povray_realistic_sky_string(
+    b.date,
+    b.place.latitude,
+    b.place.longitude,
+    b.place.meridian,
+    b.render_env.turbidity,
+    b.render_env.sun)
+
+povray_environment_string(b::POVRay, env::ClayEnvironment) =
+  povray_clay_settings_string(b.view.camera, b.view.target)
+
+####################################################
+
+export_to_povray(b::POVRay, path::String) =
+  let buf = connection(b)
+    take!(buf)
+    realize_shapes(b)
+    open(path, "w") do out
+      # write the sky
+      write(out, povray_environment_string(b, b.render_env))
+      # write useful include
+      write(out, """#include "transforms.inc"\n""")
+      # write materials (removing duplicate includes and void refs)
+      let vr = void_ref(b)
+        for m in unique(m->m isa POVRayInclude ? m.filename : m,
+                        filter(r -> r != vr, material_refs(b, used_materials(b))))
+          write_povray_definition(out, m)
+        end
+      end
+      # write the ground
+      if !isnothing(b.ground_material)
+        write_povray_object(out, "plane", material_ref(b, b.ground_material), :y, b.ground_level)
+      end
+      # write the objects
+      write(out, String(take!(buf)))
+      let v = in_world(b.view.camera - b.view.target)
+        println(out, "plane {<$(v.x),$(v.y),$(v.z)>, -10000 texture { pigment { color rgb <0,0,0> }}}")
+      end
+    # write the view
+      write_povray_camera(out, b.view.camera, b.view.target, b.view.lens)
+    end
+  end
+
+povray_cmd() =
+  @static Sys.iswindows() ?
+    "C:/Program Files/POV-Ray/v3.7/bin/pvengine64" :
+    (@static Sys.isunix() ?
+      realpath(normpath(@__DIR__, "..", "bin", "povray")) :
+      error("Unsupported operating system!"))
+
+const povray_lib = Parameter(realpath(normpath(@__DIR__, "..", "lib", "include")))
+const LightsysIV_lib = Parameter(realpath(normpath(@__DIR__, "..", "lib", "LightsysIV")))
+
+# The studio environment map ships as a lazy artifact, not in lib/include, so it
+# is fetched only by users who actually render. Deliberately a function and not a
+# Parameter: a Parameter would evaluate @artifact_str at module load and force the
+# download on every `using KhepriPOVRay`, which is exactly what laziness avoids.
+studio_hdri_lib() = artifact"studio_small_05_4k_hdr"
+
+##########################################
+export rendered_image_area
+rendered_image_area = Parameter{Union{Missing,Tuple{Int,Int,Int,Int}}}(missing)
+
+KhepriBase.b_render_and_save_view(b::POVRay, path::String) =
+  let povpath = path_replace_suffix(path, ".pov"),
+      inipath = path_replace_suffix(path, ".ini"),
+      options = @static(Sys.iswindows() ? (film_active() ? ["-D", "/EXIT", "/RENDER"] : ["/RENDER"]) : []),
+      cmd = `$(povray_cmd()) $options "$inipath"`
+    @info cmd
+    export_to_povray(b, povpath)
+    open(inipath, "w") do out
+      #println(out, "Debug_Console=off")
+      println(out, "Library_Path='$(povray_lib())'")
+      println(out, "Library_Path='$(LightsysIV_lib())'")
+      println(out, "Library_Path='$(studio_hdri_lib())'")
+      println(out, "Width=$(render_width())")
+      println(out, "Height=$(render_height())")
+      println(out, "Antialias=on")
+      println(out, "Quality=10")
+      println(out, "High_Reproducibility=on")
+      println(out, "Input_File_Name='$(povpath)'")
+      if ! ismissing(rendered_image_area())
+        let (start_col, start_row, end_col, end_row) = rendered_image_area()
+          println(out, "Start_Row=", start_row)
+          println(out, "Start_Column=", start_col)
+          println(out, "End_Row=", end_row)
+          println(out, "End_Column=", end_col)
+        end
+      end
+    end
+    let wait = @static(Sys.iswindows() ? film_active() : true)
+      run(cmd, wait=wait)
+      wait ? PNGFile(path) : path
+    end
+  end
+
+# raw_view: .pov source output (skip POV-Ray rendering) — exact text comparison
+KhepriBase.b_raw_pathname(::POVRay, name) =
+  with(render_ext, ".pov") do
+    render_default_pathname(name)
+  end
+
+KhepriBase.b_raw_view(b::POVRay, path) =
+  begin
+    export_to_povray(b, path)
+    path
+  end
+
+KhepriBase.b_render_final_setup(b::POVRay, kind) =
+  if kind == :white
+    b.render_env = ClayEnvironment()
+    b.ground_level = 0
+    b.ground_material = material("Ground", POVRay=>povray_definition("Ground", "texture", "{ pigment { color rgb 3 } finish { reflection 0 ambient 0 }}"))
+  elseif kind == :black
+    error("Finish this")
+  elseif kind == :realistic
+    b.render_env = RealisticSkyEnvironment(5, true)
+    b.ground_level = 0
+    b.ground_material = material("Ground", POVRay=>povray_gray_ground)
+  end
