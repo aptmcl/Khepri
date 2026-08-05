@@ -21,6 +21,8 @@
 #include "Materials/MaterialExpressionMultiply.h"
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/Package.h"
+#include "Modules/ModuleManager.h"
+#include "HAL/PlatformFileManager.h"
 #include "Editor.h"
 #include "LevelEditorViewport.h"
 #include "EditorViewportClient.h"
@@ -326,10 +328,26 @@ void KhepriPrimitives::RegisterAllOperations(FKhepriServer& Server)
    */
 
   // Build-stamp handshake: Julia requests this once per fresh connection and
-  // warns when the running plugin does not match expectations. The stamp is a
-  // compile-time constant, so it identifies this exact build.
+  // reports what is running. The stamp is the loaded module DLL's UTC mtime —
+  // its link time — because __DATE__/__TIME__ would only be the compile time
+  // of THIS translation unit: a fix elsewhere in the module recompiles and
+  // relinks without touching this file, and the baked constant would then
+  // claim an old build is running when the new one is (the exact
+  // loaded-vs-deployed confusion the handshake exists to expose). The
+  // compile-time constant remains only as a fallback when the module path or
+  // timestamp is unavailable.
   Server.RegisterOperation(TEXT("KhepriBuildStamp"), TEXT("String()"),
-    [](FKhepriChannel& C) { C.WriteString(TEXT("KhepriUnreal built " __DATE__ " " __TIME__)); });
+    [](FKhepriChannel& C) {
+      FString Stamp = TEXT("KhepriUnreal built " __DATE__ " " __TIME__ " (compile-time fallback)");
+      FString Dll = FModuleManager::Get().GetModuleFilename(TEXT("Khepri"));
+      if (!Dll.IsEmpty())
+      {
+        FDateTime Ts = FPlatformFileManager::Get().GetPlatformFile().GetTimeStamp(*Dll);
+        if (Ts != FDateTime::MinValue())
+          Stamp = FString::Printf(TEXT("KhepriUnreal built %s"), *Ts.ToString(TEXT("%Y-%m-%dT%H:%M:%SZ")));
+      }
+      C.WriteString(Stamp);
+    });
 
   // Shape Management
   Server.RegisterOperation(TEXT("Primitive::DeleteAll"), TEXT("Int32()"), &KhepriPrimitives::DeleteAll);

@@ -91,8 +91,12 @@
          update_plugin() actually installs for users. The 2026-07-30 incident
          was a rebuild that refreshed only THIS project-side bundle (above)
          while the deployed one stayed stale; copying both from the same build
-         makes that class of divergence impossible. CI's staleness check
-         verifies the committed copies match the sources. -->
-    <Copy SourceFiles="$(ProjectDir)KhepriAutoCAD.bundle\Contents\KhepriAutoCAD.dll;$(ProjectDir)KhepriAutoCAD.bundle\Contents\KhepriBase.dll" DestinationFolder="$(ProjectDir)..\..\..\Julia\KhepriAutoCAD\Plugin\KhepriAutoCAD.bundle\Contents" SkipUnchangedFiles="true" ContinueOnError="true" />
+         makes that class of divergence impossible. The Condition (rather than
+         ContinueOnError, which silently downgrades a locked/read-only copy
+         failure to a warning) makes a failed copy FAIL the build when the
+         monorepo layout is present, while out-of-tree builds skip it. CI's
+         staleness check verifies the committed copies match the sources. -->
+    <Copy SourceFiles="$(ProjectDir)KhepriAutoCAD.bundle\Contents\KhepriAutoCAD.dll;$(ProjectDir)KhepriAutoCAD.bundle\Contents\KhepriBase.dll" DestinationFolder="$(ProjectDir)..\..\..\Julia\KhepriAutoCAD\Plugin\KhepriAutoCAD.bundle\Contents" SkipUnchangedFiles="true" Condition="Exists('$(ProjectDir)..\..\..\Julia\KhepriAutoCAD\Plugin\KhepriAutoCAD.bundle\Contents')" />
+    <Copy SourceFiles="$(ProjectDir)KhepriAutoCAD.bundle\PackageContents.xml" DestinationFolder="$(ProjectDir)..\..\..\Julia\KhepriAutoCAD\Plugin\KhepriAutoCAD.bundle" SkipUnchangedFiles="true" Condition="Exists('$(ProjectDir)..\..\..\Julia\KhepriAutoCAD\Plugin\KhepriAutoCAD.bundle')" />
   </Target>
 </Project>

@@ -31,34 +31,57 @@ import sys
 # merged, so base-source changes do not stale the app DLL itself — the base
 # DLL beside it catches those). Bundle output dirs that live INSIDE a project
 # dir are excluded from that project's source set.
-KHEPRI_BASE_SRC = ["Plugins/KhepriBase/KhepriBase", ":(exclude)Plugins/KhepriBase/KhepriBase/bin"]
+# sign.ps1 (Authenticode post-build signing) and the .sln shape the built
+# bytes without living under the project dir, so each source set names them.
+KHEPRI_BASE_SRC = [
+    "Plugins/KhepriBase/KhepriBase",
+    "Plugins/KhepriBase/sign.ps1",
+    "Plugins/KhepriBase/KhepriBase.sln",
+    ":(exclude)Plugins/KhepriBase/KhepriBase/bin",
+]
 AUTOCAD_SRC = [
     "Plugins/KhepriAutoCAD/KhepriAutoCAD",
+    "Plugins/KhepriAutoCAD/sign.ps1",
+    "Plugins/KhepriAutoCAD/KhepriAutoCAD.sln",
     ":(exclude)Plugins/KhepriAutoCAD/KhepriAutoCAD/KhepriAutoCAD.bundle",
     ":(exclude)Plugins/KhepriAutoCAD/KhepriAutoCAD/bin",
 ]
 REVIT_SRC = [
     "Plugins/KhepriRevit/KhepriRevit",
+    "Plugins/KhepriRevit/sign.ps1",
+    "Plugins/KhepriRevit/KhepriRevit.sln",
     ":(exclude)Plugins/KhepriRevit/KhepriRevit/KhepriRevit.bundle",
     ":(exclude)Plugins/KhepriRevit/KhepriRevit/bin",
 ]
 RHINO_SRC = [
     "Plugins/KhepriRhinoceros/KhepriRhinoceros",
+    "Plugins/KhepriRhinoceros/KhepriRhinoceros.sln",
     ":(exclude)Plugins/KhepriRhinoceros/KhepriRhinoceros/bin",
 ]
 GRASSHOPPER_SRC = [
     "Plugins/KhepriGrasshopper/KhepriGrasshopper",
+    "Plugins/KhepriGrasshopper/KhepriGrasshopper.sln",
     ":(exclude)Plugins/KhepriGrasshopper/KhepriGrasshopper/bin",
 ]
+# The bundle MANIFESTS are hand-vendored copies of the project-side bundle
+# originals; update_plugin() installs them into the host application, so a
+# manifest edited only on the Plugins side is exactly the refresh-the-wrong-
+# copy incident again, in .xml form.
+AUTOCAD_MANIFEST_SRC = ["Plugins/KhepriAutoCAD/KhepriAutoCAD/KhepriAutoCAD.bundle/PackageContents.xml"]
+REVIT_MANIFEST_SRC = ["Plugins/KhepriRevit/KhepriRevit/KhepriRevit.bundle/PackageContents.xml"]
+REVIT_ADDIN_SRC = ["Plugins/KhepriRevit/KhepriRevit/KhepriRevit.bundle/Contents/KhepriRevit.addin"]
 
 CHECKS = [
     # (vendored binary, source pathspecs)
     ("Julia/KhepriAutoCAD/Plugin/KhepriAutoCAD.bundle/Contents/KhepriAutoCAD.dll", AUTOCAD_SRC),
     ("Julia/KhepriAutoCAD/Plugin/KhepriAutoCAD.bundle/Contents/KhepriBase.dll", KHEPRI_BASE_SRC),
+    ("Julia/KhepriAutoCAD/Plugin/KhepriAutoCAD.bundle/PackageContents.xml", AUTOCAD_MANIFEST_SRC),
     ("Plugins/KhepriAutoCAD/KhepriAutoCAD/KhepriAutoCAD.bundle/Contents/KhepriAutoCAD.dll", AUTOCAD_SRC),
     ("Plugins/KhepriAutoCAD/KhepriAutoCAD/KhepriAutoCAD.bundle/Contents/KhepriBase.dll", KHEPRI_BASE_SRC),
     ("Julia/KhepriRevit/Plugin/KhepriRevit.bundle/Contents/KhepriRevit.dll", REVIT_SRC),
     ("Julia/KhepriRevit/Plugin/KhepriRevit.bundle/Contents/KhepriBase.dll", KHEPRI_BASE_SRC),
+    ("Julia/KhepriRevit/Plugin/KhepriRevit.bundle/PackageContents.xml", REVIT_MANIFEST_SRC),
+    ("Julia/KhepriRevit/Plugin/KhepriRevit.bundle/Contents/KhepriRevit.addin", REVIT_ADDIN_SRC),
     ("Julia/KhepriRhino/Plugin/KhepriRhinoceros.rhp", RHINO_SRC),
     ("Julia/KhepriRhino/Plugin/KhepriBase.dll", KHEPRI_BASE_SRC),
     ("Julia/KhepriGrasshopper/Plugin/KhepriGrasshopper.gha", GRASSHOPPER_SRC),

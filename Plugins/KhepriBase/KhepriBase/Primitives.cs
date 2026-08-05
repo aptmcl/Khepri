@@ -33,7 +33,15 @@ namespace KhepriBase {
         static String AssemblyBuildStamp(System.Reflection.Assembly a) {
             try {
                 var ts = PeLinkTimestamp(a.Location);
-                return $"{a.GetName().Name} built {ts:yyyy-MM-dd'T'HH:mm:ss'Z'}";
+                // InvariantCulture is load-bearing: the interpolated form would use
+                // CurrentCulture, whose TimeSeparator replaces ':' (fi-FI => '.')
+                // and whose default calendar replaces the year (th-TH => 2569) —
+                // and Julia compares this string byte-for-byte against its own
+                // fixed-format rendering of the vendored binaries (pe_link_stamp),
+                // so a culture-shaped stamp would warn "stale plugin" forever.
+                return a.GetName().Name + " built " +
+                       ts.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'",
+                                   System.Globalization.CultureInfo.InvariantCulture);
             } catch (Exception e) {
                 // Dynamic or in-memory assemblies (empty Location) land here; the
                 // handshake still succeeds, it just cannot vouch for that assembly.
