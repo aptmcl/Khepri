@@ -29,14 +29,29 @@ with_unreal_editor(f) =
     isfile(log_file) && rm(log_file; force=true)
     @info "Launching UnrealEditor..." ue_exe uproject log_file
     #=
-    ExecCmds pin down the two frame-history-dependent effects that made
-    captures drift between editor sessions (8 of 57 scenes on 2026-08-05):
-    TAA/TSR accumulate jitter history across frames, and auto-exposure
-    adapts from recent view state — neither is reproducible in a fresh
-    session. FXAA is per-frame deterministic; fixed exposure removes the
-    adaptation. Test sessions only — a user's editor is untouched.
+    ExecCmds pin every frame-history-dependent effect, because each one
+    makes a capture depend on what the editor rendered BEFORE it — which a
+    fresh session cannot reproduce (2026-08-05: 8, then 19, of 57 scenes
+    drifted between sessions with only the first two pinned):
+      AntiAliasingMethod 1  FXAA — per-frame; TAA/TSR accumulate jitter.
+      AutoExposure 0 + EyeAdaptationQuality 0
+                            fixed exposure. The default-feature flag alone
+                            left a whole-frame brightness drift (one scene
+                            differed on 98% of pixels at max_delta 0.098 —
+                            uniform, not geometric); killing eye adaptation
+                            outright removes the trailing average.
+      DynamicGlobalIlluminationMethod 0 / ReflectionMethod 0 /
+      SkyLight.RealTimeReflectionCapture 0
+                            Lumen's GI, reflection probes, and the realtime
+                            sky capture all converge over frames, so
+                            identical geometry lands at different radiance
+                            depending on session history.
+      Shadow.Virtual.Enable 0 / DistanceFieldAO 0 / VolumetricFog 0
+                            virtual shadow maps, DFAO, and fog all cache or
+                            accumulate across frames.
+    Test sessions only — a user's editor is untouched.
     =#
-    launch_detached(`$ue_exe $uproject -log -ABSLOG=$log_file -ExecCmds="r.AntiAliasingMethod 1, r.DefaultFeature.AutoExposure 0"`)
+    launch_detached(`$ue_exe $uproject -log -ABSLOG=$log_file -ExecCmds="r.AntiAliasingMethod 1, r.DefaultFeature.AutoExposure 0, r.EyeAdaptationQuality 0, r.DynamicGlobalIlluminationMethod 0, r.ReflectionMethod 0, r.SkyLight.RealTimeReflectionCapture 0, r.Shadow.Virtual.Enable 0, r.DistanceFieldAO 0, r.VolumetricFog 0"`)
     try
       wait_for_port(KhepriBase.unreal_port;
                     timeout=900.0, timeout_env="KHEPRI_UNREAL_BOOT_TIMEOUT",
@@ -271,17 +286,36 @@ with_unreal_editor(f) =
   # debugging in KhepriUnreal's extrusion path.
   unreal_broken_scenes = ["florCirculosExtrudidos"]
   #=
-  NO GOLDENS ARE COMMITTED for Unreal yet: editor-viewport renders are not
-  session-deterministic at pixel_diff_compare's tolerances. Capture itself
-  is reliable (direct Viewport->Draw consumption; a full 57-scene run takes
-  ~2.5 min with zero dropped captures), and FXAA + fixed exposure are
-  pinned at launch — but consecutive fresh-session pairs still drift on a
-  VARYING subset (5, then 19 scenes, mostly borderline 2D/planar renders
-  crossing the 1% differing-pixel budget). Until the varying render state
-  is pinned (or capture moves to a deterministic offscreen path), a local
-  gated run mints a per-session baseline and verifies WITHIN the session;
-  committing any baseline would manufacture false cross-session
-  regressions.
+  NO GOLDENS ARE COMMITTED for Unreal yet, and here is exactly how far the
+  investigation got (2026-08-05), so the next attempt starts from evidence
+  rather than from scratch.
+
+  Capture itself is SOLVED: direct Viewport->Draw consumption plus the
+  warm-up above give 57/57 captures in ~2.5 min with zero drops, session
+  after session.
+
+  Cross-session RENDER determinism is not. Measured by minting in one
+  fresh editor and strict-verifying in another:
+      2 CVars pinned (AA + default-feature exposure) ....... 19 scenes drift
+      5 CVars (+ Lumen GI, reflections, virtual shadows) .... 6 scenes drift
+      9 CVars (+ eye adaptation, sky capture, DFAO, fog) .... 6 scenes drift
+  The last round's set was {circles, cuboids, pilone, piramidesRomboides,
+  washingtonMonument, arcoFalso} against the previous round's
+  {circles, column_grid, pilone, piramidesRomboides, washingtonMonument,
+  arcoFalso}: FIVE scenes recur and roughly ONE is random per run. That
+  residual randomness is why no baseline is committed — a skip list cannot
+  cover a scene chosen at random, so the suite would flake.
+
+  Drift magnitudes rule out tolerance tuning: they run from frac 0.03 to
+  0.98 of pixels, and a scene differing on 98% of pixels cannot be absorbed
+  without making the comparison meaningless.
+
+  Next lead: the five recurring scenes are all large flat-shaded solids
+  filling much of the frame, which points at remaining screen-space passes
+  (SSAO/SSGI/temporal history the CVars above do not reach) or at capturing
+  through the editor viewport at all. The decisive experiment is to bypass
+  the viewport entirely — render through a dedicated FSceneCaptureComponent2D
+  with an explicit show-flag set — rather than to keep adding CVars.
   =#
 
   if gate_enabled("KHEPRI_UNREAL_TESTS")
