@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Tutorial · Frame4DD.jl</title><meta name="title" content="Tutorial · Frame4DD.jl"/><meta property="og:title" content="Tutorial · Frame4DD.jl"/><meta property="twitter:title" content="Tutorial · Frame4DD.jl"/><meta name="description" content="Documentation for Frame4DD.jl."/><meta property="og:description" content="Documentation for Frame4DD.jl."/><meta property="twitter:description" content="Documentation for Frame4DD.jl."/><meta property="og:url" content="https://aptmcl.github.io/Khepri/Frame4DD/stable/tutorial.html"/><meta property="twitter:url" content="https://aptmcl.github.io/Khepri/Frame4DD/stable/tutorial.html"/><link rel="canonical" href="https://aptmcl.github.io/Khepri/Frame4DD/stable/tutorial.html"/><script data-outdated-warner src="assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="assets/documenter.js"></script><script src="search_index.js"></script><script src="siteinfo.js"></script><script src="../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="index.html">Frame4DD.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="index.html">Home</a></li><li class="is-active"><a class="tocitem" href="tutorial.html">Tutorial</a><ul class="internal"><li><a class="tocitem" href="#Concepts"><span>Concepts</span></a></li><li><a class="tocitem" href="#Example-1:-2D-Planar-Truss"><span>Example 1: 2D Planar Truss</span></a></li><li><a class="tocitem" href="#Example-2:-3D-Frame-with-Multiple-Load-Cases"><span>Example 2: 3D Frame with Multiple Load Cases</span></a></li><li><a class="tocitem" href="#Example-3:-Modal-Analysis"><span>Example 3: Modal Analysis</span></a></li><li><a class="tocitem" href="#Analysis-Options"><span>Analysis Options</span></a></li></ul></li><li><a class="tocitem" href="api.html">API Reference</a></li><li><a class="tocitem" href="internals.html">Internals</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href="tutorial.html">Tutorial</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href="tutorial.html">Tutorial</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/aptmcl/Khepri" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/aptmcl/Khepri/blob/main/Julia/Frame4DD/docs/src/tutorial.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Tutorial"><a class="docs-heading-anchor" href="#Tutorial">Tutorial</a><a id="Tutorial-1"></a><a class="docs-heading-anchor-permalink" href="#Tutorial" title="Permalink"></a></h1><p>This tutorial walks through three progressively complex examples:</p><ol><li>A 2D planar truss</li><li>A 3D frame with multiple load cases</li><li>Modal analysis of a 3D structure</li></ol><h2 id="Concepts"><a class="docs-heading-anchor" href="#Concepts">Concepts</a><a id="Concepts-1"></a><a class="docs-heading-anchor-permalink" href="#Concepts" title="Permalink"></a></h2><p>Every analysis follows the same workflow:</p><ol><li>Create a <a href="api.html#Frame4DD.Model"><code>Model</code></a> with <a href="api.html#Frame4DD.AnalysisOptions"><code>AnalysisOptions</code></a></li><li>Define geometry: <a href="api.html#Frame4DD.add_node!"><code>add_node!</code></a>, <a href="api.html#Frame4DD.add_element!"><code>add_element!</code></a></li><li>Apply restraints: <a href="api.html#Frame4DD.fix_node!"><code>fix_node!</code></a></li><li>Define load cases: <a href="api.html#Frame4DD.add_load_case!"><code>add_load_case!</code></a>, then add loads</li><li>Call <a href="api.html#Frame4DD.solve"><code>solve</code></a> to get <a href="api.html#Frame4DD.AnalysisResults"><code>AnalysisResults</code></a></li><li>Read displacements, reactions, and element forces from the results</li></ol><h3 id="Degrees-of-Freedom"><a class="docs-heading-anchor" href="#Degrees-of-Freedom">Degrees of Freedom</a><a id="Degrees-of-Freedom-1"></a><a class="docs-heading-anchor-permalink" href="#Degrees-of-Freedom" title="Permalink"></a></h3><p>Each node has 6 degrees of freedom (DOFs), numbered sequentially:</p><table><tr><th style="text-align: right">DOF</th><th style="text-align: right">Direction</th><th style="text-align: right">Index for node <code>n</code></th></tr><tr><td style="text-align: right">dx</td><td style="text-align: right">Translation X</td><td style="text-align: right"><code>6(n-1) + 1</code></td></tr><tr><td style="text-align: right">dy</td><td style="text-align: right">Translation Y</td><td style="text-align: right"><code>6(n-1) + 2</code></td></tr><tr><td style="text-align: right">dz</td><td style="text-align: right">Translation Z</td><td style="text-align: right"><code>6(n-1) + 3</code></td></tr><tr><td style="text-align: right">rx</td><td style="text-align: right">Rotation X</td><td style="text-align: right"><code>6(n-1) + 4</code></td></tr><tr><td style="text-align: right">ry</td><td style="text-align: right">Rotation Y</td><td style="text-align: right"><code>6(n-1) + 5</code></td></tr><tr><td style="text-align: right">rz</td><td style="text-align: right">Rotation Z</td><td style="text-align: right"><code>6(n-1) + 6</code></td></tr></table><p>For a truss analysis, you still use frame elements — there is no separate truss element type. A truss is simply a frame where the bending stiffness is small relative to the axial stiffness, and rotational DOFs are unconstrained.</p><h3 id="Coordinate-Systems"><a class="docs-heading-anchor" href="#Coordinate-Systems">Coordinate Systems</a><a id="Coordinate-Systems-1"></a><a class="docs-heading-anchor-permalink" href="#Coordinate-Systems" title="Permalink"></a></h3><p>Loads on nodes (<code>add_nodal_load!</code>, <code>add_prescribed_displacement!</code>) use <strong>global</strong> coordinates. Distributed loads on elements (<code>add_uniform_load!</code>, <code>add_trapezoidal_load!</code>, <code>add_point_load!</code>, <code>add_temperature_load!</code>) use <strong>local element</strong> coordinates:</p><ul><li>Local x: along the element axis (from node1 to node2)</li><li>Local y and z: perpendicular to the element, determined by the roll angle and the vertical axis convention</li></ul><p>The default vertical axis is Z (<code>ZVertical</code>). Use <code>AnalysisOptions(vertical=YVertical)</code> to switch.</p><h3 id="Element-End-Forces"><a class="docs-heading-anchor" href="#Element-End-Forces">Element End Forces</a><a id="Element-End-Forces-1"></a><a class="docs-heading-anchor-permalink" href="#Element-End-Forces" title="Permalink"></a></h3><p>Element forces in <a href="api.html#Frame4DD.LoadCaseResults"><code>LoadCaseResults</code></a> are stored as an <code>nE × 12</code> matrix. Each row contains the 12 local end forces for one element:</p><table><tr><th style="text-align: right">Column</th><th style="text-align: right">Force</th><th style="text-align: right">Description</th></tr><tr><td style="text-align: right">1</td><td style="text-align: right">Nx1</td><td style="text-align: right">Axial force at node 1</td></tr><tr><td style="text-align: right">2</td><td style="text-align: right">Vy1</td><td style="text-align: right">Shear y at node 1</td></tr><tr><td style="text-align: right">3</td><td style="text-align: right">Vz1</td><td style="text-align: right">Shear z at node 1</td></tr><tr><td style="text-align: right">4</td><td style="text-align: right">Mx1</td><td style="text-align: right">Torsion at node 1</td></tr><tr><td style="text-align: right">5</td><td style="text-align: right">My1</td><td style="text-align: right">Bending moment y at node 1</td></tr><tr><td style="text-align: right">6</td><td style="text-align: right">Mz1</td><td style="text-align: right">Bending moment z at node 1</td></tr><tr><td style="text-align: right">7</td><td style="text-align: right">Nx2</td><td style="text-align: right">Axial force at node 2</td></tr><tr><td style="text-align: right">8</td><td style="text-align: right">Vy2</td><td style="text-align: right">Shear y at node 2</td></tr><tr><td style="text-align: right">9</td><td style="text-align: right">Vz2</td><td style="text-align: right">Shear z at node 2</td></tr><tr><td style="text-align: right">10</td><td style="text-align: right">Mx2</td><td style="text-align: right">Torsion at node 2</td></tr><tr><td style="text-align: right">11</td><td style="text-align: right">My2</td><td style="text-align: right">Bending moment y at node 2</td></tr><tr><td style="text-align: right">12</td><td style="text-align: right">Mz2</td><td style="text-align: right">Bending moment z at node 2</td></tr></table><p>Sign convention: positive axial force is compression at node 1 (pushes into the element). Nx1 = -Nx2 for a pure axial member.</p><hr/><h2 id="Example-1:-2D-Planar-Truss"><a class="docs-heading-anchor" href="#Example-1:-2D-Planar-Truss">Example 1: 2D Planar Truss</a><a id="Example-1:-2D-Planar-Truss-1"></a><a class="docs-heading-anchor-permalink" href="#Example-1:-2D-Planar-Truss" title="Permalink"></a></h2><p>A Warren truss with 7 bottom-chord nodes and 5 top-chord nodes:</p><pre><code class="nohighlight hljs">    8---9---10--11--12        y
+   /|\ |\ /|\ |\ /|         |
+  / | \|/ \| \|/ \|          +--x
+ 1--2--3---4---5---6---7</code></pre><p>Bottom chord at y=0, top chord at y=120. Nodes spaced 120 apart in x. Pin support at node 1 (fixed dx, dy), roller at node 7 (fixed dy).</p><pre><code class="language-julia hljs">using Frame4DD
+
+model = Model()
+
+# Bottom chord nodes (y = 0)
+for i in 0:6
+  add_node!(model, 120.0 * i, 0.0, 0.0)
+end
+
+# Top chord nodes (y = 120)
+for i in 1:5
+  add_node!(model, 120.0 * i, 120.0, 0.0)
+end
+
+# Cross-section and material (steel)
+sec = Section(10.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+mat = Material(29000.0, 11500.0, 7.33e-7)
+
+# Bottom chord: 1-2, 2-3, ..., 6-7
+for i in 1:6
+  add_element!(model, i, i + 1, sec, mat)
+end
+
+# Top chord: 8-9, 9-10, 10-11, 11-12
+for i in 8:11
+  add_element!(model, i, i + 1, sec, mat)
+end
+
+# Diagonals and verticals
+diags = [
+  (1,8), (2,8), (2,9), (3,9), (3,10),
+  (4,10), (4,11), (5,11), (5,12), (6,12), (6,7)
+]
+for (n1, n2) in diags
+  add_element!(model, n1, n2, sec, mat)
+end
+
+# Supports
+fix_node!(model, 1; dx=true, dy=true, dz=true, rx=true, ry=true, rz=true)
+fix_node!(model, 7; dy=true, dz=true, rx=true, ry=true, rz=true)
+
+# Load case: vertical loads on bottom chord
+lc = add_load_case!(model)
+add_nodal_load!(lc, 2; fy=-10.0)
+add_nodal_load!(lc, 3; fy=-20.0)
+add_nodal_load!(lc, 4; fy=-20.0)
+add_nodal_load!(lc, 5; fy=-10.0)
+
+# Solve
+results = solve(model)
+
+# --- Read results ---
+
+lc1 = results.load_cases[1]
+
+# Displacements at node 4 (midspan)
+D = lc1.displacements
+node4_dx = D[6*3 + 1]  # DOF 19
+node4_dy = D[6*3 + 2]  # DOF 20
+println(&quot;Node 4 displacement: dx = $node4_dx, dy = $node4_dy&quot;)
+
+# Reactions at supports
+R = lc1.reactions
+println(&quot;Node 1 reactions: Fx = $(R[1]), Fy = $(R[2])&quot;)
+println(&quot;Node 7 reactions: Fy = $(R[6*6 + 2])&quot;)
+
+# Axial forces in elements (column 1 of element_forces)
+Q = lc1.element_forces
+for i in 1:size(Q, 1)
+  println(&quot;Element $i: axial force = $(round(Q[i, 1], digits=4))&quot;)
+end
+
+# Equilibrium residual (should be near machine epsilon)
+println(&quot;RMS residual: $(lc1.rms_residual)&quot;)</code></pre><h2 id="Example-2:-3D-Frame-with-Multiple-Load-Cases"><a class="docs-heading-anchor" href="#Example-2:-3D-Frame-with-Multiple-Load-Cases">Example 2: 3D Frame with Multiple Load Cases</a><a id="Example-2:-3D-Frame-with-Multiple-Load-Cases-1"></a><a class="docs-heading-anchor-permalink" href="#Example-2:-3D-Frame-with-Multiple-Load-Cases" title="Permalink"></a></h2><p>A 3D inverted pyramid: one free node at the top connected to four fixed base nodes. Three load cases demonstrate different load types.</p><pre><code class="language-julia hljs">using Frame4DD
+
+model = Model(options=AnalysisOptions(
+  shear=true,        # include shear deformation
+  geometric=true,    # include P-delta effects (Newton-Raphson)
+))
+
+# Node 1: free top node at (0, 0, 120)
+add_node!(model, 0.0, 0.0, 120.0; r=0.1)  # r = rigid end zone radius
+
+# Nodes 2-5: fixed base nodes
+add_node!(model, -100.0, 0.0, 0.0)
+add_node!(model, 100.0, 0.0, 0.0)
+add_node!(model, 0.0, -100.0, 0.0)
+add_node!(model, 0.0, 100.0, 0.0)
+
+# Cross-section and material
+sec = Section(100.0, 60.0, 60.0, 600.0, 200.0, 200.0)
+mat = Material(29000.0, 11500.0, 7.33e-7)
+
+# Four elements connecting node 1 to each base node
+for n2 in [2, 3, 4, 5]
+  add_element!(model, 1, n2, sec, mat)
+end
+
+# Fix all base nodes
+for n in [2, 3, 4, 5]
+  fix_node!(model, n; dx=true, dy=true, dz=true, rx=true, ry=true, rz=true)
+end
+
+# --- Load Case 1: Gravity + Concentrated Loads ---
+lc1 = add_load_case!(model)
+set_gravity!(lc1, 0.0, 0.0, -386.4)
+add_nodal_load!(lc1, 1; fx=10.0, fy=-20.0, fz=-30.0, mx=100.0)
+
+# --- Load Case 2: Distributed + Temperature ---
+lc2 = add_load_case!(model)
+set_gravity!(lc2, 0.0, 0.0, -386.4)
+
+# Uniform load on element 1 (local y and z, force/length)
+add_uniform_load!(lc2, 1; uy=1.0, uz=1.5)
+
+# Trapezoidal load on element 2
+# Linearly varying in local y from 0 to 100, intensity -0.1 to -0.2
+# and in local z from 50 to 150, intensity 0.1 to 0.5
+add_trapezoidal_load!(lc2, 2;
+  yx1=0.0, yx2=100.0, wy1=-0.1, wy2=-0.2,
+  zx1=50.0, zx2=150.0, wz1=0.1, wz2=0.5)
+
+# Temperature load on element 3
+add_temperature_load!(lc2, 3;
+  alpha=5.5e-6,         # thermal expansion coefficient
+  hy=10.0, hz=10.0,     # section depths
+  ty_pos=10.0, ty_neg=-10.0,  # temp change at +y and -y fibers
+  tz_pos=10.0, tz_neg=-10.0)  # temp change at +z and -z fibers
+
+# --- Load Case 3: Internal Point Loads ---
+lc3 = add_load_case!(model)
+set_gravity!(lc3, 0.0, 0.0, -386.4)
+
+# Point load at distance a=78.1 from node 1 on elements 1 and 4
+add_point_load!(lc3, 1; px=5.0, py=-8.0, pz=-12.0, a=78.1)
+add_point_load!(lc3, 4; px=5.0, py=-8.0, pz=-12.0, a=78.1)
+
+# Solve all load cases
+results = solve(model)
+
+# --- Read results ---
+
+for (i, lc_result) in enumerate(results.load_cases)
+  D = lc_result.displacements
+  println(&quot;Load case $i:&quot;)
+  println(&quot;  Node 1 displacements:&quot;)
+  println(&quot;    dx = $(D[1]), dy = $(D[2]), dz = $(D[3])&quot;)
+  println(&quot;    rx = $(D[4]), ry = $(D[5]), rz = $(D[6])&quot;)
+  println(&quot;  RMS residual: $(lc_result.rms_residual)&quot;)
+end</code></pre><h3 id="Prescribed-Displacements"><a class="docs-heading-anchor" href="#Prescribed-Displacements">Prescribed Displacements</a><a id="Prescribed-Displacements-1"></a><a class="docs-heading-anchor-permalink" href="#Prescribed-Displacements" title="Permalink"></a></h3><p>You can impose known displacements at restrained DOFs. The node must first be fixed with <a href="api.html#Frame4DD.fix_node!"><code>fix_node!</code></a>, then the displacement value is set in the load case:</p><pre><code class="language-julia hljs"># Fix node 1 in y-direction
+fix_node!(model, 1; dy=true)
+
+# In a load case, prescribe dy = -1.0 at node 1
+lc = add_load_case!(model)
+add_prescribed_displacement!(lc, 1; dy=-1.0)</code></pre><p>The solver first applies the prescribed displacement, then solves for the remaining unknowns. The reaction at that DOF reflects the force required to maintain the prescribed displacement.</p><h2 id="Example-3:-Modal-Analysis"><a class="docs-heading-anchor" href="#Example-3:-Modal-Analysis">Example 3: Modal Analysis</a><a id="Example-3:-Modal-Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Example-3:-Modal-Analysis" title="Permalink"></a></h2><p>To compute natural frequencies and mode shapes, pass a <a href="api.html#Frame4DD.ModalOptions"><code>ModalOptions</code></a> to <a href="api.html#Frame4DD.AnalysisOptions"><code>AnalysisOptions</code></a>:</p><pre><code class="language-julia hljs">using Frame4DD
+
+model = Model(options=AnalysisOptions(
+  shear=true,
+  geometric=true,
+  modal=ModalOptions(
+    6;                       # number of modes to compute
+    method=SubspaceJacobi,   # or Stodola
+    lumped=true,             # lumped mass matrix (false = consistent)
+    tol=1e-9,                # convergence tolerance
+    shift=0.0,               # eigenvalue shift
+  ),
+))
+
+# Geometry (same pyramid as Example 2)
+add_node!(model, 0.0, 0.0, 120.0; r=0.1)
+add_node!(model, -100.0, 0.0, 0.0)
+add_node!(model, 100.0, 0.0, 0.0)
+add_node!(model, 0.0, -100.0, 0.0)
+add_node!(model, 0.0, 100.0, 0.0)
+
+sec = Section(100.0, 60.0, 60.0, 600.0, 200.0, 200.0)
+mat = Material(29000.0, 11500.0, 7.33e-7)
+
+for n2 in [2, 3, 4, 5]
+  add_element!(model, 1, n2, sec, mat)
+end
+for n in [2, 3, 4, 5]
+  fix_node!(model, n; dx=true, dy=true, dz=true, rx=true, ry=true, rz=true)
+end
+
+# Add lumped mass at the free node
+add_node_mass!(model, 1; mass=1.0, Ixx=100.0, Iyy=100.0, Izz=100.0)
+
+# At least one load case is required
+lc = add_load_case!(model)
+set_gravity!(lc, 0.0, 0.0, -386.4)
+add_nodal_load!(lc, 1; fx=10.0, fy=-20.0, fz=-30.0)
+
+# Solve
+results = solve(model)
+
+# --- Modal results ---
+
+modal = results.modal
+println(&quot;Structural mass: $(modal.structural_mass)&quot;)
+println(&quot;Total mass:      $(modal.total_mass)&quot;)
+println()
+for (i, f) in enumerate(modal.frequencies)
+  println(&quot;Mode $i: $(round(f, digits=3)) Hz&quot;)
+end
+
+# Mode shapes: modal.mode_shapes is a DoF × nModes matrix
+# Each column is one mode shape vector
+phi1 = modal.mode_shapes[:, 1]
+println(&quot;\nMode 1 shape at node 1: &quot;, phi1[1:6])</code></pre><h3 id="Eigensolver-Methods"><a class="docs-heading-anchor" href="#Eigensolver-Methods">Eigensolver Methods</a><a id="Eigensolver-Methods-1"></a><a class="docs-heading-anchor-permalink" href="#Eigensolver-Methods" title="Permalink"></a></h3><p>Two methods are available via <a href="api.html#Frame4DD.EigenMethod"><code>EigenMethod</code></a>:</p><ul><li><strong><code>SubspaceJacobi</code></strong> (default): Subspace iteration with Jacobi rotation for the reduced eigenproblem. Computes all requested modes simultaneously. Good for problems where many modes are needed.</li><li><strong><code>Stodola</code></strong>: Inverse iteration with deflation. Computes one mode at a time. Can be more robust for problems with closely spaced eigenvalues.</li></ul><h3 id="Extra-Masses"><a class="docs-heading-anchor" href="#Extra-Masses">Extra Masses</a><a id="Extra-Masses-1"></a><a class="docs-heading-anchor-permalink" href="#Extra-Masses" title="Permalink"></a></h3><p>You can add non-structural mass to nodes or elements:</p><pre><code class="language-julia hljs"># Lumped mass at a node (mass + rotational inertias)
+add_node_mass!(model, 1; mass=1.0, Ixx=100.0, Iyy=100.0, Izz=100.0)
+
+# Extra distributed mass on an element
+add_element_extra_mass!(model, 3; mass=0.5)</code></pre><p>These masses are included in both the static gravity loads and the mass matrix for modal analysis.</p><h2 id="Analysis-Options"><a class="docs-heading-anchor" href="#Analysis-Options">Analysis Options</a><a id="Analysis-Options-1"></a><a class="docs-heading-anchor-permalink" href="#Analysis-Options" title="Permalink"></a></h2><p>The <a href="api.html#Frame4DD.AnalysisOptions"><code>AnalysisOptions</code></a> struct controls the analysis:</p><pre><code class="language-julia hljs">AnalysisOptions(
+  shear=false,            # shear deformation (Timoshenko beam)
+  geometric=false,        # geometric nonlinearity (P-delta)
+  vertical=ZVertical,     # vertical axis: ZVertical or YVertical
+  tol=1e-9,               # Newton-Raphson convergence tolerance
+  modal=nothing,          # nothing, or ModalOptions(...)
+  sparse_threshold=200,   # use sparse solver when DoF &gt; this value
+)</code></pre><p>The <code>sparse_threshold</code> controls automatic solver selection. Below the threshold, dense LAPACK routines are used (lower overhead for small problems). Above it, sparse CHOLMOD is used (dramatically faster for large problems). The default of 200 is a good general choice.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="index.html">« Home</a><a class="docs-footer-nextpage" href="api.html">API Reference »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Wednesday 5 August 2026 16:25">Wednesday 5 August 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
