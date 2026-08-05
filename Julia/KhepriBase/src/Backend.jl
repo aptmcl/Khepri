@@ -411,8 +411,23 @@ native closed interpolant IS the periodic chord-parameterized cubic
 knots — never valid — and fell back to dense sampling, while six backends
 overrode it with six DIFFERENT curves through the same points.)
 =#
+#=
+Degenerate cycles have no periodic cubic (fewer than 3 distinct points, or
+coincident consecutive points — the chord grid cannot normalize a zero
+span), but they DID draw before canonicalization on the backends whose
+overrides tolerated them. Fall back to the polygon through the same points
+rather than throwing: a user's degenerate closed spline keeps rendering,
+and the canonical path handles every well-formed cycle.
+=#
 b_closed_spline(b::Backend, ps, mat) =
-  b_bezier_curve(b, closed_spline_bezier_path(ps), mat)
+  let wpts = [in_world(p) for p in ps],
+      n = length(wpts),
+      degenerate = n < 3 ||
+        any(i -> distance(wpts[i], wpts[mod1(i + 1, n)]) == 0, 1:n)
+    degenerate ?
+      b_polygon(b, ps, mat) :
+      b_bezier_curve(b, closed_spline_bezier_path(ps), mat)
+  end
 
 b_circle(b::Backend, c, r, mat) =
   b_closed_spline(b, regular_polygon_vertices(tessellation_divisions(b), c, r, 0, true), mat)
@@ -2701,21 +2716,6 @@ public standalone_obj_transform, wall_obj_transform
   Compute a Loc (4×4 transform) for placing an OBJ mesh at a world
   position (no wall context). Rotation is around the world Z (vertical) axis.
 =#
-#=
-Plan rotation angle a Loc's cs bakes in (loc_from_o_phi): for wire protocols
-that take position+angle rather than a placement frame (Unity's
-InstantiateBIMElement). Mirrors the φ extraction inside
-standalone_obj_transform below — extracting from the cs, not a stored
-angle, keeps the wall-crossing-cabinet class of bug fixed for these
-protocols too.
-=#
-public plan_angle
-plan_angle(position) =
-  let p = in_world(position),
-      xw = in_world(position + vx(1, position.cs)) - p
-    norm(vxy(cx(xw), cy(xw))) < 1e-9 ? 0.0 : atan(cy(xw), cx(xw))
-  end
-
 function standalone_obj_transform(position, bf::OBJFileFamily, extra_angle=0.0)
   let p = in_world(position),
       s = bf.scale,

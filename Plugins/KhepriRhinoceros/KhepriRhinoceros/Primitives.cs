@@ -2438,6 +2438,36 @@ def show_vertices(shape):
         }
         public void UnregisterForChanges(Guid id) {
             watchedShapes.Remove(id);
+            // Drain events queued for this id between the client's last poll
+            // and this call: a survivor would fire the NEXT watch on an
+            // unrelated shape spuriously. (BlockingCollection has no targeted
+            // remove; re-add the ones still being watched.)
+            var keep = new System.Collections.Generic.List<Guid>();
+            Guid g;
+            while (changedShapes.TryTake(out g)) {
+                if (g != id) keep.Add(g);
+            }
+            foreach (var k in keep) changedShapes.Add(k);
+            // Nothing left to watch: drop the document subscription so a
+            // finished session leaves no handler (and no rooted Primitives
+            // instance) behind. RegisterForChanges re-subscribes on demand.
+            if (watchedShapes.Count == 0 && changeEventSubscribed) {
+                RhinoDoc.ReplaceRhinoObject -= AddChangedShape;
+                changeEventSubscribed = false;
+            }
+        }
+
+        // Called when a client disconnects: a session that ended mid-watch
+        // (or without unregistering) must not leave this instance rooted by
+        // the static RhinoDoc event forever — one leak per reconnect.
+        public void ReleaseChangeTracking() {
+            if (changeEventSubscribed) {
+                RhinoDoc.ReplaceRhinoObject -= AddChangedShape;
+                changeEventSubscribed = false;
+            }
+            watchedShapes.Clear();
+            Guid g;
+            while (changedShapes.TryTake(out g)) { }
         }
 
         // Non-blocking TryTake, exactly like AutoCAD's ChangedShape: RPCs run

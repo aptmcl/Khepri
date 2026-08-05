@@ -326,12 +326,21 @@ b_get_family_ref(b::UE, f::Family, uf::UEMaterialFamily) =
 
 struct UEResourceFamily <: UEFamily
   name::String
-  parameter_map::Dict{Symbol,String}
+  scale::Float64
   ref::IdDict{Backend, Any}
 end
 
-unreal_resource_family(name, pairs...) =
-  UEResourceFamily(name, Dict(pairs...), IdDict{Backend, Any}())
+#=
+Takes a name and an optional uniform `scale`, and NOTHING else. The previous
+signature accepted `pairs...` into a parameter_map that no code ever read —
+Unreal's placement RPC (CreateBlockInstance) carries a frame and a uniform
+scale, with no slot for arbitrary parameters — so any parameter a caller
+passed was silently discarded. Now `scale` is honored at placement and an
+unsupported parameter raises a clear MethodError at the call site instead
+(the same rule KhepriUnity's design note states for its resource families).
+=#
+unreal_resource_family(name; scale=1.0) =
+  UEResourceFamily(name, Float64(scale), IdDict{Backend, Any}())
 
 b_get_family_ref(b::UE, f::Family, uf::UEResourceFamily) =
   get!(uf.ref, b) do
@@ -343,7 +352,7 @@ b_get_family_ref(b::UE, f::Family, uf::UEResourceFamily) =
 # The loc's cs supplies the placement frame (same shape as realize(::BlockInstance)).
 KhepriBase.b_family_instance(b::UE, uf::UEResourceFamily, f::Family, loc::Loc, fallback::Function) =
   @remote(b, Primitive__CreateBlockInstance(
-    family_ref(b, f), loc, vx(1, loc.cs), vy(1, loc.cs), 1.0))
+    family_ref(b, f), loc, vx(1, loc.cs), vy(1, loc.cs), uf.scale))
 
 #=============================================================================
  BIM Operations

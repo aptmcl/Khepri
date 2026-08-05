@@ -24,12 +24,17 @@ function __init__()
   set_backend_family(default_panel_family(), unreal,
     unreal_material_family("/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"))
 
-  # Table and chair families use resource loading (static meshes)
-  # These use engine primitives as fallbacks; users should override with project assets
-  set_backend_family(default_table_family(), unreal,
-    unreal_resource_family("/Engine/BasicShapes/Cube.Cube"))
-  set_backend_family(default_chair_family(), unreal,
-    unreal_resource_family("/Engine/BasicShapes/Cube.Cube"))
+  #=
+  No furniture registrations on the DEFAULT families. They were inert
+  before the b_family_instance seam existed (nothing placed a
+  UEResourceFamily), and activating them would capture every user
+  family: the delegation walk falls back to the default family, so
+  `table(family=table_family(length=5))` would place an engine Cube
+  and discard the dimensions — while the same script honors them on
+  every other backend. Register per family instead:
+    set_backend_family(my_table_family, unreal,
+                       unreal_resource_family("/Game/MyTable"))
+  =#
 
   set_backend_family(default_curtain_wall_family().panel, unreal,
     unreal_material_family("/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"))

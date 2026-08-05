@@ -12,6 +12,22 @@ using Test
 include(joinpath(pkgdir(KhepriBase), "test", "BackendTestScaffolding.jl"))
 using .BackendTestScaffolding
 
+#=
+threshold 0.02 (not pixel_diff_compare's 0.01 default): live Rhino
+renders graze the 1% differing-pixel budget on ONE random scene per
+run (AA flicker on edge-reaching scenes, observed across sessions);
+2% absorbs it while a real regression — moved geometry, changed
+material — exceeds it by an order of magnitude.
+
+A NAMED function, not a closure: run_visual_tests records
+string(nameof(compare)) in every provenance sidecar, so a lambda
+would stamp a gensym ("#6") that changes whenever this file is
+edited AND silently disables warn_if_stale's comparator-drift
+check (it skips names starting with '#').
+=#
+rhino_pixel_compare(test_path, golden_path) =
+  pixel_diff_compare(test_path, golden_path; threshold=0.02)
+
 @testset "KhepriRhino.jl" begin
 
   @testset "RPC Conformance (static)" begin
@@ -92,24 +108,29 @@ using .BackendTestScaffolding
       # b_setup_raw_view(::RH) (src/Rhino.jl), which an override would bypass.
       run_visual_tests(rhino,
         golden_dir = joinpath(@__DIR__, "golden"),
-        # Rhino's boolean Unite fails for this scene's union (NOTOK "Union
-        # failed: could not add result to document", live-verified
-        # 2026-08-05) — a geometry-kernel limitation for its coincident
-        # faces, not a harness issue. Unblock: fix Primitives.Unite in
-        # Plugins/KhepriRhinoceros (e.g. tolerant boolean or piecewise
-        # fallback) and re-mint.
-        skip_tests = ["abobadasRomanas"],
+        skip_tests = [
+          # Rhino's boolean Unite fails for this scene's union (NOTOK "Union
+          # failed: could not add result to document", live-verified
+          # 2026-08-05) — a geometry-kernel limitation for its coincident
+          # faces, not a harness issue. Unblock: fix Primitives.Unite in
+          # Plugins/KhepriRhinoceros (e.g. tolerant boolean or piecewise
+          # fallback) and re-mint.
+          "abobadasRomanas",
+          # Renders nondeterministically: mint-then-verify against the SAME
+          # live Rhino session differs by 16.6% of pixels (max_delta 0.90 —
+          # structural, not antialiasing), reproducibly, live-verified
+          # 2026-08-05 across four sessions. Every other scene in the corpus
+          # is stable both within and across sessions, so this is specific to
+          # how this scene's tori are shaded/framed. Unblock: find the varying
+          # Rhino render state (display-mode or camera framing on
+          # edge-reaching geometry) and pin it, then re-mint.
+          "tori",
+        ],
         reset! = () -> begin
           delete_all_shapes()
           backend(rhino)
         end,
-        # threshold 0.02 (not the 0.01 default): live Rhino renders graze
-        # the 1% differing-pixel budget on ONE random scene per run
-        # (boxes/tori/surface_* AA flicker — observed across Phase 3 and 5
-        # sessions); 2% absorbs the flicker while a real regression (moved
-        # geometry, changed material) still exceeds it by an order of
-        # magnitude.
-        compare = (t, g) -> pixel_diff_compare(t, g; threshold=0.02),
+        compare = rhino_pixel_compare,
         backend_module = KhepriRhino,
         skip = Symbol[]
       )

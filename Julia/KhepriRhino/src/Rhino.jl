@@ -376,8 +376,20 @@ rhino_is_listening() =
     false
   end
 
+#=
+Auto-start is best-effort: a failure to LOCATE Rhino must not abort the
+connect, because connection() runs before_connecting BEFORE start_connection
+— throwing here skips the 10-attempt retry loop that lets a user start Rhino
+by hand mid-run (which is how this backend worked before auto-start existed).
+Warn and fall through to that loop instead.
+=#
 KhepriBase.before_connecting(b::RH) =
-  rhino_is_listening() || start_rhino()
+  rhino_is_listening() ||
+    try
+      start_rhino()
+    catch e
+      @warn "Could not start Rhino automatically; start it manually and the connection will retry." exception=e
+    end
 
 #=
 Material-mapping setup. Failure to recognize the install must degrade, not
@@ -1592,6 +1604,12 @@ khepri_studio_renv() =
 
 # Khepri render quality dial [-1, +1] -> Rhino AntialiasLevel [0, 3]
 # (None/Draft/Good/High — RenderSettings.AntialiasLevel in the plugin's Render).
+#
+# BEHAVIOR NOTE: the pre-contract clay path hardcoded level 3 (High); the
+# dial's default (render_quality() == 0) maps to 2 (Good), so default
+# :white/:black renders antialias one level lower than before while
+# honoring the portable dial like AutoCAD. Pass render_quality(1.0) — or
+# opts.quality=1.0 — for the old fidelity.
 convert_render_quality(b::RH, v::Real) = round(Int, (v + 1)*3/2)
 
 #=
