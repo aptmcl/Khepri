@@ -215,4 +215,36 @@ include("TestMockBackend.jl")
     end
   end
 
+  #=
+  Regression: the delegation walk used to recurse forever
+  (StackOverflowError) whenever the CURRENT default family is a
+  with_*_family element and the backend has no registered implementation.
+  with_window_family binds default_window_family to a window_family_element
+  whose based_on is the original template, so the walk went
+  element -> template -> default(= the element again); the old
+  `default !== family` guard sees only one-step cycles. Fixed by the
+  seen-set walk (_walk_backend_family, BIM.jl).
+  =#
+  @testset "with_*_family elements do not cycle the delegation walk" begin
+    with_mock_backend() do b
+      # The original reproduction: a window realized inside
+      # with_window_family on a backend with no registered window family
+      # must terminate and fall to the generic geometry branch.
+      with_window_family(width=2.0, height=1.5) do
+        let w = wall([xy(0, 0), xy(8, 0)])
+          @test (add_window(w, xy(1, 0.5)); true)
+        end
+      end
+      # Both walk entry points, on the cycle itself: the bound default IS
+      # an element based_on the template being walked.
+      let t = default_window_family(),
+          e = window_family_element(t)
+        with(default_window_family, e) do
+          @test isnothing(KhepriBase.maybe_backend_family(b, e))
+          @test_throws ErrorException backend_family(b, e)
+        end
+      end
+    end
+  end
+
 end
