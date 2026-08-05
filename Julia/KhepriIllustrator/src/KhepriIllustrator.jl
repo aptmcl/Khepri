@@ -1,6 +1,5 @@
 module KhepriIllustrator
 
-using Test
 using KhepriBase
 
 include("JuliaReader.jl")

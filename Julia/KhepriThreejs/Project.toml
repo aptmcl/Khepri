@@ -1,6 +1,6 @@
 name = "KhepriThreejs"
 uuid = "ce4cf1d5-169f-4669-87f9-ceef84a82a97"
-version = "1.1.0-DEV"
+version = "1.1.0"
 authors = ["António Menezes Leitão <antonio.menezes.leitao@gmail.com>"]
 
 [deps]
@@ -17,13 +17,14 @@ Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
+OrderedCollections = "1"
 ColorTypes = "0.11"
 Colors = "0.13.1"
 Dates = "1.9"
 HTTP = "1.10"
-KhepriBase = "0.8"
+KhepriBase = "0.8.1"
 LinearAlgebra = "1.9"
-Reexport = "1.2"
+Reexport = "1"
 Sockets = "1.9"
 StaticArrays = "1.6"
 Test = "1"
