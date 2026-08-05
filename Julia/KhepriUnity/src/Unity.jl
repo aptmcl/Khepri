@@ -365,6 +365,28 @@ set_default_materials() =
     set_material(Unity, material_grass, "Default/Materials/Grass")
   end
 
+#=
+Furniture prefabs are NOT registered on the default families, deliberately.
+
+The shipped prefabs (Plugins/KhepriUnity/Assets/Resources/Default/Prefabs)
+place through the b_family_instance seam, but registering them on
+default_table_family() etc. would capture EVERY table: the delegation walk
+(_walk_backend_family, KhepriBase/src/BIM.jl) falls back to the default
+family for any family with no registration of its own — which is every
+family a user builds with table_family(...) — so
+`table(family=table_family(length=5))` would silently place a fixed-size
+prefab and discard the dimensions, while the same script honors them on
+every other backend. That is precisely the portability break CLAUDE.md's
+core principle forbids.
+
+Opting in is one line, per family, and stays explicit:
+
+    set_backend_family(my_table_family, unity, unity_resource_family("Default/Prefabs/Table"))
+
+(A prefab whose geometry genuinely matched the parametric defaults could be
+registered here safely; the shipped ones do not, being fixed-size.)
+=#
+
 KhepriBase.b_get_material(b::Unity, path::AbstractString) =
   @remote(b, LoadMaterial(path))
 
@@ -533,6 +555,15 @@ end
 # RPC has no per-resource parameter slot. See the prose block above.
 unity_resource_family(name) = UnityResourceFamily(name)
 b_get_family_ref(b::Unity, f::Family, uf::UnityResourceFamily) = @remote(b, LoadResource(uf.name))
+
+# The b_family_instance placement seam (KhepriBase/src/BIM.jl): a furniture
+# family registered with a prefab places the prefab instead of parametric
+# geometry. InstantiateResource (not InstantiateBIMElement) because it takes
+# the placement FRAME: reducing the loc to position+plan-angle would silently
+# flatten tilted frames (a prefab on a sloped surface) and drop mirrored
+# placements, which every frame-carrying backend honors.
+KhepriBase.b_family_instance(b::Unity, uf::UnityResourceFamily, f::Family, loc::Loc, fallback::Function) =
+  @remote(b, InstantiateResource(family_ref(b, f), loc, vx(1, loc.cs), vy(1, loc.cs), 1.0))
 
 #=
 set_backend_family(default_wall_family(), unity, unity_material_family("Default/Materials/Plaster"))

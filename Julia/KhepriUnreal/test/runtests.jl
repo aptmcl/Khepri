@@ -105,10 +105,13 @@ with_unreal_editor(f) =
     @test mf isa KhepriUnreal.UEMaterialFamily
     @test mf.name == "TestMat"
 
-    rf = unreal_resource_family("TestRes", :key => "value")
+    rf = unreal_resource_family("TestRes")
     @test rf isa KhepriUnreal.UEResourceFamily
     @test rf.name == "TestRes"
-    @test rf.parameter_map[:key] == "value"
+    @test rf.scale == 1.0
+    @test unreal_resource_family("TestRes"; scale=2.5).scale == 2.5
+    # Unsupported parameters raise instead of being swallowed.
+    @test_throws MethodError unreal_resource_family("TestRes", :key => "value")
   end
 
   @testset "Modern b_* methods exist" begin

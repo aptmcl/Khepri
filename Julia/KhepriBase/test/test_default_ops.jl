@@ -197,6 +197,42 @@ end
 end
 
 #=
+Closed twin of the probe above: the default b_closed_spline draws the
+canonical PERIODIC C2 cubic via closed_spline_bezier_path and must stay in
+lockstep with the Paths.jl helpers (MockBackend used to override
+b_closed_spline, masking the default — the exact trap the open probe
+closed).
+=#
+@testset "default b_closed_spline draws the canonical periodic curve" begin
+  let ps = [xy(0, 0), xy(4, 1), xy(5, 4), xy(1, 6), xy(-2, 3)],
+      b = SplineProbeBackend()
+    KhepriBase.b_closed_spline(b, ps, 0)
+    @test length(b.lines) == 1
+    let vs = b.lines[1],
+        sample_step = 9.5 / max(path_smoothness_segments(), length(ps) * 8)
+      @test length(vs) >= length(ps)
+      # Interpolates every cycle point: the sampler is uniform in the curve
+      # parameter and need not land a vertex ON a knot, so the honest bound
+      # is a curve-arc step around it (2x the linear step estimate).
+      for p in ps
+        @test minimum(distance(p, v) for v in vs) < 2 * sample_step
+      end
+      # Closes: the sampled polyline returns to its start.
+      let wvs = [KhepriBase.in_world(v) for v in vs]
+        @test distance(wvs[1], wvs[end]) < sample_step
+      end
+      # Independent oracle: every drawn vertex lies on the Dierckx PERIODIC
+      # chord-parameterized interpolant.
+      let ci = KhepriBase.curve_interpolator(ps, true),
+          dense = [xyz(KhepriBase.Dierckx.evaluate(ci, t)..., world_cs)
+                   for t in 0:0.00005:1]
+        @test maximum(minimum(distance(v, q) for q in dense) for v in vs) < 1e-2
+      end
+    end
+  end
+end
+
+#=
 Family profiles are section data: a profile path constructed under a non-world
 current_cs (a group factory body, a with(current_cs, ...) block) used to drag
 the ambient transform into every member placement — path_on/path_vertices_on

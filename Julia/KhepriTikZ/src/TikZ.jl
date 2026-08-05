@@ -546,8 +546,10 @@ KhepriBase.b_line(b::TikZ, ps, mat) =
 KhepriBase.b_polygon(b::TikZ, ps, mat) =
   isempty(ps) ? void_ref(b) : tikz_closed_line(connection(b), ps, false, mat)
 
-KhepriBase.b_closed_spline(b::TikZ, ps, mat) =
-  tikz_hobby_closed_spline(connection(b), ps)
+# No b_closed_spline override: the default renders the canonical periodic C2
+# cubic (closed_spline_bezier_path) through TikZ's native b_bezier_curve —
+# the old override's Hobby spline followed a different (curvature-optimized)
+# curve through the same points, diverging from every canonical backend.
 
 #=
 A Khepri BezierPath is a chain of BezierSpans (each a control-point list). A cubic

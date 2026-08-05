@@ -111,6 +111,8 @@ export empty_path,
        open_spline_tangents,
        open_spline_derivatives,
        open_spline_bezier_path,
+       closed_spline_derivatives,
+       closed_spline_bezier_path,
        mirrored_path,
        mirrored_on_x,
        mirrored_on_y,
@@ -2302,6 +2304,98 @@ open_spline_bezier_path(ps, v0=false, v1=false) =
                    wpts[i+1] - ms[i+1] * (h[i] / 3),
                    wpts[i+1]])
        for i in 1:length(wpts)-1])
+  end
+
+#=
+Closed (periodic) analogue of the open-spline canonicalization above: THE
+canonical closed spline through n cycle points is the unique periodic C2
+cubic interpolant over the cyclic chord grid. Before this existed, six
+backends drew six different curves through the same points (a straight
+polygon, Catmull-Rom, Hobby, AUTO-handle beziers, ...) — the exact
+portability violation the open-spline work retired in July.
+
+The slope system is the open one's interior row applied cyclically to ALL
+n rows (indices mod n), giving a cyclic tridiagonal system solved by
+Sherman-Morrison around the Thomas solve: A = T' + u vᵀ with the corners
+folded into T'[1,1] and T'[n,n], one Vec-valued and one scalar Thomas
+pass, then the rank-one correction.
+=#
+closed_spline_chord_grid(wpts) =
+  let n = length(wpts)
+    n < 3 && throw(ArgumentError("closed spline: needs at least 3 interpolation points, got $n"))
+    let ds = [distance(wpts[i], wpts[mod1(i + 1, n)]) for i in 1:n],
+        l = sum(ds)
+      any(iszero, ds) && throw(ArgumentError("closed spline: coincident consecutive interpolation points"))
+      (ds ./ l, l)
+    end
+  end
+
+# Thomas solve for a (non-cyclic) tridiagonal system with generic-valued RHS —
+# shared by the two Sherman-Morrison passes below.
+function _thomas_solve(a, b, c, r)
+  m = length(b)
+  cp = zeros(m)
+  dp = Vector{eltype(r)}(undef, m)
+  cp[1] = c[1] / b[1]
+  dp[1] = r[1] / b[1]
+  for k in 2:m
+    let denom = b[k] - a[k] * cp[k-1]
+      cp[k] = c[k] / denom
+      dp[k] = (r[k] - a[k] * dp[k-1]) / denom
+    end
+  end
+  xs = Vector{eltype(r)}(undef, m)
+  xs[m] = dp[m]
+  for k in m-1:-1:1
+    xs[k] = dp[k] - cp[k] * xs[k+1]
+  end
+  xs
+end
+
+# Per-point derivatives (w.r.t. the normalized cyclic chord parameter) of the
+# periodic C2 cubic through ps.
+function closed_spline_derivatives(ps)
+  wpts = [in_world(p) for p in ps]
+  n = length(wpts)
+  h, _ = closed_spline_chord_grid(wpts)
+  δ = [(wpts[mod1(i + 1, n)] - wpts[i]) / h[i] for i in 1:n]
+  # Row i (cyclic): h[i]*m[i-1] + 2(h[i-1]+h[i])*m[i] + h[i-1]*m[i+1] =
+  #                 3(h[i]*δ[i-1] + h[i-1]*δ[i])
+  hm(i) = h[mod1(i - 1, n)]
+  α = [h[i] for i in 1:n]                 # coefficient of m[i-1]
+  β = [2 * (hm(i) + h[i]) for i in 1:n]
+  γ = [hm(i) for i in 1:n]                # coefficient of m[i+1]
+  r = Vec[3 * (h[i] * δ[mod1(i - 1, n)] + hm(i) * δ[i]) for i in 1:n]
+  # Sherman-Morrison: corners A[1,n] = α[1], A[n,1] = γ[n].
+  let g = -β[1],
+      b′ = copy(β)
+    b′[1] -= g
+    b′[n] -= γ[n] * α[1] / g
+    let y = _thomas_solve(α, b′, γ, r),
+        u = zeros(n)
+      u[1] = g
+      u[n] = γ[n]
+      let z = _thomas_solve(α, b′, γ, u),
+          vy = y[1] + (α[1] / g) * y[n],
+          vz = z[1] + (α[1] / g) * z[n],
+          f = 1 + vz
+        [y[i] - z[i] * (vy / f) for i in 1:n]
+      end
+    end
+  end
+end
+
+closed_spline_bezier_path(ps) =
+  let wpts = [in_world(p) for p in ps],
+      ms = closed_spline_derivatives(ps),
+      (h, _) = closed_spline_chord_grid(wpts),
+      n = length(wpts)
+    closed_bezier_path(
+      [BezierSpan([wpts[i],
+                   wpts[i] + ms[i] * (h[i] / 3),
+                   wpts[mod1(i + 1, n)] - ms[mod1(i + 1, n)] * (h[i] / 3),
+                   wpts[mod1(i + 1, n)]])
+       for i in 1:n])
   end
 
 convert(::Type{ClosedPolygonalPath}, path::CompositePath{true}) =

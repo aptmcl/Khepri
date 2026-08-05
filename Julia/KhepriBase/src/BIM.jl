@@ -448,6 +448,33 @@ realize(b::Backend, f::Family) =
 b_get_family_ref(b::Backend, f::Family, bf) = bf
 export backend_family, set_backend_family
 
+#=
+b_family_instance: THE placement seam for resource-backed families.
+
+Furniture (and, incrementally, fixtures and family elements) used to
+hard-code a two-way branch: `bf isa OBJFamily` placed a mesh, everything
+else fell to parametric geometry — so Unity prefabs, Unreal static meshes,
+and Revit families registered via set_backend_family were silently ignored
+by realize(::Table/::Chair). The backend-family structs (OBJFileFamily,
+UnityResourceFamily, UEResourceFamily, RevitFileFamily, ...) already ARE
+the abstraction; what was missing is one generic dispatched on the
+backend-family VALUE (the b_get_family_ref idiom):
+
+- default: call the fallback closure — today's parametric geometry, so an
+  unregistered or unknown backend family changes NOTHING;
+- OBJFamily: the mesh placement that used to live inline in each realize;
+- each resource backend adds ONE method (prefab instancing, block
+  instancing, native family placement).
+
+The fallback takes (b, loc) so composites (TableAndChairs) can route their
+per-item placements through the seam too.
+=#
+public b_family_instance
+b_family_instance(b::Backend, bf, f::Family, loc::Loc, fallback::Function) =
+  fallback(b, loc)
+b_family_instance(b::Backend, bf::OBJFamily, f::Family, loc::Loc, fallback::Function) =
+  b_mesh_obj_fmt(b, bf.obj_name, standalone_obj_transform(loc, bf))
+
 # Registry of default family parameters for invalidation on backend reconnection.
 # Each @deffamily generates a default_xxx_family Parameter; we register them here
 # so that invalidate_family_refs can clear stale cached refs.
@@ -1423,56 +1450,59 @@ used_materials(f::TableChairFamily) =
 table(loc::Loc, angle::Real, level=default_level(), family::TableFamily=default_table_family()) =
   table(loc_from_o_phi(loc, angle), level, family)
 realize(b::Backend, s::Table) =
-  let bf = maybe_backend_family(b, s.family)
-    if bf isa OBJFamily
-      b_mesh_obj_fmt(b, bf.obj_name, standalone_obj_transform(add_z(s.loc, s.level.height), bf))
-    else
-      let tf = s.family
-        b_table(b, add_z(s.loc, s.level.height),
-                tf.length, tf.width, tf.height,
-                tf.top_thickness, tf.leg_thickness,
-                material_ref(b, tf.material))
-      end
-    end
+  let tf = s.family
+    b_family_instance(b, maybe_backend_family(b, tf), tf,
+      add_z(s.loc, s.level.height),
+      (b, p) -> b_table(b, p, tf.length, tf.width, tf.height,
+                        tf.top_thickness, tf.leg_thickness,
+                        material_ref(b, tf.material)))
   end
 
 @defproxy(chair, BIMShape, loc::Loc=u0(), level::Level=default_level(), family::ChairFamily=default_chair_family())
 chair(loc::Loc, angle::Real, level::Level=default_level(), family::ChairFamily=default_chair_family()) =
   chair(loc_from_o_phi(loc, angle), level, family)
 realize(b::Backend, s::Chair) =
-  let bf = maybe_backend_family(b, s.family)
-    if bf isa OBJFamily
-      b_mesh_obj_fmt(b, bf.obj_name, standalone_obj_transform(add_z(s.loc, s.level.height), bf))
-    else
-      let cf = s.family
-        b_chair(b, add_z(s.loc, s.level.height),
-                cf.length, cf.width, cf.height,
-                cf.seat_height, cf.thickness,
-                material_ref(b, cf.material))
-      end
-    end
+  let cf = s.family
+    b_family_instance(b, maybe_backend_family(b, cf), cf,
+      add_z(s.loc, s.level.height),
+      (b, p) -> b_chair(b, p, cf.length, cf.width, cf.height,
+                        cf.seat_height, cf.thickness,
+                        material_ref(b, cf.material)))
   end
 
 @defproxy(table_and_chairs, BIMShape, loc::Loc=u0(), level::Level=default_level(), family::TableChairFamily=default_table_chair_family())
 table_and_chairs(loc::Loc, angle::Real, level::Level=default_level(), family::TableChairFamily=default_table_chair_family()) =
   table_and_chairs(loc_from_o_phi(loc, angle), level, family)
+#=
+The composite routes through the seam TWICE: the whole arrangement first
+(a backend with a combined table+chairs resource places it as one
+instance), and otherwise each table/chair placement individually — so a
+prefab table with parametric chairs (or vice versa) mixes correctly.
+=#
 realize(b::Backend, s::TableAndChairs) =
-  let f = s.family,
-      tf = f.table_family,
-      cf = f.chair_family,
-      tmat = material_ref(b, tf.material),
-      cmat = material_ref(b, cf.material)
-    b_table_and_chairs(b,
+  let f = s.family
+    b_family_instance(b, maybe_backend_family(b, f), f,
       add_z(s.loc, s.level.height),
-      p->b_table(b, p, tf.length, tf.width, tf.height, tf.top_thickness, tf.leg_thickness, tmat),
-      p->b_chair(b, p, cf.length, cf.width, cf.height, cf.seat_height, cf.thickness, cmat),
-      tf.length,
-      tf.width,
-      f.chairs_top,
-      f.chairs_bottom,
-      f.chairs_right,
-      f.chairs_left,
-      f.spacing)
+      (b, p) ->
+        let tf = f.table_family,
+            cf = f.chair_family,
+            tmat = material_ref(b, tf.material),
+            cmat = material_ref(b, cf.material)
+          b_table_and_chairs(b, p,
+            pt -> b_family_instance(b, maybe_backend_family(b, tf), tf, pt,
+                    (b, q) -> b_table(b, q, tf.length, tf.width, tf.height,
+                                      tf.top_thickness, tf.leg_thickness, tmat)),
+            pc -> b_family_instance(b, maybe_backend_family(b, cf), cf, pc,
+                    (b, q) -> b_chair(b, q, cf.length, cf.width, cf.height,
+                                      cf.seat_height, cf.thickness, cmat)),
+            tf.length,
+            tf.width,
+            f.chairs_top,
+            f.chairs_bottom,
+            f.chairs_right,
+            f.chairs_left,
+            f.spacing)
+        end)
   end
 
 # Lights

@@ -193,14 +193,14 @@ end tangents entirely. Unreal is a mesh engine with no native spline, so we defe
 to the KhepriBase default, which renders the canonical chord-parameterized cubic
 (see open_spline_bezier_path) as a sampled Bézier chain via b_line -- a tube
 that passes through the intended points, identical to what every other backend
-draws.
+draws. Closed splines take the same road for the same reason: the old
+b_closed_spline override shipped the cycle points to Primitive__ClosedLine,
+drawing a straight-edged POLYGON where every other backend drew a curve —
+the canonical periodic C2 cubic default (closed_spline_bezier_path) replaced it.
 See also: b_arc (same sample-then-Line strategy), b_line.
 =#
 KhepriBase.b_spline(b::UE, ps, v0, v1, mat) =
   invoke(KhepriBase.b_spline, Tuple{KhepriBase.Backend, Any, Any, Any, Any}, b, ps, v0, v1, mat)
-
-KhepriBase.b_closed_spline(b::UE, ps, mat) =
-  @remote(b, Primitive__ClosedLine(collect(ps), mat))
 
 #=============================================================================
  Tier 1 - Triangles and Basic Surfaces
@@ -326,17 +326,33 @@ b_get_family_ref(b::UE, f::Family, uf::UEMaterialFamily) =
 
 struct UEResourceFamily <: UEFamily
   name::String
-  parameter_map::Dict{Symbol,String}
+  scale::Float64
   ref::IdDict{Backend, Any}
 end
 
-unreal_resource_family(name, pairs...) =
-  UEResourceFamily(name, Dict(pairs...), IdDict{Backend, Any}())
+#=
+Takes a name and an optional uniform `scale`, and NOTHING else. The previous
+signature accepted `pairs...` into a parameter_map that no code ever read —
+Unreal's placement RPC (CreateBlockInstance) carries a frame and a uniform
+scale, with no slot for arbitrary parameters — so any parameter a caller
+passed was silently discarded. Now `scale` is honored at placement and an
+unsupported parameter raises a clear MethodError at the call site instead
+(the same rule KhepriUnity's design note states for its resource families).
+=#
+unreal_resource_family(name; scale=1.0) =
+  UEResourceFamily(name, Float64(scale), IdDict{Backend, Any}())
 
 b_get_family_ref(b::UE, f::Family, uf::UEResourceFamily) =
   get!(uf.ref, b) do
     @remote(b, Primitive__LoadResource(uf.name))
   end
+
+# The b_family_instance placement seam (KhepriBase/src/BIM.jl): a furniture
+# family registered with a static mesh places the mesh as a block instance.
+# The loc's cs supplies the placement frame (same shape as realize(::BlockInstance)).
+KhepriBase.b_family_instance(b::UE, uf::UEResourceFamily, f::Family, loc::Loc, fallback::Function) =
+  @remote(b, Primitive__CreateBlockInstance(
+    family_ref(b, f), loc, vx(1, loc.cs), vy(1, loc.cs), uf.scale))
 
 #=============================================================================
  BIM Operations

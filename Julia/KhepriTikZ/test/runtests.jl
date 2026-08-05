@@ -209,10 +209,14 @@ using .BackendTestScaffolding
     @testset "b_closed_spline" begin
       clear_io!(tikz)
       pts = [xy(0, 0), xy(1, 0), xy(1, 1), xy(0, 1)]
-      ref = KhepriBase.b_closed_spline(tikz, pts, nothing)
+      KhepriBase.b_closed_spline(tikz, pts, nothing)
       output = io_output(tikz)
-      @test ref != KhepriBase.void_ref(tikz)
+      # The canonical periodic C2 cubic ships through TikZ's native bezier
+      # emitter (..controls chains), one span per cycle segment — not the
+      # old Hobby spline (whose op returned a non-void ref; the bezier
+      # emitter follows TikZ's void_ref convention).
       @test length(output) > 0
+      @test count("..controls", output) == length(pts)
     end
   end
 

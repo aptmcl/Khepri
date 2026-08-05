@@ -324,105 +324,11 @@ svg_rectangle(out::IO, c, dx, dy, filled, mat) =
 # Splines: Catmull-Rom → cubic Bezier
 # ============================================================
 
-# Convert Catmull-Rom control points to cubic Bezier path data
-# For segment P[i]→P[i+1], control points are:
-#   CP1 = P[i] + (P[i+1] - P[i-1]) / 6
-#   CP2 = P[i+1] - (P[i+2] - P[i]) / 6
-svg_spline(out::IO, ps, closed, mat) =
-  let n = length(ps)
-    n < 2 && return
-    if n == 2
-      svg_line(out, ps, mat)
-      return
-    end
-    parts = String[]
-    push!(parts, let (x, y) = svg_coord(ps[1]); "M $(svg_number(x)),$(svg_number(y))" end)
-    for i in 1:n-1
-      let p_prev = i == 1 ? (closed ? ps[n] : ps[1]) : ps[i-1],
-          p_curr = ps[i],
-          p_next = ps[i+1],
-          p_next2 = i == n-1 ? (closed ? ps[1] : ps[n]) : ps[i+2],
-          # Tangent-based control points
-          pw = in_world(p_prev), cw = in_world(p_curr), nw = in_world(p_next), n2w = in_world(p_next2),
-          cp1x = cw.x + (nw.x - pw.x) / 6.0,
-          cp1y = -(cw.y + (nw.y - pw.y) / 6.0),
-          cp2x = nw.x - (n2w.x - cw.x) / 6.0,
-          cp2y = -(nw.y - (n2w.y - cw.y) / 6.0),
-          (ex, ey) = svg_coord(p_next)
-        push!(parts, "C $(svg_number(cp1x)),$(svg_number(cp1y)) $(svg_number(cp2x)),$(svg_number(cp2y)) $(svg_number(ex)),$(svg_number(ey))")
-      end
-    end
-    if closed
-      # Add closing segment from last point back to first
-      let p_prev = ps[n-1],
-          p_curr = ps[n],
-          p_next = ps[1],
-          p_next2 = ps[2],
-          pw = in_world(p_prev), cw = in_world(p_curr), nw = in_world(p_next), n2w = in_world(p_next2),
-          cp1x = cw.x + (nw.x - pw.x) / 6.0,
-          cp1y = -(cw.y + (nw.y - pw.y) / 6.0),
-          cp2x = nw.x - (n2w.x - cw.x) / 6.0,
-          cp2y = -(nw.y - (n2w.y - cw.y) / 6.0),
-          (ex, ey) = svg_coord(p_next)
-        push!(parts, "C $(svg_number(cp1x)),$(svg_number(cp1y)) $(svg_number(cp2x)),$(svg_number(cp2y)) $(svg_number(ex)),$(svg_number(ey))")
-      end
-      push!(parts, "Z")
-    end
-    println(out, "<path d=\"$(join(parts, " "))\"$(svg_style_attr(mat, closed))/>")
-  end
-
-# Hermite spline with endpoint tangent vectors → cubic Bezier
-svg_hermite_spline(out::IO, ps, v0, v1, mat) =
-  let n = length(ps)
-    n < 2 && return
-    if n == 2
-      # Single cubic Bezier segment with Hermite tangents
-      let (sx, sy) = svg_coord(ps[1]),
-          (ex, ey) = svg_coord(ps[2]),
-          v0w = in_world(v0), v1w = in_world(v1),
-          p0w = in_world(ps[1]), p1w = in_world(ps[2]),
-          cp1x = p0w.x + v0w.x / 3.0,
-          cp1y = -(p0w.y + v0w.y / 3.0),
-          cp2x = p1w.x - v1w.x / 3.0,
-          cp2y = -(p1w.y - v1w.y / 3.0)
-        println(out, "<path d=\"M $(svg_number(sx)),$(svg_number(sy)) C $(svg_number(cp1x)),$(svg_number(cp1y)) $(svg_number(cp2x)),$(svg_number(cp2y)) $(svg_number(ex)),$(svg_number(ey))\"$(svg_style_attr(mat, false))/>")
-      end
-    else
-      # Use Catmull-Rom for interior, override first/last tangents
-      parts = String[]
-      push!(parts, let (x, y) = svg_coord(ps[1]); "M $(svg_number(x)),$(svg_number(y))" end)
-      for i in 1:n-1
-        let p_curr = ps[i],
-            p_next = ps[i+1],
-            cw = in_world(p_curr), nw = in_world(p_next),
-            # First segment: use v0 as tangent at start
-            # Last segment: use v1 as tangent at end
-            # Interior: Catmull-Rom
-            t0 = if i == 1
-                   in_world(v0)
-                 else
-                   let pw = in_world(ps[i-1])
-                     vxyz(nw.x - pw.x, nw.y - pw.y, nw.z - pw.z)
-                   end
-                 end,
-            t1 = if i == n-1
-                   in_world(v1)
-                 else
-                   let n2w = in_world(ps[i+2])
-                     vxyz(n2w.x - cw.x, n2w.y - cw.y, n2w.z - cw.z)
-                   end
-                 end,
-            cp1x = cw.x + t0.x / 6.0,
-            cp1y = -(cw.y + t0.y / 6.0),
-            cp2x = nw.x - t1.x / 6.0,
-            cp2y = -(nw.y - t1.y / 6.0),
-            (ex, ey) = svg_coord(p_next)
-          push!(parts, "C $(svg_number(cp1x)),$(svg_number(cp1y)) $(svg_number(cp2x)),$(svg_number(cp2y)) $(svg_number(ex)),$(svg_number(ey))")
-        end
-      end
-      println(out, "<path d=\"$(join(parts, " "))\"$(svg_style_attr(mat, false))/>")
-    end
-  end
+# The Catmull-Rom and Hermite spline emitters that used to live here were
+# deleted with the b_spline/b_closed_spline overrides they served: splines
+# now render as exact cubic-Bezier chains of the canonical curve (see
+# svg_bezier_path below). Keeping non-canonical curve math around only
+# invites its reuse.
 
 # ============================================================
 # Text
@@ -685,18 +591,50 @@ KhepriBase.b_line(b::SVG, ps, mat) =
 KhepriBase.b_polygon(b::SVG, ps, mat) =
   svg_closed_line(connection(b), ps, false, mat)
 
-KhepriBase.b_spline(b::SVG, ps, v0, v1, mat) =
-  if (v0 == false) && (v1 == false)
-    svg_spline(connection(b), ps, false, mat)
-  else
-    let v0 = v0 == false ? ps[2] - ps[1] : v0,
-        v1 = v1 == false ? ps[end-1] - ps[end] : v1
-      svg_hermite_spline(connection(b), ps, v0, v1, mat)
+#=
+No b_spline / b_closed_spline overrides: both take the KhepriBase defaults,
+which render THE canonical chord-parameterized C2 cubics
+(open/closed_spline_bezier_path) through the native b_bezier_curve below —
+the old overrides' Catmull-Rom and Hermite constructions followed different
+curves through the same points. SVG paths speak cubic Beziers natively, so
+the chain is emitted EXACTLY (one C command per span), not sampled.
+=#
+svg_bezier_path(out::IO, path::BezierPath, mat) =
+  let spans = path.spans,
+      closed = path isa ClosedBezierPath,
+      parts = String[]
+    isempty(spans) && return
+    push!(parts, let (x, y) = svg_coord(spans[1].control_points[1])
+      "M $(svg_number(x)),$(svg_number(y))"
+    end)
+    for span in spans
+      let (c1x, c1y) = svg_coord(span.control_points[2]),
+          (c2x, c2y) = svg_coord(span.control_points[3]),
+          (ex, ey) = svg_coord(span.control_points[4])
+        push!(parts, "C $(svg_number(c1x)),$(svg_number(c1y)) $(svg_number(c2x)),$(svg_number(c2y)) $(svg_number(ex)),$(svg_number(ey))")
+      end
     end
+    closed && push!(parts, "Z")
+    # A curve is STROKED, closed or not: `closed` here selects the path's
+    # geometry, not its paint. (Filling on `closed` would turn stroke() of a
+    # closed bezier path into a filled silhouette — SVG's b_polygon, the
+    # pre-canonicalization route for those, correctly strokes.)
+    println(out, "<path d=\"$(join(parts, " "))\"$(svg_style_attr(mat, false))/>")
   end
 
-KhepriBase.b_closed_spline(b::SVG, ps, mat) =
-  svg_spline(connection(b), ps, true, mat)
+#=
+Only CUBIC spans can become `C` commands. BezierSpan admits any degree
+(Paths.jl's validator requires only >= 2 control points), so a quadratic or
+quintic span must fall back to KhepriBase's general sampler — indexing
+control_points[4] unconditionally would throw for low degrees and silently
+emit a wrong, discontinuous path for high ones. Same guard TikZ and Blender
+apply to their native emitters.
+=#
+KhepriBase.b_bezier_curve(b::SVG, path::BezierPath, mat) =
+  all(seg -> length(seg.control_points) == 4, path.spans) ?
+    svg_bezier_path(connection(b), path, mat) :
+    invoke(KhepriBase.b_bezier_curve,
+           Tuple{KhepriBase.Backend, KhepriBase.BezierPath, Any}, b, path, mat)
 
 KhepriBase.b_circle(b::SVG, c, r, mat) =
   withSVGXForm(b, c, mat) do out, cc

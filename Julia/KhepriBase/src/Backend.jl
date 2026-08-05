@@ -400,12 +400,33 @@ sampled otherwise.
 b_spline(b::Backend, ps, v0, v1, mat) =
   b_bezier_curve(b, open_spline_bezier_path(ps, v0, v1), mat)
 
+#=
+The canonical closed spline is the unique periodic C2 cubic interpolant
+through the cycle points (closed_spline_bezier_path, Paths.jl) — the exact
+mirror of the open-spline default above. Backends with native cubic
+beziers draw the chain exactly; everyone else samples it. Backends whose
+native closed interpolant IS the periodic chord-parameterized cubic
+(AutoCAD, Rhino) may keep native overrides — same curve by uniqueness.
+(The previous default attempted an order-5 NURBS against Dierckx's cubic
+knots — never valid — and fell back to dense sampling, while six backends
+overrode it with six DIFFERENT curves through the same points.)
+=#
+#=
+Degenerate cycles have no periodic cubic (fewer than 3 distinct points, or
+coincident consecutive points — the chord grid cannot normalize a zero
+span), but they DID draw before canonicalization on the backends whose
+overrides tolerated them. Fall back to the polygon through the same points
+rather than throwing: a user's degenerate closed spline keeps rendering,
+and the canonical path handles every well-formed cycle.
+=#
 b_closed_spline(b::Backend, ps, mat) =
-  let ci = curve_interpolator(ps, true),
-      cps = curve_control_points(ci),
-      n = length(cps),
-      knots = curve_knots(ci)
-    b_nurbs_curve(b, ps, 5, cps, knots, fill(1.0, n), true, mat)
+  let wpts = [in_world(p) for p in ps],
+      n = length(wpts),
+      degenerate = n < 3 ||
+        any(i -> distance(wpts[i], wpts[mod1(i + 1, n)]) == 0, 1:n)
+    degenerate ?
+      b_polygon(b, ps, mat) :
+      b_bezier_curve(b, closed_spline_bezier_path(ps), mat)
   end
 
 b_circle(b::Backend, c, r, mat) =

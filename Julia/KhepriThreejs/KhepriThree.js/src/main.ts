@@ -2662,10 +2662,35 @@ typedFunction("startUpdate", [], None, () => {
 // Render one frame and return the canvas as base64 PNG (without the "data:image/png;base64," prefix).
 // A synchronous WebSocket round-trip — the server-side driver freezes the render loop, lets async OBJ
 // loads finish, then calls this to capture a complete frame headlessly without the DevTools protocol.
-typedFunction("captureImage", [], Str, () => {
-  render();
-  const url = renderer.domElement.toDataURL("image/png");
-  return url.substring(url.indexOf(",") + 1);
+// When width/height are positive, the frame is rendered at exactly that pixel size (pixelRatio 1,
+// camera aspect adjusted) and the previous viewport is restored afterwards — the pattern the legacy
+// MeshCat viewer used for capture_image(w, h). Non-positive dimensions capture the canvas as-is.
+typedFunction("captureImage", [Int32, Int32], Str, (width: number, height: number) => {
+  const captureCanvas = () => {
+    render();
+    const url = renderer.domElement.toDataURL("image/png");
+    return url.substring(url.indexOf(",") + 1);
+  };
+  if (width > 0 && height > 0) {
+    const prevPixelRatio = renderer.getPixelRatio();
+    const prevSize = renderer.getSize(new THREE.Vector2());
+    const prevAspect = camera.aspect;
+    try {
+      renderer.setPixelRatio(1);
+      renderer.setSize(width, height, false);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      return captureCanvas();
+    } finally {
+      renderer.setPixelRatio(prevPixelRatio);
+      renderer.setSize(prevSize.x, prevSize.y, false);
+      camera.aspect = prevAspect;
+      camera.updateProjectionMatrix();
+      render();
+    }
+  } else {
+    return captureCanvas();
+  }
 });
 
 function loadFileAndSendRequest(request: request) {

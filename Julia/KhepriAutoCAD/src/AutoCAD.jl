@@ -1372,28 +1372,17 @@ b_frame_at(b::ACAD, c::Shape1D, t::Real) = @remote(b, CurveFrameAt(ref_value(b, 
 b_frame_at(b::ACAD, s::Shape2D, u::Real, v::Real) = @remote(b, SurfaceFrameAt(ref_value(b, s), u, v))
 
 # BIM
-realize(b::ACAD, f::TableFamily) =
-    let bf = get(f.implemented_as, typeof(b), nothing)
-      isnothing(bf) ?
-        @remote(b, CreateRectangularTableFamily(f.length, f.width, f.height, f.top_thickness, f.leg_thickness)) :
-        b_get_family_ref(b, f, bf)
-    end
-realize(b::ACAD, f::ChairFamily) =
-    let bf = get(f.implemented_as, typeof(b), nothing)
-      isnothing(bf) ?
-        @remote(b, CreateChairFamily(f.length, f.width, f.height, f.seat_height, f.thickness)) :
-        b_get_family_ref(b, f, bf)
-    end
-realize(b::ACAD, f::TableChairFamily) =
-    let bf = get(f.implemented_as, typeof(b), nothing)
-      isnothing(bf) ?
-        @remote(b, CreateRectangularTableAndChairsFamily(
-            family_ref(b, f.table_family), family_ref(b, f.chair_family),
-            f.table_family.length, f.table_family.width,
-            f.chairs_top, f.chairs_bottom, f.chairs_right, f.chairs_left,
-            f.spacing)) :
-        b_get_family_ref(b, f, bf)
-    end
+#=
+The old realize(::TableFamily/::ChairFamily/::TableChairFamily) methods were
+dead: realize(::Table) never consulted them (it branched on OBJFamily and
+fell to parametric b_table geometry), their bare `get(f.implemented_as,
+typeof(b))` bypassed the seen-set delegation walk, and the
+CreateRectangularTableFamily-style native RPCs they invoked have no
+surviving callers. Furniture placement is now the portable
+b_family_instance seam (KhepriBase/src/BIM.jl); reviving AutoCAD-native
+table families would mean b_get_family_ref methods on explicit marker
+families installed via set_backend_family.
+=#
 
 ############################################
 

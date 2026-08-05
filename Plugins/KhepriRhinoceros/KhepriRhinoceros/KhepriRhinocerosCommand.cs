@@ -94,6 +94,10 @@ namespace KhepriRhinoceros {
             int op = processor.TryReadOperation();
             if (op == -1) {
                 RhinoApp.WriteLine("Connection terminated");
+                // The next connection builds a fresh Processor+Primitives; without
+                // this the old instance stays rooted by the static
+                // RhinoDoc.ReplaceRhinoObject handler — one leak per reconnect.
+                processor.primitives.ReleaseChangeTracking();
                 RhinoApp.WriteLine("Waiting for connection");
                 currentAction = AcceptClient;
             } else if (op == -2) {

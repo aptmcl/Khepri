@@ -217,7 +217,11 @@ approx3(a, b; atol=1e-9) = all(abs(x - y) <= atol for (x, y) in zip(a, b))
       @test approx3(b.data.controls[1][1], (√2/3, 0, 0), atol=1e-3)
     end
     let s = rt(() -> KhepriBase.b_closed_spline(tikz, [xy(0, 0), xy(1, 0), xy(1, 1), xy(0, 1)], nothing))
-      @test s.statements[1].kind === :hobby_closed_spline
+      # Canonical periodic C2 cubic through the native bezier emitter: a
+      # 4-point cycle is a 4-span ..controls chain closing on its start
+      # (previously :hobby_closed_spline — a different curve).
+      @test s.statements[1].kind === :bezier
+      @test s.statements[1].data.pts[1] == s.statements[1].data.pts[end]
     end
     let c = scene_circles(rt(() -> KhepriBase.b_surface_circle(tikz, xy(0, 0), 3, nothing)))[1]
       @test c.filled && isapprox(c.r, 3, atol=1e-3)

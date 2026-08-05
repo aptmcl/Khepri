@@ -555,8 +555,10 @@ KhepriBase.b_polygon(b::TBS, ps, mat) =
 KhepriBase.b_spline(b::TBS, ps, v0, v1, mat) =
   (push!(b.scene, SceneSpline(collect(ps), false, mat)); next_ref!(b))
 
-KhepriBase.b_closed_spline(b::TBS, ps, mat) =
-  (push!(b.scene, SceneSpline(collect(ps), true, mat)); next_ref!(b))
+# No b_closed_spline override: the SceneSpline closed path rendered as a
+# straight Luxor polyline through the cycle points — a polygon where every
+# canonical backend draws the periodic C2 cubic. The default now samples
+# closed_spline_bezier_path through b_line, which follows the true curve.
 
 KhepriBase.b_circle(b::TBS, c, r, mat) =
   let n = 64,
