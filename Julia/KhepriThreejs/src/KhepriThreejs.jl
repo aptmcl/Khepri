@@ -1,6 +1,7 @@
 module KhepriThreejs
 using KhepriBase
 using Colors
+import Base64
 import HTTP
 using Random
 

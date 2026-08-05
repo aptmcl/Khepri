@@ -211,6 +211,12 @@ public Guid[] GetShape(string prompt)
 public Guid[] GetShapes(string prompt)
 public Guid[] GetAllShapes()
 public Guid[] GetAllShapesInLayer(Guid id)
+public void RegisterForChanges(Guid id)
+public void UnregisterForChanges(Guid id)
+public Guid[] ChangedShape()
+public void DetectCancel()
+public void UndetectCancel()
+public bool WasCanceled()
 public Guid CreateLeaderDimension(String text, Point3d p0, Point3d p1, double scale, String mark, Options props)
 public Guid CreateDiametricDimension(String text, Plane c, Point3d p, Point3d pdim, double scale, String mark, Options props)
 public Guid CreateAngularDimension(String text, Plane p, Point3d p0, Point3d p1, Point3d ptdim, double scale, String mark, Options props) {
@@ -298,35 +304,117 @@ KhepriBase.failed_connecting(b::RH) =
   	@info("Location: $(joinpath(local_plugin, dlls[2]))")
   end
 
+#=
+Auto-start, mirroring KhepriAutoCAD's start_autocad/before_connecting pair
+(AutoCAD.jl — see the literate blocks there for the detach and port-probe
+rationale). The Khepri plugin loads AtStartup (KhepriRhinocerosPlugIn.cs) and
+auto-listens on `rhino_port`, so a port probe is the precise "can serve us"
+signal (verified live 2026-08-05): a running Rhino WITHOUT the plugin cannot
+serve us, while a plugin-loaded Rhino left over from a previous Julia session
+can be re-attached to — spawning a second instance in either case would be
+wrong. The probe connection is closed immediately; the plugin's server returns
+to accepting. `detach` keeps Rhino out of Julia's process tree so it survives
+Julia exiting; `wait=false` lets `start_connection`'s retry loop poll the
+socket while Rhino finishes initialising.
+
+The executable is resolved from the registry — HKLM\SOFTWARE\McNeel\
+Rhinoceros\<major>.0\Install, value `ExePath` (verified against a live
+Rhino 8 install), newest major first — with a filesystem scan of
+"C:\Program Files\Rhino <N>\System\Rhino.exe" as fallback for nonstandard
+registry states. `/nosplash /notemplate` skips the splash screen and the
+template-picker dialog, which would otherwise stall a headless start.
+=#
+
+const rhino_major_versions = 9:-1:6
+
+rhino_exe_from_registry() =
+  for major in rhino_major_versions
+    let key = "HKLM\\SOFTWARE\\McNeel\\Rhinoceros\\$(major).0\\Install",
+        out = try
+          # stderr → devnull: for an absent key reg.exe prints an "ERROR: ..."
+          # line and exits nonzero; the catch is the signal, not the noise.
+          read(pipeline(`reg.exe query $(key) /v ExePath`, stderr=devnull), String)
+        catch
+          nothing  # key absent — try the next major
+        end
+      if !isnothing(out)
+        let m = match(r"ExePath\s+REG_SZ\s+(.+?)\s*$"m, out)
+          if !isnothing(m) && isfile(strip(m[1]))
+            return String(strip(m[1]))
+          end
+        end
+      end
+    end
+  end
+
+rhino_exe_from_filesystem() =
+  for major in rhino_major_versions
+    let exe = joinpath(raw"C:\Program Files", "Rhino $(major)", "System", "Rhino.exe")
+      isfile(exe) && return exe
+    end
+  end
+
+export rhino_exe
+rhino_exe() =
+  let exe = rhino_exe_from_registry()
+    isnothing(exe) ? rhino_exe_from_filesystem() : exe
+  end
+
+export start_rhino
+start_rhino() =
+  let exe = rhino_exe()
+    isnothing(exe) ?
+      error("Couldn't find Rhino. Please, start it manually.") :
+      run(detach(`$(exe) /nosplash /notemplate`), wait=false)
+  end
+
+rhino_is_listening() =
+  try
+    close(Sockets.connect("127.0.0.1", rhino_port))
+    true
+  catch
+    false
+  end
+
+KhepriBase.before_connecting(b::RH) =
+  rhino_is_listening() || start_rhino()
+
+#=
+Material-mapping setup. Failure to recognize the install must degrade, not
+error: an unparseable localized materials folder (or an unexpected Rhino
+version) would otherwise kill the connection outright, even though every
+Khepri material falls back to its portable PBR definition without the native
+mapping. Matches AutoCAD's warn-and-continue behavior.
+=#
 KhepriBase.after_connecting(b::RH) =
   let mat_folder = @remote(b, DefaultMaterialsFolder()),
-  	  m = match(r".+?Rhinoceros\\(.+?)\\Localization", mat_folder)
-  	if m === nothing
-	    error("Unrecognized Rhino materials folder: $(mat_folder)")
-  	else
-	    let v = VersionNumber(m[1])
-	      if v >= v"6.0"
-		  	# Rhino 6/7/8 share the same Render Content library layout; each path is a `<name>.rmtl`
-			  	# under DefaultMaterialsFolder(). A path that does not resolve loads as the void
-			  	# material (null-safe LoadRenderMaterialFromPath) instead of hanging the connection.
-	        set_material(RH, material_metal, rhino_default_material(raw"Metal\Matte\Matte Silver"))
-	        set_material(RH, material_glass, rhino_default_material(raw"Glass\Clear Glass"))
-	        set_material(RH, material_wood, rhino_default_material(raw"Wood\Pear polished"))
-	        set_material(RH, material_concrete, rhino_default_material(raw"Ceramics\Stoneware"))
-	        set_material(RH, material_plaster, rhino_default_material(raw"White Matte"))
-	        set_material(RH, material_grass, rhino_default_material(raw"Organic\Grass\Realistic grass"))  # grass is a material here, not Textures\Grass (a .png)
-	      elseif v >= v"5.0"
-            set_material(RH, material_metal, rhino_default_material(raw"Metal\Silver"))
-            set_material(RH, material_glass, rhino_default_material(raw"Transparent\Glass"))
-            set_material(RH, material_wood, rhino_default_material(raw"Wood\Scots Pine"))
-            set_material(RH, material_concrete, rhino_default_material(raw"Stone\Granite"))
-            set_material(RH, material_plaster, rhino_default_material(raw"White Matte"))
-            set_material(RH, material_grass, rhino_default_material(raw"Special\Grass"))
-	      else
-	        error("Unrecognized Rhino version: ")
-	      end
-	    end
-    end
+  	  m = match(r".+?Rhinoceros\\(.+?)\\Localization", mat_folder),
+  	  v = isnothing(m) ? nothing : tryparse(VersionNumber, m[1])
+  	if isnothing(v)
+	    @warn("Unrecognized Rhino materials folder: $(mat_folder); skipping default material mapping.")
+	  elseif v >= v"6.0"
+	  	# Rhino 6/7/8 share the same Render Content library layout; each path is a `<name>.rmtl`
+	  	# under DefaultMaterialsFolder(). A path that does not resolve loads as the void
+	  	# material (null-safe LoadRenderMaterialFromPath) instead of hanging the connection.
+	    set_material(RH, material_metal, rhino_default_material(raw"Metal\Matte\Matte Silver"))
+	    set_material(RH, material_glass, rhino_default_material(raw"Glass\Clear Glass"))
+	    set_material(RH, material_wood, rhino_default_material(raw"Wood\Pear polished"))
+	    set_material(RH, material_concrete, rhino_default_material(raw"Ceramics\Stoneware"))
+	    set_material(RH, material_plaster, rhino_default_material(raw"White Matte"))
+	    set_material(RH, material_grass, rhino_default_material(raw"Organic\Grass\Realistic grass"))  # grass is a material here, not Textures\Grass (a .png)
+	    set_material(RH, material_clay, rhino_default_material(raw"Ceramics\Terracotta"))  # verified present in the Rhino 6 and 8 libraries
+	  elseif v >= v"5.0"
+	    set_material(RH, material_metal, rhino_default_material(raw"Metal\Silver"))
+	    set_material(RH, material_glass, rhino_default_material(raw"Transparent\Glass"))
+	    set_material(RH, material_wood, rhino_default_material(raw"Wood\Scots Pine"))
+	    set_material(RH, material_concrete, rhino_default_material(raw"Stone\Granite"))
+	    set_material(RH, material_plaster, rhino_default_material(raw"White Matte"))
+	    set_material(RH, material_grass, rhino_default_material(raw"Special\Grass"))
+	    # No material_clay mapping: Rhino 5's library predates the Render Content
+	    # clay entries; the portable PBR definition applies.
+	  else
+	    @warn("Unrecognized Rhino version $(v); skipping default material mapping.")
+	  end
   end
 
 const rhino = RH("Rhino", rhino_port, rhino_api)
@@ -1055,29 +1143,14 @@ realize(b::RH, s::Thicken) =
 # BIM
 
 # Families
-
-realize(b::RH, f::TableFamily) =
-    let bf = get(f.implemented_as, typeof(b), nothing)
-      isnothing(bf) ?
-        @remote(b, CreateRectangularTableFamily(f.length, f.width, f.height, f.top_thickness, f.leg_thickness)) :
-        b_get_family_ref(b, f, bf)
-    end
-realize(b::RH, f::ChairFamily) =
-    let bf = get(f.implemented_as, typeof(b), nothing)
-      isnothing(bf) ?
-        @remote(b, CreateChairFamily(f.length, f.width, f.height, f.seat_height, f.thickness)) :
-        b_get_family_ref(b, f, bf)
-    end
-realize(b::RH, f::TableChairFamily) =
-    let bf = get(f.implemented_as, typeof(b), nothing)
-      isnothing(bf) ?
-        @remote(b, CreateRectangularTableAndChairsFamily(
-            family_ref(b, f.table_family), family_ref(b, f.chair_family),
-            f.table_family.length, f.table_family.width,
-            f.chairs_top, f.chairs_bottom, f.chairs_right, f.chairs_left,
-            f.spacing)) :
-        b_get_family_ref(b, f, bf)
-    end
+#=
+The old realize(::TableFamily/::ChairFamily/::TableChairFamily) trio was
+dead (realize(::Table) never consulted it; its bare implemented_as get
+bypassed the delegation walk; the CreateRectangularTableFamily-style RPCs
+had no surviving callers) — deleted alongside AutoCAD's twin when
+furniture placement moved to the portable b_family_instance seam
+(KhepriBase/src/BIM.jl).
+=#
 
 # Lights
 KhepriBase.b_pointlight(b::RH, loc, energy, color) =
@@ -1205,7 +1278,10 @@ KhepriBase.b_setup_raw_view(b::RH) = begin
   b_view_settings(b; visual_style=:shaded)
 end
 
-# Rhino display modes: Wireframe, Shaded, Rendered, Ghosted, XRay, Technical, Artistic, Pen
+# Rhino display modes: Wireframe, Shaded, Rendered, Ghosted, XRay, Technical, Artistic, Pen, Arctic
+# Every canonical visual style (KhepriBase.canonical_visual_styles) maps to a native mode:
+# :arctic is native since Rhino 7, and :sketchy renders through Rhino's hand-drawn
+# "Artistic" mode (the closest native match; also reachable as :artistic).
 const rhino_display_modes = Dict(
   :wireframe => "Wireframe",
   :shaded => "Shaded",
@@ -1215,11 +1291,17 @@ const rhino_display_modes = Dict(
   :xray => "XRay",
   :technical => "Technical",
   :artistic => "Artistic",
+  :sketchy => "Artistic",
+  :arctic => "Arctic",
   :pen => "Pen")
 
+# Contract (KhepriBase/src/Backend.jl, canonical visual styles): a backend that
+# does not support a given style must fall back to :shaded with a one-line
+# @warn, not error — an unknown style must not abort a script mid-render.
 KhepriBase.b_view_settings(b::RH; visual_style::Symbol=:shaded, display_mode::Symbol=visual_style) =
   let mode = get(rhino_display_modes, display_mode) do
-        error("Unknown Rhino display mode: $display_mode. Options: $(join(keys(rhino_display_modes), ", "))")
+        @warn("Unknown Rhino display mode: $display_mode (options: $(join(sort(collect(keys(rhino_display_modes))), ", "))); falling back to :shaded.")
+        rhino_display_modes[:shaded]
       end
     @remote(b, SetViewDisplayMode(mode))
   end
@@ -1275,6 +1357,21 @@ KhepriBase.b_create_layer_from_ref_value(b::RH, r) =
 # implementation below serves both captured_shape replay and selection of untraced shapes.
 KhepriBase.b_shape_from_ref(b::RH, r) = get_or_create_shape_from_ref_value(b, r)
 
+# The plugin classifies solids (ShapeCode 81-84) but has no per-solid query
+# RPCs to measure them (no SphereCenter/SphereRadius analogues, unlike
+# AutoCAD's CircleCenter/CircleRadius curve queries), so solid parameters are
+# derived from the world-aligned bounding box. This is exact for the
+# vz-axis-aligned solids Khepri itself creates (b_sphere/b_cylinder/b_cone/
+# b_torus all build along vz) and approximate for solids rotated off-axis
+# afterwards.
+rhino_solid_bbox(b::RH, r) =
+  let pts = @remote(b, BoundingBox([r]))
+    (pts[1], pts[2])
+  end
+
+rhino_bbox_center(pmin, pmax) =
+  xyz((pmin.x + pmax.x)/2, (pmin.y + pmax.y)/2, (pmin.z + pmax.z)/2)
+
 KhepriBase.b_create_shape_from_ref_value(b::RH, r) =
   let code = @remote(b, ShapeCode(r))
     if code == 1
@@ -1306,17 +1403,41 @@ KhepriBase.b_create_shape_from_ref_value(b::RH, r) =
     elseif code == 41
       surface(frontier=[])
     elseif code == 81
-      sphere()
+      let (pmin, pmax) = rhino_solid_bbox(b, r)
+        sphere(rhino_bbox_center(pmin, pmax), (pmax.x - pmin.x)/2)
+      end
     elseif code == 82
-      cylinder()
+      let (pmin, pmax) = rhino_solid_bbox(b, r),
+          c = rhino_bbox_center(pmin, pmax)
+        cylinder(xyz(c.x, c.y, pmin.z), (pmax.x - pmin.x)/2, pmax.z - pmin.z)
+      end
     elseif code == 83
-      cone()
+      # Base radius from the XY extent, apex assumed at the top (b_cone builds
+      # apex-up along vz; an inverted or tilted cone reconstructs approximately).
+      let (pmin, pmax) = rhino_solid_bbox(b, r),
+          c = rhino_bbox_center(pmin, pmax)
+        cone(xyz(c.x, c.y, pmin.z), (pmax.x - pmin.x)/2, pmax.z - pmin.z)
+      end
     elseif code == 84
-      torus()
+      # For a vz-axis torus: XY extent = 2(re + ri), Z extent = 2ri.
+      let (pmin, pmax) = rhino_solid_bbox(b, r),
+          ri = (pmax.z - pmin.z)/2
+        torus(rhino_bbox_center(pmin, pmax), (pmax.x - pmin.x)/2 - ri, ri)
+      end
     else
-      error("Unknown shape")
+      # Opaque geometry (generic Breps, meshes, blocks, ...) round-trips as
+      # `unknown` — copyable via its baseref (realize below), skipped by
+      # shapes_to_expr in the codegen pipeline. Matches KhepriAutoCAD.
+      unknown(r)
     end
   end
+
+#=
+In case we need to realize an Unknown shape, we just copy it (AutoCAD uses
+its Copy RPC; the Rhino plugin's equivalent is Clone).
+=#
+realize(b::RH, s::Unknown) =
+  @remote(b, Clone(s.baseref))
 
 #
 
@@ -1390,8 +1511,45 @@ b_generate_captured_shapes(b::RH, ss::Shapes) =
 KhepriBase.b_all_shapes_in_layer(b::RH, layer) =
   Shape[get_or_create_shape_from_ref_value(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
 
-# Khepri render quality ranges from -1 to 1
-# Rhino render quality ranges from 0 to 3
+# Register for notification
+
+#=
+`register_shape_for_changes` / `unregister_shape_for_changes` /
+`waiting_for_changes` come from `@defshapeop`, so they are EXPORTED (not
+public-but-unexported) and therefore are NOT part of the `@import_backend_api`
+import list — extending them requires the explicit `KhepriBase.` qualification.
+Their `@defshapeop` signature is `(s::Shape, b::Backend)`, i.e. the shape comes
+FIRST; that is the order `on_change`/`register_for_changes` dispatch on.
+`changed_shape` is a `@defcb`, so its hook is the public `b_changed_shape`.
+Mirrors KhepriAutoCAD (AutoCAD.jl "Register for notification" block); the C#
+side lives in Plugins/KhepriRhinoceros/KhepriRhinoceros/Primitives.cs.
+=#
+KhepriBase.register_shape_for_changes(s::Shape, b::RH) =
+  begin
+    @remote(b, RegisterForChanges(ref_value(b, s)))
+    @remote(b, DetectCancel())
+    s
+  end
+
+KhepriBase.unregister_shape_for_changes(s::Shape, b::RH) =
+  begin
+    @remote(b, UnregisterForChanges(ref_value(b, s)))
+    @remote(b, UndetectCancel())
+    s
+  end
+
+KhepriBase.waiting_for_changes(s::Shape, b::RH) =
+  ! @remote(b, WasCanceled())
+
+b_changed_shape(b::RH, ss::Shapes) =
+  let changed = []
+    while length(changed) == 0 && ! @remote(b, WasCanceled())
+      changed = @remote(b, ChangedShape())
+      sleep(0.1)
+    end
+    length(changed) > 0 ? b_shape_from_ref(b, changed[1]) : nothing
+  end
+
 # -- shot_view: fast viewport capture (no ray-tracing) --
 KhepriBase.b_shot_view(b::RH, path::String) =
   @remote(b, SaveView(render_width(), render_height(), path))
@@ -1432,26 +1590,72 @@ khepri_studio_renv() =
     isfile(cached) ? cached : (khepri_studio_renv_cache[] = materialize_khepri_studio_renv())
   end
 
-KhepriBase.b_render_and_save_view(b::RH, path::String) =
-  let kind = render_kind()
-    if kind == :realistic
-      let quality = round(Int, (render_quality() + 1)*3/2)
-        @remote(b, Render(render_width(), render_height(), quality, path))
-      end
+# Khepri render quality dial [-1, +1] -> Rhino AntialiasLevel [0, 3]
+# (None/Draft/Good/High — RenderSettings.AntialiasLevel in the plugin's Render).
+convert_render_quality(b::RH, v::Real) = round(Int, (v + 1)*3/2)
+
+#=
+Render profiles, mirroring acad_render_profile (KhepriAutoCAD/src/AutoCAD.jl):
+  :realistic — ray-traced render of the document's current environment/materials.
+  :white     — clay render on a white ground plane under the KhepriStudio HDRi.
+  :black     — clay render, no ground plane, under the KhepriStudio HDRi.
+`environment` is the .renv archive to load (nothing ⇒ keep the document's);
+`rotation_mode` aligns the HDRi with the camera (:view) or leaves it fixed;
+`default_visual_style` upgrades an unspecified (:shaded) visual style — the
+clay profiles present best over Rhino's Arctic display mode, matching
+AutoCAD's :white → :arctic default. `opts.exposure` is ignored: the plugin's
+Render has no exposure control (allowed by the RenderViewOptions contract).
+=#
+rhino_render_profile(kind::Symbol, quality::Integer) =
+  kind == :realistic ?
+    (level=quality, environment=nothing, clay=nothing,
+     rotation_mode=:fixed, default_visual_style=nothing) :
+  kind == :white ?
+    (level=quality, environment=khepri_studio_renv(), clay=:white,
+     rotation_mode=:view, default_visual_style=:arctic) :
+  kind == :black ?
+    (level=quality, environment=khepri_studio_renv(), clay=:black,
+     rotation_mode=:view, default_visual_style=:arctic) :
+  error("Unknown render kind $kind")
+
+rhino_effective_render_visual_style(opts::RenderViewOptions, profile) =
+  opts.visual_style == :shaded && !isnothing(profile.default_visual_style) ?
+    profile.default_visual_style :
+    opts.visual_style
+
+# HDRi azimuth for the KhepriStudio environment: fixed for :realistic,
+# camera-following for the clay profiles. Same intent as AutoCAD's
+# acad_render_environment_rotation, but in radians (RenderUseHDRiEnvironment
+# sets the texture azimuth parameter directly) and with the rotation offset
+# the legacy Rhino clay path always used.
+rhino_render_environment_rotation(b::RH, rotation_mode::Symbol) =
+  rotation_mode == :fixed ? 0.0 :
+  rotation_mode == :view ?
+    let (camera, target) = (@remote(b, ViewCamera()), @remote(b, ViewTarget()))
+      11π/6 + π/2 - (camera - target).ϕ
+    end :
+  error("Unknown Rhino render environment rotation mode $rotation_mode")
+
+KhepriBase.b_render_and_save_view(b::RH, path::String, opts::RenderViewOptions) =
+  let quality = convert_render_quality(b, opts.quality),
+      profile = rhino_render_profile(opts.kind, quality),
+      visual_style = rhino_effective_render_visual_style(opts, profile)
+    b_view_settings(b, visual_style=visual_style)
+    if isnothing(profile.clay)
+      @remote(b, Render(opts.width, opts.height, profile.level, path))
     else
-      @remote(b, RenderLoadHDRiEnvironment("KhepriStudio", khepri_studio_renv()))
-      let (camera, target) = (@remote(b, ViewCamera()), @remote(b, ViewTarget())),
-          rot = 11π/6 + π/2 - (camera - target).ϕ
-        if render_kind() == :white
-          @remote(b, ClayRenderWhite("KhepriStudio", rot, render_width(), render_height(), 3, path))
-        elseif render_kind() == :black
-          @remote(b, ClayRenderBlack("KhepriStudio", rot, render_width(), render_height(), 3, path))
-        else
-          error("Unknown render kind $kind")
-        end
+      @remote(b, RenderLoadHDRiEnvironment("KhepriStudio", profile.environment))
+      let rot = rhino_render_environment_rotation(b, profile.rotation_mode)
+        profile.clay == :white ?
+          @remote(b, ClayRenderWhite("KhepriStudio", rot, opts.width, opts.height, profile.level, path)) :
+          @remote(b, ClayRenderBlack("KhepriStudio", rot, opts.width, opts.height, profile.level, path))
       end
     end
+    path
   end
+
+KhepriBase.b_render_and_save_view(b::RH, path::String) =
+  b_render_and_save_view(b, path, RenderViewOptions())
 
 #=
 BIM families for Rhino
@@ -1478,3 +1682,20 @@ KhepriBase.b_realistic_sky(b::RH, date, latitude, longitude, elevation, meridian
 export run_grasshopper_solver
 run_grasshopper_solver() =
   @remote(rhino, RunGrasshopperSolver())
+
+# ── Geometric round-trip ────────────────────────────────────────────────────
+# Read the document's shapes and emit an equivalent, runnable Khepri program.
+# Curves/points and axis-aligned classified solids reconstruct parametrically
+# via b_create_shape_from_ref_value; unclassifiable geometry comes back as
+# `unknown` and shapes_to_expr skips it. Pure geometry — no levels/families —
+# reusing KhepriBase's codegen pipeline. Accessed qualified
+# (KhepriRhino.generate_khepri_code), matching KhepriAutoCAD and KhepriRevit.
+# RH is a SocketBackend alias, so the default b_codegen_module (parentmodule of
+# the type) resolves to KhepriBase; make generated code load KhepriRhino
+# instead (matches KhepriAutoCAD's b_codegen_module).
+KhepriBase.b_codegen_module(b::RH) = :KhepriRhino
+
+introspect_model(; b::RH=rhino) = existing_shapes(backend=b)
+
+generate_khepri_code(output_path::String; b::RH=rhino) =
+  KhepriBase.shapes_to_khepri_code(introspect_model(b=b), b; output_path=output_path)

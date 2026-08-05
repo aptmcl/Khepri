@@ -685,18 +685,35 @@ KhepriBase.b_line(b::SVG, ps, mat) =
 KhepriBase.b_polygon(b::SVG, ps, mat) =
   svg_closed_line(connection(b), ps, false, mat)
 
-KhepriBase.b_spline(b::SVG, ps, v0, v1, mat) =
-  if (v0 == false) && (v1 == false)
-    svg_spline(connection(b), ps, false, mat)
-  else
-    let v0 = v0 == false ? ps[2] - ps[1] : v0,
-        v1 = v1 == false ? ps[end-1] - ps[end] : v1
-      svg_hermite_spline(connection(b), ps, v0, v1, mat)
+#=
+No b_spline / b_closed_spline overrides: both take the KhepriBase defaults,
+which render THE canonical chord-parameterized C2 cubics
+(open/closed_spline_bezier_path) through the native b_bezier_curve below —
+the old overrides' Catmull-Rom and Hermite constructions followed different
+curves through the same points. SVG paths speak cubic Beziers natively, so
+the chain is emitted EXACTLY (one C command per span), not sampled.
+=#
+svg_bezier_path(out::IO, path::BezierPath, mat) =
+  let spans = path.spans,
+      closed = path isa ClosedBezierPath,
+      parts = String[]
+    isempty(spans) && return
+    push!(parts, let (x, y) = svg_coord(spans[1].control_points[1])
+      "M $(svg_number(x)),$(svg_number(y))"
+    end)
+    for span in spans
+      let (c1x, c1y) = svg_coord(span.control_points[2]),
+          (c2x, c2y) = svg_coord(span.control_points[3]),
+          (ex, ey) = svg_coord(span.control_points[4])
+        push!(parts, "C $(svg_number(c1x)),$(svg_number(c1y)) $(svg_number(c2x)),$(svg_number(c2y)) $(svg_number(ex)),$(svg_number(ey))")
+      end
     end
+    closed && push!(parts, "Z")
+    println(out, "<path d=\"$(join(parts, " "))\"$(svg_style_attr(mat, closed))/>")
   end
 
-KhepriBase.b_closed_spline(b::SVG, ps, mat) =
-  svg_spline(connection(b), ps, true, mat)
+KhepriBase.b_bezier_curve(b::SVG, path::BezierPath, mat) =
+  svg_bezier_path(connection(b), path, mat)
 
 KhepriBase.b_circle(b::SVG, c, r, mat) =
   withSVGXForm(b, c, mat) do out, cc

@@ -11,6 +11,7 @@ using Rhino.Render;
 using Rhino.Render.Fields;
 using Rhino.Runtime.InteropWrappers;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -2407,5 +2408,70 @@ def show_vertices(shape):
             dynamic gh = RhinoApp.GetPlugInObject("Grasshopper");
             gh.RunSolver(true);
         }
+
+        // Change notification
+        //
+        // AutoCAD attaches a per-entity Modified handler (see KhepriAutoCAD's
+        // Primitives.cs, the template for this block). RhinoCommon has no
+        // per-object Modified event: edits REPLACE the RhinoObject under the
+        // SAME ObjectId, raised as the document-level RhinoDoc.ReplaceRhinoObject
+        // event. We subscribe to it once (guarded — RhinoDoc events are static,
+        // and a duplicate += would enqueue every change twice) and filter
+        // against the set of explicitly watched Guids.
+
+        readonly HashSet<Guid> watchedShapes = new HashSet<Guid>();
+        BlockingCollection<Guid> changedShapes = new BlockingCollection<Guid>();
+        bool changeEventSubscribed = false;
+
+        public void AddChangedShape(object senderObj, RhinoReplaceObjectEventArgs evtArgs) {
+            if (evtArgs.Document == doc && watchedShapes.Contains(evtArgs.ObjectId)) {
+                changedShapes.Add(evtArgs.ObjectId);
+            }
+        }
+
+        public void RegisterForChanges(Guid id) {
+            if (!changeEventSubscribed) {
+                RhinoDoc.ReplaceRhinoObject += AddChangedShape;
+                changeEventSubscribed = true;
+            }
+            watchedShapes.Add(id);
+        }
+        public void UnregisterForChanges(Guid id) {
+            watchedShapes.Remove(id);
+        }
+
+        // Non-blocking TryTake, exactly like AutoCAD's ChangedShape: RPCs run
+        // on the UI thread (sync.Invoke in KhepriChannel) and ReplaceRhinoObject
+        // is raised on that same thread, so a blocking Take here would deadlock
+        // Rhino. The Julia side polls instead (b_changed_shape's sleep loop).
+        public Guid[] ChangedShape() {
+            Guid changed;
+            if (changedShapes.TryTake(out changed)) {
+                return new Guid[] { changed };
+            } else {
+                return new Guid[] { };
+            }
+        }
+
+        // Cancel detection: AutoCAD watches doc.CommandCancelled; the Rhino
+        // analogue for "user aborted the wait" is RhinoApp.EscapeKeyPressed
+        // (static event — guard against duplicate subscription like above).
+        bool wasCanceled = false;
+        bool escapeEventSubscribed = false;
+        public void DetectCancel() {
+            wasCanceled = false;
+            if (!escapeEventSubscribed) {
+                RhinoApp.EscapeKeyPressed += UserCancelled;
+                escapeEventSubscribed = true;
+            }
+        }
+        public void UndetectCancel() {
+            if (escapeEventSubscribed) {
+                RhinoApp.EscapeKeyPressed -= UserCancelled;
+                escapeEventSubscribed = false;
+            }
+        }
+        public void UserCancelled(object senderObj, EventArgs evtArgs) => wasCanceled = true;
+        public bool WasCanceled() => wasCanceled;
     }
 }

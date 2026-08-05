@@ -38805,10 +38805,32 @@ typedFunction("startUpdate", [], None, () => {
   console.log("Paused for", now - time, "ms");
   update = true;
 });
-typedFunction("captureImage", [], Str, () => {
-  render();
-  const url = renderer.domElement.toDataURL("image/png");
-  return url.substring(url.indexOf(",") + 1);
+typedFunction("captureImage", [Int32, Int32], Str, (width, height) => {
+  const captureCanvas = () => {
+    render();
+    const url = renderer.domElement.toDataURL("image/png");
+    return url.substring(url.indexOf(",") + 1);
+  };
+  if (width > 0 && height > 0) {
+    const prevPixelRatio = renderer.getPixelRatio();
+    const prevSize = renderer.getSize(new Vector2());
+    const prevAspect = camera.aspect;
+    try {
+      renderer.setPixelRatio(1);
+      renderer.setSize(width, height, false);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      return captureCanvas();
+    } finally {
+      renderer.setPixelRatio(prevPixelRatio);
+      renderer.setSize(prevSize.x, prevSize.y, false);
+      camera.aspect = prevAspect;
+      camera.updateProjectionMatrix();
+      render();
+    }
+  } else {
+    return captureCanvas();
+  }
 });
 function loadFileAndSendRequest(request) {
   n({

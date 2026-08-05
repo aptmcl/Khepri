@@ -333,8 +333,10 @@ KhepriBase.b_bezier_curve(b::BLR, path::BezierPath, mat) =
     end :
     @invoke b_bezier_curve(b::Backend, path::BezierPath, mat)
 
-KhepriBase.b_closed_spline(b::BLR, ps, mat) =
-  @remote(b, bezier(5, ps, true, [], mat))
+# No b_closed_spline override: the default renders the canonical periodic C2
+# cubic (closed_spline_bezier_path), which the closed-aware b_bezier_curve
+# above ships as a native Blender bezier chain — the old override's
+# AUTO-handle `bezier` op followed a different curve through the same points.
 
 KhepriBase.b_trig(b::BLR, p1, p2, p3, mat) =
   @remote(b, trig(p1, p2, p3, mat))

@@ -400,13 +400,19 @@ sampled otherwise.
 b_spline(b::Backend, ps, v0, v1, mat) =
   b_bezier_curve(b, open_spline_bezier_path(ps, v0, v1), mat)
 
+#=
+The canonical closed spline is the unique periodic C2 cubic interpolant
+through the cycle points (closed_spline_bezier_path, Paths.jl) — the exact
+mirror of the open-spline default above. Backends with native cubic
+beziers draw the chain exactly; everyone else samples it. Backends whose
+native closed interpolant IS the periodic chord-parameterized cubic
+(AutoCAD, Rhino) may keep native overrides — same curve by uniqueness.
+(The previous default attempted an order-5 NURBS against Dierckx's cubic
+knots — never valid — and fell back to dense sampling, while six backends
+overrode it with six DIFFERENT curves through the same points.)
+=#
 b_closed_spline(b::Backend, ps, mat) =
-  let ci = curve_interpolator(ps, true),
-      cps = curve_control_points(ci),
-      n = length(cps),
-      knots = curve_knots(ci)
-    b_nurbs_curve(b, ps, 5, cps, knots, fill(1.0, n), true, mat)
-  end
+  b_bezier_curve(b, closed_spline_bezier_path(ps), mat)
 
 b_circle(b::Backend, c, r, mat) =
   b_closed_spline(b, regular_polygon_vertices(tessellation_divisions(b), c, r, 0, true), mat)
@@ -2695,6 +2701,21 @@ public standalone_obj_transform, wall_obj_transform
   Compute a Loc (4×4 transform) for placing an OBJ mesh at a world
   position (no wall context). Rotation is around the world Z (vertical) axis.
 =#
+#=
+Plan rotation angle a Loc's cs bakes in (loc_from_o_phi): for wire protocols
+that take position+angle rather than a placement frame (Unity's
+InstantiateBIMElement). Mirrors the φ extraction inside
+standalone_obj_transform below — extracting from the cs, not a stored
+angle, keeps the wall-crossing-cabinet class of bug fixed for these
+protocols too.
+=#
+public plan_angle
+plan_angle(position) =
+  let p = in_world(position),
+      xw = in_world(position + vx(1, position.cs)) - p
+    norm(vxy(cx(xw), cy(xw))) < 1e-9 ? 0.0 : atan(cy(xw), cx(xw))
+  end
+
 function standalone_obj_transform(position, bf::OBJFileFamily, extra_angle=0.0)
   let p = in_world(position),
       s = bf.scale,

@@ -143,7 +143,7 @@ typedFunction("setView", [Point3d, Point3d, Float32, Float32], None, (position: 
 typedFunction("zoomExtents", [], None, () => {
 typedFunction("stopUpdate", [], None, () => {
 typedFunction("startUpdate", [], None, () => {
-typedFunction("captureImage", [], Str, () => {
+typedFunction("captureImage", [Int32, Int32], Str, (width, height) => {
 typedAsyncFunction("showKMLCoordinatesFromFile", [], None, (cont: Function) => {
 typedFunction("wall", [[Point3d], [Point3d], Float32, Bool, MatId, MatId, MatId], Id, (rightVs: THREE.Vector3[], leftVs: THREE.Vector3[], height: number, closed: boolean, rightMat: THREE.Material, leftMat: THREE.Material, sideMat: THREE.Material) => {
 typedFunction("stair", [Point3d, Vector3d, Float32, Int32, Float32, Float32, Float32, Bool, MatId, MatId], Id, (basePoint: THREE.Vector3, direction: THREE.Vector3, bottomHeight: number, nSteps: number, riserHeight: number, treadDepth: number, width: number, hasRisers: boolean, treadMat: THREE.Material, riserMat: THREE.Material) => {
@@ -386,14 +386,12 @@ KhepriBase.b_line(b::THR, ps, mat) = begin
 end
 
 #=
-No b_spline override: open interpolating splines take the KhepriBase default
-so THR draws the canonical chord-parameterized cubic (as a sampled Bézier
-chain) instead of the native `spline` op, whose Catmull-Rom construction
-follows a different curve through the same points. The native op remains in
-use for closed splines.
+No b_spline or b_closed_spline overrides: both take the KhepriBase defaults
+so THR draws the canonical chord-parameterized cubics (as sampled Bézier
+chains) instead of the native `spline` op, whose Catmull-Rom construction
+follows a different curve through the same points. The native op is now
+unused by this adapter; it remains in the TS side for compatibility.
 =#
-KhepriBase.b_closed_spline(b::THR, ps, mat) =
-  @remote(b, spline(ps, true, mat))
 
 KhepriBase.b_circle(b::THR, c, r, mat) =
   @remote(b, arc(c, r, 0, 2π, mat))
@@ -982,13 +980,22 @@ KhepriBase.b_stop_batch_processing(b::THR) = @remote(b, startUpdate())
 
 export capture_image
 """
-    capture_image(b=current_backend()) -> String
+    capture_image(b=current_backend(); width=0, height=0) -> String
 
 Render one frame in the connected browser and return it as a base64-encoded PNG string (no data-URL
 prefix). A synchronous WebSocket round-trip, so it works headlessly without the DevTools protocol —
-decode with `Base64.base64decode` and write to a `.png`.
+decode with `Base64.base64decode` and write to a `.png`. When `width` and `height` are positive, the
+frame is rendered at exactly that pixel size (device pixel ratio 1) and the viewer's previous
+viewport is restored afterwards; otherwise the canvas is captured as-is.
 """
-capture_image(b::THR=current_backend()) = @remote(b, captureImage())
+capture_image(b::THR=current_backend(); width::Integer=0, height::Integer=0) =
+  @remote(b, captureImage(width, height))
+
+KhepriBase.b_render_and_save_view(b::THR, path::String) =
+  let png = Base64.base64decode(@remote(b, captureImage(render_width(), render_height())))
+    write(path, png)
+    path
+  end
 
 export gui_create, 
        gui_add_folder, 

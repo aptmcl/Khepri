@@ -363,6 +363,14 @@ set_default_materials() =
     set_material(Unity, material_concrete, "Default/Materials/Concrete")
     set_material(Unity, material_plaster, "Default/Materials/Plaster")
     set_material(Unity, material_grass, "Default/Materials/Grass")
+    # Furniture prefabs (shipped in Plugins/KhepriUnity/Assets/Resources):
+    # routed through the b_family_instance placement seam, so a Unity table
+    # is the actual prefab, not parametric boxes. Phase-1 deleted the dead
+    # wrong-arity b_table trio that used to hint at this; the seam restores
+    # the plumbing portably.
+    set_backend_family(default_table_family(), unity, unity_resource_family("Default/Prefabs/Table"))
+    set_backend_family(default_chair_family(), unity, unity_resource_family("Default/Prefabs/Chair"))
+    set_backend_family(default_table_chair_family(), unity, unity_resource_family("Default/Prefabs/TableChair"))
   end
 
 KhepriBase.b_get_material(b::Unity, path::AbstractString) =
@@ -533,6 +541,14 @@ end
 # RPC has no per-resource parameter slot. See the prose block above.
 unity_resource_family(name) = UnityResourceFamily(name)
 b_get_family_ref(b::Unity, f::Family, uf::UnityResourceFamily) = @remote(b, LoadResource(uf.name))
+
+# The b_family_instance placement seam (KhepriBase/src/BIM.jl): a furniture
+# family registered with a prefab places the prefab instead of parametric
+# geometry. Unity's wire protocol takes position+angle (no frame), so the
+# instance angle is extracted from the loc's cs; the sign flip matches
+# Unity's clockwise-positive Y-up rotation convention.
+KhepriBase.b_family_instance(b::Unity, uf::UnityResourceFamily, f::Family, loc::Loc, fallback::Function) =
+  @remote(b, InstantiateBIMElement(family_ref(b, f), loc, -Float64(KhepriBase.plan_angle(loc))))
 
 #=
 set_backend_family(default_wall_family(), unity, unity_material_family("Default/Materials/Plaster"))
