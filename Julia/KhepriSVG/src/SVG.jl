@@ -252,11 +252,19 @@ KhepriBase.merge_backend_materials(b::SVG, m1::String, m2::String) =
    that only rounds to white would otherwise emit a spurious
    near-white style. =#
 KhepriBase.b_layer_material(b::SVG, layer, spec) =
+  #=
+  White is judged on the rgb channels alone, mirroring tikz_color's own
+  per-channel suppression: a TRANSLUCENT white layer must contribute only
+  its opacity (a proper key:value declaration), not white paint that
+  replaces the default black and vanishes on a white page.
+  =#
   let c = layer.color,
-      white = c.r ≈ 1 && c.g ≈ 1 && c.b ≈ 1 && c.alpha ≈ 1
-    isnothing(spec) ?
-      (white ? void_ref(b) : svg_color_value(c)) :
-      (white ? spec : "$(svg_color_value(c));$(spec)")
+      rgbwhite = c.r ≈ 1 && c.g ≈ 1 && c.b ≈ 1,
+      colour = rgbwhite ?
+        (c.alpha ≈ 1 ? nothing : "opacity:$(svg_number(Float64(c.alpha)))") :
+        svg_color_value(c),
+      parts = filter(!isnothing, Any[colour, spec])
+    isempty(parts) ? void_ref(b) : join(parts, ";")
   end
 
 KhepriBase.b_get_material(b::SVG, spec::Nothing) = void_ref(b)

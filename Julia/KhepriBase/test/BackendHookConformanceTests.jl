@@ -80,7 +80,17 @@ hook_arity_violations(backend_module::Module; ignore::Vector{Symbol}=Symbol[]) =
       nameof(f) in ignore && continue
       let ms = collect(methods(f)),
           backend_ms = [m for m in ms if m.module === backend_module],
-          outside = [method_arity(m) for m in ms if m.module !== backend_module]
+          #=
+          The reference set is KhepriBase-OWNED methods, not merely "methods
+          outside backend_module": with the looser rule, a wrong-arity method
+          in any other loaded module (a test probe in Main, a second backend
+          package, or a KhepriBase-internal backend like MeasureBackend)
+          would legitimize the same dead arity here. Known residual blind
+          spot: wrong-arity methods on KhepriBase-internal backends live in
+          KhepriBase itself and so join this reference set — the self-test
+          pins the historical Measure b_realistic_sky instance directly.
+          =#
+          outside = [method_arity(m) for m in ms if m.module === KhepriBase]
         isempty(backend_ms) && continue
         for m in backend_ms
           any(o -> arities_intersect(method_arity(m), o), outside) ||

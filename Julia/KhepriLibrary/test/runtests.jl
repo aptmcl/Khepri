@@ -20,13 +20,10 @@ include(joinpath(pkgdir(KhepriBase), "test", "TestMockBackend.jl"))
   @testset "test_cell builds headless with the roof at the wall top" begin
     let b = mock_backend()
       reset_mock_backend!(b)
-      # KhepriBase's maybe_backend_family loops forever when the current default
-      # family is a with_*_family element and the backend has no registered
-      # implementation: element -> based_on template -> _default_family_for ->
-      # element again. test_cell's with_window_family hits exactly that on a bare
-      # MockBackend, so register a neutral (non-OBJ) window family to break the
-      # cycle; the Window realize generic branch never reads it.
-      set_backend_family(default_window_family(), MockBackend, window_family())
+      # No family registration needed: test_cell's with_window_family on a bare
+      # MockBackend is exactly the element -> template -> default(element) cycle
+      # that used to recurse forever in KhepriBase's family delegation, so this
+      # test doubles as the regression test for that fix (BIM.jl seen-set walk).
       with(current_backend, b) do
         let r = test_cell(height=5)
           # The roof must sit at the height keyword, not at the positional default

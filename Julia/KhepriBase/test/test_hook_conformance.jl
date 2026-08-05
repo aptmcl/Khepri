@@ -55,4 +55,26 @@ end
     @test isempty(hook_arity_violations(HookConformanceWrongArityScratch;
                                         ignore=[:b_sphere]))
   end
+
+  #=
+  KhepriBase-internal backends are the guard's residual blind spot: their
+  methods live in KhepriBase and therefore join the reference arity set, so
+  a wrong arity there both escapes detection AND legitimizes the same dead
+  arity in real backends. Pin the historical instance directly: every
+  MeasureBackend b_realistic_sky method must carry an arity some generic
+  (::Backend first argument) method of the hook also carries. The original
+  bug was a 9-slot Measure no-op no caller could ever reach.
+  =#
+  @testset "Measure b_realistic_sky arities match the generic contract" begin
+    let f = KhepriBase.b_realistic_sky,
+        arity(m) = BackendHookConformanceTests.method_arity(m),
+        first_arg(m) = fieldtypes(m.sig)[2],
+        generic = [arity(m) for m in methods(f) if first_arg(m) === KhepriBase.Backend],
+        measure = [m for m in methods(f) if first_arg(m) === KhepriBase.MeasureBackend]
+      @test !isempty(measure)
+      for m in measure
+        @test any(g -> BackendHookConformanceTests.arities_intersect(arity(m), g), generic)
+      end
+    end
+  end
 end

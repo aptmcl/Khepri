@@ -392,19 +392,35 @@ Khepri module.
 
 # When dispatching a BIM operation to a backend, we also need to dispatch the family
 
-backend_family(b::Backend, family::Family) =
-  get(family.implemented_as, typeof(b)) do
-    if !isnothing(family.based_on)
-      backend_family(b, family.based_on)
-    else
-      let default = _default_family_for(typeof(family))
-        if default !== nothing && default !== family
-          backend_family(b, default)
-        else
-          error("Family $(family) is missing the implementation for backend $(b)")
+#=
+The walk follows based_on up to the template, then falls back to the CURRENT
+default family Parameter. That default can itself be an element based_on the
+very template we came from — with_window_family binds default_window_family
+to such an element for its whole body — so a `default !== family` guard sees
+only one-step cycles and the two-step element -> template -> default(element)
+cycle recursed forever (StackOverflowError on any backend without a
+registered family). The seen-set terminates every cycle shape.
+=#
+_walk_backend_family(b::Backend, family::Family, seen) =
+  family in seen ? nothing :
+  begin
+    push!(seen, family)
+    get(family.implemented_as, typeof(b)) do
+      if !isnothing(family.based_on)
+        _walk_backend_family(b, family.based_on, seen)
+      else
+        let default = _default_family_for(typeof(family))
+          isnothing(default) ? nothing : _walk_backend_family(b, default, seen)
         end
       end
     end
+  end
+
+backend_family(b::Backend, family::Family) =
+  let bf = _walk_backend_family(b, family, Base.IdSet{Any}())
+    isnothing(bf) ?
+      error("Family $(family) is missing the implementation for backend $(b)") :
+      bf
   end
 
 # Like backend_family, but returns `nothing` instead of erroring when no
@@ -413,15 +429,7 @@ backend_family(b::Backend, family::Family) =
 # delegation, so an OBJ family installed on a base family is honoured (the bare
 # `get(implemented_as, typeof(b), nothing)` it replaces did not).
 maybe_backend_family(b::Backend, family::Family) =
-  get(family.implemented_as, typeof(b)) do
-    if !isnothing(family.based_on)
-      maybe_backend_family(b, family.based_on)
-    else
-      let default = _default_family_for(typeof(family))
-        default !== nothing && default !== family ? maybe_backend_family(b, default) : nothing
-      end
-    end
-  end
+  _walk_backend_family(b, family, Base.IdSet{Any}())
 
 # Backends will install their own families on top of the default families, e.g.,
 # set_backend_family(default_beam_family(), revit, revit_beam_family)
