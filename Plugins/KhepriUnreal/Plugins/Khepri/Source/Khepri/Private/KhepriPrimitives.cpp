@@ -1926,11 +1926,19 @@ void KhepriPrimitives::RenderView(FKhepriChannel& Channel)
       GScreenshotResolutionY = Height;
 
       Viewport->TakeHighResScreenShot();
-      // The request is consumed on the next viewport DRAW; an idle or
-      // backgrounded editor may not redraw on its own for a long time,
-      // leaving the capture queued indefinitely. Force the draw now (the
-      // Julia side then waits for the complete PNG on disk).
-      GEditor->RedrawLevelEditingViewports(true);
+      /*
+       * The request is consumed inside FViewport::Draw (UnrealClient.cpp:
+       * GIsHighResScreenshot |= bTakeHighResScreenShot -> HighResScreenshot()),
+       * so draw THIS viewport directly and synchronously. The previous
+       * RedrawLevelEditingViewports route goes through editor redraw
+       * scheduling, which a backgrounded/unfocused editor throttles — in the
+       * 2026-08-05 verification session 40 of 57 queued captures were simply
+       * never processed. A direct Draw() has no such dependence (we are on
+       * the game thread, where viewport draws belong; the PNG is still
+       * written asynchronously by the image-write queue, which the Julia
+       * side waits out via the IEND-complete check).
+       */
+      Viewport->Draw();
       bSuccess = true;
       UE_LOG(LogKhepri, Log, TEXT("Khepri: RenderView - screenshot requested to %s (%dx%d)"), *FullPath, Width, Height);
     }

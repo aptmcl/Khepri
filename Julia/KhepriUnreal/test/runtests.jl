@@ -28,7 +28,15 @@ with_unreal_editor(f) =
     isfile(uproject) || error("KhepriUnreal.uproject not found at $uproject")
     isfile(log_file) && rm(log_file; force=true)
     @info "Launching UnrealEditor..." ue_exe uproject log_file
-    launch_detached(`$ue_exe $uproject -log -ABSLOG=$log_file`)
+    #=
+    ExecCmds pin down the two frame-history-dependent effects that made
+    captures drift between editor sessions (8 of 57 scenes on 2026-08-05):
+    TAA/TSR accumulate jitter history across frames, and auto-exposure
+    adapts from recent view state — neither is reproducible in a fresh
+    session. FXAA is per-frame deterministic; fixed exposure removes the
+    adaptation. Test sessions only — a user's editor is untouched.
+    =#
+    launch_detached(`$ue_exe $uproject -log -ABSLOG=$log_file -ExecCmds="r.AntiAliasingMethod 1, r.DefaultFeature.AutoExposure 0"`)
     try
       wait_for_port(KhepriBase.unreal_port;
                     timeout=900.0, timeout_env="KHEPRI_UNREAL_BOOT_TIMEOUT",
@@ -37,6 +45,20 @@ with_unreal_editor(f) =
       # holding a dead socket; discard it so the first RPC reconnects to
       # THIS editor instead of dying on the stale connection.
       KhepriBase.reset_backend(unreal)
+      #=
+      Warm-up: the first draws after editor boot block on shader
+      compilation, which starves the image-write queue past the per-capture
+      wait — on 2026-08-05 exactly the first three scenes of an otherwise
+      clean mint produced empty captures. Take throwaway screenshots until
+      one lands complete, so the suite's first real capture starts from a
+      warm renderer.
+      =#
+      let warmup = joinpath(mktempdir(), "warmup.png")
+        for _ in 1:10
+          KhepriBase.b_render_and_save_view(unreal, warmup)
+          isfile(warmup) && filesize(warmup) > 12 && break
+        end
+      end
       f()
     finally
       # wait_gone: a fire-and-forget kill can race the NEXT editor launch
@@ -245,6 +267,19 @@ with_unreal_editor(f) =
   # Int32 is expected (convert(Int32, nothing) MethodError) — needs live
   # debugging in KhepriUnreal's extrusion path.
   unreal_broken_scenes = ["florCirculosExtrudidos"]
+  #=
+  NO GOLDENS ARE COMMITTED for Unreal yet: editor-viewport renders are not
+  session-deterministic at pixel_diff_compare's tolerances. Capture itself
+  is reliable (direct Viewport->Draw consumption; a full 57-scene run takes
+  ~2.5 min with zero dropped captures), and FXAA + fixed exposure are
+  pinned at launch — but consecutive fresh-session pairs still drift on a
+  VARYING subset (5, then 19 scenes, mostly borderline 2D/planar renders
+  crossing the 1% differing-pixel budget). Until the varying render state
+  is pinned (or capture moves to a deterministic offscreen path), a local
+  gated run mints a per-session baseline and verifies WITHIN the session;
+  committing any baseline would manufacture false cross-session
+  regressions.
+  =#
 
   if gate_enabled("KHEPRI_UNREAL_TESTS")
     require_windows("Unreal visual")
