@@ -63,29 +63,35 @@ GRASSHOPPER_SRC = [
     "Plugins/KhepriGrasshopper/KhepriGrasshopper.sln",
     ":(exclude)Plugins/KhepriGrasshopper/KhepriGrasshopper/bin",
 ]
-# The bundle MANIFESTS are hand-vendored copies of the project-side bundle
-# originals; update_plugin() installs them into the host application, so a
-# manifest edited only on the Plugins side is exactly the refresh-the-wrong-
-# copy incident again, in .xml form.
-AUTOCAD_MANIFEST_SRC = ["Plugins/KhepriAutoCAD/KhepriAutoCAD/KhepriAutoCAD.bundle/PackageContents.xml"]
-REVIT_MANIFEST_SRC = ["Plugins/KhepriRevit/KhepriRevit/KhepriRevit.bundle/PackageContents.xml"]
-REVIT_ADDIN_SRC = ["Plugins/KhepriRevit/KhepriRevit/KhepriRevit.bundle/Contents/KhepriRevit.addin"]
-
 CHECKS = [
     # (vendored binary, source pathspecs)
     ("Julia/KhepriAutoCAD/Plugin/KhepriAutoCAD.bundle/Contents/KhepriAutoCAD.dll", AUTOCAD_SRC),
     ("Julia/KhepriAutoCAD/Plugin/KhepriAutoCAD.bundle/Contents/KhepriBase.dll", KHEPRI_BASE_SRC),
-    ("Julia/KhepriAutoCAD/Plugin/KhepriAutoCAD.bundle/PackageContents.xml", AUTOCAD_MANIFEST_SRC),
     ("Plugins/KhepriAutoCAD/KhepriAutoCAD/KhepriAutoCAD.bundle/Contents/KhepriAutoCAD.dll", AUTOCAD_SRC),
     ("Plugins/KhepriAutoCAD/KhepriAutoCAD/KhepriAutoCAD.bundle/Contents/KhepriBase.dll", KHEPRI_BASE_SRC),
     ("Julia/KhepriRevit/Plugin/KhepriRevit.bundle/Contents/KhepriRevit.dll", REVIT_SRC),
     ("Julia/KhepriRevit/Plugin/KhepriRevit.bundle/Contents/KhepriBase.dll", KHEPRI_BASE_SRC),
-    ("Julia/KhepriRevit/Plugin/KhepriRevit.bundle/PackageContents.xml", REVIT_MANIFEST_SRC),
-    ("Julia/KhepriRevit/Plugin/KhepriRevit.bundle/Contents/KhepriRevit.addin", REVIT_ADDIN_SRC),
     ("Julia/KhepriRhino/Plugin/KhepriRhinoceros.rhp", RHINO_SRC),
     ("Julia/KhepriRhino/Plugin/KhepriBase.dll", KHEPRI_BASE_SRC),
     ("Julia/KhepriGrasshopper/Plugin/KhepriGrasshopper.gha", GRASSHOPPER_SRC),
     ("Plugins/KhepriUnity/Assets/Khepri/Plugins/KhepriBase.dll", KHEPRI_BASE_SRC),
+]
+
+# The bundle MANIFESTS are hand-vendored copies of the project-side bundle
+# originals; update_plugin() installs them into the host application, so a
+# manifest edited only on the Plugins side is the refresh-the-wrong-copy
+# incident again, in .xml form. Unlike the binaries, a copy has an exact
+# freshness test — byte equality with its original — and that is also the
+# only correct one here: the 2026-08 consolidation interleaved 23 repo
+# histories, so commit topology across the two copies does not reflect real
+# staleness (both pairs were byte-identical yet "stale" by topology).
+MUST_MATCH = [
+    ("Julia/KhepriAutoCAD/Plugin/KhepriAutoCAD.bundle/PackageContents.xml",
+     "Plugins/KhepriAutoCAD/KhepriAutoCAD/KhepriAutoCAD.bundle/PackageContents.xml"),
+    ("Julia/KhepriRevit/Plugin/KhepriRevit.bundle/PackageContents.xml",
+     "Plugins/KhepriRevit/KhepriRevit/KhepriRevit.bundle/PackageContents.xml"),
+    ("Julia/KhepriRevit/Plugin/KhepriRevit.bundle/Contents/KhepriRevit.addin",
+     "Plugins/KhepriRevit/KhepriRevit/KhepriRevit.bundle/Contents/KhepriRevit.addin"),
 ]
 
 
@@ -109,6 +115,14 @@ def main():
             failures.append(binary)
         else:
             print(f"ok: {binary} (last vendored in {bin_commit[:10]})")
+    for copy, original in MUST_MATCH:
+        if open(copy, "rb").read() != open(original, "rb").read():
+            print(f"::error file={copy}::vendored manifest differs from its original "
+                  f"{original}. Sync them (the AutoCAD AfterBuild and Revit "
+                  f"upgrade_plugin() both refresh the deployed copy) and commit both.")
+            failures.append(copy)
+        else:
+            print(f"ok: {copy} == {original}")
     if failures:
         print(f"\n{len(failures)} stale vendored binar{'y' if len(failures) == 1 else 'ies'}.")
         sys.exit(1)
