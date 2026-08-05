@@ -4,6 +4,9 @@ using KhepriBase: truss_node_family_element, truss_bar_family_element,
   family_ref, truss_bar_family_cross_section_area
 using Test
 
+include(joinpath(pkgdir(KhepriBase), "test", "BackendTestScaffolding.jl"))
+using .BackendTestScaffolding
+
 @testset "KhepriFrame4DD.jl" begin
 
   @testset "Module loading and types" begin
@@ -428,15 +431,4 @@ using Test
 
 end
 
-
-# Guard against silently-dead b_* methods: every hook method this backend
-# defines must have a positional arity KhepriBase actually dispatches -- see
-# BackendHookConformanceTests.jl's header for the shipped bugs that motivated
-# this (4-arg table/chair trio, 7-arg Blender spotlight, 9-slot Measure sky).
-@testset "Hook arity conformance" begin
-  using KhepriBase
-  include(joinpath(dirname(pathof(KhepriBase)), "..", "test",
-                   "BackendHookConformanceTests.jl"))
-  using .BackendHookConformanceTests
-  run_hook_conformance(KhepriFrame4DD)
-end
+hook_arity_guard(KhepriFrame4DD)

@@ -9,14 +9,12 @@ using KhepriBase
 using KhepriBase: SocketBackend
 using Test
 
+include(joinpath(pkgdir(KhepriBase), "test", "BackendTestScaffolding.jl"))
+using .BackendTestScaffolding
+
 @testset "KhepriRevit.jl" begin
 
   @testset "RPC Conformance (static)" begin
-    # Every @remote/@get_remote RPC the adapter calls must be declared in its
-    # @remote_api block. Catches the undeclared-RPC crash class at CI, with no
-    # live CAD connection (reads getfield(revit, :remote) + parses source).
-    include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "RPCConformanceTests.jl"))
-    using .RPCConformanceTests
     run_rpc_conformance_tests(revit, joinpath(dirname(pathof(KhepriRevit))))
   end
 
@@ -86,9 +84,8 @@ using Test
   # gated on KHEPRI_REVIT_TESTS=1 so the static suite above stays cheap and
   # cross-platform; sibling backends (KhepriAutoCAD, KhepriRhino) use the
   # same convention. The harness assumes Windows + Revit + the Khepri plugin.
-  if get(ENV, "KHEPRI_REVIT_TESTS", "0") == "1"
-    Sys.iswindows() || error(
-      "KhepriRevit live tests require Windows + a running Revit with the Khepri plugin.")
+  if gate_enabled("KHEPRI_REVIT_TESTS")
+    require_windows("KhepriRevit live")
     # verbose=true prints a summary line for each nested @testset as it
     # completes, instead of buffering everything until the outermost one
     # finishes. This makes it possible to tell where the suite is in real
@@ -99,15 +96,4 @@ using Test
   end
 end
 
-
-# Guard against silently-dead b_* methods: every hook method this backend
-# defines must have a positional arity KhepriBase actually dispatches -- see
-# BackendHookConformanceTests.jl's header for the shipped bugs that motivated
-# this (4-arg table/chair trio, 7-arg Blender spotlight, 9-slot Measure sky).
-@testset "Hook arity conformance" begin
-  using KhepriBase
-  include(joinpath(dirname(pathof(KhepriBase)), "..", "test",
-                   "BackendHookConformanceTests.jl"))
-  using .BackendHookConformanceTests
-  run_hook_conformance(KhepriRevit)
-end
+hook_arity_guard(KhepriRevit)

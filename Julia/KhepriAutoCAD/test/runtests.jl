@@ -8,14 +8,12 @@ using KhepriAutoCAD
 using KhepriBase: SocketBackend
 using Test
 
+include(joinpath(pkgdir(KhepriBase), "test", "BackendTestScaffolding.jl"))
+using .BackendTestScaffolding
+
 @testset "KhepriAutoCAD.jl" begin
 
   @testset "RPC Conformance (static)" begin
-    # Every @remote/@get_remote RPC the adapter calls must be declared in its
-    # @remote_api block. Catches the undeclared-RPC crash class at CI, with no
-    # live CAD connection (reads getfield(autocad, :remote) + parses source).
-    include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "RPCConformanceTests.jl"))
-    using .RPCConformanceTests
     run_rpc_conformance_tests(autocad, joinpath(dirname(pathof(KhepriAutoCAD))))
   end
 
@@ -124,14 +122,9 @@ using Test
   end
 
   # Visual regression tests (require running AutoCAD with Khepri plugin on Windows)
-  if get(ENV, "KHEPRI_AUTOCAD_TESTS", "0") == "1"
-    if !Sys.iswindows()
-      error("AutoCAD visual tests require Windows. Run these tests from a native Windows Julia installation.")
-    end
+  if gate_enabled("KHEPRI_AUTOCAD_TESTS")
+    require_windows("AutoCAD visual")
     @testset "Visual Regression (AutoCAD)" begin
-      include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
-      using .VisualTests
-
       setup_test_view(autocad)
       try
         run_visual_tests(autocad,
@@ -140,7 +133,14 @@ using Test
             delete_all_shapes()
             backend(autocad)
           end,
+          # 1280x720, not the 1920x1080 default: SaveView captures the real
+          # viewport, and a viewport of the full screen size can never exist
+          # (window chrome must fit too) — the old 225x56 golden set died on
+          # exactly this. 720p fits any modern display with room for chrome.
+          width = 1280,
+          height = 720,
           compare = pixel_diff_compare,
+          backend_module = KhepriAutoCAD,
           skip = Symbol[])
       finally
         teardown_test_view(autocad)
@@ -148,38 +148,30 @@ using Test
     end
   end
 
-  # Combinatorial stress tests (require running AutoCAD with Khepri plugin on
-  # Windows). Distinct from visual regression: rather than comparing rendered
-  # output, these exercise hundreds of argument combinations per modeling
-  # operation and assert that the backend tolerates them without error. The
-  # produced shapes remain visible in AutoCAD after the run for manual
-  # inspection — each test occupies a unique grid slot.
-  if get(ENV, "KHEPRI_AUTOCAD_STRESS_TESTS", "0") == "1"
-    if !Sys.iswindows()
-      error("AutoCAD stress tests require Windows. Run these tests from a native Windows Julia installation.")
-    end
-    @testset "Stress (AutoCAD)" begin
-      include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "BackendStressTests.jl"))
-      using .BackendStressTests
+  # Wire benchmark (requires running AutoCAD): guards the socket loop against
+  # performance regressions — batching collapses only show against a live app.
+  if gate_enabled("KHEPRI_AUTOCAD_BENCH")
+    require_windows("AutoCAD bench")
+    run_wire_benchmark(autocad)
+  end
 
+  # Combinatorial stress tests (require running AutoCAD with Khepri plugin on Windows)
+  if gate_enabled("KHEPRI_AUTOCAD_STRESS_TESTS")
+    require_windows("AutoCAD stress")
+    @testset "Stress (AutoCAD)" begin
       run_stress_tests(autocad,
         reset! = () -> begin
           delete_all_shapes()
           backend(autocad)
         end,
         verify = :envelope,
-        skip = Symbol[])
+        skip = stress_skip_from_env())
     end
   end
 
-  if get(ENV, "KHEPRI_AUTOCAD_EXACT_GEOMETRY_TESTS", "0") == "1"
-    if !Sys.iswindows()
-      error("AutoCAD exact geometry tests require Windows. Run these tests from a native Windows Julia installation.")
-    end
+  if gate_enabled("KHEPRI_AUTOCAD_EXACT_GEOMETRY_TESTS")
+    require_windows("AutoCAD exact geometry")
     @testset "Exact Geometry (AutoCAD)" begin
-      include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "ExactGeometrySmokeTests.jl"))
-      using .ExactGeometrySmokeTests
-
       delete_all_shapes()
       backend(autocad)
       run_exact_geometry_smoke_tests(autocad)
@@ -187,15 +179,4 @@ using Test
   end
 end
 
-
-# Guard against silently-dead b_* methods: every hook method this backend
-# defines must have a positional arity KhepriBase actually dispatches -- see
-# BackendHookConformanceTests.jl's header for the shipped bugs that motivated
-# this (4-arg table/chair trio, 7-arg Blender spotlight, 9-slot Measure sky).
-@testset "Hook arity conformance" begin
-  using KhepriBase
-  include(joinpath(dirname(pathof(KhepriBase)), "..", "test",
-                   "BackendHookConformanceTests.jl"))
-  using .BackendHookConformanceTests
-  run_hook_conformance(KhepriAutoCAD)
-end
+hook_arity_guard(KhepriAutoCAD)

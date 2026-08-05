@@ -9,14 +9,42 @@ using KhepriBase
 using KhepriBase: SocketBackend
 using Test
 
+include(joinpath(pkgdir(KhepriBase), "test", "BackendTestScaffolding.jl"))
+using .BackendTestScaffolding
+
+#=
+Shared editor-session scaffolding for the gated live blocks (visual + stress):
+launch UnrealEditor with the plugin project, wait for its Khepri listener, run
+the block, and always tear the editor down. UE first-time shader compile + DDC
+build can take 10+ minutes on a cold cache; subsequent launches are 30-60 s —
+hence the generous default, overridable with KHEPRI_UNREAL_BOOT_TIMEOUT.
+=#
+with_unreal_editor(f) =
+  let ue_exe = get(ENV, "KHEPRI_UNREAL_EXE",
+                   raw"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe"),
+      uproject = abspath(joinpath(@__DIR__, "..", "..", "..", "Plugins", "KhepriUnreal", "KhepriUnreal.uproject")),
+      log_file = joinpath(tempdir(), "khepri_unreal_runner.log")
+    isfile(ue_exe) || error("UnrealEditor not found at $ue_exe (override with KHEPRI_UNREAL_EXE)")
+    isfile(uproject) || error("KhepriUnreal.uproject not found at $uproject")
+    isfile(log_file) && rm(log_file; force=true)
+    @info "Launching UnrealEditor..." ue_exe uproject log_file
+    launch_detached(`$ue_exe $uproject -log -ABSLOG=$log_file`)
+    try
+      wait_for_port(KhepriBase.unreal_port;
+                    timeout=900.0, timeout_env="KHEPRI_UNREAL_BOOT_TIMEOUT",
+                    hint="Check $log_file for editor startup failures.")
+      f()
+    finally
+      kill_by_image("UnrealEditor.exe")
+    end
+  end
+
 @testset "KhepriUnreal.jl" begin
 
   @testset "RPC Conformance (static)" begin
     # Every @remote/@get_remote RPC the adapter calls must be declared in its
     # @remote_api block. Catches the undeclared-RPC crash class at CI, with no
     # live CAD connection (reads getfield(unreal, :remote) + parses source).
-    include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "RPCConformanceTests.jl"))
-    using .RPCConformanceTests
     run_rpc_conformance_tests(unreal, joinpath(dirname(pathof(KhepriUnreal))))
   end
 
@@ -160,83 +188,49 @@ using Test
 
   Toggle with `KHEPRI_UNREAL_STRESS_TESTS=1`. Skipped on non-Windows.
   =#
-  if get(ENV, "KHEPRI_UNREAL_STRESS_TESTS", "0") == "1"
-    if !Sys.iswindows()
-      error("Unreal stress tests require Windows (UnrealEditor.exe path hard-coded).")
-    end
+  if gate_enabled("KHEPRI_UNREAL_STRESS_TESTS")
+    require_windows("Unreal stress")
     @testset "Stress (Unreal)" begin
-      include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "BackendStressTests.jl"))
-      using .BackendStressTests
-      using Sockets
-
-      ue_exe = get(ENV, "KHEPRI_UNREAL_EXE",
-                   raw"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe")
-      isfile(ue_exe) || error("UnrealEditor not found at $ue_exe (override with KHEPRI_UNREAL_EXE)")
-
-      uproject = abspath(joinpath(@__DIR__, "..", "..", "..", "Plugins", "KhepriUnreal", "KhepriUnreal.uproject"))
-      isfile(uproject) || error("KhepriUnreal.uproject not found at $uproject")
-
-      log_file = joinpath(tempdir(), "khepri_unreal_runner.log")
-      isfile(log_file) && rm(log_file; force=true)
-
-      @info "Launching UnrealEditor..." ue_exe uproject log_file
-      ue_proc = run(pipeline(`$ue_exe $uproject -log -ABSLOG=$log_file`,
-                             stdout=devnull, stderr=devnull),
-                    wait=false)
-
-      try
-        # Wait up to 15 minutes for the listener. UE first-time shader
-        # compile + DDC build can take 10+ minutes on a cold cache (Slate
-        # icon caching alone takes ~2 min observed); subsequent launches
-        # are 30–60 s. Override with KHEPRI_UNREAL_BOOT_TIMEOUT (seconds).
-        port_ready = false
-        let deadline = time() + parse(Float64, get(ENV, "KHEPRI_UNREAL_BOOT_TIMEOUT", "900"))
-          while time() < deadline
-            try
-              Sockets.connect(KhepriBase.unreal_port) |> close
-              port_ready = true
-              break
-            catch
-              sleep(2.0)
-            end
-          end
-        end
-        port_ready || error("Unreal listener never opened on port $(KhepriBase.unreal_port). " *
-                            "Check $log_file for editor startup failures.")
-
-        skip_cats = let s = get(ENV, "KHEPRI_STRESS_SKIP", "")
-          isempty(s) ? Symbol[] : Symbol.(strip.(split(s, ',')))
-        end
-
+      with_unreal_editor() do
         run_stress_tests(unreal,
           reset! = () -> begin
             delete_all_shapes()
             backend(unreal)
           end,
           verify = :envelope,
-          skip = skip_cats)
-      finally
-        try
-          run(`taskkill /F /IM UnrealEditor.exe`, wait=false)
-        catch
-        end
+          skip = stress_skip_from_env())
+      end
+    end
+  end
+
+  #=
+  Visual regression against the shared 78-scene corpus, mirroring Rhino's
+  wiring (live app + pixel_diff_compare). Gated: needs a Windows machine
+  with the Unreal editor. Goldens mint at 960x540 — a quarter of the
+  default golden weight per regold; the pre-2026-08 full-size goldens were
+  never compared by any harness and were deleted when this block landed
+  (regold sessions re-mint from scratch).
+  =#
+  if gate_enabled("KHEPRI_UNREAL_TESTS")
+    require_windows("Unreal visual")
+    @testset "Visual Regression (Unreal)" begin
+      with_unreal_editor() do
+        run_visual_tests(unreal,
+          golden_dir = joinpath(@__DIR__, "golden"),
+          reset! = () -> begin
+            delete_all_shapes()
+            backend(unreal)
+          end,
+          width = 960,
+          height = 540,
+          compare = pixel_diff_compare,
+          backend_module = KhepriUnreal)
       end
     end
   end
 end
 
-
-# Guard against silently-dead b_* methods: every hook method this backend
-# defines must have a positional arity KhepriBase actually dispatches -- see
-# BackendHookConformanceTests.jl's header for the shipped bugs that motivated
-# this (4-arg table/chair trio, 7-arg Blender spotlight, 9-slot Measure sky).
-@testset "Hook arity conformance" begin
-  using KhepriBase
-  include(joinpath(dirname(pathof(KhepriBase)), "..", "test",
-                   "BackendHookConformanceTests.jl"))
-  using .BackendHookConformanceTests
-  run_hook_conformance(KhepriUnreal)
-end
+hook_arity_guard(KhepriUnreal)
 
 #=
 The C++ plugin validates each operation's canonical signature at registration

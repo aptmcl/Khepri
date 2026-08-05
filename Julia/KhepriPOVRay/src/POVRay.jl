@@ -464,6 +464,50 @@ KhepriBase.b_mirror_material(b::POVRay, name, color) =
     red=Float64(red(color)), green=Float64(green(color)), blue=Float64(blue(color)),
     specularity=1.0)
 
+#=
+b_line is the ground floor of every KhepriBase 2D default — circles, arcs,
+splines, and the vector-font text all sample into polylines that bottom out
+at the b_line @bdef — so without it the entire :primitives_2d corpus
+category (and every 3D scene that realizes an input curve) aborted as
+unimplemented. POV-Ray has no zero-width stroke primitive; a line renders as
+a thin sphere_sweep tube. The radius is a Parameter because "thin" depends
+on scene scale; the default suits the corpus scenes' unit range.
+=#
+const povray_line_radius = Parameter(0.01)
+
+KhepriBase.b_line(b::POVRay, ps, mat) =
+  let io = connection(b),
+      r = povray_line_radius(),
+      # POV-Ray rejects consecutive duplicate control points in a sphere_sweep.
+      pts = let acc = similar(ps, 0)
+        for p in ps
+          (isempty(acc) || distance(acc[end], p) > 1e-12) && push!(acc, p)
+        end
+        acc
+      end
+    if isempty(pts)
+      -1
+    elseif length(pts) == 1
+      # A degenerate (single-point) line still marks its location.
+      write_povray_object(io, "sphere", mat, pts[1], r)
+    else
+      # Hand-written rather than write_povray_object: sphere_sweep's grammar
+      # is `linear_spline N, <p>, r, <p>, r ...` — the spline keyword takes
+      # no separating comma, which the generic arg writer would insert.
+      write(io, "sphere_sweep {\n  linear_spline\n  ", string(length(pts)))
+      for p in pts
+        write(io, ",\n  ")
+        show(io, MIMEPOVRay(), p)
+        write(io, ", ")
+        show(io, MIMEPOVRay(), r)
+      end
+      write(io, "\n")
+      write_povray_material(io, mat)
+      write(io, "}\n")
+      -1
+    end
+  end
+
 #
 KhepriBase.b_trig(b::POVRay, p1, p2, p3, mat) =
   write_povray_object(connection(b), "triangle", mat, p1, p2, p3)

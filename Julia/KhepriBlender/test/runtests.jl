@@ -9,14 +9,12 @@ using KhepriBase
 using KhepriBase: SocketBackend
 using Test
 
+include(joinpath(pkgdir(KhepriBase), "test", "BackendTestScaffolding.jl"))
+using .BackendTestScaffolding
+
 @testset "KhepriBlender.jl" begin
 
   @testset "RPC Conformance (static)" begin
-    # Every @remote/@get_remote RPC the adapter calls must be declared in its
-    # @remote_api block. Catches the undeclared-RPC crash class at CI, with no
-    # live Blender connection (reads getfield(blender, :remote) + parses source).
-    include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "RPCConformanceTests.jl"))
-    using .RPCConformanceTests
     #= Known live offender, skipped so the test still guards every other name:
        b_all_shapes_in_layer (Blender.jl) calls `all_shapes_in_collection`, which
        is neither declared in blender_api nor implemented in BlenderServer.py
@@ -106,46 +104,24 @@ using Test
   # and starts the socket server; `start_blender()` launches Blender which
   # connects in. The connected backend is then the top_backend(), not the
   # static `blender` constant.
-  if get(ENV, "KHEPRI_BLENDER_STRESS_TESTS", "0") == "1"
+  if gate_enabled("KHEPRI_BLENDER_STRESS_TESTS")
     @testset "Stress (Blender)" begin
-      include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "BackendStressTests.jl"))
-      using .BackendStressTests
-
       start_blender()
-      # Wait up to 30s for Blender to connect.
-      let connected_b = nothing, deadline = time() + 30
-        while time() < deadline
-          let bs = KhepriBase.current_backends()
-            if !isempty(bs)
-              connected_b = first(bs)
-              break
-            end
-          end
-          sleep(0.5)
-        end
-        connected_b === nothing &&
-          error("Blender failed to connect within 30s. Check start_blender() output.")
+      # Wait for Blender to connect (default 30s; override via
+      # KHEPRI_BLENDER_BOOT_TIMEOUT, in seconds).
+      let connected_b = wait_for_connected_backend(
+            timeout=30.0, timeout_env="KHEPRI_BLENDER_BOOT_TIMEOUT",
+            hint="Check start_blender() output.")
         run_stress_tests(connected_b,
           reset! = () -> begin
             delete_all_shapes()
             backend(connected_b)
           end,
           verify = :envelope,
-          skip = Symbol[])
+          skip = stress_skip_from_env())
       end
     end
   end
 end
 
-
-# Guard against silently-dead b_* methods: every hook method this backend
-# defines must have a positional arity KhepriBase actually dispatches -- see
-# BackendHookConformanceTests.jl's header for the shipped bugs that motivated
-# this (4-arg table/chair trio, 7-arg Blender spotlight, 9-slot Measure sky).
-@testset "Hook arity conformance" begin
-  using KhepriBase
-  include(joinpath(dirname(pathof(KhepriBase)), "..", "test",
-                   "BackendHookConformanceTests.jl"))
-  using .BackendHookConformanceTests
-  run_hook_conformance(KhepriBlender)
-end
+hook_arity_guard(KhepriBlender)

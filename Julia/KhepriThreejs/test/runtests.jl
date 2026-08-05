@@ -2,6 +2,9 @@ using KhepriThreejs
 using KhepriBase
 using Test
 
+include(joinpath(pkgdir(KhepriBase), "test", "BackendTestScaffolding.jl"))
+using .BackendTestScaffolding
+
 #= KhepriThreejs exports no static backend instance to probe: a THR is only
    constructed when a browser opens a WebSocket (KhepriThreejs.__init__
    registers `conn -> THR("Threejs", conn, threejs_api)` per connection), and
@@ -20,8 +23,6 @@ KhepriBase.backend_name(::THRConformanceProbe) = "Threejs"
         # Every @remote/@get_remote RPC the adapter calls must be declared in
         # the @remote_api block. Catches the undeclared-RPC crash class at CI,
         # with no browser/WebSocket (parses source + reads threejs_api keys).
-        include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "RPCConformanceTests.jl"))
-        using .RPCConformanceTests
         run_rpc_conformance_tests(THRConformanceProbe(KhepriThreejs.threejs_api),
                                   joinpath(dirname(pathof(KhepriThreejs))))
     end
@@ -47,18 +48,12 @@ KhepriBase.backend_name(::THRConformanceProbe) = "Threejs"
       4. Run the stress suite against that backend.
       5. Kill the browser process on the way out.
 
-    Skipped on non-Windows (Chrome path is hard-coded for the CI host).
+    Windows-only (the Chrome path is hard-coded for the CI host).
     Toggle with `KHEPRI_THREEJS_STRESS_TESTS=1`.
     =#
-    if get(ENV, "KHEPRI_THREEJS_STRESS_TESTS", "0") == "1"
-        if !Sys.iswindows()
-            error("Threejs stress tests require Windows (Chrome path hard-coded). " *
-                  "Set up an equivalent launcher and re-enable.")
-        end
+    if gate_enabled("KHEPRI_THREEJS_STRESS_TESTS")
+        require_windows("Threejs stress")
         @testset "Stress (Threejs)" begin
-            include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "BackendStressTests.jl"))
-            using .BackendStressTests
-
             chrome = raw"C:\Program Files\Google\Chrome\Application\chrome.exe"
             isfile(chrome) || error("Chrome not found at $chrome")
 
@@ -71,34 +66,15 @@ KhepriBase.backend_name(::THRConformanceProbe) = "Threejs"
             # session for the profile lock. `--remote-debugging-port` is not
             # needed; --headless=new is enough.
             user_data = mktempdir(prefix="khepri_threejs_chrome_")
-            chrome_proc = run(pipeline(`$chrome --headless=new --disable-gpu
-                                       --no-first-run --no-default-browser-check
-                                       --user-data-dir=$user_data
-                                       $url`,
-                                       stdout=devnull, stderr=devnull),
-                              wait=false)
+            chrome_proc = launch_detached(`$chrome --headless=new --disable-gpu
+                                          --no-first-run --no-default-browser-check
+                                          --user-data-dir=$user_data
+                                          $url`)
 
             try
-                connected_b = nothing
-                let deadline = time() + 60
-                    while time() < deadline
-                        let bs = KhepriBase.current_backends()
-                            if !isempty(bs)
-                                connected_b = first(bs)
-                                break
-                            end
-                        end
-                        sleep(0.5)
-                    end
-                end
-                connected_b === nothing &&
-                    error("Threejs failed to connect within 60s — is Chrome blocking the page?")
-
-                # Optional category skip via comma-separated env var, e.g.
-                # `KHEPRI_STRESS_SKIP=curves,surfaces` to focus on a subset.
-                skip = let s = get(ENV, "KHEPRI_STRESS_SKIP", "")
-                    isempty(s) ? Symbol[] : Symbol.(strip.(split(s, ',')))
-                end
+                connected_b = wait_for_connected_backend(
+                    timeout=60.0, timeout_env="KHEPRI_THREEJS_BOOT_TIMEOUT",
+                    hint="Is Chrome blocking the page?")
 
                 run_stress_tests(connected_b,
                     reset! = () -> begin
@@ -106,8 +82,10 @@ KhepriBase.backend_name(::THRConformanceProbe) = "Threejs"
                         backend(connected_b)
                     end,
                     verify = :envelope,
-                    skip = skip)
+                    skip = stress_skip_from_env())
             finally
+                # Kill our own Chrome via its Process handle — kill_by_image
+                # would take down the user's browser session too.
                 try
                     kill(chrome_proc)
                 catch
@@ -122,15 +100,4 @@ KhepriBase.backend_name(::THRConformanceProbe) = "Threejs"
     end
 end
 
-
-# Guard against silently-dead b_* methods: every hook method this backend
-# defines must have a positional arity KhepriBase actually dispatches -- see
-# BackendHookConformanceTests.jl's header for the shipped bugs that motivated
-# this (4-arg table/chair trio, 7-arg Blender spotlight, 9-slot Measure sky).
-@testset "Hook arity conformance" begin
-  using KhepriBase
-  include(joinpath(dirname(pathof(KhepriBase)), "..", "test",
-                   "BackendHookConformanceTests.jl"))
-  using .BackendHookConformanceTests
-  run_hook_conformance(KhepriThreejs)
-end
+hook_arity_guard(KhepriThreejs)

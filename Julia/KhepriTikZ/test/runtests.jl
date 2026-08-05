@@ -4,18 +4,8 @@ using KhepriTikZ
 using KhepriBase
 using Test
 
-# Helper to get the output from the backend's IOBuffer
-function get_tikz_output(b)
-  io = KhepriBase.connection(b)
-  String(take!(io))
-end
-
-# Helper to clear the backend's buffer
-function clear_tikz_buffer!(b)
-  io = KhepriBase.connection(b)
-  take!(io)
-  nothing
-end
+include(joinpath(pkgdir(KhepriBase), "test", "BackendTestScaffolding.jl"))
+using .BackendTestScaffolding
 
 @testset "KhepriTikZ.jl" begin
 
@@ -100,68 +90,68 @@ end
 
   @testset "Backend drawing operations" begin
     @testset "b_point" begin
-      clear_tikz_buffer!(tikz)
+      clear_io!(tikz)
       ref = KhepriBase.b_point(tikz, xy(5, 5), nothing)
-      output = get_tikz_output(tikz)
+      output = io_output(tikz)
       @test ref != KhepriBase.void_ref(tikz)
       @test occursin("5", output)
     end
 
     @testset "b_line" begin
-      clear_tikz_buffer!(tikz)
+      clear_io!(tikz)
       ref = KhepriBase.b_line(tikz, [xy(0, 0), xy(10, 0), xy(10, 10)], nothing)
-      output = get_tikz_output(tikz)
+      output = io_output(tikz)
       @test ref != KhepriBase.void_ref(tikz)
       @test occursin("\\draw", output)
       @test occursin("--", output)
     end
 
     @testset "b_polygon" begin
-      clear_tikz_buffer!(tikz)
+      clear_io!(tikz)
       ref = KhepriBase.b_polygon(tikz, [xy(0, 0), xy(1, 0), xy(1, 1), xy(0, 1)], nothing)
-      output = get_tikz_output(tikz)
+      output = io_output(tikz)
       @test ref != KhepriBase.void_ref(tikz)
       @test occursin("cycle", output)
     end
 
     @testset "b_circle" begin
-      clear_tikz_buffer!(tikz)
+      clear_io!(tikz)
       ref = KhepriBase.b_circle(tikz, xy(0, 0), 5.0, nothing)
-      output = get_tikz_output(tikz)
+      output = io_output(tikz)
       @test ref != KhepriBase.void_ref(tikz)
       @test occursin("circle", output)
       @test occursin("5", output)
     end
 
     @testset "b_arc" begin
-      clear_tikz_buffer!(tikz)
+      clear_io!(tikz)
       ref = KhepriBase.b_arc(tikz, xy(0, 0), 5.0, 0, pi/2, nothing)
-      output = get_tikz_output(tikz)
+      output = io_output(tikz)
       @test ref != KhepriBase.void_ref(tikz)
       @test occursin("arc", output)
     end
 
     @testset "b_rectangle" begin
-      clear_tikz_buffer!(tikz)
+      clear_io!(tikz)
       ref = KhepriBase.b_rectangle(tikz, xy(0, 0), 10.0, 5.0, nothing)
-      output = get_tikz_output(tikz)
+      output = io_output(tikz)
       @test ref != KhepriBase.void_ref(tikz)
       @test length(output) > 0
     end
 
     @testset "b_surface_polygon" begin
-      clear_tikz_buffer!(tikz)
+      clear_io!(tikz)
       ref = KhepriBase.b_surface_polygon(tikz, [xy(0, 0), xy(1, 0), xy(1, 1)], nothing)
-      output = get_tikz_output(tikz)
+      output = io_output(tikz)
       @test ref != KhepriBase.void_ref(tikz)
       @test occursin("\\fill", output)
     end
 
     # NOTE: b_surface_circle test skipped - uses b_ngon fallback which has some issues
     # @testset "b_surface_circle" begin
-    #   clear_tikz_buffer!(tikz)
+    #   clear_io!(tikz)
     #   ref = KhepriBase.b_surface_circle(tikz, xy(0, 0), 3.0, nothing)
-    #   output = get_tikz_output(tikz)
+    #   output = io_output(tikz)
     #   @test ref != KhepriBase.void_ref(tikz)
     #   @test length(output) > 0
     # end
@@ -169,9 +159,9 @@ end
 
   @testset "Text operations" begin
     @testset "b_text" begin
-      clear_tikz_buffer!(tikz)
+      clear_io!(tikz)
       ref = KhepriBase.b_text(tikz, "Hello", xy(0, 0), 1.0, nothing)
-      output = get_tikz_output(tikz)
+      output = io_output(tikz)
       @test ref != KhepriBase.void_ref(tikz)
       @test occursin("Hello", output)
       @test occursin("node", output)
@@ -206,10 +196,10 @@ end
 
   @testset "Spline operations" begin
     @testset "b_spline" begin
-      clear_tikz_buffer!(tikz)
+      clear_io!(tikz)
       pts = [xy(0, 0), xy(1, 1), xy(2, 0), xy(3, 1)]
       KhepriBase.b_spline(tikz, pts, false, false, nothing)
-      output = get_tikz_output(tikz)
+      output = io_output(tikz)
       # Splines emit the canonical cubic Bézier chain (b_bezier_curve, which
       # returns void_ref for this IO backend), not a smooth plot.
       @test occursin("..controls", output)
@@ -217,10 +207,10 @@ end
     end
 
     @testset "b_closed_spline" begin
-      clear_tikz_buffer!(tikz)
+      clear_io!(tikz)
       pts = [xy(0, 0), xy(1, 0), xy(1, 1), xy(0, 1)]
       ref = KhepriBase.b_closed_spline(tikz, pts, nothing)
-      output = get_tikz_output(tikz)
+      output = io_output(tikz)
       @test ref != KhepriBase.void_ref(tikz)
       @test length(output) > 0
     end
@@ -228,7 +218,7 @@ end
 
   @testset "Triangle operations (for 3D)" begin
     @testset "b_trig" begin
-      clear_tikz_buffer!(tikz)
+      clear_io!(tikz)
       ref = KhepriBase.b_trig(tikz, xyz(0, 0, 0), xyz(1, 0, 0), xyz(0, 1, 0), nothing)
       @test ref != KhepriBase.void_ref(tikz)
     end
@@ -236,9 +226,9 @@ end
 
   @testset "add_tikz function" begin
     @testset "direct tikz injection" begin
-      clear_tikz_buffer!(tikz)
+      clear_io!(tikz)
       add_tikz("\\draw (0,0) -- (1,1);")
-      output = get_tikz_output(tikz)
+      output = io_output(tikz)
       @test occursin("\\draw (0,0) -- (1,1);", output)
     end
   end
@@ -268,12 +258,10 @@ end
     end
   end
 
-  # Shared visual-test corpus, Tier-1 artifact oracle, and parser tests.
-  # TikZOracle.jl defines validate_tikz_golden (and pulls in the analytic
-  # SceneExpectations); test_tikz_parser.jl runs the dialect/round-trip
-  # tests plus the always-on fresh-artifact validation testset.
-  include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
-  using .VisualTests
+  # Tier-1 artifact oracle and parser tests. TikZOracle.jl defines
+  # validate_tikz_golden (and pulls in the analytic SceneExpectations);
+  # test_tikz_parser.jl runs the dialect/round-trip tests plus the always-on
+  # fresh-artifact validation testset.
   include("TikZOracle.jl")
   include("test_tikz_parser.jl")
 
@@ -283,7 +271,7 @@ end
       golden_dir = joinpath(@__DIR__, "golden"),
       reset! = () -> begin
         delete_all_shapes()
-        clear_tikz_buffer!(tikz)
+        clear_io!(tikz)
         backend(tikz)
       end,
       compare = text_compare,
@@ -291,23 +279,14 @@ end
       # Tier-1 parse-and-measure validation when (re)minting a golden;
       # comparison runs against existing goldens are unaffected.
       validate_golden = validate_tikz_golden,
-      # These tests generate millions of triangles that exceed TeX's capacity
-      skip_tests = ["abacus", "arvores3D", "cidadeEspacial",
-                     "abrigoEsfericoTubos", "corrimaoCaracol"]
+      # These tests generate millions of triangles that exceed TeX's capacity:
+      # the shared four (see OVERSIZED_GOLDEN_SCENES in VisualTests) plus
+      # abacus, which only TikZ needs to skip.
+      skip_tests = vcat(OVERSIZED_GOLDEN_SCENES, ["abacus"])
     )
   end
 
 end
 
 
-# Guard against silently-dead b_* methods: every hook method this backend
-# defines must have a positional arity KhepriBase actually dispatches -- see
-# BackendHookConformanceTests.jl's header for the shipped bugs that motivated
-# this (4-arg table/chair trio, 7-arg Blender spotlight, 9-slot Measure sky).
-@testset "Hook arity conformance" begin
-  using KhepriBase
-  include(joinpath(dirname(pathof(KhepriBase)), "..", "test",
-                   "BackendHookConformanceTests.jl"))
-  using .BackendHookConformanceTests
-  run_hook_conformance(KhepriTikZ)
-end
+hook_arity_guard(KhepriTikZ)

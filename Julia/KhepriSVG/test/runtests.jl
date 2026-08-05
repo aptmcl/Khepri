@@ -2,18 +2,8 @@ using KhepriSVG
 using KhepriBase
 using Test
 
-# Helper to get the output from the backend's IOBuffer
-function get_svg_output(b)
-  io = KhepriBase.connection(b)
-  String(take!(io))
-end
-
-# Helper to clear the backend's buffer
-function clear_svg_buffer!(b)
-  io = KhepriBase.connection(b)
-  take!(io)
-  nothing
-end
+include(joinpath(pkgdir(KhepriBase), "test", "BackendTestScaffolding.jl"))
+using .BackendTestScaffolding
 
 @testset "KhepriSVG.jl" begin
 
@@ -93,70 +83,70 @@ end
 
   @testset "Backend drawing operations" begin
     @testset "b_point" begin
-      clear_svg_buffer!(svg)
+      clear_io!(svg)
       KhepriBase.b_point(svg, xy(5, 5), nothing)
-      output = get_svg_output(svg)
+      output = io_output(svg)
       @test occursin("<circle", output)
       @test occursin("r=\"0.03\"", output)
     end
 
     @testset "b_line" begin
-      clear_svg_buffer!(svg)
+      clear_io!(svg)
       KhepriBase.b_line(svg, [xy(0, 0), xy(10, 0), xy(10, 10)], nothing)
-      output = get_svg_output(svg)
+      output = io_output(svg)
       @test occursin("<polyline", output)
     end
 
     @testset "b_polygon" begin
-      clear_svg_buffer!(svg)
+      clear_io!(svg)
       KhepriBase.b_polygon(svg, [xy(0, 0), xy(1, 0), xy(1, 1), xy(0, 1)], nothing)
-      output = get_svg_output(svg)
+      output = io_output(svg)
       @test occursin("<polygon", output)
       @test occursin("fill:none", output)
     end
 
     @testset "b_circle" begin
-      clear_svg_buffer!(svg)
+      clear_io!(svg)
       KhepriBase.b_circle(svg, xy(0, 0), 5.0, nothing)
-      output = get_svg_output(svg)
+      output = io_output(svg)
       @test occursin("<circle", output)
       @test occursin("r=\"5\"", output)
     end
 
     @testset "b_arc" begin
-      clear_svg_buffer!(svg)
+      clear_io!(svg)
       KhepriBase.b_arc(svg, xy(0, 0), 5.0, 0, pi/2, nothing)
-      output = get_svg_output(svg)
+      output = io_output(svg)
       @test occursin("<path", output)
     end
 
     @testset "b_rectangle" begin
-      clear_svg_buffer!(svg)
+      clear_io!(svg)
       KhepriBase.b_rectangle(svg, xy(0, 0), 10.0, 5.0, nothing)
-      output = get_svg_output(svg)
+      output = io_output(svg)
       @test occursin("<rect", output)
     end
 
     @testset "b_surface_polygon" begin
-      clear_svg_buffer!(svg)
+      clear_io!(svg)
       KhepriBase.b_surface_polygon(svg, [xy(0, 0), xy(1, 0), xy(1, 1)], nothing)
-      output = get_svg_output(svg)
+      output = io_output(svg)
       @test occursin("<polygon", output)
       @test occursin("fill:rgb(0,0,0)", output)
     end
 
     @testset "b_spline" begin
-      clear_svg_buffer!(svg)
+      clear_io!(svg)
       KhepriBase.b_spline(svg, [xy(0, 0), xy(1, 1), xy(2, 0), xy(3, 1)], false, false, nothing)
-      output = get_svg_output(svg)
+      output = io_output(svg)
       @test occursin("<path", output)
       @test occursin("C ", output) || occursin("C ", output)
     end
 
     @testset "b_text" begin
-      clear_svg_buffer!(svg)
+      clear_io!(svg)
       KhepriBase.b_text(svg, "Hello", xy(0, 0), 1.0, nothing)
-      output = get_svg_output(svg)
+      output = io_output(svg)
       @test occursin("<text", output)
       @test occursin("Hello", output)
     end
@@ -169,9 +159,9 @@ end
     line(xy(0, 0), xy(10, 0))
     circle(xy(5, 5), 3)
 
-    clear_svg_buffer!(svg)
+    clear_io!(svg)
     KhepriSVG.gen_svg_document(svg)
-    output = get_svg_output(svg)
+    output = io_output(svg)
 
     @test startswith(output, "<svg")
     @test occursin("xmlns=\"http://www.w3.org/2000/svg\"", output)
@@ -273,13 +263,13 @@ end
   @testset "Arrowed line emission" begin
     backend(svg)
     delete_all_shapes()
-    clear_svg_buffer!(svg)
+    clear_io!(svg)
     # Arrow-decorated line. Khepri's `line(p, q)` helper forwards to
     # `line([p, q])` without kwargs, so we build the vertex vector
     # explicitly to attach the material.
     line([xy(0, 0), xy(5, 0)], material=var"->")
     KhepriSVG.gen_svg_document(svg)
-    output = get_svg_output(svg)
+    output = io_output(svg)
     @test occursin("marker-end=\"url(#ah-end-", output)
     @test occursin("<marker id=\"ah-end-", output)
     @test occursin("markerUnits=\"userSpaceOnUse\"", output)
@@ -289,10 +279,10 @@ end
   @testset "Bidirectional arrow line" begin
     backend(svg)
     delete_all_shapes()
-    clear_svg_buffer!(svg)
+    clear_io!(svg)
     line([xy(0, 0), xy(5, 0)], material=var"<->")
     KhepriSVG.gen_svg_document(svg)
-    output = get_svg_output(svg)
+    output = io_output(svg)
     @test occursin("marker-start=\"url(#ah-start-", output)
     @test occursin("marker-end=\"url(#ah-end-", output)
     delete_all_shapes()
@@ -301,10 +291,10 @@ end
   @testset "Dimension line uses dim-grey arrows" begin
     backend(svg)
     delete_all_shapes()
-    clear_svg_buffer!(svg)
+    clear_io!(svg)
     dimension(xy(0, 0), xy(10, 0), "10")
     KhepriSVG.gen_svg_document(svg)
-    output = get_svg_output(svg)
+    output = io_output(svg)
     @test occursin("rgb(211,211,211)", output)         # light-gray dim color
     @test occursin("marker-start=\"url(#ah-start-", output)
     @test occursin("marker-end=\"url(#ah-end-", output)
@@ -314,10 +304,10 @@ end
   @testset "Radii illustration" begin
     backend(svg)
     delete_all_shapes()
-    clear_svg_buffer!(svg)
+    clear_io!(svg)
     radius_illustration(xy(0, 0), 5, "r=5")
     KhepriSVG.gen_svg_document(svg)
-    output = get_svg_output(svg)
+    output = io_output(svg)
     # Bidirectional arrow on the radial segment
     @test occursin("marker-start=", output)
     @test occursin("marker-end=", output)
@@ -329,10 +319,10 @@ end
   @testset "Vector illustration" begin
     backend(svg)
     delete_all_shapes()
-    clear_svg_buffer!(svg)
+    clear_io!(svg)
     vector_illustration(xy(0, 0), pi/4, 5, "v")
     KhepriSVG.gen_svg_document(svg)
-    output = get_svg_output(svg)
+    output = io_output(svg)
     @test occursin("marker-start=", output)
     @test occursin("marker-end=", output)
     @test occursin(">v</text>", output)
@@ -342,10 +332,10 @@ end
   @testset "Angle illustration" begin
     backend(svg)
     delete_all_shapes()
-    clear_svg_buffer!(svg)
+    clear_io!(svg)
     angle_illustration(xy(0, 0), 5, 0, pi/3, "r", "0", "π/3")
     KhepriSVG.gen_svg_document(svg)
-    output = get_svg_output(svg)
+    output = io_output(svg)
     @test occursin("π/3", output)
     @test occursin(">r</text>", output)
     @test occursin("<path d=\"M ", output)  # inner arc
@@ -355,10 +345,10 @@ end
   @testset "Text uses Helvetica family" begin
     backend(svg)
     delete_all_shapes()
-    clear_svg_buffer!(svg)
+    clear_io!(svg)
     text("Hello", xy(0, 0), 1.0)
     KhepriSVG.gen_svg_document(svg)
-    output = get_svg_output(svg)
+    output = io_output(svg)
     @test occursin("Helvetica", output)
     @test occursin(">Hello</text>", output)
     delete_all_shapes()
@@ -367,14 +357,14 @@ end
   @testset "Single-point labels merge into one annotation" begin
     backend(svg)
     delete_all_shapes()
-    clear_svg_buffer!(svg)
+    clear_io!(svg)
     # Three labels at the same point should produce one labels()
     # annotation — the SVG output should have a single dot.
     label(xy(0, 0), "A")
     label(xy(0, 0), "B")
     label(xy(0, 0), "C")
     KhepriSVG.gen_svg_document(svg)
-    output = get_svg_output(svg)
+    output = io_output(svg)
     @test occursin(">A</text>", output)
     @test occursin(">B</text>", output)
     @test occursin(">C</text>", output)
@@ -391,14 +381,11 @@ end
   # ======================================================================
 
   @testset "Visual Regression (SVG)" begin
-    include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
-    using .VisualTests
-
     run_visual_tests(svg,
       golden_dir = joinpath(@__DIR__, "golden"),
       reset! = () -> begin
         delete_all_shapes()
-        clear_svg_buffer!(svg)
+        clear_io!(svg)
         backend(svg)
       end,
       compare = text_compare,
@@ -410,14 +397,4 @@ end
 end
 
 
-# Guard against silently-dead b_* methods: every hook method this backend
-# defines must have a positional arity KhepriBase actually dispatches -- see
-# BackendHookConformanceTests.jl's header for the shipped bugs that motivated
-# this (4-arg table/chair trio, 7-arg Blender spotlight, 9-slot Measure sky).
-@testset "Hook arity conformance" begin
-  using KhepriBase
-  include(joinpath(dirname(pathof(KhepriBase)), "..", "test",
-                   "BackendHookConformanceTests.jl"))
-  using .BackendHookConformanceTests
-  run_hook_conformance(KhepriSVG)
-end
+hook_arity_guard(KhepriSVG)
