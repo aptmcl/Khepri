@@ -387,13 +387,17 @@ const RVT = SocketBackend{RVTKey, RVTId}
 # Build-stamp handshake (see KhepriBase.check_plugin_build_stamp): compares the
 # assemblies the running Revit plugin loaded against the vendored bundle this
 # package ships; a mismatch means "update_plugin() and restart Revit".
-KhepriBase.wants_build_stamp(b::RVT) = true
-KhepriBase.vendored_plugin_stamp(b::RVT) =
-  let contents = joinpath(local_khepri_plugin, "Contents"),
-      plugin = KhepriBase.assembly_stamp("KhepriRevit", joinpath(contents, "KhepriRevit.dll")),
-      base = KhepriBase.assembly_stamp("KhepriBase", joinpath(contents, "KhepriBase.dll"))
-    isnothing(plugin) || isnothing(base) ? nothing : "$(plugin); $(base)"
-  end
+# Conditional so the package still loads against a released KhepriBase that
+# predates the handshake.
+if isdefined(KhepriBase, :wants_build_stamp)
+  KhepriBase.wants_build_stamp(b::RVT) = true
+  KhepriBase.vendored_plugin_stamp(b::RVT) =
+    let contents = joinpath(local_khepri_plugin, "Contents"),
+        plugin = KhepriBase.assembly_stamp("KhepriRevit", joinpath(contents, "KhepriRevit.dll")),
+        base = KhepriBase.assembly_stamp("KhepriBase", joinpath(contents, "KhepriBase.dll"))
+      isnothing(plugin) || isnothing(base) ? nothing : "$(plugin); $(base)"
+    end
+end
 const RVTVoidId = RVTId(-1)
 
 KhepriBase.void_ref(b::RVT) = RVTVoidId

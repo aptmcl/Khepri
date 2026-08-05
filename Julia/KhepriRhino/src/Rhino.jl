@@ -276,12 +276,16 @@ const RH = SocketBackend{RHKey, RHId}
 # assemblies the running Rhino plugin loaded against the vendored binaries this
 # package ships (the .rhp is a renamed .NET assembly, so it has a PE stamp
 # too). Rhino installs are manual, so this is the only staleness signal.
-KhepriBase.wants_build_stamp(b::RH) = true
-KhepriBase.vendored_plugin_stamp(b::RH) =
-  let plugin = KhepriBase.assembly_stamp("KhepriRhinoceros", joinpath(local_plugin, "KhepriRhinoceros.rhp")),
-      base = KhepriBase.assembly_stamp("KhepriBase", joinpath(local_plugin, "KhepriBase.dll"))
-    isnothing(plugin) || isnothing(base) ? nothing : "$(plugin); $(base)"
-  end
+# Conditional so the package still loads against a released KhepriBase that
+# predates the handshake.
+if isdefined(KhepriBase, :wants_build_stamp)
+  KhepriBase.wants_build_stamp(b::RH) = true
+  KhepriBase.vendored_plugin_stamp(b::RH) =
+    let plugin = KhepriBase.assembly_stamp("KhepriRhinoceros", joinpath(local_plugin, "KhepriRhinoceros.rhp")),
+        base = KhepriBase.assembly_stamp("KhepriBase", joinpath(local_plugin, "KhepriBase.dll"))
+      isnothing(plugin) || isnothing(base) ? nothing : "$(plugin); $(base)"
+    end
+end
 
 KhepriBase.shape_storage_type(::Type{<:RH}) = RemoteShapeStorage()
 

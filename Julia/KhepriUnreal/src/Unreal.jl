@@ -146,9 +146,13 @@ const UENativeRef = NativeRef{UEKey, UEId}
 const UE = SocketBackend{UEKey, UEId}
 
 # Build-stamp handshake: the C++ plugin registers KhepriBuildStamp with its
-# compile date. No vendored binaries to compare against (Unreal plugins build
+# link time. No vendored binaries to compare against (Unreal plugins build
 # inside the user's project), so the handshake only reports what is running.
-KhepriBase.wants_build_stamp(b::UE) = true
+# Conditional so the package still loads against a released KhepriBase that
+# predates the handshake.
+if isdefined(KhepriBase, :wants_build_stamp)
+  KhepriBase.wants_build_stamp(b::UE) = true
+end
 
 # Void reference for empty results
 KhepriBase.void_ref(b::UE) = -1

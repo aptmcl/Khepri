@@ -189,8 +189,11 @@ const Unity = SocketBackend{UnityKey, UnityId}
 # Build-stamp handshake: Unity's Primitives inherit KhepriBuildStamp from the
 # vendored KhepriBase.dll in the Unity project. Unity compiles the scripts
 # itself, so there are no package-vendored binaries to compare against — the
-# handshake only reports what is running.
-KhepriBase.wants_build_stamp(b::Unity) = true
+# handshake only reports what is running. Conditional so the package still
+# loads against a released KhepriBase that predates the handshake.
+if isdefined(KhepriBase, :wants_build_stamp)
+  KhepriBase.wants_build_stamp(b::Unity) = true
+end
 # For users to be able to initialize each of the connections
 export Unity
 
