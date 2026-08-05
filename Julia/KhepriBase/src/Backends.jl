@@ -124,10 +124,32 @@ connection(b::RemoteBackend) =
       # Must run before after_connecting: hooks like set_material and
       # set_backend_family populate b.refs in the new session.
       discard_session_state!(b)
+      # And before after_connecting too: its hooks should not run RPCs
+      # against a plugin we have not yet vouched for.
+      check_plugin_build_stamp(b)
       after_connecting(b)
     end
     b.connection
   end
+
+#=
+Build-stamp handshake — see build_stamp_remote in Primitives.jl for the
+protocol and degradation story. Backends OPT IN with
+`KhepriBase.wants_build_stamp(b::MyBackend) = true` (opt-in because the
+request is an ordinary opcode-0 registration: safe for every plugin built
+from Plugins/, but a non-C#-protocol peer, e.g. a Python-side server that
+answers registration differently, should not receive it unasked).
+`vendored_plugin_stamp(b)` returns the stamp string the backend's VENDORED
+binaries imply (via assembly_stamp), or `nothing` when the backend has no
+committed binaries to compare against — then the handshake only reports
+what is running.
+=#
+public wants_build_stamp, vendored_plugin_stamp
+wants_build_stamp(b::RemoteBackend) = false
+vendored_plugin_stamp(b::RemoteBackend) = nothing
+
+check_plugin_build_stamp(b::RemoteBackend) = nothing
+# The SocketBackend method is defined after the SocketBackend struct, below.
 
 #=
 Teardown layers:
@@ -257,6 +279,33 @@ which shadows `Sockets.connect` inside this module and silently turns every
 socket-backend connection attempt into a MethodError — the backend then logs
 "Couldn't connect" despite the backend process listening normally.
 =#
+check_plugin_build_stamp(b::SocketBackend) =
+  if wants_build_stamp(b) && !isempty(b.remote)
+    let ns = first(b.remote).info.namespace
+      try
+        let stamp = build_stamp_remote(ns)(b.connection),
+            expected = vendored_plugin_stamp(b)
+          if isnothing(expected) || expected == stamp
+            @info "$(b.name) plugin: $(stamp)"
+          else
+            @warn """The running $(b.name) plugin does not match the binaries this package ships.
+                       running:  $(stamp)
+                       expected: $(expected)
+                     Run the backend's update_plugin() (or reinstall the plugin) and RESTART $(b.name) so it loads the new build."""
+          end
+        end
+      catch e
+        if e isa BackendError
+          # The registration request answered NOTOK: the plugin predates the
+          # handshake — exactly the stale-binary situation worth one line.
+          @warn "The running $(b.name) plugin predates the build-stamp handshake and is likely stale. Update the plugin and restart $(b.name)."
+        else
+          rethrow()
+        end
+      end
+    end
+  end
+
 start_connection(b::SocketBackend) =
   let attempts = 10,
       last_error = Ref{Any}(nothing)
@@ -374,6 +423,9 @@ run_khepri_socket_server(host=default_khepri_socket_server_host(), port=default_
               init_func = get_socket_backend_init_function(backend_name),
               backend = invokelatest(init_func, conn)
             invokelatest(before_connecting, backend)
+            # This accept path bypasses connection(), so it needs its own
+            # build-stamp check (same reasoning: before after_connecting).
+            invokelatest(check_plugin_build_stamp, backend)
             invokelatest(after_connecting, backend)
             add_global_backend(backend)
             invokelatest(main, backend)

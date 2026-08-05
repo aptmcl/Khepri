@@ -36,6 +36,7 @@ namespace KhepriAutoCAD {
 
         public Transaction tr;
         public Document doc;
+        DocumentLock docLock;
 
         const uint WM_KEYDOWN = 0x0100;
         const uint WM_KEYUP = 0x0101;
@@ -70,54 +71,39 @@ namespace KhepriAutoCAD {
             }
         }
 
-        public override bool ExecuteReadAndRepeat(int op) {
-            if (op == -1) return false;
+        /*
+         * The batch loop itself is the base class's — this used to be a wholesale
+         * copy (kept only to wrap the batch in a document lock + transaction), and
+         * the copy had already drifted from the base (`count > MaxRepeated` vs the
+         * base's exact `count >= MaxRepeated`; the 2026-07 poll-batching fix had to
+         * be applied to both copies separately). Now AutoCAD only scopes the batch
+         * via the hooks; polling, batching, FIN disambiguation, and the opcode
+         * guard all come from the base. The interactive contract is unchanged:
+         * waiting happens in the base's Socket.Poll between frames, never inside
+         * a frame.
+         */
+        protected override bool BeginBatch() {
             doc = Application.DocumentManager.MdiActiveDocument;
+            // No open document: report as "cannot run a batch" (historical behavior
+            // treated this as a disconnect and dropped the client).
             if (doc == null) return false;
-
-            using (doc.LockDocument()) {
+            docLock = doc.LockDocument();
+            try {
                 tr = doc.Database.TransactionManager.StartOpenCloseTransaction();
-                int count = 0;
-                try {
-                    while (true) {
-                        if (op == -1) return false;
-                        // Guard a stale/desynced opcode (mirrors base Processor.Execute):
-                        // indexing operations[] out of range would throw before the RMI
-                        // delegate's error handler runs, so no NOTOK frame would ship and
-                        // the timeout-less Julia client would block. Write a clean NOTOK
-                        // and keep the batch alive instead.
-                        if (op < 0 || op >= operations.Count) {
-                            channel.wByte(1);
-                            channel.wString($"Unknown opcode {op}");
-                        } else {
-                            operations[op](channel, primitives);
-                        }
-                        channel.EndFrame();
-                        count++;
-                        if (count > MaxRepeated) break;
-                        // Wait briefly for the next op instead of only checking whether one is
-                        // already buffered. After EndFrame flushes this op's result, the
-                        // synchronous Julia client must read it and write its next request — a
-                        // sub-millisecond localhost round-trip during which no bytes are buffered
-                        // yet. A bare DataAvailable check loses that race on essentially every op,
-                        // collapsing the batch to a single operation and paying the host's
-                        // per-idle-tick latency for the next one. Polling with maxWaitTime keeps
-                        // the batch alive so a synchronous burst drains in one Idle tick. (Less
-                        // visible here than in Rhino because AutoCAD's Application.Idle fires far
-                        // faster, but the batching win still applies.)
-                        if (!channel.PollRead(maxWaitTime * 1000)) break;
-                        // Poll ready but zero bytes => the peer closed the socket (FIN).
-                        if (!channel.DataAvailable) return false;
-                        try {
-                            op = ReadOperation();
-                        } catch (IOException) {
-                            return false;
-                        }
-                    }
-                    return true;
-                } finally {
-                    CommitAndStop();
-                }
+            } catch {
+                docLock.Dispose();
+                docLock = null;
+                throw;
+            }
+            return true;
+        }
+
+        protected override void EndBatch() {
+            try {
+                CommitAndStop();
+            } finally {
+                docLock?.Dispose();
+                docLock = null;
             }
         }
 

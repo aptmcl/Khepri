@@ -316,102 +316,117 @@ static int32 GKhepriActorCounter = 0;
 
 void KhepriPrimitives::RegisterAllOperations(FKhepriServer& Server)
 {
+  /*
+   * Canonical strings below are generated from the Julia side
+   * (KhepriUnreal.unreal_api — each entry's info.canonical, computed by
+   * canonical_signature in KhepriBase/src/Primitives.jl); a Julia test
+   * (Julia/KhepriUnreal/test) cross-checks every literal against that table so
+   * drift turns into a red test instead of a runtime mystery. TEXT("") marks
+   * operations with no Julia-side declaration: nothing to validate against.
+   */
+
+  // Build-stamp handshake: Julia requests this once per fresh connection and
+  // warns when the running plugin does not match expectations. The stamp is a
+  // compile-time constant, so it identifies this exact build.
+  Server.RegisterOperation(TEXT("KhepriBuildStamp"), TEXT("String()"),
+    [](FKhepriChannel& C) { C.WriteString(TEXT("KhepriUnreal built " __DATE__ " " __TIME__)); });
+
   // Shape Management
-  Server.RegisterOperation(TEXT("Primitive::DeleteAll"), &KhepriPrimitives::DeleteAll);
-  Server.RegisterOperation(TEXT("Primitive::DeleteAllShapes"), &KhepriPrimitives::DeleteAllShapes);
-  Server.RegisterOperation(TEXT("Primitive::DeleteMany"), &KhepriPrimitives::DeleteMany);
-  Server.RegisterOperation(TEXT("Primitive::DeleteRef"), &KhepriPrimitives::DeleteRef);
+  Server.RegisterOperation(TEXT("Primitive::DeleteAll"), TEXT("Int32()"), &KhepriPrimitives::DeleteAll);
+  Server.RegisterOperation(TEXT("Primitive::DeleteAllShapes"), TEXT("Int32()"), &KhepriPrimitives::DeleteAllShapes);
+  Server.RegisterOperation(TEXT("Primitive::DeleteMany"), TEXT("Int32(TArray_AActor_)"), &KhepriPrimitives::DeleteMany);
+  Server.RegisterOperation(TEXT("Primitive::DeleteRef"), TEXT("Int32(AActor)"), &KhepriPrimitives::DeleteRef);
 
   // Tier 0: Curves
-  Server.RegisterOperation(TEXT("Primitive::Point"), &KhepriPrimitives::Point);
-  Server.RegisterOperation(TEXT("Primitive::Line"), &KhepriPrimitives::Line);
-  Server.RegisterOperation(TEXT("Primitive::ClosedLine"), &KhepriPrimitives::ClosedLine);
+  Server.RegisterOperation(TEXT("Primitive::Point"), TEXT("AActor(FVector,UMaterial)"), &KhepriPrimitives::Point);
+  Server.RegisterOperation(TEXT("Primitive::Line"), TEXT("AActor(TArray_FVector_,UMaterial)"), &KhepriPrimitives::Line);
+  Server.RegisterOperation(TEXT("Primitive::ClosedLine"), TEXT("AActor(TArray_FVector_,UMaterial)"), &KhepriPrimitives::ClosedLine);
 
   // Tier 1: Surfaces
-  Server.RegisterOperation(TEXT("Primitive::Triangle"), &KhepriPrimitives::Triangle);
-  Server.RegisterOperation(TEXT("Primitive::Quad"), &KhepriPrimitives::Quad);
-  Server.RegisterOperation(TEXT("Primitive::NGon"), &KhepriPrimitives::NGon);
-  Server.RegisterOperation(TEXT("Primitive::QuadStrip"), &KhepriPrimitives::QuadStrip);
-  Server.RegisterOperation(TEXT("Primitive::SurfacePolygon"), &KhepriPrimitives::SurfacePolygon);
+  Server.RegisterOperation(TEXT("Primitive::Triangle"), TEXT("AActor(FVector,FVector,FVector,UMaterial)"), &KhepriPrimitives::Triangle);
+  Server.RegisterOperation(TEXT("Primitive::Quad"), TEXT("AActor(FVector,FVector,FVector,FVector,UMaterial)"), &KhepriPrimitives::Quad);
+  Server.RegisterOperation(TEXT("Primitive::NGon"), TEXT("AActor(TArray_FVector_,FVector,UMaterial)"), &KhepriPrimitives::NGon);
+  Server.RegisterOperation(TEXT("Primitive::QuadStrip"), TEXT("AActor(TArray_FVector_,TArray_FVector_,Int32,UMaterial)"), &KhepriPrimitives::QuadStrip);
+  Server.RegisterOperation(TEXT("Primitive::SurfacePolygon"), TEXT("AActor(TArray_FVector_,UMaterial)"), &KhepriPrimitives::SurfacePolygon);
 
   // Tier 2: Advanced Surfaces
-  Server.RegisterOperation(TEXT("Primitive::SurfaceGrid"), &KhepriPrimitives::SurfaceGrid);
-  Server.RegisterOperation(TEXT("Primitive::SurfaceMesh"), &KhepriPrimitives::SurfaceMesh);
+  Server.RegisterOperation(TEXT("Primitive::SurfaceGrid"), TEXT("AActor(TArray_TArray_FVector__,Int32,Int32,Int32,UMaterial)"), &KhepriPrimitives::SurfaceGrid);
+  Server.RegisterOperation(TEXT("Primitive::SurfaceMesh"), TEXT("AActor(TArray_FVector_,TArray_TArray_int32__,UMaterial)"), &KhepriPrimitives::SurfaceMesh);
 
   // Tier 3: Solids
-  Server.RegisterOperation(TEXT("Primitive::Sphere"), &KhepriPrimitives::Sphere);
-  Server.RegisterOperation(TEXT("Primitive::Box"), &KhepriPrimitives::Box);
-  Server.RegisterOperation(TEXT("Primitive::RightCuboid"), &KhepriPrimitives::RightCuboid);
-  Server.RegisterOperation(TEXT("Primitive::Cylinder"), &KhepriPrimitives::Cylinder);
-  Server.RegisterOperation(TEXT("Primitive::ConeFrustum"), &KhepriPrimitives::ConeFrustum);
-  Server.RegisterOperation(TEXT("Primitive::Torus"), &KhepriPrimitives::Torus);
-  Server.RegisterOperation(TEXT("Primitive::Pyramid"), &KhepriPrimitives::Pyramid);
-  Server.RegisterOperation(TEXT("Primitive::PyramidFrustum"), &KhepriPrimitives::PyramidFrustum);
-  Server.RegisterOperation(TEXT("Primitive::PyramidFrustumWithMaterial"), &KhepriPrimitives::PyramidFrustumWithMaterial);
+  Server.RegisterOperation(TEXT("Primitive::Sphere"), TEXT("AActor(FVector,Single,UMaterial)"), &KhepriPrimitives::Sphere);
+  Server.RegisterOperation(TEXT("Primitive::Box"), TEXT("AActor(FVector,FVector,FVector,Single,Single,Single,UMaterial)"), &KhepriPrimitives::Box);
+  Server.RegisterOperation(TEXT("Primitive::RightCuboid"), TEXT("AActor(FVector,FVector,FVector,Single,Single,Single,Single,UMaterial)"), &KhepriPrimitives::RightCuboid);
+  Server.RegisterOperation(TEXT("Primitive::Cylinder"), TEXT("AActor(FVector,Single,FVector,UMaterial,UMaterial,UMaterial)"), &KhepriPrimitives::Cylinder);
+  Server.RegisterOperation(TEXT("Primitive::ConeFrustum"), TEXT("AActor(FVector,Single,FVector,Single,UMaterial,UMaterial,UMaterial)"), &KhepriPrimitives::ConeFrustum);
+  Server.RegisterOperation(TEXT("Primitive::Torus"), TEXT("AActor(FVector,Single,Single,FVector,UMaterial)"), &KhepriPrimitives::Torus);
+  Server.RegisterOperation(TEXT("Primitive::Pyramid"), TEXT("AActor(TArray_FVector_,FVector,UMaterial,UMaterial)"), &KhepriPrimitives::Pyramid);
+  Server.RegisterOperation(TEXT("Primitive::PyramidFrustum"), TEXT("AActor(TArray_FVector_,TArray_FVector_,UMaterial,UMaterial,UMaterial)"), &KhepriPrimitives::PyramidFrustum);
+  Server.RegisterOperation(TEXT("Primitive::PyramidFrustumWithMaterial"), TEXT(""), &KhepriPrimitives::PyramidFrustumWithMaterial);
 
   // BIM Elements
-  Server.RegisterOperation(TEXT("Primitive::Slab"), &KhepriPrimitives::Slab);
-  Server.RegisterOperation(TEXT("Primitive::Panel"), &KhepriPrimitives::Panel);
-  Server.RegisterOperation(TEXT("Primitive::BeamRectSection"), &KhepriPrimitives::BeamRectSection);
-  Server.RegisterOperation(TEXT("Primitive::BeamCircSection"), &KhepriPrimitives::BeamCircSection);
-  Server.RegisterOperation(TEXT("Primitive::InstantiateBIMElement"), &KhepriPrimitives::InstantiateBIMElement);
-  Server.RegisterOperation(TEXT("Primitive::CreateBlockInstance"), &KhepriPrimitives::CreateBlockInstance);
+  Server.RegisterOperation(TEXT("Primitive::Slab"), TEXT("AActor(TArray_FVector_,TArray_TArray_FVector__,Single,UMaterial)"), &KhepriPrimitives::Slab);
+  Server.RegisterOperation(TEXT("Primitive::Panel"), TEXT(""), &KhepriPrimitives::Panel);
+  Server.RegisterOperation(TEXT("Primitive::BeamRectSection"), TEXT("AActor(FVector,FVector,FVector,Single,Single,Single,Single,UMaterial)"), &KhepriPrimitives::BeamRectSection);
+  Server.RegisterOperation(TEXT("Primitive::BeamCircSection"), TEXT("AActor(FVector,Single,FVector,UMaterial)"), &KhepriPrimitives::BeamCircSection);
+  Server.RegisterOperation(TEXT("Primitive::InstantiateBIMElement"), TEXT(""), &KhepriPrimitives::InstantiateBIMElement);
+  Server.RegisterOperation(TEXT("Primitive::CreateBlockInstance"), TEXT("AActor(UStaticMesh,FVector,FVector,FVector,Single)"), &KhepriPrimitives::CreateBlockInstance);
 
   // Materials & Layers
-  Server.RegisterOperation(TEXT("Primitive::LoadMaterial"), &KhepriPrimitives::LoadMaterial);
-  Server.RegisterOperation(TEXT("Primitive::CreatePBRMaterial"), &KhepriPrimitives::CreatePBRMaterial);
-  Server.RegisterOperation(TEXT("Primitive::CurrentMaterial"), &KhepriPrimitives::CurrentMaterial);
-  Server.RegisterOperation(TEXT("Primitive::SetCurrentMaterial"), &KhepriPrimitives::SetCurrentMaterial);
-  Server.RegisterOperation(TEXT("Primitive::CurrentParent"), &KhepriPrimitives::CurrentParent);
-  Server.RegisterOperation(TEXT("Primitive::SetCurrentParent"), &KhepriPrimitives::SetCurrentParent);
-  Server.RegisterOperation(TEXT("Primitive::CreateParent"), &KhepriPrimitives::CreateParent);
-  Server.RegisterOperation(TEXT("Primitive::SetParentVisible"), &KhepriPrimitives::SetParentVisible);
-  Server.RegisterOperation(TEXT("Primitive::SetParentOpacity"), &KhepriPrimitives::SetParentOpacity);
-  Server.RegisterOperation(TEXT("Primitive::DeleteAllInParent"), &KhepriPrimitives::DeleteAllInParent);
-  Server.RegisterOperation(TEXT("Primitive::LoadResource"), &KhepriPrimitives::LoadResource);
+  Server.RegisterOperation(TEXT("Primitive::LoadMaterial"), TEXT("UMaterial(String)"), &KhepriPrimitives::LoadMaterial);
+  Server.RegisterOperation(TEXT("Primitive::CreatePBRMaterial"), TEXT("UMaterial(Single,Single,Single,Single,Single,Single,Single,Single,Single,Single,Single,Single,Single,Single,Single,Single)"), &KhepriPrimitives::CreatePBRMaterial);
+  Server.RegisterOperation(TEXT("Primitive::CurrentMaterial"), TEXT(""), &KhepriPrimitives::CurrentMaterial);
+  Server.RegisterOperation(TEXT("Primitive::SetCurrentMaterial"), TEXT(""), &KhepriPrimitives::SetCurrentMaterial);
+  Server.RegisterOperation(TEXT("Primitive::CurrentParent"), TEXT("AActor()"), &KhepriPrimitives::CurrentParent);
+  Server.RegisterOperation(TEXT("Primitive::SetCurrentParent"), TEXT("AActor(AActor)"), &KhepriPrimitives::SetCurrentParent);
+  Server.RegisterOperation(TEXT("Primitive::CreateParent"), TEXT("AActor(String)"), &KhepriPrimitives::CreateParent);
+  Server.RegisterOperation(TEXT("Primitive::SetParentVisible"), TEXT("Int32(AActor,Int32)"), &KhepriPrimitives::SetParentVisible);
+  Server.RegisterOperation(TEXT("Primitive::SetParentOpacity"), TEXT("Int32(AActor,Single)"), &KhepriPrimitives::SetParentOpacity);
+  Server.RegisterOperation(TEXT("Primitive::DeleteAllInParent"), TEXT("Int32(AActor)"), &KhepriPrimitives::DeleteAllInParent);
+  Server.RegisterOperation(TEXT("Primitive::LoadResource"), TEXT("UStaticMesh(String)"), &KhepriPrimitives::LoadResource);
 
   // Lighting
-  Server.RegisterOperation(TEXT("Primitive::PointLight"), &KhepriPrimitives::PointLight);
-  Server.RegisterOperation(TEXT("Primitive::Spotlight"), &KhepriPrimitives::Spotlight);
+  Server.RegisterOperation(TEXT("Primitive::PointLight"), TEXT("AActor(FVector,FLinearColor,Single,Single)"), &KhepriPrimitives::PointLight);
+  Server.RegisterOperation(TEXT("Primitive::Spotlight"), TEXT("AActor(FVector,FVector,FLinearColor,Single,Single,Single,Single)"), &KhepriPrimitives::Spotlight);
 
   // Boolean Operations
-  Server.RegisterOperation(TEXT("Primitive::Unite"), &KhepriPrimitives::Unite);
-  Server.RegisterOperation(TEXT("Primitive::Subtract"), &KhepriPrimitives::Subtract);
-  Server.RegisterOperation(TEXT("Primitive::Intersect"), &KhepriPrimitives::Intersect);
+  Server.RegisterOperation(TEXT("Primitive::Unite"), TEXT("AActor(AActor,AActor)"), &KhepriPrimitives::Unite);
+  Server.RegisterOperation(TEXT("Primitive::Subtract"), TEXT("AActor(AActor,AActor)"), &KhepriPrimitives::Subtract);
+  Server.RegisterOperation(TEXT("Primitive::Intersect"), TEXT("AActor(AActor,AActor)"), &KhepriPrimitives::Intersect);
 
   // Transformations
-  Server.RegisterOperation(TEXT("Primitive::Move"), &KhepriPrimitives::Move);
-  Server.RegisterOperation(TEXT("Primitive::Scale"), &KhepriPrimitives::Scale);
-  Server.RegisterOperation(TEXT("Primitive::Rotate"), &KhepriPrimitives::Rotate);
+  Server.RegisterOperation(TEXT("Primitive::Move"), TEXT("Int32(AActor,FVector)"), &KhepriPrimitives::Move);
+  Server.RegisterOperation(TEXT("Primitive::Scale"), TEXT("Int32(AActor,FVector,Single)"), &KhepriPrimitives::Scale);
+  Server.RegisterOperation(TEXT("Primitive::Rotate"), TEXT("Int32(AActor,FVector,FVector,Single)"), &KhepriPrimitives::Rotate);
 
   // View & Rendering
-  Server.RegisterOperation(TEXT("Primitive::SetView"), &KhepriPrimitives::SetView);
-  Server.RegisterOperation(TEXT("Primitive::ViewCamera"), &KhepriPrimitives::ViewCamera);
-  Server.RegisterOperation(TEXT("Primitive::ViewTarget"), &KhepriPrimitives::ViewTarget);
-  Server.RegisterOperation(TEXT("Primitive::ViewLens"), &KhepriPrimitives::ViewLens);
-  Server.RegisterOperation(TEXT("Primitive::RenderView"), &KhepriPrimitives::RenderView);
-  Server.RegisterOperation(TEXT("Primitive::ZoomExtents"), &KhepriPrimitives::ZoomExtents);
-  Server.RegisterOperation(TEXT("Primitive::ViewSize"), &KhepriPrimitives::ViewSize);
+  Server.RegisterOperation(TEXT("Primitive::SetView"), TEXT("AActor(FVector,FVector,Single,Single)"), &KhepriPrimitives::SetView);
+  Server.RegisterOperation(TEXT("Primitive::ViewCamera"), TEXT("FVector()"), &KhepriPrimitives::ViewCamera);
+  Server.RegisterOperation(TEXT("Primitive::ViewTarget"), TEXT("FVector()"), &KhepriPrimitives::ViewTarget);
+  Server.RegisterOperation(TEXT("Primitive::ViewLens"), TEXT("Single()"), &KhepriPrimitives::ViewLens);
+  Server.RegisterOperation(TEXT("Primitive::RenderView"), TEXT("Int32(Int32,Int32,String,String,Int32)"), &KhepriPrimitives::RenderView);
+  Server.RegisterOperation(TEXT("Primitive::ZoomExtents"), TEXT("Int32()"), &KhepriPrimitives::ZoomExtents);
+  Server.RegisterOperation(TEXT("Primitive::ViewSize"), TEXT("Int32(Int32,Int32)"), &KhepriPrimitives::ViewSize);
 
   // Bounding Box
-  Server.RegisterOperation(TEXT("Primitive::BoundingBoxMin"), &KhepriPrimitives::BoundingBoxMin);
-  Server.RegisterOperation(TEXT("Primitive::BoundingBoxMax"), &KhepriPrimitives::BoundingBoxMax);
+  Server.RegisterOperation(TEXT("Primitive::BoundingBoxMin"), TEXT("FVector(AActor)"), &KhepriPrimitives::BoundingBoxMin);
+  Server.RegisterOperation(TEXT("Primitive::BoundingBoxMax"), TEXT("FVector(AActor)"), &KhepriPrimitives::BoundingBoxMax);
 
   // Batch
-  Server.RegisterOperation(TEXT("Primitive::DisableUpdate"), &KhepriPrimitives::DisableUpdate);
-  Server.RegisterOperation(TEXT("Primitive::EnableUpdate"), &KhepriPrimitives::EnableUpdate);
+  Server.RegisterOperation(TEXT("Primitive::DisableUpdate"), TEXT("Int32()"), &KhepriPrimitives::DisableUpdate);
+  Server.RegisterOperation(TEXT("Primitive::EnableUpdate"), TEXT("Int32()"), &KhepriPrimitives::EnableUpdate);
 
   // Selection
-  Server.RegisterOperation(TEXT("Primitive::HighlightRefs"), &KhepriPrimitives::HighlightRefs);
-  Server.RegisterOperation(TEXT("Primitive::UnhighlightRefs"), &KhepriPrimitives::UnhighlightRefs);
-  Server.RegisterOperation(TEXT("Primitive::UnhighlightAllRefs"), &KhepriPrimitives::UnhighlightAllRefs);
+  Server.RegisterOperation(TEXT("Primitive::HighlightRefs"), TEXT("Int32(TArray_AActor_)"), &KhepriPrimitives::HighlightRefs);
+  Server.RegisterOperation(TEXT("Primitive::UnhighlightRefs"), TEXT("Int32(TArray_AActor_)"), &KhepriPrimitives::UnhighlightRefs);
+  Server.RegisterOperation(TEXT("Primitive::UnhighlightAllRefs"), TEXT("Int32()"), &KhepriPrimitives::UnhighlightAllRefs);
 
   // Shape query
-  Server.RegisterOperation(TEXT("Primitive::ShapeType"), &KhepriPrimitives::ShapeType);
+  Server.RegisterOperation(TEXT("Primitive::ShapeType"), TEXT("String(AActor)"), &KhepriPrimitives::ShapeType);
 
   // Deferred selection
-  Server.RegisterOperation(TEXT("Primitive::GetShape"), &KhepriPrimitives::GetShape);
-  Server.RegisterOperation(TEXT("Primitive::GetShapes"), &KhepriPrimitives::GetShapes);
+  Server.RegisterOperation(TEXT("Primitive::GetShape"), TEXT("Void(String)"), &KhepriPrimitives::GetShape);
+  Server.RegisterOperation(TEXT("Primitive::GetShapes"), TEXT("Void(String)"), &KhepriPrimitives::GetShapes);
 }
 
 // =============================================================================

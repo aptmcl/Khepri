@@ -744,3 +744,63 @@ macro encode_decode_as(ns, from, to)
     end)
 end
 
+
+#=
+Build-stamp handshake (client side).
+
+Every C# plugin inherits `KhepriBuildStamp()` from the shared
+Plugins/KhepriBase Primitives (the Unreal C++ plugin registers the same
+name), answering a string that identifies the exact build of the running
+plugin assemblies — "Name built <PE link timestamp>", the concrete plugin
+assembly first, then KhepriBase.dll. At connect time we request it through
+the ordinary lazy-registration path (opcode 0), so for a plugin that
+predates the mechanism the request itself answers NOTOK ("method not
+found"), which surfaces here as a BackendError — old plugin + new Julia
+degrades to a warning, never a hang, and the wire format is untouched.
+
+The stamp closes the loaded-vs-deployed gap that update_plugin() cannot:
+update_plugin refreshes DLLs on disk, but the host application keeps the
+already-loaded assembly until it restarts. Comparing the stamp the RUNNING
+plugin reports against the stamp of the VENDORED binaries this package
+ships turns "the plugin is silently stale" into a one-line warning naming
+the fix (update + restart).
+=#
+
+public build_stamp_remote, pe_link_stamp, assembly_stamp
+
+build_stamp_remote(ns) =
+  RemoteFunction(remote_function_info(
+    ns, "String KhepriBuildStamp()", "String()",
+    "KhepriBuildStamp", "KhepriBuildStamp",
+    (opcode, conn, buf) -> begin
+      truncate(buf, 0)
+      encode(ns, Val(:int), buf, opcode)
+      send(conn, buf)
+      decode_with_prefix(ns, Val(:string), receive(conn))
+    end))
+
+#=
+PE link timestamp of a DLL, formatted exactly as the C# side formats it
+(Primitives.KhepriBuildStamp): the classic csproj builds are
+non-deterministic, so the COFF TimeDateStamp is a real UTC build time and
+identifies the build. Any parse problem yields `nothing` — a missing or
+odd vendored file must never break connecting.
+=#
+pe_link_stamp(path) =
+  try
+    open(path) do io
+      seek(io, 0x3C)
+      peoff = read(io, UInt32)
+      seek(io, peoff)
+      read(io, UInt8) == UInt8('P') && read(io, UInt8) == UInt8('E') || return nothing
+      seek(io, peoff + 8)
+      Dates.format(Dates.unix2datetime(read(io, UInt32)), dateformat"yyyy-mm-dd\THH:MM:SS\Z")
+    end
+  catch
+    nothing
+  end
+
+assembly_stamp(name, dll_path) =
+  let ts = pe_link_stamp(dll_path)
+    isnothing(ts) ? nothing : "$(name) built $(ts)"
+  end

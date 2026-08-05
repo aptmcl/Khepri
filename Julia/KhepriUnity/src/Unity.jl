@@ -185,6 +185,12 @@ const UnityRef = GenericRef{UnityKey, UnityId}
 const UnityRefs = Vector{UnityRef}
 const UnityNativeRef = NativeRef{UnityKey, UnityId}
 const Unity = SocketBackend{UnityKey, UnityId}
+
+# Build-stamp handshake: Unity's Primitives inherit KhepriBuildStamp from the
+# vendored KhepriBase.dll in the Unity project. Unity compiles the scripts
+# itself, so there are no package-vendored binaries to compare against — the
+# handshake only reports what is running.
+KhepriBase.wants_build_stamp(b::Unity) = true
 # For users to be able to initialize each of the connections
 export Unity
 

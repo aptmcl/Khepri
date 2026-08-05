@@ -119,10 +119,48 @@ void FKhepriServer::StopServer()
   }
 }
 
-void FKhepriServer::RegisterOperation(const FString& Name, TFunction<void(FKhepriChannel&)> Handler)
+void FKhepriServer::RegisterOperation(const FString& Name, const FString& Canonical,
+                                      TFunction<void(FKhepriChannel&)> Handler)
 {
   int32 Index = OperationHandlers.Add(Handler);
+  OperationCanonicals.Add(Canonical);
   OperationNameToIndex.Add(Name, Index);
+}
+
+// ProvideOperation (opcode 0): Julia sends the method name and the canonical
+// signature it expects; we answer the assigned opcode, or NOTOK on an unknown
+// name or a canonical mismatch. Both the socket-thread path and the mid-batch
+// game-thread path dispatch HERE — the logic used to be duplicated inline in
+// both, which is exactly how a validation fix could reach one path and miss
+// the other. The mismatch message mirrors the C# side (RMIFy.RMIFor) so
+// signature drift reads the same on every backend.
+void FKhepriServer::HandleProvideOperation()
+{
+  FString OpName = Channel.ReadString();
+  FString ExpectedCanonical = Channel.ReadString();
+  int32* FoundIndex = OperationNameToIndex.Find(OpName);
+  if (!FoundIndex)
+  {
+    UE_LOG(LogKhepri, Warning, TEXT("Khepri: Unknown operation '%s'"), *OpName);
+    Channel.WriteByte(1);
+    Channel.WriteString(FString::Printf(TEXT("Method '%s' not found in Unreal primitives"), *OpName));
+  }
+  else if (!OperationCanonicals[*FoundIndex].IsEmpty() &&
+           OperationCanonicals[*FoundIndex] != ExpectedCanonical)
+  {
+    UE_LOG(LogKhepri, Warning, TEXT("Khepri: Signature mismatch for '%s': Julia expects %s but Unreal has %s"),
+           *OpName, *ExpectedCanonical, *OperationCanonicals[*FoundIndex]);
+    Channel.WriteByte(1);
+    Channel.WriteString(FString::Printf(TEXT("Signature mismatch for '%s': Julia expects %s but Unreal has %s"),
+                                        *OpName, *ExpectedCanonical, *OperationCanonicals[*FoundIndex]));
+  }
+  else
+  {
+    // Success: write OK prefix + new opcode (1-based: index + 1)
+    Channel.WriteByte(0);
+    Channel.WriteInt32(*FoundIndex + 1);
+  }
+  Channel.EndFrame();
 }
 
 void FKhepriServer::HandleConnection(FSocket* ClientSocket)
@@ -185,26 +223,7 @@ void FKhepriServer::ProcessCommands(FSocket* ClientSocket)
 
     if (Opcode == 0)
     {
-      // ProvideOperation: Julia sends method name + canonical signature.
-      // We read both but ignore the canonical (no reflection in C++).
-      FString OpName = Channel.ReadString();
-      FString Canonical = Channel.ReadString(); // consumed but not validated
-
-      int32* FoundIndex = OperationNameToIndex.Find(OpName);
-      if (FoundIndex)
-      {
-        // Success: write OK prefix + new opcode (1-based: index + 1)
-        Channel.WriteByte(0);
-        Channel.WriteInt32(*FoundIndex + 1);
-      }
-      else
-      {
-        // Failure: write NOTOK prefix + error message
-        UE_LOG(LogKhepri, Warning, TEXT("Khepri: Unknown operation '%s'"), *OpName);
-        Channel.WriteByte(1);
-        Channel.WriteString(FString::Printf(TEXT("Method '%s' not found in Unreal primitives"), *OpName));
-      }
-      Channel.EndFrame();
+      HandleProvideOperation();
     }
     else if (Opcode > 0)
     {
@@ -222,21 +241,7 @@ void FKhepriServer::ProcessCommands(FSocket* ClientSocket)
           if (Op == 0)
           {
             // ProvideOperation arrived mid-batch
-            FString OpName = Channel.ReadString();
-            FString Canonical = Channel.ReadString();
-            int32* FoundIndex = OperationNameToIndex.Find(OpName);
-            if (FoundIndex)
-            {
-              Channel.WriteByte(0);
-              Channel.WriteInt32(*FoundIndex + 1);
-            }
-            else
-            {
-              UE_LOG(LogKhepri, Warning, TEXT("Khepri: Unknown operation '%s'"), *OpName);
-              Channel.WriteByte(1);
-              Channel.WriteString(FString::Printf(TEXT("Method '%s' not found in Unreal primitives"), *OpName));
-            }
-            Channel.EndFrame();
+            HandleProvideOperation();
           }
           else if (Op > 0)
           {
@@ -251,12 +256,22 @@ void FKhepriServer::ProcessCommands(FSocket* ClientSocket)
               catch (const std::exception& e)
               {
                 UE_LOG(LogKhepri, Error, TEXT("Khepri: opcode %d threw exception: %s"), HandlerIndex, ANSI_TO_TCHAR(e.what()));
+                // The handler may have written part of its reply after the 0x00 OK
+                // prefix; shipping that would make Julia decode garbage as success.
+                // Discard the partial payload and ship a NOTOK error frame instead
+                // (the CSG-stub pattern; mirrors C# RMIFy's error serialization).
+                Channel.ResetResponse();
+                Channel.WriteByte(1);
+                Channel.WriteString(FString::Printf(TEXT("Unreal exception in opcode %d: %s"), Op, ANSI_TO_TCHAR(e.what())));
                 Channel.EndFrame();
                 break;
               }
               catch (...)
               {
                 UE_LOG(LogKhepri, Error, TEXT("Khepri: opcode %d threw unknown exception"), HandlerIndex);
+                Channel.ResetResponse();
+                Channel.WriteByte(1);
+                Channel.WriteString(FString::Printf(TEXT("Unreal unknown exception in opcode %d"), Op));
                 Channel.EndFrame();
                 break;
               }
@@ -272,6 +287,10 @@ void FKhepriServer::ProcessCommands(FSocket* ClientSocket)
           else
           {
             UE_LOG(LogKhepri, Error, TEXT("Khepri: Invalid opcode %d in batch"), Op);
+            // An empty response frame would make Julia's prefix read hit EOF;
+            // ship a proper NOTOK so the client sees a BackendError instead.
+            Channel.WriteByte(1);
+            Channel.WriteString(FString::Printf(TEXT("Invalid opcode %d"), Op));
             Channel.EndFrame();
             break;
           }
@@ -346,6 +365,9 @@ void FKhepriServer::ProcessCommands(FSocket* ClientSocket)
     else
     {
       UE_LOG(LogKhepri, Error, TEXT("Khepri: Invalid opcode %d"), Opcode);
+      // See the batch-path twin: an empty frame starves Julia's prefix read.
+      Channel.WriteByte(1);
+      Channel.WriteString(FString::Printf(TEXT("Invalid opcode %d"), Opcode));
       Channel.EndFrame();
     }
   }

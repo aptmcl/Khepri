@@ -100,27 +100,63 @@ namespace KhepriBase {
             return true; //FIXME
         }
 
-        // Uses Socket.Poll + DataAvailable instead of NetworkStream.ReadTimeout,
-        // which is broken on Mono/Linux (corrupts stream state on timeout).
+        // Poll briefly for a next frame, then read it whole. The two-step check is the
+        // load-bearing part of the interactive design: the ONLY thing that ever waits
+        // with a finite timeout is Socket.Poll, which consumes no bytes, so a timeout
+        // can only happen BETWEEN frames; once a frame has begun it is read to
+        // completion with blocking reads. (NetworkStream.ReadTimeout must never be
+        // used for this — a mid-frame timeout discards partially-read bytes and
+        // desyncs the wire protocol, and it corrupts stream state on Mono.)
         //
-        // Disambiguating Poll=true: Socket.Poll(SelectRead) returns true in two
-        // distinct cases — bytes are available OR the peer closed the connection
-        // (FIN). The DataAvailable check below tells them apart. If Poll fires
-        // but no bytes are buffered, the connection has been closed gracefully
-        // and we must return -1 (disconnected). Returning -2 ("timeout") here
-        // is the bug that wedges idle-driven listeners like KhepriAutoCAD's
-        // current PlugIn.cs after a quick connect/close probe: the handler
-        // sees -2 on every subsequent tick, never transitions to AcceptClient,
-        // and any real connection queued behind the closed one in the kernel
-        // listen backlog is never picked up. Symptom on the Julia side: the
-        // first operation after reconnect blocks forever.
-        public int TryReadOperation() {
-            if (!channel.PollRead(minWaitTime * 1000))
+        // Returns -2 when the poll window elapsed with nothing (yield to the host),
+        // -1 when the peer closed the connection (Poll fired but zero bytes are
+        // buffered = FIN, or the frame read hit EOF/an I/O error), else the opcode.
+        //
+        // The FIN disambiguation is load-bearing: Socket.Poll(SelectRead) fires both
+        // for readable bytes AND for a peer close. Reporting a close as -2 ("timeout")
+        // is the bug that wedged idle-driven listeners like KhepriAutoCAD's PlugIn.cs
+        // after a quick connect/close probe: the handler saw -2 on every tick, never
+        // transitioned back to AcceptClient, and a real connection queued in the
+        // kernel listen backlog was never picked up — the first operation after a
+        // reconnect blocked forever on the Julia side.
+        protected int PollThenReadOperation(int waitMilliseconds) {
+            if (!channel.PollRead(waitMilliseconds * 1000))
                 return -2;
             if (!channel.DataAvailable)
                 return -1;
-            return ReadOperation();
+            try {
+                return ReadOperation();
+            } catch (IOException) {
+                // A socket error while reading the frame: the connection is unusable;
+                // report it as a disconnect rather than crashing the host's idle loop.
+                return -1;
+            }
         }
+
+        // See PollThenReadOperation for the -2/-1/opcode semantics and the
+        // reason a wedged AutoCAD-style listener needs the FIN disambiguation.
+        public int TryReadOperation() =>
+            PollThenReadOperation(minWaitTime);
+
+        /*
+         * Template-method hooks around the batch loop. Host plugins that must scope a
+         * batch in application state (a document lock + transaction in AutoCAD, a
+         * Transaction in Revit) override THESE instead of copying the loop — the two
+         * historical copies each missed later loop fixes (Revit's `new`-hidden copy
+         * kept a mid-frame ReadTimeout the base had retired; AutoCAD's drifted on the
+         * batch-cap comparison).
+         *
+         * The hooks run on whichever thread runs the loop — the Idle-driven UI thread
+         * in AutoCAD/Rhino, the ExternalEvent API thread in Revit — which is exactly
+         * where host transaction scopes must live. BeginBatch returning false means
+         * "the host cannot run a batch right now" (e.g. no open document) and is
+         * reported as a disconnect, matching the historical AutoCAD behavior.
+         * EndBatch runs in a finally, so host state is unwound even when an operation
+         * or the transport throws mid-batch.
+         */
+        protected virtual bool BeginBatch() { return true; }
+        protected virtual void BeforeOperation() { }
+        protected virtual void EndBatch() { }
 
         // Batching: after executing one operation, keep executing subsequent ones
         // without returning control to the host application's message loop, so a burst
@@ -138,38 +174,40 @@ namespace KhepriBase {
         // spinning and the entire burst drains inside one idle tick. Only when the client
         // genuinely goes quiet (poll times out) do we leave the batch.
         public virtual bool ExecuteReadAndRepeat(int op) {
+            if (op == -1) return false;
+            if (!BeginBatch()) return false;
             int count = 0;
-            while (true) {
-                if (op == -1) {
-                    return false;
+            try {
+                while (true) {
+                    if (op == -1) {
+                        return false;
+                    }
+                    BeforeOperation();
+                    Execute(op);
+                    count++;
+                    // Exact cap (>=, not >) and break (not return false): hitting the batch
+                    // cap means "yield to the host idle loop, keep the connection", which the
+                    // caller must not confuse with a real disconnect (op == -1).
+                    if (count >= MaxRepeated) {
+                        break;
+                    }
+                    // -2: the burst is over (poll window elapsed) — yield to the host
+                    // loop, keep the connection. -1: peer closed or the socket died.
+                    op = PollThenReadOperation(maxWaitTime);
+                    if (op == -2) {
+                        break;
+                    }
                 }
-                Execute(op);
-                count++;
-                // Exact cap (>=, not >) and break (not return false): hitting the batch
-                // cap means "yield to the host idle loop, keep the connection", which the
-                // caller must not confuse with a real disconnect (op == -1).
-                if (count >= MaxRepeated) {
-                    break;
-                }
-                // Wait briefly for the next op rather than only checking for one already
-                // buffered. Poll=false => the window elapsed with nothing: the burst is
-                // over, yield to the host loop.
-                if (!channel.PollRead(maxWaitTime * 1000)) {
-                    break;
-                }
-                // Poll=true but zero bytes => the peer closed the socket (FIN), same
-                // disambiguation as TryReadOperation. Signal disconnect, don't read.
-                if (!channel.DataAvailable) {
-                    return false;
-                }
-                op = ReadOperation();
+                return true;
+            } finally {
+                EndBatch();
             }
-            return true;
         }
 
         public virtual bool ReadAndExecuteAndRepeat() {
-            //We can safely wait forever
-            channel.SetReadTimeout(-1);
+            // Between frames we wait via Socket.Poll; the frame reads themselves are
+            // meant to block, so make sure no finite stream timeout is left armed.
+            channel.EnsureBlockingReads();
             return ExecuteReadAndRepeat(ReadOperation());
         }
     }

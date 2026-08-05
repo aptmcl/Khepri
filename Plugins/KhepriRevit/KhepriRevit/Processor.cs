@@ -16,57 +16,31 @@ namespace KhepriRevit {
             this.uiApp = uiApp;
         }
 
-        public new bool ExecuteReadAndRepeat(int op) {
-            primitives.EnsureTransaction(uiApp);
-            try {
-                while (true) {
-                    if (op == -1) {
-                        return false;
-                    }
-                    // Detect document switch (user opened/created a new project)
-                    primitives.EnsureTransaction(uiApp);
-                    Execute(op);
-                    channel.SetReadTimeout(20);
-                    try {
-                        op = ReadOperation();
-                    } catch (IOException) {
-                        break;
-                    } finally {
-                        channel.SetReadTimeout(-1);
-                    }
-                }
-                primitives.CommitAndDisposeTransaction();
-                return true;
-            } finally {
-                primitives.CommitAndDisposeTransaction();
-            }
-        }
         /*
-        public bool ExecuteOperation(int op) {
-            using (Transaction t = new Transaction(doc, "Execute")) {
-                primitives.CurrentTransaction = t;
-                t.Start();
-                WarningSwallower.KhepriWarnings(t);
-                while (true) {
-                    if (op == -1) {
-                        t.Commit();
-                        return false;
-                    }
-                    operations[op](this, primitives);
-                    flush();
-                    stream.ReadTimeout = 20;
-                    try {
-                        op = ReadOperation();
-                    } catch (IOException) {
-                        break;
-                    } finally {
-                        stream.ReadTimeout = -1;
-                    }
-                }
-                t.Commit();
-                return true;
-            }
+         * The batch loop itself is the base class's — this used to be a `new`-hidden
+         * copy, which meant every base-loop fix since 2026-03 (poll batching, FIN
+         * disambiguation, the retirement of mid-frame ReadTimeout) was dead code for
+         * Revit, and its own SetReadTimeout(20) around ReadOperation could time out
+         * INSIDE a frame, desyncing the wire protocol. Now Revit only scopes the
+         * batch in a Transaction via the hooks. They run on the thread that runs the
+         * loop — the ExternalEvent API thread (see PlugIn.cs ClientHandler.Execute) —
+         * which is where Revit transactions must live. The interactive contract is
+         * unchanged: waiting happens in the base's Socket.Poll between frames, never
+         * inside one.
+         */
+        protected override bool BeginBatch() {
+            primitives.EnsureTransaction(uiApp);
+            return true;
         }
-        */
+
+        // Per-op re-check detects a document switch (user opened/created a new
+        // project mid-batch); EnsureTransaction is idempotent on the same document.
+        protected override void BeforeOperation() {
+            primitives.EnsureTransaction(uiApp);
+        }
+
+        protected override void EndBatch() {
+            primitives.CommitAndDisposeTransaction();
+        }
     }
 }

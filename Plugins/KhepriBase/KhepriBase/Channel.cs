@@ -59,7 +59,21 @@ namespace KhepriBase {
 
 
         public void Flush() => w.Flush();
-        public void SetReadTimeout(int t) => stream.ReadTimeout = t;
+        /*
+         * There is deliberately NO way to arm a finite NetworkStream.ReadTimeout.
+         * Khepri is interactive: hosts wait for work by POLLING (PollRead below,
+         * Socket.Poll — consumes no bytes, so a timeout can only happen BETWEEN
+         * frames) and then read each length-prefixed frame to completion with
+         * blocking reads. A finite stream timeout can fire mid-frame, and
+         * BinaryReader then discards the partially-read bytes: the next read
+         * starts inside the old frame and the protocol desyncs (garbage length,
+         * misaligned request/response pairing — on Mono it corrupts stream state
+         * outright). KhepriRevit's old loop copy did exactly this with a 20 ms
+         * ReadTimeout; the SetReadTimeout(int) that made it possible is gone.
+         * This method only RESTORES the blocking default, e.g. after a host or
+         * library left something else armed.
+         */
+        public void EnsureBlockingReads() => stream.ReadTimeout = System.Threading.Timeout.Infinite;
         public bool DataAvailable => stream.DataAvailable;
         // Poll for readable data without touching the stream state.
         // microSeconds: max wait time; returns true if data (or EOF) is ready to read.
