@@ -49,6 +49,18 @@ the project's central design constraint, not a convenience layer added later.
 
 ## Installation
 
+### Cloning on Windows
+
+Some paths in this repository exceed Windows' historical 260-character
+limit. Enable long-path support in Git before cloning:
+
+```
+git config --global core.longpaths true
+```
+
+Without it, `git clone` aborts mid-checkout with `Filename too long`
+errors.
+
 Five packages are in the General registry:
 
 ```julia

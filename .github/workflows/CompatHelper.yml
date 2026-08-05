@@ -42,6 +42,11 @@ jobs:
   CompatHelper:
     runs-on: ubuntu-latest
     steps:
+      # Checkout exists so the package list can be DERIVED from
+      # Julia/*/Project.toml — the old hardcoded 15-name list silently
+      # omitted Frame4DD, KhepriSVG, and KhepriThebes.
+      - uses: actions/checkout@v4
+
       - uses: julia-actions/setup-julia@v3
         with:
           version: '1'
@@ -59,10 +64,8 @@ jobs:
           COMPATHELPER_PRIV: ${{ secrets.DOCUMENTER_KEY }}
         run: |
           import CompatHelper
-          pkgs = ["Khepri", "KhepriAutoCAD", "KhepriBase", "KhepriBlender",
-                  "KhepriFrame4DD", "KhepriGrasshopper", "KhepriIllustrator",
-                  "KhepriLibrary", "KhepriPOVRay", "KhepriRevit", "KhepriRhino",
-                  "KhepriThreejs", "KhepriTikZ", "KhepriUnity", "KhepriUnreal"]
+          pkgs = sort!(filter(p -> isfile(joinpath("Julia", p, "Project.toml")),
+                              readdir("Julia")))
           CompatHelper.main(; subdirs = ["Julia/$p" for p in pkgs])
 
       - name: Run CompatHelper on the docs environments
@@ -72,10 +75,11 @@ jobs:
           COMPATHELPER_PRIV: ${{ secrets.DOCUMENTER_KEY }}
         run: |
           import CompatHelper
-          pkgs = ["Khepri", "KhepriAutoCAD", "KhepriBase", "KhepriBlender",
-                  "KhepriFrame4DD", "KhepriGrasshopper", "KhepriIllustrator",
-                  "KhepriLibrary", "KhepriPOVRay", "KhepriRevit", "KhepriRhino",
-                  "KhepriThreejs", "KhepriTikZ", "KhepriUnity", "KhepriUnreal"]
+          # Filtered on docs/Project.toml presence so a package without a
+          # docs environment (KhepriSVG) cannot abort the run — CompatHelper
+          # parses each subdir's Project.toml without an existence check.
+          pkgs = sort!(filter(p -> isfile(joinpath("Julia", p, "docs", "Project.toml")),
+                              readdir("Julia")))
           for p in pkgs
             CompatHelper.main(; subdirs = ["Julia/$p/docs"], pr_title_prefix = "[$p docs] ")
           end

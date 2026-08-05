@@ -9,7 +9,7 @@ makedocs(;
     sitename="KhepriThreejs.jl",
     format=Documenter.HTML(;
         canonical="https://aptmcl.github.io/Khepri/KhepriThreejs/stable",
-        edit_link="master",
+        edit_link="main",
         assets=String[],
     ),
     pages=[
