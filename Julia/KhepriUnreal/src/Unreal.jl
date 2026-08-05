@@ -588,24 +588,43 @@ KhepriBase.b_zoom_extents(b::UE) =
 KhepriBase.b_set_view_size(b::UE, width, height) =
   @remote(b, Primitive__ViewSize(width, height))
 
+#=
+TakeHighResScreenShot only QUEUES a capture: the shot is taken on a later
+viewport draw and streamed to disk by UE's image-write queue, and UE
+captures twice per request, truncating and rewriting the file in between.
+Waiting for mere file EXISTENCE therefore sampled mid-write — the
+2026-08-05 mint session read 0-byte "captures" for 37 of 48 scenes, with
+the survivors pure timing luck. A PNG is complete exactly when it ends
+with the IEND chunk (4-byte length + "IEND" + CRC = last 12 bytes), so
+wait for that, then require completeness to SURVIVE a re-check interval —
+the second capture's truncation window — before trusting the file.
+=#
+_complete_png(p) =
+  isfile(p) && filesize(p) > 12 &&
+    open(p) do io
+      seekend(io)
+      seek(io, position(io) - 8)
+      read(io, 4) == b"IEND"
+    end
+
 KhepriBase.b_render_and_save_view(b::UE, path::String) =
   let dir = dirname(path),
       name = first(splitext(basename(path))),
       png_path = endswith(path, ".png") ? path : path * ".png"
+    # Never let a previous capture (or a stale partial) pass for this one.
+    isfile(png_path) && rm(png_path; force=true)
     @remote(b, Primitive__RenderView(render_width(), render_height(), name, dir, 0))
-    # TakeHighResScreenShot is async — wait for the file to appear on disk.
-    # During sleep, UE's game thread is free to tick and render the viewport.
-    for _ in 1:100
-      sleep(0.1)
-      if isfile(png_path)
-        # UE captures screenshots twice per request. Wait for the second
-        # capture to finish before returning, so the next test's screenshot
-        # request doesn't race with this one's second capture.
-        sleep(0.5)
-        return png_path
+    let deadline = time() + 30
+      while time() < deadline
+        if _complete_png(png_path)
+          sleep(0.6)
+          _complete_png(png_path) && return png_path
+        else
+          sleep(0.1)
+        end
       end
     end
-    @warn "RenderView: screenshot did not appear within timeout" png_path
+    @warn "RenderView: complete screenshot did not appear within timeout" png_path
     png_path
   end
 

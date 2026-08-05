@@ -1,0 +1,15 @@
+backend = "Rhino"
+compare = "pixel_diff_compare"
+created = "2026-08-05T12:54:56.886Z"
+golden = "prisms.png"
+height = 1080
+julia = "1.12.6"
+khepribase = "0.8.1"
+name = "prisms"
+schema = 1
+width = 1920
+
+[validation]
+detail = "sidecar backfilled for a pre-provenance golden; never validated"
+method = "legacy-backfill"
+passed = false

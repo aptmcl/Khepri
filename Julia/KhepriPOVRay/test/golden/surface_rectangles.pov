@@ -24,19 +24,15 @@ vrotate(<0,0,1000000000>,<-Al,Az,0>)
 #include "transforms.inc"
 triangle {
   <0, 0, 0>, <5, 0, 0>, <5, 0, 3>
-  -1
 }
 triangle {
   <0, 0, 0>, <5, 0, 3>, <0, 0, 3>
-  -1
 }
 triangle {
   <6, 0, 0>, <8, 0, 0>, <8, 0, 4>
-  -1
 }
 triangle {
   <6, 0, 0>, <8, 0, 4>, <6, 0, 4>
-  -1
 }
 plane {<0.0,0.0,1000.0>, -10000 texture { pigment { color rgb <0,0,0> }}}
 camera {

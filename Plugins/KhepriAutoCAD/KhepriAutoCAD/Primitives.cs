@@ -62,6 +62,9 @@ namespace KhepriAutoCAD {
     public class Primitives : KhepriBase.Primitives {
         [DllImport("user32.dll", SetLastError = true)]
         static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern bool GetWindowRect(IntPtr hWnd, out WindowRect rect);
+        struct WindowRect { public int Left, Top, Right, Bottom; }
         const uint SWP_NOMOVE = 0x0002;
         const uint SWP_NOZORDER = 0x0004;
 
@@ -189,8 +192,27 @@ namespace KhepriAutoCAD {
                 return doc.Editor.GetCurrentView().LensLength;
         }
         public void ViewSize(int width, int height) {
-            SetWindowPos(Autodesk.AutoCAD.ApplicationServices.Application.MainWindow.Handle,
-                         IntPtr.Zero, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER);
+            // Size the DRAWING AREA to width x height, not the outer window:
+            // SaveView snapshots the viewport at its actual pixel size
+            // (SCREENSIZE), so sizing the outer window made every capture
+            // smaller than requested by the window chrome (~12 x 104 px with
+            // CLEANSCREEN on) and the visual harness refused every mint.
+            // Self-measure the chrome as (outer window) - (current viewport)
+            // and compensate; robust to theme/DPI/ribbon state. Note the
+            // requested size plus chrome must still fit on the screen —
+            // Windows clamps oversized windows, so a full-screen-sized
+            // viewport is impossible on a same-sized display.
+            IntPtr hwnd = Autodesk.AutoCAD.ApplicationServices.Application.MainWindow.Handle;
+            int dx = 0, dy = 0;
+            WindowRect r;
+            if (GetWindowRect(hwnd, out r)) {
+                Point2d viewport = (Point2d)Application.GetSystemVariable("SCREENSIZE");
+                dx = (r.Right - r.Left) - (int)viewport.X;
+                dy = (r.Bottom - r.Top) - (int)viewport.Y;
+                if (dx < 0) dx = 0;
+                if (dy < 0) dy = 0;
+            }
+            SetWindowPos(hwnd, IntPtr.Zero, 0, 0, width + dx, height + dy, SWP_NOMOVE | SWP_NOZORDER);
         }
         GeoLocationData FindOrCreateGeoLocationData(ObjectId msId, Transaction tr, Database db) {
             try {

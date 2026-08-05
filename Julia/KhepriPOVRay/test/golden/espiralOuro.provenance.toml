@@ -1,0 +1,16 @@
+backend = "POVRay"
+backend_version = "0.3.0"
+compare = "text_compare"
+created = "2026-08-05T12:57:16.982Z"
+golden = "espiralOuro.pov"
+height = 1080
+julia = "1.12.6"
+khepribase = "0.8.1"
+name = "espiralOuro"
+schema = 1
+width = 1920
+
+[validation]
+detail = "built-in artifact sanity only; no scene oracle applied"
+method = "sanity:nonempty"
+passed = true

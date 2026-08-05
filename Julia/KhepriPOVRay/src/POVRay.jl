@@ -62,7 +62,15 @@ write_povray_object(f::Function, io::IO, type, material, args...; flags=String[]
     for flag in flags
       write(io, "  ", flag, "\n")
     end
-    if ! isnothing(material)
+    #=
+    A void material ref (-1, the default-material sentinel) must not be
+    written: a bare `-1` inside an object body is silently folded into the
+    preceding numeric slot by POV-Ray's expression parser (e.g. a radius
+    0.01 becomes 0.01-1 = -0.99) — no error, wrong geometry. This shipped
+    in every mesh/polygon golden for months (sierpinski.pov carried 1364
+    such lines) because text_compare never runs POV-Ray.
+    =#
+    if !isnothing(material) && !(material isa Integer && material < 0)
       write_povray_material(io, material)
     end
     let res = f()
@@ -106,8 +114,16 @@ write_povray_call(io::IO, name::String, values...) =
   end
 
 
+#=
+The guard lives HERE, not at call sites: a void material ref (-1, the
+default-material sentinel) written into an object body is a bare `-1` that
+POV-Ray's expression parser silently folds into the preceding numeric slot
+(a radius 0.01 becomes 0.01-1 = -0.99) — no parse error, wrong geometry.
+This shipped in every mesh/polygon golden for months (sierpinski.pov
+carried 1364 such lines) because text_compare never runs POV-Ray.
+=#
 write_povray_material(io::IO, material) =
-  begin
+  if !isnothing(material) && !(material isa Integer && material < 0)
     write(io, "  ")
     write_povray_value(io, material)
     write(io, '\n')
@@ -463,6 +479,69 @@ KhepriBase.b_mirror_material(b::POVRay, name, color) =
   povray_material(name,
     red=Float64(red(color)), green=Float64(green(color)), blue=Float64(blue(color)),
     specularity=1.0)
+
+#=
+b_line is the ground floor of every KhepriBase 2D default — circles, arcs,
+splines, and the vector-font text all sample into polylines that bottom out
+at the b_line @bdef — so without it the entire :primitives_2d corpus
+category (and every 3D scene that realizes an input curve) aborted as
+unimplemented. POV-Ray has no zero-width stroke primitive; a line renders as
+a thin sphere_sweep tube. The radius is a Parameter because "thin" depends
+on scene scale; the default suits the corpus scenes' unit range.
+=#
+"""
+    povray_line_radius
+
+The tube radius (POV-Ray model units) used to render zero-width curves —
+lines, circles, arcs, splines, vector-font text — as thin `sphere_sweep`
+tubes, since POV-Ray has no stroke primitive. Tune per scene scale:
+
+    povray_line_radius(0.05)
+"""
+const povray_line_radius = Parameter(0.01)
+public povray_line_radius
+
+KhepriBase.b_line(b::POVRay, ps, mat) =
+  let io = connection(b),
+      r = povray_line_radius(),
+      # POV-Ray rejects consecutive duplicate control points in a sphere_sweep.
+      pts = let acc = similar(ps, 0)
+        for p in ps
+          (isempty(acc) || distance(acc[end], p) > 1e-12) && push!(acc, p)
+        end
+        acc
+      end
+    #=
+    The default curve material resolves to void_ref(b) == -1, not a texture.
+    Writing it would put a bare `-1` inside the object body, and POV-Ray's
+    expression parser silently folds it into the preceding radius
+    (`0.01 -1` parses as -0.99): no error, giant end-blobs instead of
+    hairlines. Same convention as export_to_povray, which filters void refs
+    out of the materials section.
+    =#
+    texture = mat == void_ref(b) ? nothing : mat
+    if isempty(pts)
+      -1
+    elseif length(pts) == 1
+      # A degenerate (single-point) line still marks its location.
+      write_povray_object(io, "sphere", texture, pts[1], r)
+    else
+      # Hand-written rather than write_povray_object: sphere_sweep's grammar
+      # is `linear_spline N, <p>, r, <p>, r ...` — the spline keyword takes
+      # no separating comma, which the generic arg writer would insert.
+      write(io, "sphere_sweep {\n  linear_spline\n  ", string(length(pts)))
+      for p in pts
+        write(io, ",\n  ")
+        show(io, MIMEPOVRay(), p)
+        write(io, ", ")
+        show(io, MIMEPOVRay(), r)
+      end
+      write(io, "\n")
+      isnothing(texture) || write_povray_material(io, texture)
+      write(io, "}\n")
+      -1
+    end
+  end
 
 #
 KhepriBase.b_trig(b::POVRay, p1, p2, p3, mat) =

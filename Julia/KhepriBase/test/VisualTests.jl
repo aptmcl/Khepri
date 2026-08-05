@@ -31,6 +31,24 @@ module VisualTests
 using KhepriBase
 using Test
 export run_visual_tests, text_compare, pixel_diff_compare, backfill_provenance
+export HEAVY_TESSELLATION_SCENES, OVERSIZED_GOLDEN_SCENES
+
+#=
+Scenes several backends must skip for the same physical reason, named once so
+the per-backend skip lists stop restating (and drifting on) the rationale:
+
+- HEAVY_TESSELLATION_SCENES: dense tube/rail tessellations whose text-format
+  output explodes — TikZ exceeds TeX capacity, and Thebes/POVRay goldens mint
+  in the 130-350 MB range, beyond GitHub's 100 MB blob rejection.
+- OVERSIZED_GOLDEN_SCENES: deterministic and correct, but the golden file is
+  too large to commit (GitHub hard-rejects blobs over 100 MB; 50 MB warns).
+  Skipped until goldens can be compared by digest instead of full text.
+
+When digest-based comparison lands, one edit here re-enables them everywhere.
+=#
+const HEAVY_TESSELLATION_SCENES = ["abrigoEsfericoTubos", "corrimaoCaracol"]
+const OVERSIZED_GOLDEN_SCENES = vcat(HEAVY_TESSELLATION_SCENES,
+                                     ["arvores3D", "cidadeEspacial"])
 
 #=
 This module runs inside each backend's test process, whose Project.toml test
@@ -1448,6 +1466,17 @@ load_pngfiles() =
           "[extras] section and to its test target in Project.toml.")
   end
 
+#=
+Every call into the lazily-required module MUST go through invokelatest:
+run_visual_tests' whole scene loop executes in ONE function invocation, whose
+world age predates the Base.require above, so a direct PNGFiles.load errors
+with "method too new to be called from this world context" — for EVERY scene
+of the run, refusing every mint (that is how AutoCAD's first live regold
+failed 77/77 with perfectly good captures on disk).
+=#
+png_load(PNGFiles, x) = Base.invokelatest(PNGFiles.load, x)
+png_save(PNGFiles, path, img) = Base.invokelatest(PNGFiles.save, path, img)
+
 # Largest per-channel difference between two pixels, in [0, 1] units.
 # Convert to RGBA{Float64} first: PNG pixels come back as N0f8/N0f16
 # fixed-point colorants, whose subtraction would wrap around at 0.
@@ -1493,8 +1522,8 @@ function pixel_diff_compare(test_path, golden_path; threshold=0.01, atol=0.02, e
   golden_bytes = read(golden_path)
   test_bytes == golden_bytes && return true
   PNGFiles = load_pngfiles()
-  test_img = PNGFiles.load(test_path)
-  golden_img = PNGFiles.load(golden_path)
+  test_img = png_load(PNGFiles, test_path)
+  golden_img = png_load(PNGFiles, golden_path)
   if size(test_img) != size(golden_img)
     # No per-pixel diff exists for mismatched dimensions, so none is emitted.
     @warn "pixel_diff_compare: image dimensions differ" test_path golden_path size(test_img) size(golden_img)
@@ -1517,8 +1546,8 @@ function pixel_diff_compare(test_path, golden_path; threshold=0.01, atol=0.02, e
           # so the scale is finite.
           let diff_path = splitext(test_path)[1] * "_diff.png",
               scale = 1.0 / max_delta
-            PNGFiles.save(diff_path,
-                          scaled_pixel_diff.(test_img, golden_img, scale))
+            png_save(PNGFiles, diff_path,
+                     scaled_pixel_diff.(test_img, golden_img, scale))
             @warn "pixel_diff_compare: images differ beyond tolerance" test_path golden_path n ndiff frac threshold max_delta atol diff_path
           end
         else
@@ -1683,7 +1712,7 @@ function mint_golden!(name, category, test_path, golden_path;
             # Decode from bytes: PNGFiles.load(path) holds the file handle
             # open when it throws mid-decode, which on Windows blocks the
             # later deletion of the test output directory.
-            size(PNGFiles.load(IOBuffer(read(test_path))))
+            size(png_load(PNGFiles, IOBuffer(read(test_path))))
           catch e
             # An undecodable PNG must refuse like any other sanity failure,
             # not escape as a testset ERROR.

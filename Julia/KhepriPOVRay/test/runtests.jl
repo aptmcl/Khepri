@@ -4,18 +4,11 @@ using KhepriPOVRay
 using KhepriBase
 using Test
 
-# Helper to get the output from the backend's IOBuffer
-function get_povray_output(b)
-  io = KhepriBase.connection(b)
-  String(take!(io))
-end
+include(joinpath(pkgdir(KhepriBase), "test", "BackendTestScaffolding.jl"))
+using .BackendTestScaffolding
 
-# Helper to clear the backend's buffer
-function clear_povray_buffer!(b)
-  io = KhepriBase.connection(b)
-  take!(io)
-  nothing
-end
+get_povray_output(b) = io_output(b)
+clear_povray_buffer!(b) = clear_io!(b)
 
 @testset "KhepriPOVRay.jl" begin
 
@@ -166,8 +159,32 @@ end
 end
 
 # ── Visual regression tests ──────────────────────────────────────────
-include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
-using .VisualTests
+
+#=
+POV-Ray's remaining gaps are EXPLICIT skips with named unblock conditions,
+not @test_broken: a broken-forever test asserts nothing and can never flip.
+Verified 2026-08-05 by stub-probing the three missing hooks — these lists
+are the complete gap.
+
+CSG: objects are streamed to the buffer as SDL text and refs are bare -1
+(see the has_boolean_ops comment in src/POVRay.jl), so nothing remains to
+wrap in a native difference{}/intersection{} block. Unblock condition: a
+ref-model refactor (#declare obj_N per object, refs as identifiers, final
+assembly at save time) — it would flip all 15 scenes and requires a
+reviewed regold of every golden, since it rewrites the text of every
+emitted object.
+=#
+unimplemented_subtract_ref = [
+  "csg_subtraction", "banheira", "abobadasRomanas", "cascasPerfuradas",
+  "coberturaTubos", "coberturaTubos2", "coberturaTubos3",
+  # These five arrive via slice(), whose default b_slice_ref subtracts a
+  # half-space prism through b_subtract_ref.
+  "tetraedroEvol", "duploTetraedro", "octahedro", "octaedroEstrelado",
+  "calotaEsferica",
+]
+unimplemented_intersect_ref = [
+  "csg_intersection", "cilindrosUniaoInterseccao", "csg_compound",
+]
 
 # The enclosing testset matters: without it the first failing scene's
 # testset finish throws, aborting every later scene and suppressing the
@@ -175,26 +192,17 @@ using .VisualTests
 @testset "Visual Regression (POVRay)" begin
   run_visual_tests(povray,
     golden_dir = joinpath(@__DIR__, "golden"),
-    reset! = () -> begin delete_all_shapes(); backend(povray) end,
+    reset! = () -> begin clear_io!(povray); delete_all_shapes(); backend(povray) end,
     compare = text_compare,
-    # The goldens of these two scenes were 23 MB and 9.5 MB of unreviewable
-    # tessellation output and were evicted (TestingStrategy.md §8 step 0).
-    # Without this skip the next run would silently re-mint them; they return
-    # once Tier-1 parse-and-measure validation can vouch for artifacts of that
-    # size (TikZ already skips both names for TeX capacity reasons).
-    skip_tests = ["abrigoEsfericoTubos", "corrimaoCaracol"],
+    backend_module = KhepriPOVRay,
+    # HEAVY_TESSELLATION_SCENES: these two minted 23 MB and 9.5 MB of
+    # unreviewable tessellation output and were evicted (TestingStrategy.md
+    # §8 step 0); they return once parse-and-measure validation can vouch
+    # for artifacts of that size.
+    skip_tests = vcat(unimplemented_subtract_ref,
+                      unimplemented_intersect_ref,
+                      HEAVY_TESSELLATION_SCENES),
   )
 end
 
-
-# Guard against silently-dead b_* methods: every hook method this backend
-# defines must have a positional arity KhepriBase actually dispatches -- see
-# BackendHookConformanceTests.jl's header for the shipped bugs that motivated
-# this (4-arg table/chair trio, 7-arg Blender spotlight, 9-slot Measure sky).
-@testset "Hook arity conformance" begin
-  using KhepriBase
-  include(joinpath(dirname(pathof(KhepriBase)), "..", "test",
-                   "BackendHookConformanceTests.jl"))
-  using .BackendHookConformanceTests
-  run_hook_conformance(KhepriPOVRay)
-end
+hook_arity_guard(KhepriPOVRay)

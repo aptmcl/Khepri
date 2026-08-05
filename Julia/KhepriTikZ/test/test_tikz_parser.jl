@@ -7,9 +7,10 @@
 #   (d) anchor tests pinning expectation literals to hand-derived constants
 #       (the oracle-of-the-oracle, as in KhepriBase/test/Oracles.jl)
 #
-# Requires (from runtests.jl): using KhepriTikZ/KhepriBase/Test, the
-# VisualTests module, TikZOracle.jl (validate_tikz_golden, compare_measures,
-# SceneExpectations), and the get_tikz_output/clear_tikz_buffer! helpers.
+# Requires (from runtests.jl): using KhepriTikZ/KhepriBase/Test,
+# BackendTestScaffolding (VisualTests names, io_output/clear_io! helpers),
+# and TikZOracle.jl (validate_tikz_golden, compare_measures,
+# SceneExpectations).
 
 # Wrap a statement body in the exact document frame gen_tex_document emits,
 # so literal-dialect tests parse complete artifacts.
@@ -174,9 +175,9 @@ approx3(a, b; atol=1e-9) = all(abs(x - y) <= atol for (x, y) in zip(a, b))
 
   @testset "emitter round-trip (headless IOBuffer backend)" begin
     rt(emit!) = begin
-      clear_tikz_buffer!(tikz)
+      clear_io!(tikz)
       emit!()
-      parse_snippet(chomp(get_tikz_output(tikz)))
+      parse_snippet(chomp(io_output(tikz)))
     end
     let c = scene_circles(rt(() -> KhepriBase.b_circle(tikz, xy(2, 3), 4.5, nothing)))[1]
       @test approx3(c.center, (2, 3, 0), atol=1e-3) && isapprox(c.r, 4.5, atol=1e-3)
@@ -283,11 +284,11 @@ approx3(a, b; atol=1e-9) = all(abs(x - y) <= atol for (x, y) in zip(a, b))
   @testset "Tier-1 fresh artifact validation" begin
     rendering_with(dir=mktempdir(), width=1920, height=1080) do
       setup_raw_view(tikz)
-      for (name, category, test_fn) in VisualTests.VISUAL_TESTS
+      for (name, category, test_fn) in BackendTestScaffolding.VisualTests.VISUAL_TESTS
         SceneExpectations.tikz_parseable(name) || continue
         @testset "$name" begin
           delete_all_shapes()
-          clear_tikz_buffer!(tikz)
+          clear_io!(tikz)
           backend(tikz)
           let path = test_fn(),
               result = validate_tikz_golden(name, category, path)

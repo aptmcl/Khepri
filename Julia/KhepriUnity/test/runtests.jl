@@ -9,14 +9,12 @@ using KhepriBase
 using KhepriBase: SocketBackend
 using Test
 
+include(joinpath(pkgdir(KhepriBase), "test", "BackendTestScaffolding.jl"))
+using .BackendTestScaffolding
+
 @testset "KhepriUnity.jl" begin
 
   @testset "RPC Conformance (static)" begin
-    # Every @remote/@get_remote RPC the adapter calls must be declared in its
-    # @remote_api block. Catches the undeclared-RPC crash class at CI, with no
-    # live CAD connection (reads getfield(unity, :remote) + parses source).
-    include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "RPCConformanceTests.jl"))
-    using .RPCConformanceTests
     run_rpc_conformance_tests(unity, joinpath(dirname(pathof(KhepriUnity))))
   end
 
@@ -301,14 +299,9 @@ using Test
   test-level skip via `KHEPRI_STRESS_SKIP=extrusion` if that category is the
   blocker for your run.
   =#
-  if get(ENV, "KHEPRI_UNITY_STRESS_TESTS", "0") == "1"
-    if !Sys.iswindows()
-      error("Unity stress tests require Windows (Unity.exe path hard-coded).")
-    end
+  if gate_enabled("KHEPRI_UNITY_STRESS_TESTS")
+    require_windows("Unity stress")
     @testset "Stress (Unity)" begin
-      include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "BackendStressTests.jl"))
-      using .BackendStressTests
-
       # Unity 6000.4.0f1 is required: the project's Packages/manifest.json
       # references com.unity.test-framework@1.6.0 and several modules that
       # only exist in Unity 6.x; older editors exit with "Project has invalid
@@ -338,66 +331,33 @@ using Test
       # interactive UI dialogs are suppressed. `-nographics` is omitted because
       # Khepri's primitives need a working GfxDevice to instantiate Mesh objects.
       @info "Launching Unity with auto-runner..." unity_exe project_path log_file
-      unity_proc = run(pipeline(`$unity_exe
-                                -batchmode
-                                -projectPath $project_path
-                                -executeMethod KhepriAutoRunner.AutoStartListener
-                                -logFile $log_file`,
-                                stdout=devnull, stderr=devnull),
-                       wait=false)
+      launch_detached(`$unity_exe
+                      -batchmode
+                      -projectPath $project_path
+                      -executeMethod KhepriAutoRunner.AutoStartListener
+                      -logFile $log_file`)
 
       try
         # Wait up to 15 minutes for Unity to enter Play mode and dial in.
         # Unity's first-time project load + asset import + Play mode entry can
         # take 10+ minutes on a cold cache (script compilation + library
-        # rebuild). Subsequent launches are 30–60 s. Override with
-        # KHEPRI_UNITY_BOOT_TIMEOUT (seconds).
-        connected_b = nothing
-        let deadline = time() + parse(Float64, get(ENV, "KHEPRI_UNITY_BOOT_TIMEOUT", "900"))
-          while time() < deadline
-            let bs = KhepriBase.current_backends()
-              if !isempty(bs)
-                connected_b = first(bs)
-                break
-              end
-            end
-            sleep(0.5)
-          end
+        # rebuild); subsequent launches are 30–60 s.
+        let connected_b = wait_for_connected_backend(
+              timeout=900.0, timeout_env="KHEPRI_UNITY_BOOT_TIMEOUT",
+              hint="Check $log_file for editor startup failures.")
+          run_stress_tests(connected_b,
+            reset! = () -> begin
+              delete_all_shapes()
+              backend(connected_b)
+            end,
+            verify = :envelope,
+            skip = stress_skip_from_env())
         end
-        connected_b === nothing &&
-          error("Unity never connected to Khepri socket server within timeout. " *
-                "Check $log_file for editor startup failures.")
-
-        skip_cats = let s = get(ENV, "KHEPRI_STRESS_SKIP", "")
-          isempty(s) ? Symbol[] : Symbol.(strip.(split(s, ',')))
-        end
-
-        run_stress_tests(connected_b,
-          reset! = () -> begin
-            delete_all_shapes()
-            backend(connected_b)
-          end,
-          verify = :envelope,
-          skip = skip_cats)
       finally
-        try
-          run(`taskkill /F /IM Unity.exe`, wait=false)
-        catch
-        end
+        kill_by_image("Unity.exe")
       end
     end
   end
 end
 
-
-# Guard against silently-dead b_* methods: every hook method this backend
-# defines must have a positional arity KhepriBase actually dispatches -- see
-# BackendHookConformanceTests.jl's header for the shipped bugs that motivated
-# this (4-arg table/chair trio, 7-arg Blender spotlight, 9-slot Measure sky).
-@testset "Hook arity conformance" begin
-  using KhepriBase
-  include(joinpath(dirname(pathof(KhepriBase)), "..", "test",
-                   "BackendHookConformanceTests.jl"))
-  using .BackendHookConformanceTests
-  run_hook_conformance(KhepriUnity)
-end
+hook_arity_guard(KhepriUnity)

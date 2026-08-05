@@ -260,19 +260,10 @@ function run_stress_tests(b::Backend;
   end
 end
 
-# Stub categories — implemented in dedicated files included below.
-stress_curves(b, reset!, verify)       = error("stress_curves not loaded")
-stress_surfaces(b, reset!, verify)     = error("stress_surfaces not loaded")
-stress_solids(b, reset!, verify)       = error("stress_solids not loaded")
-stress_extrusion(b, reset!, verify)    = error("stress_extrusion not loaded")
-stress_sweep(b, reset!, verify)        = error("stress_sweep not loaded")
-stress_revolve(b, reset!, verify)      = error("stress_revolve not loaded")
-stress_loft(b, reset!, verify)         = error("stress_loft not loaded")
-stress_csg(b, reset!, verify)          = error("stress_csg not loaded")
-stress_transforms(b, reset!, verify)   = error("stress_transforms not loaded")
-stress_pathological(b, reset!, verify) = error("stress_pathological not loaded")
-stress_exercises(b, reset!, verify)    = error("stress_exercises not loaded")
-
+# Category implementations. No forward stubs: the includes below define each
+# stress_* before run_stress_tests can call it, and stubs would only be
+# overwritten immediately — 11 method-overwrite warnings in every suite that
+# loads this module (which, via BackendTestScaffolding, is all of them).
 include("stress/curves.jl")
 include("stress/surfaces.jl")
 include("stress/solids.jl")

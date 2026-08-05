@@ -5,6 +5,9 @@ using KhepriBase
 using Thebes: Point3D
 using Test
 
+include(joinpath(pkgdir(KhepriBase), "test", "BackendTestScaffolding.jl"))
+using .BackendTestScaffolding
+
 @testset "KhepriThebes.jl" begin
 
   @testset "Backend initialization" begin
@@ -250,20 +253,8 @@ using Test
 
   # Visual regression tests
   @testset "Visual Regression (Thebes)" begin
-    include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
-    using .VisualTests
-
-    # Deterministic, but their SVG goldens are too large to commit: arvores3D
-    # mints at 348 MB and abrigoEsfericoTubos/corrimaoCaracol at ~130 MB
-    # (GitHub rejects blobs over 100 MB outright); cidadeEspacial at 74 MB
-    # (above the 50 MB warning). Skipped until goldens can be compared by
-    # digest instead of committed full text.
-    oversized_golden_skip = [
-      "arvores3D",
-      "cidadeEspacial",
-      "abrigoEsfericoTubos",
-      "corrimaoCaracol",
-    ]
+    # Deterministic, but SVG goldens too large to commit — see
+    # OVERSIZED_GOLDEN_SCENES in VisualTests.jl for the rationale.
     run_visual_tests(thebes,
       golden_dir = joinpath(@__DIR__, "golden"),
       reset! = () -> begin
@@ -272,16 +263,14 @@ using Test
         backend(thebes)
       end,
       compare = text_compare,
+      backend_module = KhepriThebes,
       skip = [:csg],
-      skip_tests = oversized_golden_skip,
+      skip_tests = OVERSIZED_GOLDEN_SCENES,
     )
   end
 
   # Conformance tests
   @testset "Backend Conformance (Thebes)" begin
-    include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "BackendConformanceTests.jl"))
-    using .BackendConformanceTests
-
     run_conformance_tests(thebes,
       reset! = () -> begin
         reset_thebes()
@@ -293,15 +282,4 @@ using Test
   end
 end
 
-
-# Guard against silently-dead b_* methods: every hook method this backend
-# defines must have a positional arity KhepriBase actually dispatches -- see
-# BackendHookConformanceTests.jl's header for the shipped bugs that motivated
-# this (4-arg table/chair trio, 7-arg Blender spotlight, 9-slot Measure sky).
-@testset "Hook arity conformance" begin
-  using KhepriBase
-  include(joinpath(dirname(pathof(KhepriBase)), "..", "test",
-                   "BackendHookConformanceTests.jl"))
-  using .BackendHookConformanceTests
-  run_hook_conformance(KhepriThebes)
-end
+hook_arity_guard(KhepriThebes)
