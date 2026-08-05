@@ -1,6 +1,7 @@
 backend = "POVRay"
+backend_version = "0.3.0"
 compare = "text_compare"
-created = "2026-08-05T10:06:53.461Z"
+created = "2026-08-05T13:00:41.02Z"
 golden = "surface_polygons.pov"
 height = 1080
 julia = "1.12.6"
@@ -10,6 +11,6 @@ schema = 1
 width = 1920
 
 [validation]
-detail = "sidecar backfilled for a pre-provenance golden; never validated"
-method = "legacy-backfill"
-passed = false
+detail = "built-in artifact sanity only; no scene oracle applied"
+method = "sanity:nonempty"
+passed = true

@@ -194,6 +194,7 @@ unimplemented_intersect_ref = [
     golden_dir = joinpath(@__DIR__, "golden"),
     reset! = () -> begin clear_io!(povray); delete_all_shapes(); backend(povray) end,
     compare = text_compare,
+    backend_module = KhepriPOVRay,
     # HEAVY_TESSELLATION_SCENES: these two minted 23 MB and 9.5 MB of
     # unreviewable tessellation output and were evicted (TestingStrategy.md
     # §8 step 0); they return once parse-and-measure validation can vouch

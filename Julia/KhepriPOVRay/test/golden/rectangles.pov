@@ -30,7 +30,6 @@ sphere_sweep {
   <4, 0, 3>, 0.01,
   <0, 0, 3>, 0.01,
   <0, 0, 0>, 0.01
-  -1
 }
 sphere_sweep {
   linear_spline
@@ -40,7 +39,6 @@ sphere_sweep {
   <7, 0, 5>, 0.01,
   <5, 0, 5>, 0.01,
   <5, 0, 0>, 0.01
-  -1
 }
 sphere_sweep {
   linear_spline
@@ -50,7 +48,6 @@ sphere_sweep {
   <11, 0, 3>, 0.01,
   <8, 0, 3>, 0.01,
   <8, 0, 0>, 0.01
-  -1
 }
 plane {<0.0,0.0,1000.0>, -10000 texture { pigment { color rgb <0,0,0> }}}
 camera {

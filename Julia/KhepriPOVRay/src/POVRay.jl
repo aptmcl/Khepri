@@ -62,7 +62,15 @@ write_povray_object(f::Function, io::IO, type, material, args...; flags=String[]
     for flag in flags
       write(io, "  ", flag, "\n")
     end
-    if ! isnothing(material)
+    #=
+    A void material ref (-1, the default-material sentinel) must not be
+    written: a bare `-1` inside an object body is silently folded into the
+    preceding numeric slot by POV-Ray's expression parser (e.g. a radius
+    0.01 becomes 0.01-1 = -0.99) — no error, wrong geometry. This shipped
+    in every mesh/polygon golden for months (sierpinski.pov carried 1364
+    such lines) because text_compare never runs POV-Ray.
+    =#
+    if !isnothing(material) && !(material isa Integer && material < 0)
       write_povray_material(io, material)
     end
     let res = f()
@@ -106,8 +114,16 @@ write_povray_call(io::IO, name::String, values...) =
   end
 
 
+#=
+The guard lives HERE, not at call sites: a void material ref (-1, the
+default-material sentinel) written into an object body is a bare `-1` that
+POV-Ray's expression parser silently folds into the preceding numeric slot
+(a radius 0.01 becomes 0.01-1 = -0.99) — no parse error, wrong geometry.
+This shipped in every mesh/polygon golden for months (sierpinski.pov
+carried 1364 such lines) because text_compare never runs POV-Ray.
+=#
 write_povray_material(io::IO, material) =
-  begin
+  if !isnothing(material) && !(material isa Integer && material < 0)
     write(io, "  ")
     write_povray_value(io, material)
     write(io, '\n')
@@ -473,7 +489,17 @@ unimplemented. POV-Ray has no zero-width stroke primitive; a line renders as
 a thin sphere_sweep tube. The radius is a Parameter because "thin" depends
 on scene scale; the default suits the corpus scenes' unit range.
 =#
+"""
+    povray_line_radius
+
+The tube radius (POV-Ray model units) used to render zero-width curves —
+lines, circles, arcs, splines, vector-font text — as thin `sphere_sweep`
+tubes, since POV-Ray has no stroke primitive. Tune per scene scale:
+
+    povray_line_radius(0.05)
+"""
 const povray_line_radius = Parameter(0.01)
+public povray_line_radius
 
 KhepriBase.b_line(b::POVRay, ps, mat) =
   let io = connection(b),
@@ -485,11 +511,20 @@ KhepriBase.b_line(b::POVRay, ps, mat) =
         end
         acc
       end
+    #=
+    The default curve material resolves to void_ref(b) == -1, not a texture.
+    Writing it would put a bare `-1` inside the object body, and POV-Ray's
+    expression parser silently folds it into the preceding radius
+    (`0.01 -1` parses as -0.99): no error, giant end-blobs instead of
+    hairlines. Same convention as export_to_povray, which filters void refs
+    out of the materials section.
+    =#
+    texture = mat == void_ref(b) ? nothing : mat
     if isempty(pts)
       -1
     elseif length(pts) == 1
       # A degenerate (single-point) line still marks its location.
-      write_povray_object(io, "sphere", mat, pts[1], r)
+      write_povray_object(io, "sphere", texture, pts[1], r)
     else
       # Hand-written rather than write_povray_object: sphere_sweep's grammar
       # is `linear_spline N, <p>, r, <p>, r ...` — the spline keyword takes
@@ -502,7 +537,7 @@ KhepriBase.b_line(b::POVRay, ps, mat) =
         show(io, MIMEPOVRay(), r)
       end
       write(io, "\n")
-      write_povray_material(io, mat)
+      isnothing(texture) || write_povray_material(io, texture)
       write(io, "}\n")
       -1
     end

@@ -1,6 +1,7 @@
 backend = "POVRay"
+backend_version = "0.3.0"
 compare = "text_compare"
-created = "2026-08-05T09:54:08.913Z"
+created = "2026-08-05T12:57:15.692Z"
 golden = "circulosRaiosPolar.pov"
 height = 1080
 julia = "1.12.6"

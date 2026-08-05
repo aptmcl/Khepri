@@ -263,6 +263,7 @@ using .BackendTestScaffolding
         backend(thebes)
       end,
       compare = text_compare,
+      backend_module = KhepriThebes,
       skip = [:csg],
       skip_tests = OVERSIZED_GOLDEN_SCENES,
     )

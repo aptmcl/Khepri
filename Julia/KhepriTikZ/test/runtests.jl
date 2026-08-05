@@ -275,6 +275,7 @@ using .BackendTestScaffolding
         backend(tikz)
       end,
       compare = text_compare,
+      backend_module = KhepriTikZ,
       skip = [:csg],
       # Tier-1 parse-and-measure validation when (re)minting a golden;
       # comparison runs against existing goldens are unaffected.

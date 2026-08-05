@@ -389,6 +389,7 @@ using .BackendTestScaffolding
         backend(svg)
       end,
       compare = text_compare,
+      backend_module = KhepriSVG,
       # 3D categories aren't the focus — they're emulated via flat
       # painter triangles that are not yet meant to look like TikZ.
       skip = [:csg, :primitives_3d, :surfaces, :extrusions, :parametric],

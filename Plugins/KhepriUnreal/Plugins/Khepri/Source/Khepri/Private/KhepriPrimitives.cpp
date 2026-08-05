@@ -1926,6 +1926,11 @@ void KhepriPrimitives::RenderView(FKhepriChannel& Channel)
       GScreenshotResolutionY = Height;
 
       Viewport->TakeHighResScreenShot();
+      // The request is consumed on the next viewport DRAW; an idle or
+      // backgrounded editor may not redraw on its own for a long time,
+      // leaving the capture queued indefinitely. Force the draw now (the
+      // Julia side then waits for the complete PNG on disk).
+      GEditor->RedrawLevelEditingViewports(true);
       bSuccess = true;
       UE_LOG(LogKhepri, Log, TEXT("Khepri: RenderView - screenshot requested to %s (%dx%d)"), *FullPath, Width, Height);
     }

@@ -93,7 +93,16 @@ hosts need (the four hand-rolled copies of this loop had drifted to 30 s /
 """
 wait_until(pred; timeout=900.0, interval=0.5, timeout_env=nothing, what="backend") =
   let limit = isnothing(timeout_env) ? timeout :
-                parse(Float64, get(ENV, timeout_env, string(timeout))),
+                let s = get(ENV, timeout_env, ""),
+                    v = tryparse(Float64, s)
+                  if !isempty(s) && isnothing(v)
+                    # A typo like "1m" must be self-diagnosing, not a bare
+                    # ArgumentError from deep inside a testset — and it must
+                    # not abort a block whose external app already launched.
+                    @warn "Ignoring unparsable $(timeout_env)=$(repr(s)) — expected seconds as a number; using default" default=timeout
+                  end
+                  something(v, timeout)
+                end,
       deadline = time() + limit
     while time() < deadline
       let r = pred()
@@ -139,10 +148,22 @@ wait_for_port(port; interval=2.0, hint="", kwargs...) =
 "Launch an external application detached, output discarded (it has its own log)."
 launch_detached(cmd) = run(pipeline(cmd, stdout=devnull, stderr=devnull), wait=false)
 
-"Best-effort teardown of an external app by image name (Windows taskkill)."
-kill_by_image(name) =
+"""
+Best-effort teardown of an external app by image name (Windows taskkill).
+`wait_gone=true` blocks (bounded) until no such process remains — needed
+when the caller may relaunch the app immediately, since a fire-and-forget
+kill races the next launch on the port and any file locks.
+"""
+kill_by_image(name; wait_gone=false) =
   try
-    run(`taskkill /F /IM $(name)`, wait=false)
+    run(`taskkill /F /IM $(name)`, wait=wait_gone)
+    if wait_gone
+      wait_until(; timeout=30.0, interval=0.5, what="$(name) exit") do
+        success(`tasklist /FI "IMAGENAME eq $(name)" /NH`) &&
+          !occursin(name, read(`tasklist /FI "IMAGENAME eq $(name)" /NH`, String)) ?
+          true : nothing
+      end
+    end
   catch
   end
 
@@ -182,6 +203,8 @@ run_wire_benchmark(b; ops=300, min_ops_per_second=100.0, max_median_ms=10.0) =
           wall = time() - t
         end
       end
+      isempty(KhepriBase.rpc_times) &&
+        error("wire benchmark recorded no RPC times — did the backend connect?")
       let ts = sort(copy(KhepriBase.rpc_times)),
           med = ts[cld(length(ts), 2)],
           p95 = ts[max(1, ceil(Int, 0.95 * length(ts)))],

@@ -8,9 +8,13 @@
 # reconnect loop blocks for ~80 s before erroring.
 
 using Khepri
-# import, not using: KhepriBase exports the same API names Khepri reexports,
-# and a second `using` would turn every unqualified name into an ambiguous
-# binding (UndefVarError). The test exercises the Khepri-provided names.
+#=
+import, not using, and introspection names KhepriBase-qualified: the point
+of this suite is that USER-visible names resolve through Khepri alone, so
+nothing else may contribute bindings for them. (TestMockBackend.jl below
+does `using KhepriBase` internally, which is why the qualification — not
+the import — is what actually keeps the exercised names Khepri's.)
+=#
 import KhepriBase
 using Test
 
