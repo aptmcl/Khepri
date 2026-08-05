@@ -119,7 +119,6 @@ end
   output_format::Symbol = :svg
   scene::Vector{SceneItem} = SceneItem[]
   next_id::Int = 1
-  scene_dirty::Bool = false
 end
 const thebes = TBS()
 
@@ -450,12 +449,13 @@ function reset_thebes(b::TBS=thebes)
   b.drawing = nothing
   empty!(b.scene)
   b.next_id = 1
-  b.scene_dirty = false
   b
 end
 
+# Deletion needs no bookkeeping: render_scene! rebuilds the scene from
+# b.refs.shapes, so a ref removed there simply stops being rendered.
 KhepriBase.b_delete_ref(b::TBS, r::ThebesId) =
-  b.scene_dirty = true
+  nothing
 
 KhepriBase.b_delete_all_shape_refs(b::TBS) =
   begin
@@ -464,13 +464,25 @@ KhepriBase.b_delete_all_shape_refs(b::TBS) =
     nothing
   end
 
+#=
+b.refs.shapes is a Dict keyed by shape OBJECTS, whose hash is their address,
+so its iteration order varies from run to run — even within one session.
+Re-realizing in that order permuted the scene, and with it the emitted SVG
+paths: the source of the "nondeterministic scenes" the test suite skipped
+(the old skip comment blamed a missing stable depth sort; no depth sort is
+involved — plain trig/quad items are emitted in scene order). Re-realize in
+creation order instead, which the previously assigned ref ids record.
+=#
+_rebuild_order(r::NativeRef) = r.value
+_rebuild_order(r::NativeRefs) = isempty(r.values) ? typemax(Int) : minimum(r.values)
+_rebuild_order(r) = typemax(Int)  # unknown ref shapes sort last (none today)
+
 function rebuild_scene!(b::TBS)
   empty!(b.scene)
   b.next_id = 1
-  b.scene_dirty = false
-  let shapes = collect(keys(b.refs.shapes))
+  let pairs = sort!(collect(b.refs.shapes), by=kv -> _rebuild_order(kv[2]))
     empty!(b.refs.shapes)
-    for s in shapes
+    for (s, _) in pairs
       force_realize(b, s)
     end
   end
@@ -1021,9 +1033,16 @@ end
 
 # Render all scene items to a new Luxor drawing
 function render_scene!(b::TBS)
-  if b.scene_dirty
-    rebuild_scene!(b)
-  end
+  #=
+  Always canonicalize, not just when a dirty flag says so: the old
+  scene_dirty flag missed paths in both directions (b_delete_all_shape_refs
+  cleared it via reset_thebes; a first render after creation never set it),
+  so eager-order and rebuild-order output disagreed — the same scene
+  produced different SVGs depending on whether anything had been deleted
+  before. Rebuilding is cheap next to rendering, and canonical
+  creation-order output is what the golden comparisons rely on.
+  =#
+  isempty(b.refs.shapes) || rebuild_scene!(b)
 
   if isempty(b.scene)
     @warn "No shapes to render. Create some shapes first."

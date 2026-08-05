@@ -253,32 +253,16 @@ using Test
     include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "VisualTests.jl"))
     using .VisualTests
 
-    #=
-    Some scenes produce non-deterministic SVG output between runs (path
-    ordering varies — likely due to dict-iteration order or Z-sort tie-
-    breaking on coplanar faces). They pass once a golden is captured but
-    fail subsequent runs even with no code change. Skip them under
-    text_compare; revisit when Thebes either canonicalises path output or
-    when this test framework supports a pixel/perceptual comparator.
-    =#
-    nondeterministic_skip = [
-      "florCirculosExtrudidos",
-      "abrigoEsfericoTubos",
-      "predioSinusoidal",
-      "corrimaoCaracol",
-      # Path ORDER varies between runs while the set of paths is identical -- two
-      # independent mints are permutations of the same 2505 paths, so regolding
-      # cannot fix it: any golden written today fails the next run. The real
-      # repair is a stable depth sort in Thebes.jl, as KhepriTikZ now has.
-      "loft_circles",
-    ]
     # Deterministic, but their SVG goldens are too large to commit: arvores3D
-    # mints at 348 MB (GitHub rejects blobs over 100 MB outright) and
-    # cidadeEspacial at 74 MB (above the 50 MB warning). Skipped until goldens
-    # can be compared by digest instead of committed full text.
+    # mints at 348 MB and abrigoEsfericoTubos/corrimaoCaracol at ~130 MB
+    # (GitHub rejects blobs over 100 MB outright); cidadeEspacial at 74 MB
+    # (above the 50 MB warning). Skipped until goldens can be compared by
+    # digest instead of committed full text.
     oversized_golden_skip = [
       "arvores3D",
       "cidadeEspacial",
+      "abrigoEsfericoTubos",
+      "corrimaoCaracol",
     ]
     run_visual_tests(thebes,
       golden_dir = joinpath(@__DIR__, "golden"),
@@ -289,7 +273,7 @@ using Test
       end,
       compare = text_compare,
       skip = [:csg],
-      skip_tests = vcat(nondeterministic_skip, oversized_golden_skip),
+      skip_tests = oversized_golden_skip,
     )
   end
 
