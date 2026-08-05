@@ -57,7 +57,8 @@ plugin_name = "KhepriRevit"
 khepri_dlls = ["KhepriBase.dll", plugin_name*".dll"]
 addin_name = plugin_name*".addin"
 # 2. Depending on whether we are in Debug mode or Release mode,
-development_phase = "Debug" # "Release"
+# (vendored binaries are always built Release; flip only for local debugging)
+development_phase = "Release" # "Debug"
 # 3. the dlls are located in a folder
 dlls_folder = joinpath("bin", "x64", development_phase)
 # 4. contained inside the Plugins folder, which has a specific location regarding this file itself
@@ -382,6 +383,17 @@ const RVTId = Int64
 const RVTIds = Vector{RVTId}
 const RVTNativeRef = NativeRef{RVTKey, RVTId}
 const RVT = SocketBackend{RVTKey, RVTId}
+
+# Build-stamp handshake (see KhepriBase.check_plugin_build_stamp): compares the
+# assemblies the running Revit plugin loaded against the vendored bundle this
+# package ships; a mismatch means "update_plugin() and restart Revit".
+KhepriBase.wants_build_stamp(b::RVT) = true
+KhepriBase.vendored_plugin_stamp(b::RVT) =
+  let contents = joinpath(local_khepri_plugin, "Contents"),
+      plugin = KhepriBase.assembly_stamp("KhepriRevit", joinpath(contents, "KhepriRevit.dll")),
+      base = KhepriBase.assembly_stamp("KhepriBase", joinpath(contents, "KhepriBase.dll"))
+    isnothing(plugin) || isnothing(base) ? nothing : "$(plugin); $(base)"
+  end
 const RVTVoidId = RVTId(-1)
 
 KhepriBase.void_ref(b::RVT) = RVTVoidId

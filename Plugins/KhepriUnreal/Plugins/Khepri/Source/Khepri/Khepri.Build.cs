@@ -9,6 +9,12 @@ public class Khepri : ModuleRules
   {
     PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
     IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
+    // The dispatch loop (KhepriServer.cpp) converts handler exceptions into
+    // NOTOK error frames. UBT compiles with exceptions OFF by default, which
+    // would make those catch blocks dead code and turn any throw into an
+    // editor-terminating std::terminate — enable them so errors reach Julia
+    // as BackendError instead.
+    bEnableExceptions = true;
 
     PublicDependencyModuleNames.AddRange(
       new string[]

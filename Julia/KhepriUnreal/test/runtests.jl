@@ -237,3 +237,49 @@ end
   using .BackendHookConformanceTests
   run_hook_conformance(KhepriUnreal)
 end
+
+#=
+The C++ plugin validates each operation's canonical signature at registration
+(FKhepriServer::HandleProvideOperation), against a hand-maintained table of
+literals in KhepriPrimitives.cpp. This test cross-checks every literal against
+the authoritative Julia side (unreal_api's info.canonical), so table drift is
+a red test here instead of a "Signature mismatch" NOTOK at runtime — or,
+worse, a rubber-stamp that lets real drift through. Runs headless in CI: it
+only reads the C++ source, which lives in this monorepo. When the plugin
+sources are not present (e.g. a registry install of just this package), there
+is nothing to check against and the testset is skipped.
+=#
+@testset "C++ canonical-signature table matches unreal_api" begin
+  cpp = normpath(joinpath(@__DIR__, "..", "..", "..",
+                          "Plugins", "KhepriUnreal", "Plugins", "Khepri",
+                          "Source", "Khepri", "Private", "KhepriPrimitives.cpp"))
+  if isfile(cpp)
+    let src = read(cpp, String),
+        # Server.RegisterOperation(TEXT("name"), TEXT("canonical"), handler)
+        registered = Dict(m.captures[1] => m.captures[2]
+                          for m in eachmatch(r"RegisterOperation\(TEXT\(\"([^\"]+)\"\),\s*TEXT\(\"([^\"]*)\"\)", src))
+      @test !isempty(registered)
+      # The handshake op is registered in the server, not declared in unreal_api.
+      @test registered["KhepriBuildStamp"] == "String()"
+      for (name, info) in pairs(KhepriUnreal.unreal_api)
+        @test haskey(registered, info.remote_name)
+        if haskey(registered, info.remote_name)
+          @test registered[info.remote_name] == info.canonical
+        end
+      end
+      # Registered-but-undeclared ops must opt out of validation explicitly
+      # (empty canonical) or match some declaration; a nonempty canonical for
+      # an op Julia never declares cannot be checked and would rot silently.
+      let declared = Set(info.remote_name for (_, info) in pairs(KhepriUnreal.unreal_api))
+        for (name, canon) in registered
+          name == "KhepriBuildStamp" && continue
+          if !(name in declared)
+            @test canon == ""
+          end
+        end
+      end
+    end
+  else
+    @info "Skipping canonical cross-check: plugin sources not present" cpp
+  end
+end

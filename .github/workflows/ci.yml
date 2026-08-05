@@ -308,6 +308,30 @@ jobs:
           DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
         run: bash .github/scripts/build_docs.sh
 
+  plugins:
+    # C# plugin supply chain. Two cheap guards that run on every push/PR:
+    #
+    # 1. Build Plugins/KhepriBase.sln — the shared Channel/RMI/Processor layer
+    #    every C# plugin links against. It is the only plugin project with no
+    #    proprietary SDK references (AutoCAD/Revit/Rhino/Grasshopper resolve
+    #    against locally installed applications and cannot build on a hosted
+    #    runner), so compiling it catches most cross-plugin breakage.
+    # 2. check_plugin_staleness.py — fails when a vendored binary
+    #    (Julia/*/Plugin DLLs, the AutoCAD bundles, the Unity KhepriBase.dll)
+    #    is older than the sources it is built from (git-topology check, needs
+    #    the full history — hence fetch-depth: 0). This is the guard for the
+    #    three 2026-06/07 stale-binary incidents.
+    name: Plugins (build + staleness)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build the shared C# plugin layer
+        run: dotnet build Plugins/KhepriBase/KhepriBase.sln -c Release
+      - name: Check vendored plugin binaries against their sources
+        run: python .github/scripts/check_plugin_staleness.py
+
   ci-ok:
     # The only job that should be configured as a required status check.
     # Matrix job names are dynamic ("KhepriTikZ / Julia 1.12") and exist only on
@@ -316,7 +340,7 @@ jobs:
     # is green when the jobs it waits on were skipped.
     name: CI ok
     if: always()
-    needs: [select, test, registry-deps, docs-build, docs]
+    needs: [select, test, registry-deps, docs-build, docs, plugins]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any upstream job failed or was cancelled

@@ -28,13 +28,20 @@ public:
 
   bool IsRunning() const { return bRunning; }
 
-  // Register an operation handler
-  void RegisterOperation(const FString& Name, TFunction<void(FKhepriChannel&)> Handler);
+  // Register an operation handler. Canonical is the signature string the Julia
+  // side computes for this operation (canonical_signature in KhepriBase's
+  // Primitives.jl — e.g. "AActor(FVector,Single,UMaterial)"); ProvideOperation
+  // validates Julia's expectation against it so protocol drift surfaces as a
+  // clean NOTOK at registration time instead of decoding garbage arguments.
+  // Pass an empty string only for operations with no Julia-side declaration.
+  void RegisterOperation(const FString& Name, const FString& Canonical,
+                         TFunction<void(FKhepriChannel&)> Handler);
 
 private:
   // Dispatch protocol
   void HandleConnection(FSocket* ClientSocket);
   void ProcessCommands(FSocket* ClientSocket);
+  void HandleProvideOperation();
 
   // Thread management
   FRunnableThread* Thread;
@@ -45,9 +52,11 @@ private:
   FSocket* ListenerSocket;
   static constexpr int32 Port = 11010;
 
-  // Operation dispatch
+  // Operation dispatch. OperationCanonicals is index-parallel to
+  // OperationHandlers (empty string = no Julia-side declaration to validate).
   TMap<FString, int32> OperationNameToIndex;
   TArray<TFunction<void(FKhepriChannel&)>> OperationHandlers;
+  TArray<FString> OperationCanonicals;
 
   // Channel for current connection
   FKhepriChannel Channel;

@@ -501,6 +501,21 @@ const ACADRefs = Vector{ACADRef}
 const ACADNativeRef = NativeRef{ACADKey, ACADId}
 const ACAD = SocketBackend{ACADKey, ACADId}
 
+#=
+Build-stamp handshake (see KhepriBase.check_plugin_build_stamp): at connect,
+the running plugin reports the PE link stamps of its loaded assemblies; we
+compare against the vendored bundle this package ships. update_plugin() can
+refresh the DLLs on disk, but AutoCAD keeps the loaded assembly until it
+restarts — the mismatch warning is what makes that visible.
+=#
+KhepriBase.wants_build_stamp(b::ACAD) = true
+KhepriBase.vendored_plugin_stamp(b::ACAD) =
+  let contents = joinpath(local_khepri_plugin, "Contents"),
+      plugin = KhepriBase.assembly_stamp("KhepriAutoCAD", joinpath(contents, "KhepriAutoCAD.dll")),
+      base = KhepriBase.assembly_stamp("KhepriBase", joinpath(contents, "KhepriBase.dll"))
+    isnothing(plugin) || isnothing(base) ? nothing : "$(plugin); $(base)"
+  end
+
 KhepriBase.shape_storage_type(::Type{<:ACAD}) = RemoteShapeStorage()
 
 #=
