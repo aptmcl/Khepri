@@ -4,3 +4,4 @@ KhepriIllustrator = "7159cd1a-befd-4126-8a94-9819cf26f52f"
 
 [compat]
 Documenter = "1"
+KhepriIllustrator = "0.1"
