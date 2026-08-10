@@ -4,3 +4,4 @@ Khepri = "59ceddad-2dad-55ad-af66-072f48a109d0"
 
 [compat]
 Documenter = "1"
+Khepri = "1"
