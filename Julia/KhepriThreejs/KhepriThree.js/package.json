@@ -13,7 +13,7 @@
     "@typescript-eslint/parser": "^8.43.0",
     "eslint": "^9.35.0",
     "typescript": "^5.9.2",
-    "vite": "^6.2.0"
+    "vite": "^6.4.5"
   },
   "dependencies": {
     "browser-fs-access": "^0.38.0",
